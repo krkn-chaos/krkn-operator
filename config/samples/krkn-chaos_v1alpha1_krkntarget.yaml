@@ -1,0 +1,9 @@
+apiVersion: krkn-chaos.krkn-chaos.dev/v1alpha1
+kind: KrknTarget
+metadata:
+  labels:
+    app.kubernetes.io/name: krkn-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: krkntarget-sample
+spec:
+  # TODO(user): Add fields here

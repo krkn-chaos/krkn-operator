@@ -1,0 +1,29 @@
+# This rule is not used by the project krkn-operator itself.
+# It is provided to allow the cluster admin to help manage permissions for users.
+#
+# Grants read-only access to krkn-chaos.krkn-chaos.dev resources.
+# This role is intended for users who need visibility into these resources
+# without permissions to modify them. It is ideal for monitoring purposes and limited-access viewing.
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/name: krkn-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: krkntarget-viewer-role
+rules:
+- apiGroups:
+  - krkn-chaos.krkn-chaos.dev
+  resources:
+  - krkntargets
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - krkn-chaos.krkn-chaos.dev
+  resources:
+  - krkntargets/status
+  verbs:
+  - get
