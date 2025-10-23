@@ -16,7 +16,7 @@ limitations under the License.
 
 // Package v1alpha1 contains API Schema definitions for the krkn-chaos v1alpha1 API group.
 // +kubebuilder:object:generate=true
-// +groupName=krkn-chaos.krkn-chaos.dev
+// +groupName=operator.krkn-chaos.dev
 package v1alpha1
 
 import (

@@ -16,7 +16,7 @@ resources:
     namespaced: true
   controller: true
   domain: krkn-chaos.dev
-  group: krkn-chaos
+  group: operator
   kind: KrknTarget
   path: github.com/krkn-chaos/krkn-operator/api/v1alpha1
   version: v1alpha1

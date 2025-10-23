@@ -24,18 +24,28 @@ import (
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
 
 // KrknTargetSpec defines the desired state of KrknTarget.
+type KrknTargetAction string
+
+const ActionCreate KrknTargetAction = "create"
+const ActionDelete KrknTargetAction = "delete"
+const ActionUpdate KrknTargetAction = "update"
+
 type KrknTargetSpec struct {
 	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
 
-	// Foo is an example field of KrknTarget. Edit krkntarget_types.go to remove/update
-	Foo string `json:"foo,omitempty"`
+	Name        string `json:"name"`
+	APIEndpoint string `json:"apiEndpoint"`
+	Token       string `json:"token"`
+	// +kubebuilder:validation:Enum=create;delete;update
+	Action KrknTargetAction `json:"action"`
 }
 
 // KrknTargetStatus defines the observed state of KrknTarget.
 type KrknTargetStatus struct {
 	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
+	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type" protobuf:"bytes,1,rep,name=conditions"`
 }
 
 // +kubebuilder:object:root=true
