@@ -36,6 +36,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/metrics/filters"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
+
+	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -47,6 +49,7 @@ var (
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 
+	utilruntime.Must(krknv1alpha1.AddToScheme(scheme))
 	// +kubebuilder:scaffold:scheme
 }
 

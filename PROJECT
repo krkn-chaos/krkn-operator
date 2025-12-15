@@ -10,4 +10,23 @@ plugins:
   scorecard.sdk.operatorframework.io/v2: {}
 projectName: krkn-operator
 repo: github.com/krkn-chaos/krkn-operator
+resources:
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: false
+  domain: krkn-chaos.dev
+  group: krkn
+  kind: KrknTargetRequest
+  path: github.com/krkn-chaos/krkn-operator/api/v1alpha1
+  version: v1alpha1
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: false
+  domain: krkn-chaos.dev
+  group: krkn
+  kind: KrknOperatorTargetProvider
+  path: github.com/krkn-chaos/krkn-operator/api/v1alpha1
+  version: v1alpha1
 version: "3"
