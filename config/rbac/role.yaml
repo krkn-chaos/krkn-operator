@@ -1,11 +1,33 @@
 apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
+kind: Role
 metadata:
   labels:
     app.kubernetes.io/name: krkn-operator
     app.kubernetes.io/managed-by: kustomize
   name: manager-role
+  namespace: system
 rules:
 - apiGroups: [""]
   resources: ["pods"]
   verbs: ["get", "list", "watch"]
+- apiGroups: [""]
+  resources: ["secrets"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["krkn.krkn-chaos.dev"]
+  resources: ["krkntargetrequests"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: ["krkn.krkn-chaos.dev"]
+  resources: ["krkntargetrequests/status"]
+  verbs: ["get", "update", "patch"]
+- apiGroups: ["krkn.krkn-chaos.dev"]
+  resources: ["krkntargetrequests/finalizers"]
+  verbs: ["update"]
+- apiGroups: ["krkn.krkn-chaos.dev"]
+  resources: ["krknoperatortargetproviders"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: ["krkn.krkn-chaos.dev"]
+  resources: ["krknoperatortargetproviders/status"]
+  verbs: ["get", "update", "patch"]
+- apiGroups: ["krkn.krkn-chaos.dev"]
+  resources: ["krknoperatortargetproviders/finalizers"]
+  verbs: ["update"]
