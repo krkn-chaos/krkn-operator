@@ -31,6 +31,18 @@ container in the same pod.
 - from the secret content structure will retrieve the kubeconfig contained inside the secret structure under the `cluster-name` object
 - for the moment the method will return the kubeconfig (this will be refactored)
 
+### /targets/{UUID} ✅ COMPLETED
+- this method will return 404 if the UUID is not found
+- this method will return 100 if the UUID is found but the status is not Completed
+- this method will return 200 if the UUID is found and Completed
+
+## POST methods
+
+### /targets ✅ COMPLETED
+
+- this method will create a new KrknTargetRequest CR named with a UUID in the same operator namespace
+- this method will return a 102 status and the UUID of the KrknTargetRequest
+
 
 # Grpc python service requirement
 

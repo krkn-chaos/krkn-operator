@@ -3,7 +3,7 @@
 ## Current Status
 
 **Last updated:** 2026-01-08
-**Current phase:** Deployment Configuration - COMPLETED
+**Current phase:** REST API Completion - COMPLETED
 
 ### Completed
 - Project scaffolding with Kubebuilder
@@ -38,19 +38,30 @@
   - ✅ Integrated gRPC client in Go operator
   - ✅ End-to-end tested: Go API → gRPC → Python → krkn-lib → Kubernetes
 - **Deployment Configuration completed:**
-  - ✅ Created Dockerfile for Python data-provider
+  - ✅ Created Dockerfile for Python data-provider (simplified, single-stage)
   - ✅ Created Kustomize patch for sidecar container
-  - ✅ Updated Makefile with data-provider build targets
+  - ✅ Updated Makefile with data-provider build targets (Docker + Podman)
   - ✅ Configured multi-container deployment
   - ✅ Created comprehensive deployment documentation (DEPLOYMENT.md)
+- **Production Deployment completed:**
+  - ✅ Added Podman support to Makefile (podman-build, podman-push, podman-build-all, podman-push-all)
+  - ✅ Fixed Dockerfiles for podman compatibility (full image names: docker.io/library/...)
+  - ✅ Added proto/ directory to operator Dockerfile
+  - ✅ Configured namespace-scoped RBAC (Role instead of ClusterRole)
+  - ✅ Added POD_NAMESPACE environment variable via Downward API
+  - ✅ Configured Manager cache to watch only operator namespace
+  - ✅ Added imagePullPolicy: Always for both containers
+  - ✅ Created Kubernetes Service for REST API (api_service.yaml)
+  - ✅ Updated deployment documentation with Service access patterns
+  - ✅ Successfully deployed to production OpenShift cluster
 
 ### In Progress
 - None
 
 ### Pending
-- Manual testing with real Kubernetes cluster deployment
 - Controller implementation for KrknTargetRequest
 - API documentation (OpenAPI/Swagger spec)
+- Additional gRPC methods (GetPods, GetNamespaces, etc.)
 
 ## Requirements Overview
 
@@ -158,6 +169,49 @@
 }
 ```
 
+#### GET /targets/{UUID}
+**Purpose:** Check the status of a KrknTargetRequest CR by UUID
+
+**Parameters:**
+- `uuid` (required): The UUID identifier in the path
+
+**Behavior:**
+1. Extract UUID from path `/targets/{uuid}`
+2. Fetch KrknTargetRequest CR named with the UUID from configured namespace
+3. Return 404 if CR not found
+4. Return 100 (Continue) if CR found but status != "Completed"
+5. Return 200 (OK) if CR found and status == "Completed"
+
+**Status:** COMPLETED
+
+**Response Codes:**
+- `404 Not Found`: KrknTargetRequest with UUID not found
+- `100 Continue`: KrknTargetRequest found but not completed
+- `200 OK`: KrknTargetRequest found and completed
+- `500 Internal Server Error`: Other errors
+
+#### POST /targets
+**Purpose:** Create a new KrknTargetRequest CR with a generated UUID
+
+**Behavior:**
+1. Generate a new UUID
+2. Create a new KrknTargetRequest CR with name = UUID
+3. Create in the operator namespace
+4. Return 102 (Processing) with the UUID
+
+**Status:** COMPLETED
+
+**Response Format:**
+```json
+{
+  "uuid": "generated-uuid-here"
+}
+```
+
+**Response Codes:**
+- `102 Processing`: KrknTargetRequest created successfully
+- `500 Internal Server Error`: Failed to create CR
+
 ## Architecture Decisions
 
 ### REST API Framework
@@ -234,10 +288,19 @@
    - TestGetClusters_NotCompleted (new test for status filter)
    - TestGetClusters_MissingID
    - TestHealthCheck
+   - TestGetTargetByUUID_Success
+   - TestGetTargetByUUID_NotFound
+   - TestGetTargetByUUID_NotCompleted
+   - TestGetTargetByUUID_MissingUUID
+   - TestPostTarget_Success
 2. ✅ Integration tests with fake Kubernetes client
 3. ✅ All tests updated for namespace parameter
 4. ✅ Tests updated for "Completed" status (capitalized)
-5. ⏳ Manual testing with real CRs (pending real cluster)
+5. ✅ API workflow test script (test/api_workflow_test.sh)
+   - Automated end-to-end workflow testing
+   - POST /targets → poll /targets/{UUID} → GET /clusters → GET /nodes
+   - Configurable host parameter
+   - Colored output and error handling
 
 ### Phase 5: GET /nodes Endpoint ✅
 **Status:** COMPLETED (Full gRPC Integration)
@@ -303,6 +366,51 @@
    - Troubleshooting section
    - Multi-architecture build support
 
+### Phase 8: Production Deployment ✅
+**Status:** COMPLETED
+
+1. ✅ Podman Support
+   - Added podman-build, podman-push targets for operator
+   - Added podman-build-data-provider, podman-push-data-provider targets
+   - Added podman-build-all, podman-push-all for building both images
+   - Updated DEPLOYMENT.md with podman usage examples
+
+2. ✅ Dockerfile Fixes
+   - Fixed operator Dockerfile: added COPY proto/ proto/
+   - Fixed image names for podman: docker.io/library/golang:1.24
+   - Fixed data-provider Dockerfile: docker.io/library/python:3.11-slim
+   - Simplified data-provider to single-stage build (no venv)
+
+3. ✅ RBAC Configuration
+   - Converted ClusterRole to namespace-scoped Role
+   - Converted ClusterRoleBinding to namespace-scoped RoleBinding
+   - Added permissions for secrets, KrknTargetRequest, KrknOperatorTargetProvider
+   - Namespace parametrized via kustomize (namespace: system placeholder)
+
+4. ✅ Manager Configuration
+   - Added POD_NAMESPACE env var via Kubernetes Downward API
+   - Configured Manager cache to watch only operator namespace (Cache.DefaultNamespaces)
+   - Separated operator namespace (POD_NAMESPACE) from CR namespace (KRKN_NAMESPACE)
+   - Added cache import: sigs.k8s.io/controller-runtime/pkg/cache
+
+5. ✅ Kubernetes Service
+   - Created config/default/api_service.yaml for REST API
+   - Service name: krkn-operator-controller-manager-api-service
+   - Port: 8080, Type: ClusterIP
+   - Updated kustomization.yaml to include api_service.yaml
+
+6. ✅ Image Pull Policy
+   - Added imagePullPolicy: Always to manager container (config/manager/manager.yaml)
+   - Added imagePullPolicy: Always to data-provider container (config/default/data_provider_patch.yaml)
+   - Ensures fresh images are pulled even with same tag
+
+7. ✅ Production Testing
+   - Successfully deployed to OpenShift cluster
+   - Resolved RBAC permission errors
+   - Verified namespace-scoped permissions work correctly
+   - Tested REST API via Service
+   - Verified gRPC communication between containers
+
 ## Technical Notes
 
 ### KrknTargetRequest Structure
@@ -330,9 +438,15 @@ type KrknTargetRequestStatus struct {
 - `internal/api/server.go`: API server with net/http.ServeMux and lifecycle management
 - `internal/api/handlers.go`: HTTP handlers using standard http.ResponseWriter/Request, gRPC client calls
 - `internal/api/types.go`: Request/response type definitions
-- `internal/api/handlers_test.go`: Comprehensive test suite (5 tests, all passing)
+- `internal/api/handlers_test.go`: Comprehensive test suite (10 tests, all passing)
 - `cmd/main.go`: Updated to integrate API server with namespace and gRPC configuration
 - `start_operator.sh`: Launch script with support for KRKN_NAMESPACE env var
+
+**Testing:**
+- `test/api_workflow_test.sh`: End-to-end API workflow test script
+  - Tests complete workflow: POST /targets → poll /targets/{UUID} → GET /clusters → GET /nodes
+  - Usage: `./test/api_workflow_test.sh <host>`
+  - Requires: curl, jq
 
 **gRPC Protocol:**
 - `proto/dataprovider.proto`: Protobuf service definition for data provider
@@ -348,9 +462,15 @@ type KrknTargetRequestStatus struct {
 - `krkn-operator-data-provider/.dockerignore`: Docker ignore rules
 
 **Deployment Configuration:**
-- `config/default/data_provider_patch.yaml`: Kustomize patch for sidecar container
-- `config/default/kustomization.yaml`: Updated with data-provider patch
-- `Makefile`: Updated with data-provider build targets
+- `config/default/data_provider_patch.yaml`: Kustomize patch for sidecar container (with imagePullPolicy)
+- `config/default/api_service.yaml`: Kubernetes Service for REST API
+- `config/default/kustomization.yaml`: Updated with patches and api_service
+- `config/manager/manager.yaml`: Updated with POD_NAMESPACE env var and imagePullPolicy
+- `config/rbac/role.yaml`: Namespace-scoped Role (not ClusterRole)
+- `config/rbac/role_binding.yaml`: Namespace-scoped RoleBinding
+- `Makefile`: Updated with podman and data-provider build targets
+- `Dockerfile`: Fixed with proto/ copy and full image names
+- `krkn-operator-data-provider/Dockerfile`: Fixed with full image names, simplified build
 - `DEPLOYMENT.md`: Comprehensive deployment documentation
 
 ### Server Configuration
@@ -362,10 +482,14 @@ type KrknTargetRequestStatus struct {
 - Health check: Available at `/health`
 
 ### Environment Variables
-- `KRKN_NAMESPACE`: Namespace for KrknTargetRequest CRs (default: "default")
+- `POD_NAMESPACE`: Namespace where the operator pod is running (set via Downward API, fallback: "krkn-operator-system")
+  - Used for Manager cache configuration (what namespace to watch)
+- `KRKN_NAMESPACE`: Namespace for KrknTargetRequest CRs (default: same as POD_NAMESPACE)
+  - Used by REST API to find CRs and Secrets
 - `API_PORT`: REST API port (default: 8080)
 - `HEALTH_PROBE_ADDR`: Health probe address (default: :8083)
 - `METRICS_ADDR`: Metrics endpoint address (default: :8443)
+- `--grpc-server-address`: gRPC data provider address (default: "localhost:50051")
 
 ## Next Steps
 
@@ -374,10 +498,12 @@ type KrknTargetRequestStatus struct {
 3. ✅ Implement GET /nodes endpoint with gRPC integration
 4. ✅ Implement gRPC communication with data provider
 5. ✅ Create multi-container deployment configuration
-6. Manual testing with real Kubernetes cluster deployment
-7. Create API documentation (OpenAPI/Swagger spec)
-8. Add additional endpoints as requirements evolve
-9. Implement controller logic for KrknTargetRequest
+6. ✅ Production deployment with namespace-scoped RBAC
+7. ✅ Podman support and container tooling
+8. ✅ Kubernetes Service for REST API access
+9. Create API documentation (OpenAPI/Swagger spec)
+10. Add additional endpoints as requirements evolve
+11. Implement controller logic for KrknTargetRequest
 
 ## Future Work (Not in Current Scope)
 

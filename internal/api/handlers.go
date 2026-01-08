@@ -22,8 +22,10 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/google/uuid"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -261,4 +263,111 @@ func (h *Handler) callGetNodesGRPC(kubeconfigBase64 string) ([]string, error) {
 	}
 
 	return resp.Nodes, nil
+}
+
+// GetTargetByUUID handles GET /targets/{UUID} endpoint
+// It checks the status of a KrknTargetRequest CR by UUID
+func (h *Handler) GetTargetByUUID(w http.ResponseWriter, r *http.Request) {
+	// Extract UUID from path: /targets/{UUID}
+	// r.URL.Path looks like "/targets/some-uuid-here"
+	path := r.URL.Path
+	prefix := "/targets/"
+
+	if len(path) <= len(prefix) {
+		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+			Error:   "bad_request",
+			Message: "UUID parameter is required in path",
+		})
+		return
+	}
+
+	uuid := path[len(prefix):]
+	if uuid == "" {
+		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+			Error:   "bad_request",
+			Message: "UUID parameter is required",
+		})
+		return
+	}
+
+	// Fetch the KrknTargetRequest CR by UUID
+	var targetRequest krknv1alpha1.KrknTargetRequest
+	err := h.client.Get(context.Background(), types.NamespacedName{
+		Name:      uuid,
+		Namespace: h.namespace,
+	}, &targetRequest)
+
+	if err != nil {
+		if client.IgnoreNotFound(err) == nil {
+			// CR not found - return 404
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		// Other error
+		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+			Error:   "internal_error",
+			Message: "Failed to fetch KrknTargetRequest: " + err.Error(),
+		})
+		return
+	}
+
+	// Check status
+	if targetRequest.Status.Status != "Completed" {
+		// Not completed - return 100 Continue
+		w.WriteHeader(http.StatusContinue)
+		return
+	}
+
+	// Completed - return 200 OK
+	w.WriteHeader(http.StatusOK)
+}
+
+// TargetsHandler handles both GET /targets/{UUID} and POST /targets endpoints
+// It routes to the appropriate handler based on the HTTP method
+func (h *Handler) TargetsHandler(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		h.GetTargetByUUID(w, r)
+	case http.MethodPost:
+		h.PostTarget(w, r)
+	default:
+		writeJSONError(w, http.StatusMethodNotAllowed, ErrorResponse{
+			Error:   "method_not_allowed",
+			Message: "Only GET and POST methods are allowed",
+		})
+	}
+}
+
+// PostTarget handles POST /targets endpoint
+// It creates a new KrknTargetRequest CR with a generated UUID
+func (h *Handler) PostTarget(w http.ResponseWriter, r *http.Request) {
+	// Generate a new UUID
+	newUUID := uuid.New().String()
+
+	// Create a new KrknTargetRequest CR
+	targetRequest := &krknv1alpha1.KrknTargetRequest{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      newUUID,
+			Namespace: h.namespace,
+		},
+		Spec: krknv1alpha1.KrknTargetRequestSpec{
+			// Spec fields can be empty or set based on request body if needed
+		},
+	}
+
+	// Create the CR in the cluster
+	err := h.client.Create(context.Background(), targetRequest)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+			Error:   "internal_error",
+			Message: "Failed to create KrknTargetRequest: " + err.Error(),
+		})
+		return
+	}
+
+	// Return 102 Processing with the UUID
+	response := map[string]string{
+		"uuid": newUUID,
+	}
+	writeJSON(w, http.StatusProcessing, response)
 }
