@@ -11,6 +11,7 @@ spec:
       # Data provider gRPC server
       - name: data-provider
         image: data-provider:latest
+        imagePullPolicy: Always
         ports:
         - containerPort: 50051
           name: grpc
