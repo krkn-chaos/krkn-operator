@@ -183,11 +183,19 @@ func main() {
 		})
 	}
 
+	// Get the namespace where the operator pod is running
+	// This is set via downward API in the deployment
+	operatorNamespace := os.Getenv("POD_NAMESPACE")
+	if operatorNamespace == "" {
+		operatorNamespace = "krkn-operator-system" // fallback default
+	}
+	setupLog.Info("Operator namespace", "namespace", operatorNamespace)
+
 	// Get the namespace for KrknTargetRequest CRs from environment variable
-	// Defaults to "default" if not set
+	// Defaults to operator namespace if not set
 	krknNamespace := os.Getenv("KRKN_NAMESPACE")
 	if krknNamespace == "" {
-		krknNamespace = "default"
+		krknNamespace = operatorNamespace
 	}
 	setupLog.Info("KrknTargetRequest namespace", "namespace", krknNamespace)
 
@@ -211,7 +219,7 @@ func main() {
 		// LeaderElectionReleaseOnCancel: true,
 		Cache: cache.Options{
 			DefaultNamespaces: map[string]cache.Config{
-				krknNamespace: {},
+				operatorNamespace: {}, // Watch only the operator's own namespace
 			},
 		},
 	})

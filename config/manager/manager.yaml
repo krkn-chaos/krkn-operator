@@ -66,6 +66,11 @@ spec:
         image: controller:latest
         imagePullPolicy: Always
         name: manager
+        env:
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
         ports: []
         securityContext:
           allowPrivilegeEscalation: false
