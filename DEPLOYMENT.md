@@ -138,18 +138,60 @@ kubectl logs -n krkn-operator-system deployment/krkn-operator-controller-manager
 
 ## REST API Access
 
-The operator exposes a REST API on port 8080. To access it:
+The operator exposes a REST API on port 8080 through a Kubernetes Service.
+
+### Access from within the cluster
+
+From any pod in the same namespace:
 
 ```bash
-# Port forward to the operator pod
-kubectl port-forward -n krkn-operator-system deployment/krkn-operator-controller-manager 8080:8080
+curl http://krkn-operator-controller-manager-api-service:8080/api/v1/targets
+```
+
+From a pod in a different namespace:
+
+```bash
+curl http://krkn-operator-controller-manager-api-service.krkn-operator-system.svc.cluster.local:8080/api/v1/targets
+```
+
+### Access from outside the cluster
+
+#### Option 1: Port Forward
+
+```bash
+# Port forward to the service
+kubectl port-forward -n krkn-operator-system service/krkn-operator-controller-manager-api-service 8080:8080
 
 # In another terminal, test the API
 curl http://localhost:8080/api/v1/targets
 
 # Get nodes for a specific cluster
-curl http://localhost:8080/api/v1/nodes/<secret-id>
+curl http://localhost:8080/api/v1/nodes/<secret-id>?cluster-name=<cluster-name>
 ```
+
+#### Option 2: NodePort (for development/testing)
+
+Edit the service to use NodePort:
+
+```bash
+kubectl patch service -n krkn-operator-system krkn-operator-controller-manager-api-service -p '{"spec":{"type":"NodePort"}}'
+
+# Get the NodePort
+kubectl get service -n krkn-operator-system krkn-operator-controller-manager-api-service
+```
+
+#### Option 3: LoadBalancer (for production with cloud provider)
+
+```bash
+kubectl patch service -n krkn-operator-system krkn-operator-controller-manager-api-service -p '{"spec":{"type":"LoadBalancer"}}'
+
+# Get the external IP
+kubectl get service -n krkn-operator-system krkn-operator-controller-manager-api-service
+```
+
+#### Option 4: Ingress (recommended for production)
+
+Create an Ingress resource to expose the API with hostname-based routing and TLS.
 
 ## Undeployment
 

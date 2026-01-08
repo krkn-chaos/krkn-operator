@@ -50,8 +50,8 @@ endif
 # This is useful for CI or a project to utilize a specific version of the operator-sdk toolkit.
 OPERATOR_SDK_VERSION ?= v1.41.1
 # Image URL to use all building/pushing image targets
-IMG ?= controller:latest
-DATA_PROVIDER_IMG ?= data-provider:latest
+IMG ?= quay.io/krkn-chaos/krkn-operator:operator
+DATA_PROVIDER_IMG ?= quay.io/krkn-chaos/krkn-operator:data-provider
 
 # Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
 ifeq (,$(shell go env GOBIN))
