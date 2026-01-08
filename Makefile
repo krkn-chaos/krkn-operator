@@ -253,9 +253,19 @@ uninstall: manifests kustomize ## Uninstall CRDs from the K8s cluster specified 
 
 .PHONY: deploy
 deploy: manifests kustomize ## Deploy controller to the K8s cluster specified in ~/.kube/config.
+	@echo "Checking if namespace krkn-operator-system exists..."
+	@$(KUBECTL) get namespace krkn-operator-system >/dev/null 2>&1 || \
+		(echo "❌ ERROR: Namespace 'krkn-operator-system' does not exist!" && \
+		 echo "" && \
+		 echo "Please create it first with:" && \
+		 echo "  kubectl create namespace krkn-operator-system" && \
+		 echo "" && \
+		 exit 1)
+	@echo "✓ Namespace exists, proceeding with deployment..."
 	cd config/manager && $(KUSTOMIZE) edit set image controller=${IMG}
 	cd config/default && $(KUSTOMIZE) edit set image data-provider=${DATA_PROVIDER_IMG}
 	$(KUSTOMIZE) build config/default | $(KUBECTL) apply -f -
+	@echo "✓ Deployment complete!"
 
 .PHONY: undeploy
 undeploy: kustomize ## Undeploy controller from the K8s cluster specified in ~/.kube/config. Call with ignore-not-found=true to ignore resource not found errors during deletion.

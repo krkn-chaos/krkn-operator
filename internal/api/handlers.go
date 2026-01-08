@@ -351,7 +351,7 @@ func (h *Handler) PostTarget(w http.ResponseWriter, r *http.Request) {
 			Namespace: h.namespace,
 		},
 		Spec: krknv1alpha1.KrknTargetRequestSpec{
-			// Spec fields can be empty or set based on request body if needed
+			UUID: newUUID,
 		},
 	}
 

@@ -195,7 +195,9 @@
 
 **Behavior:**
 1. Generate a new UUID
-2. Create a new KrknTargetRequest CR with name = UUID
+2. Create a new KrknTargetRequest CR with:
+   - metadata.name = UUID
+   - spec.uuid = UUID
 3. Create in the operator namespace
 4. Return 102 (Processing) with the UUID
 

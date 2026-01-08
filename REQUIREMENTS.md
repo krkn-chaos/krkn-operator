@@ -40,7 +40,9 @@ container in the same pod.
 
 ### /targets ✅ COMPLETED
 
-- this method will create a new KrknTargetRequest CR named with a UUID in the same operator namespace
+- this method will create a new KrknTargetRequest CR in the same operator namespace with:
+  - metadata.name = generated UUID
+  - spec.uuid = generated UUID
 - this method will return a 102 status and the UUID of the KrknTargetRequest
 
 
