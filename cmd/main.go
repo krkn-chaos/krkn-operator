@@ -38,6 +38,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
+	"github.com/krkn-chaos/krkn-operator/internal/api"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -62,6 +63,8 @@ func main() {
 	var probeAddr string
 	var secureMetrics bool
 	var enableHTTP2 bool
+	var apiPort int
+	var grpcServerAddr string
 	var tlsOpts []func(*tls.Config)
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
 		"Use :8443 for HTTPS or :8080 for HTTP, or leave as 0 to disable the metrics service.")
@@ -80,6 +83,8 @@ func main() {
 	flag.StringVar(&metricsCertKey, "metrics-cert-key", "tls.key", "The name of the metrics server key file.")
 	flag.BoolVar(&enableHTTP2, "enable-http2", false,
 		"If set, HTTP/2 will be enabled for the metrics and webhook servers")
+	flag.IntVar(&apiPort, "api-port", 8080, "The port for the REST API server")
+	flag.StringVar(&grpcServerAddr, "grpc-server-address", "localhost:50051", "The address of the gRPC data provider server")
 	opts := zap.Options{
 		Development: true,
 	}
@@ -202,6 +207,22 @@ func main() {
 	}
 
 	// +kubebuilder:scaffold:builder
+
+	// Get the namespace for KrknTargetRequest CRs from environment variable
+	// Defaults to "default" if not set
+	krknNamespace := os.Getenv("KRKN_NAMESPACE")
+	if krknNamespace == "" {
+		krknNamespace = "default"
+	}
+	setupLog.Info("KrknTargetRequest namespace", "namespace", krknNamespace)
+
+	// Setup and add REST API server
+	apiServer := api.NewServer(apiPort, mgr.GetClient(), krknNamespace, grpcServerAddr)
+	setupLog.Info("gRPC server address", "address", grpcServerAddr)
+	if err := mgr.Add(apiServer); err != nil {
+		setupLog.Error(err, "unable to add REST API server to manager")
+		os.Exit(1)
+	}
 
 	if metricsCertWatcher != nil {
 		setupLog.Info("Adding metrics certificate watcher to manager")

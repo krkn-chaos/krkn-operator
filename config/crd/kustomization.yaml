@@ -1,0 +1,3 @@
+resources:
+- bases/krkn.krkn-chaos.dev_krknoperatortargetproviders.yaml
+- bases/krkn.krkn-chaos.dev_krkntargetrequests.yaml

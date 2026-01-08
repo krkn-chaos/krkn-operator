@@ -51,6 +51,7 @@ endif
 OPERATOR_SDK_VERSION ?= v1.41.1
 # Image URL to use all building/pushing image targets
 IMG ?= controller:latest
+DATA_PROVIDER_IMG ?= data-provider:latest
 
 # Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
 ifeq (,$(shell go env GOBIN))
@@ -174,6 +175,44 @@ docker-build: ## Build docker image with the manager.
 docker-push: ## Push docker image with the manager.
 	$(CONTAINER_TOOL) push ${IMG}
 
+.PHONY: docker-build-data-provider
+docker-build-data-provider: ## Build docker image for the data-provider.
+	$(CONTAINER_TOOL) build -t ${DATA_PROVIDER_IMG} -f krkn-operator-data-provider/Dockerfile krkn-operator-data-provider/
+
+.PHONY: docker-push-data-provider
+docker-push-data-provider: ## Push docker image for the data-provider.
+	$(CONTAINER_TOOL) push ${DATA_PROVIDER_IMG}
+
+.PHONY: docker-build-all
+docker-build-all: docker-build docker-build-data-provider ## Build both operator and data-provider images.
+
+.PHONY: docker-push-all
+docker-push-all: docker-push docker-push-data-provider ## Push both operator and data-provider images.
+
+.PHONY: podman-build
+podman-build: ## Build docker image with the manager using podman.
+	$(MAKE) docker-build CONTAINER_TOOL=podman
+
+.PHONY: podman-push
+podman-push: ## Push docker image with the manager using podman.
+	$(MAKE) docker-push CONTAINER_TOOL=podman
+
+.PHONY: podman-build-data-provider
+podman-build-data-provider: ## Build docker image for the data-provider using podman.
+	$(MAKE) docker-build-data-provider CONTAINER_TOOL=podman
+
+.PHONY: podman-push-data-provider
+podman-push-data-provider: ## Push docker image for the data-provider using podman.
+	$(MAKE) docker-push-data-provider CONTAINER_TOOL=podman
+
+.PHONY: podman-build-all
+podman-build-all: ## Build both operator and data-provider images using podman.
+	$(MAKE) docker-build-all CONTAINER_TOOL=podman
+
+.PHONY: podman-push-all
+podman-push-all: ## Push both operator and data-provider images using podman.
+	$(MAKE) docker-push-all CONTAINER_TOOL=podman
+
 # PLATFORMS defines the target platforms for the manager image be built to provide support to multiple
 # architectures. (i.e. make docker-buildx IMG=myregistry/mypoperator:0.0.1). To use this option you need to:
 # - be able to use docker buildx. More info: https://docs.docker.com/build/buildx/
@@ -195,6 +234,7 @@ docker-buildx: ## Build and push docker image for the manager for cross-platform
 build-installer: manifests generate kustomize ## Generate a consolidated YAML with CRDs and deployment.
 	mkdir -p dist
 	cd config/manager && $(KUSTOMIZE) edit set image controller=${IMG}
+	cd config/default && $(KUSTOMIZE) edit set image data-provider=${DATA_PROVIDER_IMG}
 	$(KUSTOMIZE) build config/default > dist/install.yaml
 
 ##@ Deployment
@@ -214,6 +254,7 @@ uninstall: manifests kustomize ## Uninstall CRDs from the K8s cluster specified 
 .PHONY: deploy
 deploy: manifests kustomize ## Deploy controller to the K8s cluster specified in ~/.kube/config.
 	cd config/manager && $(KUSTOMIZE) edit set image controller=${IMG}
+	cd config/default && $(KUSTOMIZE) edit set image data-provider=${DATA_PROVIDER_IMG}
 	$(KUSTOMIZE) build config/default | $(KUBECTL) apply -f -
 
 .PHONY: undeploy

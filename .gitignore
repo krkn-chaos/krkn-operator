@@ -28,4 +28,4 @@ go.work
 .claude/
 .idea/
 .specify/
-
+venv/

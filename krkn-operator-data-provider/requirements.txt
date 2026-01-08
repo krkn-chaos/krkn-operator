@@ -1,0 +1,7 @@
+# gRPC dependencies
+grpcio>=1.60.0
+grpcio-tools>=1.60.0
+
+# Krkn library for Kubernetes interactions
+# Using git branch until pypi release is available
+git+https://github.com/krkn-chaos/krkn-lib.git@init_from_string

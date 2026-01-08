@@ -1,0 +1,23 @@
+syntax = "proto3";
+
+package dataprovider;
+
+option go_package = "github.com/krkn-chaos/krkn-operator/proto/dataprovider";
+
+// DataProviderService provides methods to interact with Kubernetes clusters
+service DataProviderService {
+  // GetNodes retrieves the list of nodes from a Kubernetes cluster
+  rpc GetNodes(GetNodesRequest) returns (GetNodesResponse);
+}
+
+// GetNodesRequest contains the kubeconfig to access the cluster
+message GetNodesRequest {
+  // kubeconfig in base64 format
+  string kubeconfig_base64 = 1;
+}
+
+// GetNodesResponse contains the list of node names
+message GetNodesResponse {
+  // List of node names
+  repeated string nodes = 1;
+}
