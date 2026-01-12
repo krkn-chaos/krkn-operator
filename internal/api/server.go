@@ -44,6 +44,7 @@ func NewServer(port int, client client.Client, namespace string, grpcServerAddr 
 	mux.HandleFunc("/nodes", handler.GetNodes)
 	mux.HandleFunc("/targets", handler.PostTarget)          // POST /targets
 	mux.HandleFunc("/targets/", handler.GetTargetByUUID)    // GET /targets/{uuid}
+	mux.HandleFunc("/scenarios", handler.PostScenarios)     // POST /scenarios
 
 	// Wrap mux with logging middleware
 	server := &http.Server{

@@ -2,8 +2,8 @@
 
 ## Current Status
 
-**Last updated:** 2026-01-08
-**Current phase:** REST API Completion - COMPLETED
+**Last updated:** 2026-01-12
+**Current phase:** REST API Enhancement - POST /scenarios COMPLETED
 
 ### Completed
 - Project scaffolding with Kubebuilder
@@ -54,6 +54,14 @@
   - ✅ Created Kubernetes Service for REST API (api_service.yaml)
   - ✅ Updated deployment documentation with Service access patterns
   - ✅ Successfully deployed to production OpenShift cluster
+- **POST /scenarios endpoint completed:**
+  - ✅ Integrated krknctl provider package (v0.10.15-beta)
+  - ✅ Implemented factory pattern for Quay and RegistryV2 providers
+  - ✅ Default mode: quay.io registry (no body required)
+  - ✅ Private registry support with authentication (username/password/token)
+  - ✅ Returns list of available krkn scenario tags with metadata
+  - ✅ Request/response types defined in internal/api/types.go
+  - ✅ Handler registered at POST /scenarios
 
 ### In Progress
 - None
@@ -213,6 +221,89 @@
 **Response Codes:**
 - `102 Processing`: KrknTargetRequest created successfully
 - `500 Internal Server Error`: Failed to create CR
+
+#### POST /scenarios
+**Purpose:** Retrieve list of available krkn chaos scenarios from registry
+
+**Request Body (optional):**
+```json
+{
+  "registryUrl": "registry.example.com",
+  "scenarioRepository": "org/krkn-scenarios",
+  "username": "user",
+  "password": "pass",
+  "token": "alternative-to-user-pass",
+  "skipTls": false,
+  "insecure": false
+}
+```
+
+**Behavior:**
+1. Parse optional request body
+2. If body contains registry configuration → use RegistryV2 provider (Private mode)
+3. If no body or empty body → use Quay provider (default to quay.io)
+4. Load krknctl configuration (embedded config.json)
+5. Create provider factory and instantiate appropriate provider
+6. Call `GetRegistryImages(registry)` to fetch scenario list
+7. Convert krknctl models to API response types
+8. Return list of scenarios with metadata
+
+**Status:** COMPLETED
+
+**Response Format:**
+```json
+{
+  "scenarios": [
+    {
+      "name": "pod-scenarios",
+      "digest": "sha256:abc123...",
+      "size": 123456789,
+      "lastModified": "2025-01-12T10:30:00Z"
+    },
+    {
+      "name": "node-scenarios",
+      "digest": "sha256:def456...",
+      "size": 987654321,
+      "lastModified": "2025-01-11T15:20:00Z"
+    }
+  ]
+}
+```
+
+**Error Responses:**
+
+400 Bad Request (invalid body):
+```json
+{
+  "error": "bad_request",
+  "message": "Invalid request body: ..."
+}
+```
+
+400 Bad Request (partial registry info):
+```json
+{
+  "error": "bad_request",
+  "message": "Both registryUrl and scenarioRepository are required for private registry"
+}
+```
+
+500 Internal Server Error:
+```json
+{
+  "error": "internal_error",
+  "message": "Failed to get scenarios from registry: ..."
+}
+```
+
+**Implementation Details:**
+- Uses `github.com/krkn-chaos/krknctl/pkg/provider` package
+- Factory pattern: `factory.NewProviderFactory(config).NewInstance(mode)`
+- Two modes:
+  - `provider.Quay`: Default quay.io registry (no authentication needed)
+  - `provider.Private`: Custom registry with RegistryV2 configuration
+- Supports multiple authentication methods: username/password, token
+- Optional TLS skip and insecure connection for private registries
 
 ## Architecture Decisions
 
@@ -413,6 +504,45 @@
    - Tested REST API via Service
    - Verified gRPC communication between containers
 
+### Phase 9: POST /scenarios Endpoint ✅
+**Status:** COMPLETED
+
+1. ✅ Dependency Integration
+   - Added krknctl package (github.com/krkn-chaos/krknctl v0.10.15-beta)
+   - Imported provider, factory, models, and config packages
+   - Executed `go mod tidy` to resolve transitive dependencies
+
+2. ✅ Type Definitions (internal/api/types.go)
+   - Created `ScenariosRequest` struct for optional registry configuration
+   - Created `ScenarioTag` struct matching krknctl models.ScenarioTag
+   - Created `ScenariosResponse` with list of scenarios
+   - All fields properly documented with JSON tags
+
+3. ✅ Handler Implementation (internal/api/handlers.go)
+   - Implemented `PostScenarios(w, r)` handler
+   - Request body parsing with ContentLength check
+   - Validation logic: both registryUrl and scenarioRepository required for private registry
+   - Mode selection: provider.Quay (default) vs provider.Private
+   - Factory pattern: `factory.NewProviderFactory(&cfg).NewInstance(mode)`
+   - Call to `GetRegistryImages(registry)` for scenario list retrieval
+   - Model conversion from krknctl types to API types
+   - Comprehensive error handling (400, 500)
+
+4. ✅ Route Registration (internal/api/server.go)
+   - Registered POST /scenarios route
+   - Handler accessible at http://operator:8080/scenarios
+
+5. ✅ Build Verification
+   - Successful compilation with no errors
+   - All dependencies resolved
+   - Binary built and ready for testing
+
+**Implementation Highlights:**
+- **No body**: Defaults to quay.io (public scenarios)
+- **With body**: Private registry with RegistryV2 configuration
+- **Authentication**: Supports username/password or token
+- **Flexibility**: SkipTLS and Insecure options for development environments
+
 ## Technical Notes
 
 ### KrknTargetRequest Structure
@@ -437,12 +567,13 @@ type KrknTargetRequestStatus struct {
 ### Implementation Files
 
 **Go Operator:**
-- `internal/api/server.go`: API server with net/http.ServeMux and lifecycle management
-- `internal/api/handlers.go`: HTTP handlers using standard http.ResponseWriter/Request, gRPC client calls
-- `internal/api/types.go`: Request/response type definitions
+- `internal/api/server.go`: API server with net/http.ServeMux and lifecycle management, routes for all endpoints
+- `internal/api/handlers.go`: HTTP handlers using standard http.ResponseWriter/Request, gRPC client calls, krknctl provider integration
+- `internal/api/types.go`: Request/response type definitions (Clusters, Nodes, Scenarios, Targets, Errors)
 - `internal/api/handlers_test.go`: Comprehensive test suite (10 tests, all passing)
 - `cmd/main.go`: Updated to integrate API server with namespace and gRPC configuration
 - `start_operator.sh`: Launch script with support for KRKN_NAMESPACE env var
+- `go.mod`: Dependencies including krknctl v0.10.15-beta for scenario provider
 
 **Testing:**
 - `test/api_workflow_test.sh`: End-to-end API workflow test script
@@ -503,9 +634,10 @@ type KrknTargetRequestStatus struct {
 6. ✅ Production deployment with namespace-scoped RBAC
 7. ✅ Podman support and container tooling
 8. ✅ Kubernetes Service for REST API access
-9. Create API documentation (OpenAPI/Swagger spec)
-10. Add additional endpoints as requirements evolve
-11. Implement controller logic for KrknTargetRequest
+9. ✅ Implement POST /scenarios endpoint with krknctl integration
+10. Create API documentation (OpenAPI/Swagger spec)
+11. Add additional endpoints as requirements evolve
+12. Implement controller logic for KrknTargetRequest
 
 ## Future Work (Not in Current Scope)
 

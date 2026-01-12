@@ -23,6 +23,10 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/krkn-chaos/krknctl/pkg/config"
+	"github.com/krkn-chaos/krknctl/pkg/provider"
+	"github.com/krkn-chaos/krknctl/pkg/provider/factory"
+	"github.com/krkn-chaos/krknctl/pkg/provider/models"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -370,4 +374,104 @@ func (h *Handler) PostTarget(w http.ResponseWriter, r *http.Request) {
 		"uuid": newUUID,
 	}
 	writeJSON(w, http.StatusProcessing, response)
+}
+
+// PostScenarios handles POST /scenarios endpoint
+// It returns the list of available krkn scenarios from quay.io or a private registry
+func (h *Handler) PostScenarios(w http.ResponseWriter, r *http.Request) {
+	// Parse optional request body
+	var req ScenariosRequest
+	var registry *models.RegistryV2
+	var mode provider.Mode
+
+	// Check if body is provided
+	if r.ContentLength > 0 {
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+				Error:   "bad_request",
+				Message: "Invalid request body: " + err.Error(),
+			})
+			return
+		}
+
+		// If registry info is provided, validate and use private registry mode
+		if req.RegistryURL != "" && req.ScenarioRepository != "" {
+			registry = &models.RegistryV2{
+				Username:           req.Username,
+				Password:           req.Password,
+				Token:              req.Token,
+				RegistryURL:        req.RegistryURL,
+				ScenarioRepository: req.ScenarioRepository,
+				SkipTLS:            req.SkipTLS,
+				Insecure:           req.Insecure,
+			}
+			mode = provider.Private
+		} else if req.RegistryURL != "" || req.ScenarioRepository != "" {
+			// Partial registry info provided - error
+			writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+				Error:   "bad_request",
+				Message: "Both registryUrl and scenarioRepository are required for private registry",
+			})
+			return
+		} else {
+			// Body provided but no registry info - use quay.io
+			mode = provider.Quay
+		}
+	} else {
+		// No body provided - default to quay.io
+		mode = provider.Quay
+	}
+
+	// Load krknctl config
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+			Error:   "internal_error",
+			Message: "Failed to load krknctl config: " + err.Error(),
+		})
+		return
+	}
+
+	// Create provider factory
+	providerFactory := factory.NewProviderFactory(&cfg)
+
+	// Get provider instance based on mode
+	scenarioProvider := providerFactory.NewInstance(mode)
+	if scenarioProvider == nil {
+		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+			Error:   "internal_error",
+			Message: "Failed to create scenario provider",
+		})
+		return
+	}
+
+	// Get registry images (scenario list)
+	scenarioTags, err := scenarioProvider.GetRegistryImages(registry)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+			Error:   "internal_error",
+			Message: "Failed to get scenarios from registry: " + err.Error(),
+		})
+		return
+	}
+
+	// Convert krknctl models to API response types
+	var scenarios []ScenarioTag
+	if scenarioTags != nil {
+		for _, tag := range *scenarioTags {
+			scenarios = append(scenarios, ScenarioTag{
+				Name:         tag.Name,
+				Digest:       tag.Digest,
+				Size:         tag.Size,
+				LastModified: tag.LastModified,
+			})
+		}
+	}
+
+	// Return response
+	response := ScenariosResponse{
+		Scenarios: scenarios,
+	}
+
+	writeJSON(w, http.StatusOK, response)
 }

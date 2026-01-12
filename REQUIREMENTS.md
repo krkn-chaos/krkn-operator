@@ -19,6 +19,8 @@ container in the same pod.
   you can find the definition in the api/v1alpha1 folder.
 
 
+
+
 #### refactoring
 - select only KrknTargetRequests *only* if are completed
 - replace the gin gonic framework with plain net/http for API serving
@@ -45,6 +47,15 @@ container in the same pod.
   - spec.uuid = generated UUID
 - this method will return a 102 status and the UUID of the KrknTargetRequest
 
+### /scenarios ✅ COMPLETED
+- this method must be built using the already available golang package made for krknctl to retrieve
+  the available krkn scenarios either from quay.io or from a private registry
+- the package is on the following repo https://github.com/krkn-chaos/krknctl/tree/main/pkg/provider
+- the method must instantiate the factory of the scenario providers based on the user parameters
+- - if the payload contains private registry infos `RegistryV2` provider must be instantiated
+- - if no payload is passed it must default on quay.io
+- the purpose is to return the list of the available krkn scenarioag
+
 
 # Grpc python service requirement
 
@@ -57,3 +68,7 @@ container in the same pod.
 - the list of strings will be returned to the Go API
 - the list of strings will be returned to the client
 - remove the kubeconfig return parameter from the go api
+
+
+## get pods
+- in the krkn-operator-data-provider I want to add a method to list all the pods and 

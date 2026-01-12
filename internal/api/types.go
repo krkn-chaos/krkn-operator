@@ -18,6 +18,7 @@ package api
 
 import (
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
+	"time"
 )
 
 // ClustersResponse represents the response for GET /clusters endpoint
@@ -38,4 +39,41 @@ type NodesResponse struct {
 type ErrorResponse struct {
 	Error   string `json:"error"`
 	Message string `json:"message"`
+}
+
+// ScenariosRequest represents the optional request body for POST /scenarios
+// If provided, uses private registry; if nil/empty, defaults to quay.io
+type ScenariosRequest struct {
+	// Username for private registry authentication (optional)
+	Username *string `json:"username,omitempty"`
+	// Password for private registry authentication (optional)
+	Password *string `json:"password,omitempty"`
+	// Token for private registry authentication (optional, alternative to username/password)
+	Token *string `json:"token,omitempty"`
+	// RegistryURL is the private registry URL (required if using private registry)
+	RegistryURL string `json:"registryUrl,omitempty"`
+	// ScenarioRepository is the scenario repository name (required if using private registry)
+	ScenarioRepository string `json:"scenarioRepository,omitempty"`
+	// SkipTLS skips TLS verification for private registry
+	SkipTLS bool `json:"skipTls,omitempty"`
+	// Insecure allows insecure connections to private registry
+	Insecure bool `json:"insecure,omitempty"`
+}
+
+// ScenarioTag represents a scenario available in the registry
+type ScenarioTag struct {
+	// Name is the scenario tag/version name
+	Name string `json:"name"`
+	// Digest is the image digest (optional)
+	Digest *string `json:"digest,omitempty"`
+	// Size is the image size in bytes (optional)
+	Size *int64 `json:"size,omitempty"`
+	// LastModified is when the scenario was last updated (optional)
+	LastModified *time.Time `json:"lastModified,omitempty"`
+}
+
+// ScenariosResponse represents the response for POST /scenarios endpoint
+type ScenariosResponse struct {
+	// Scenarios contains the list of available scenario tags
+	Scenarios []ScenarioTag `json:"scenarios"`
 }
