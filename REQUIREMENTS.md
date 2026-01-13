@@ -65,6 +65,9 @@ container in the same pod.
 - - if no payload is passed it must default on quay.io
 - the purpose is to return the detail of the scenario in json format using the `GetScenarioDetail` method or 404 if not found
 
+#### refactoring ✅ COMPLETED
+- type should be returned with the string value of the enum and not with the numeric value
+
 # Grpc python service requirement
 
 ## get nodes

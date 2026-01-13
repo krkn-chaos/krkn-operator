@@ -77,3 +77,35 @@ type ScenariosResponse struct {
 	// Scenarios contains the list of available scenario tags
 	Scenarios []ScenarioTag `json:"scenarios"`
 }
+
+// InputFieldResponse represents a scenario input field with Type as string
+// This is a wrapper around krknctl typing.InputField to ensure Type is serialized as string
+type InputFieldResponse struct {
+	Name              *string `json:"name"`
+	ShortDescription  *string `json:"short_description,omitempty"`
+	Description       *string `json:"description,omitempty"`
+	Variable          *string `json:"variable"`
+	Type              string  `json:"type"` // String representation instead of int64 enum
+	Default           *string `json:"default,omitempty"`
+	Validator         *string `json:"validator,omitempty"`
+	ValidationMessage *string `json:"validation_message,omitempty"`
+	Separator         *string `json:"separator,omitempty"`
+	AllowedValues     *string `json:"allowed_values,omitempty"`
+	Required          bool    `json:"required,omitempty"`
+	MountPath         *string `json:"mount_path,omitempty"`
+	Requires          *string `json:"requires,omitempty"`
+	MutuallyExcludes  *string `json:"mutually_excludes,omitempty"`
+	Secret            bool    `json:"secret,omitempty"`
+}
+
+// ScenarioDetailResponse represents the response for POST /scenarios/detail/{scenario_name}
+// This wraps krknctl models.ScenarioDetail to ensure Type fields are strings
+type ScenarioDetailResponse struct {
+	Name         string               `json:"name"`
+	Digest       *string              `json:"digest,omitempty"`
+	Size         *int64               `json:"size,omitempty"`
+	LastModified *time.Time           `json:"last_modified,omitempty"`
+	Title        string               `json:"title"`
+	Description  string               `json:"description"`
+	Fields       []InputFieldResponse `json:"fields"`
+}

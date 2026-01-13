@@ -585,7 +585,38 @@ func (h *Handler) PostScenarioDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Return the scenario detail directly (krknctl models.ScenarioDetail)
-	// It will be JSON-marshaled automatically
-	writeJSON(w, http.StatusOK, scenarioDetail)
+	// Convert krknctl models.ScenarioDetail to ScenarioDetailResponse
+	// This ensures Type fields are serialized as strings instead of int64
+	var fields []InputFieldResponse
+	for _, field := range scenarioDetail.Fields {
+		fields = append(fields, InputFieldResponse{
+			Name:              field.Name,
+			ShortDescription:  field.ShortDescription,
+			Description:       field.Description,
+			Variable:          field.Variable,
+			Type:              field.Type.String(), // Convert enum to string
+			Default:           field.Default,
+			Validator:         field.Validator,
+			ValidationMessage: field.ValidationMessage,
+			Separator:         field.Separator,
+			AllowedValues:     field.AllowedValues,
+			Required:          field.Required,
+			MountPath:         field.MountPath,
+			Requires:          field.Requires,
+			MutuallyExcludes:  field.MutuallyExcludes,
+			Secret:            field.Secret,
+		})
+	}
+
+	response := ScenarioDetailResponse{
+		Name:         scenarioDetail.Name,
+		Digest:       scenarioDetail.Digest,
+		Size:         scenarioDetail.Size,
+		LastModified: scenarioDetail.LastModified,
+		Title:        scenarioDetail.Title,
+		Description:  scenarioDetail.Description,
+		Fields:       fields,
+	}
+
+	writeJSON(w, http.StatusOK, response)
 }
