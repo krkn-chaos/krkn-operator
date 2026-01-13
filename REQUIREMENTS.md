@@ -54,8 +54,16 @@ container in the same pod.
 - the method must instantiate the factory of the scenario providers based on the user parameters
 - - if the payload contains private registry infos `RegistryV2` provider must be instantiated
 - - if no payload is passed it must default on quay.io
-- the purpose is to return the list of the available krkn scenarioag
+- the purpose is to return the list of the available krkn scenarios
 
+### /scenarios/detail/{scenario_name} ✅ COMPLETED
+- this method must be built using the already available golang package made for krknctl to retrieve
+  the available krkn scenarios either from quay.io or from a private registry
+- the package is on the following repo https://github.com/krkn-chaos/krknctl/tree/main/pkg/provider
+- the method must instantiate the factory of the scenario providers based on the user parameters
+- - if the payload contains private registry infos `RegistryV2` provider must be instantiated
+- - if no payload is passed it must default on quay.io
+- the purpose is to return the detail of the scenario in json format using the `GetScenarioDetail` method or 404 if not found
 
 # Grpc python service requirement
 

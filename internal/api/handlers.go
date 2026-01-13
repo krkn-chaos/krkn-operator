@@ -475,3 +475,117 @@ func (h *Handler) PostScenarios(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, response)
 }
+
+// PostScenarioDetail handles POST /scenarios/detail/{scenario_name} endpoint
+// It returns detailed information about a specific scenario including input fields
+func (h *Handler) PostScenarioDetail(w http.ResponseWriter, r *http.Request) {
+	// Extract scenario_name from path: /scenarios/detail/{scenario_name}
+	path := r.URL.Path
+	prefix := "/scenarios/detail/"
+
+	if len(path) <= len(prefix) {
+		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+			Error:   "bad_request",
+			Message: "scenario_name parameter is required in path",
+		})
+		return
+	}
+
+	scenarioName := path[len(prefix):]
+	if scenarioName == "" {
+		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+			Error:   "bad_request",
+			Message: "scenario_name parameter cannot be empty",
+		})
+		return
+	}
+
+	// Parse optional request body (same as /scenarios for registry config)
+	var req ScenariosRequest
+	var registry *models.RegistryV2
+	var mode provider.Mode
+
+	// Check if body is provided
+	if r.ContentLength > 0 {
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+				Error:   "bad_request",
+				Message: "Invalid request body: " + err.Error(),
+			})
+			return
+		}
+
+		// If registry info is provided, validate and use private registry mode
+		if req.RegistryURL != "" && req.ScenarioRepository != "" {
+			registry = &models.RegistryV2{
+				Username:           req.Username,
+				Password:           req.Password,
+				Token:              req.Token,
+				RegistryURL:        req.RegistryURL,
+				ScenarioRepository: req.ScenarioRepository,
+				SkipTLS:            req.SkipTLS,
+				Insecure:           req.Insecure,
+			}
+			mode = provider.Private
+		} else if req.RegistryURL != "" || req.ScenarioRepository != "" {
+			// Partial registry info provided - error
+			writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+				Error:   "bad_request",
+				Message: "Both registryUrl and scenarioRepository are required for private registry",
+			})
+			return
+		} else {
+			// Body provided but no registry info - use quay.io
+			mode = provider.Quay
+		}
+	} else {
+		// No body provided - default to quay.io
+		mode = provider.Quay
+	}
+
+	// Load krknctl config
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+			Error:   "internal_error",
+			Message: "Failed to load krknctl config: " + err.Error(),
+		})
+		return
+	}
+
+	// Create provider factory
+	providerFactory := factory.NewProviderFactory(&cfg)
+
+	// Get provider instance based on mode
+	scenarioProvider := providerFactory.NewInstance(mode)
+	if scenarioProvider == nil {
+		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+			Error:   "internal_error",
+			Message: "Failed to create scenario provider",
+		})
+		return
+	}
+
+	// Get scenario detail
+	scenarioDetail, err := scenarioProvider.GetScenarioDetail(scenarioName, registry)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+			Error:   "internal_error",
+			Message: "Failed to get scenario detail: " + err.Error(),
+		})
+		return
+	}
+
+	// Check if scenario was found
+	if scenarioDetail == nil {
+		writeJSONError(w, http.StatusNotFound, ErrorResponse{
+			Error:   "not_found",
+			Message: "Scenario '" + scenarioName + "' not found",
+		})
+		return
+	}
+
+	// Return the scenario detail directly (krknctl models.ScenarioDetail)
+	// It will be JSON-marshaled automatically
+	writeJSON(w, http.StatusOK, scenarioDetail)
+}

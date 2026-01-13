@@ -2,8 +2,8 @@
 
 ## Current Status
 
-**Last updated:** 2026-01-12
-**Current phase:** REST API Enhancement - POST /scenarios COMPLETED
+**Last updated:** 2026-01-13
+**Current phase:** REST API Enhancement - POST /scenarios/detail COMPLETED
 
 ### Completed
 - Project scaffolding with Kubebuilder
@@ -62,6 +62,14 @@
   - ✅ Returns list of available krkn scenario tags with metadata
   - ✅ Request/response types defined in internal/api/types.go
   - ✅ Handler registered at POST /scenarios
+- **POST /scenarios/detail/{scenario_name} endpoint completed:**
+  - ✅ Extracts scenario_name from URL path
+  - ✅ Reuses krknctl models.ScenarioDetail (no custom DTOs)
+  - ✅ Same registry configuration pattern as /scenarios
+  - ✅ Calls GetScenarioDetail(scenario_name, registry)
+  - ✅ Returns detailed scenario information (title, description, input fields)
+  - ✅ Returns 404 if scenario not found
+  - ✅ Handler registered at POST /scenarios/detail/{scenario_name}
 
 ### In Progress
 - None
@@ -305,6 +313,139 @@
 - Supports multiple authentication methods: username/password, token
 - Optional TLS skip and insecure connection for private registries
 
+#### POST /scenarios/detail/{scenario_name}
+**Purpose:** Retrieve detailed information about a specific chaos scenario
+
+**Path Parameter:**
+- `scenario_name` (required): The name/tag of the scenario to retrieve
+
+**Request Body (optional):**
+Same as POST /scenarios - registry configuration for private registry
+```json
+{
+  "registryUrl": "registry.example.com",
+  "scenarioRepository": "org/krkn-scenarios",
+  "username": "user",
+  "password": "pass",
+  "token": "alternative-to-user-pass",
+  "skipTls": false,
+  "insecure": false
+}
+```
+
+**Behavior:**
+1. Extract scenario_name from URL path
+2. Parse optional request body for registry configuration
+3. If body contains registry configuration → use RegistryV2 provider (Private mode)
+4. If no body or empty body → use Quay provider (default to quay.io)
+5. Load krknctl configuration (embedded config.json)
+6. Create provider factory and instantiate appropriate provider
+7. Call `GetScenarioDetail(scenario_name, registry)` to fetch scenario details
+8. Return scenario detail with input fields metadata
+9. Return 404 if scenario not found
+
+**Status:** COMPLETED
+
+**Response Format (200 OK):**
+```json
+{
+  "name": "pod-scenarios",
+  "digest": "sha256:abc123...",
+  "size": 123456789,
+  "lastModified": "2025-01-13T10:30:00Z",
+  "title": "Pod Scenarios",
+  "description": "Chaos engineering scenarios for Kubernetes pods",
+  "fields": [
+    {
+      "name": "namespace",
+      "variable": "NAMESPACE",
+      "type": "string",
+      "description": "Target namespace for pod scenarios",
+      "required": true,
+      "default": "default"
+    },
+    {
+      "name": "label_selector",
+      "variable": "LABEL_SELECTOR",
+      "type": "string",
+      "description": "Label selector to filter pods",
+      "required": false
+    },
+    {
+      "name": "config_file",
+      "variable": "CONFIG_FILE",
+      "type": "file",
+      "description": "Configuration file for scenario",
+      "required": false,
+      "mount_path": "/config/scenario.yaml"
+    }
+  ]
+}
+```
+
+**Error Responses:**
+
+400 Bad Request (missing scenario_name):
+```json
+{
+  "error": "bad_request",
+  "message": "scenario_name parameter is required in path"
+}
+```
+
+400 Bad Request (invalid body):
+```json
+{
+  "error": "bad_request",
+  "message": "Invalid request body: ..."
+}
+```
+
+400 Bad Request (partial registry info):
+```json
+{
+  "error": "bad_request",
+  "message": "Both registryUrl and scenarioRepository are required for private registry"
+}
+```
+
+404 Not Found (scenario not found):
+```json
+{
+  "error": "not_found",
+  "message": "Scenario 'invalid-scenario' not found"
+}
+```
+
+500 Internal Server Error:
+```json
+{
+  "error": "internal_error",
+  "message": "Failed to get scenario detail: ..."
+}
+```
+
+**Implementation Details:**
+- Uses `github.com/krkn-chaos/krknctl/pkg/provider` package
+- Reuses krknctl `models.ScenarioDetail` structure (no custom DTOs)
+- Factory pattern: `factory.NewProviderFactory(config).NewInstance(mode)`
+- Same registry configuration pattern as POST /scenarios
+- Two modes:
+  - `provider.Quay`: Default quay.io registry
+  - `provider.Private`: Custom registry with RegistryV2 configuration
+- Returns complete scenario metadata including:
+  - Basic info: name, digest, size, lastModified
+  - Descriptive info: title, description
+  - Input fields: detailed field configurations with types, validation, defaults
+
+**Input Field Types:**
+- `string`: Text input with optional regex validation
+- `number`: Numeric input
+- `boolean`: Boolean flag (true/false)
+- `enum`: Enumerated values with allowed_values list
+- `file`: File mount (requires mount_path)
+- `file_base64`: Base64-encoded file content
+
 ## Architecture Decisions
 
 ### REST API Framework
@@ -543,6 +684,54 @@
 - **Authentication**: Supports username/password or token
 - **Flexibility**: SkipTLS and Insecure options for development environments
 
+### Phase 10: POST /scenarios/detail/{scenario_name} Endpoint ✅
+**Status:** COMPLETED
+
+1. ✅ Architecture Decision
+   - Decided to reuse krknctl `models.ScenarioDetail` structure
+   - No custom DTOs created - direct use of upstream models
+   - Maintains consistency with krknctl ecosystem
+
+2. ✅ Handler Implementation (internal/api/handlers.go)
+   - Implemented `PostScenarioDetail(w, r)` handler
+   - Path parameter extraction for scenario_name
+   - Same registry configuration pattern as POST /scenarios
+   - Request body parsing with ContentLength check
+   - Validation logic: both registryUrl and scenarioRepository required for private registry
+   - Mode selection: provider.Quay (default) vs provider.Private
+   - Factory pattern: `factory.NewProviderFactory(&cfg).NewInstance(mode)`
+   - Call to `GetScenarioDetail(scenario_name, registry)` for detailed scenario retrieval
+   - 404 response when scenario not found
+   - Direct JSON marshaling of krknctl models.ScenarioDetail
+   - Comprehensive error handling (400, 404, 500)
+
+3. ✅ Route Registration (internal/api/server.go)
+   - Registered POST /scenarios/detail/{scenario_name} route
+   - Handler accessible at http://operator:8080/scenarios/detail/{scenario_name}
+
+4. ✅ Build Verification
+   - Successful compilation with no errors
+   - All dependencies resolved
+   - Binary built and ready for testing
+
+5. ✅ Documentation
+   - Updated REQUIREMENTS.md with ✅ COMPLETED marker
+   - Added complete endpoint documentation to PROGRESS.md
+   - Documented all request/response formats
+   - Documented all input field types (string, number, boolean, enum, file, file_base64)
+
+**Implementation Highlights:**
+- **Reuses upstream models**: No DTOs, direct krknctl models.ScenarioDetail
+- **Consistent pattern**: Same registry config as POST /scenarios
+- **Rich metadata**: Returns title, description, and complete field configurations
+- **Field metadata includes**:
+  - Field type and validation rules
+  - Required/optional flags
+  - Default values
+  - Mount paths for file types
+  - Dependencies and mutual exclusions
+  - Secret field marking
+
 ## Technical Notes
 
 ### KrknTargetRequest Structure
@@ -635,9 +824,10 @@ type KrknTargetRequestStatus struct {
 7. ✅ Podman support and container tooling
 8. ✅ Kubernetes Service for REST API access
 9. ✅ Implement POST /scenarios endpoint with krknctl integration
-10. Create API documentation (OpenAPI/Swagger spec)
-11. Add additional endpoints as requirements evolve
-12. Implement controller logic for KrknTargetRequest
+10. ✅ Implement POST /scenarios/detail/{scenario_name} endpoint
+11. Create API documentation (OpenAPI/Swagger spec)
+12. Add additional endpoints as requirements evolve
+13. Implement controller logic for KrknTargetRequest
 
 ## Future Work (Not in Current Scope)
 
