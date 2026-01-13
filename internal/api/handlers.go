@@ -620,3 +620,148 @@ func (h *Handler) PostScenarioDetail(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, response)
 }
+
+// PostScenarioGlobals handles POST /scenarios/globals/{scenario_name} endpoint
+// It returns global environment fields for a specific scenario
+func (h *Handler) PostScenarioGlobals(w http.ResponseWriter, r *http.Request) {
+	// Extract scenario_name from path: /scenarios/globals/{scenario_name}
+	path := r.URL.Path
+	prefix := "/scenarios/globals/"
+
+	if len(path) <= len(prefix) {
+		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+			Error:   "bad_request",
+			Message: "scenario_name parameter is required in path",
+		})
+		return
+	}
+
+	scenarioName := path[len(prefix):]
+	if scenarioName == "" {
+		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+			Error:   "bad_request",
+			Message: "scenario_name parameter cannot be empty",
+		})
+		return
+	}
+
+	// Parse optional request body (same as /scenarios for registry config)
+	var req ScenariosRequest
+	var registry *models.RegistryV2
+	var mode provider.Mode
+
+	// Check if body is provided
+	if r.ContentLength > 0 {
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+				Error:   "bad_request",
+				Message: "Invalid request body: " + err.Error(),
+			})
+			return
+		}
+
+		// If registry info is provided, validate and use private registry mode
+		if req.RegistryURL != "" && req.ScenarioRepository != "" {
+			registry = &models.RegistryV2{
+				Username:           req.Username,
+				Password:           req.Password,
+				Token:              req.Token,
+				RegistryURL:        req.RegistryURL,
+				ScenarioRepository: req.ScenarioRepository,
+				SkipTLS:            req.SkipTLS,
+				Insecure:           req.Insecure,
+			}
+			mode = provider.Private
+		} else if req.RegistryURL != "" || req.ScenarioRepository != "" {
+			// Partial registry info provided - error
+			writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+				Error:   "bad_request",
+				Message: "Both registryUrl and scenarioRepository are required for private registry",
+			})
+			return
+		} else {
+			// Body provided but no registry info - use quay.io
+			mode = provider.Quay
+		}
+	} else {
+		// No body provided - default to quay.io
+		mode = provider.Quay
+	}
+
+	// Load krknctl config
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+			Error:   "internal_error",
+			Message: "Failed to load krknctl config: " + err.Error(),
+		})
+		return
+	}
+
+	// Create provider factory
+	providerFactory := factory.NewProviderFactory(&cfg)
+
+	// Get provider instance based on mode
+	scenarioProvider := providerFactory.NewInstance(mode)
+	if scenarioProvider == nil {
+		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+			Error:   "internal_error",
+			Message: "Failed to create scenario provider",
+		})
+		return
+	}
+
+	// Get global environment
+	globalDetail, err := scenarioProvider.GetGlobalEnvironment(registry, scenarioName)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+			Error:   "internal_error",
+			Message: "Failed to get global environment: " + err.Error(),
+		})
+		return
+	}
+
+	// Check if global environment was found
+	if globalDetail == nil {
+		writeJSONError(w, http.StatusNotFound, ErrorResponse{
+			Error:   "not_found",
+			Message: "Global environment for scenario '" + scenarioName + "' not found",
+		})
+		return
+	}
+
+	// Convert krknctl models.ScenarioDetail to ScenarioDetailResponse
+	// This ensures Type fields are serialized as strings instead of int64
+	var fields []InputFieldResponse
+	for _, field := range globalDetail.Fields {
+		fields = append(fields, InputFieldResponse{
+			Name:              field.Name,
+			ShortDescription:  field.ShortDescription,
+			Description:       field.Description,
+			Variable:          field.Variable,
+			Type:              field.Type.String(), // Convert enum to string
+			Default:           field.Default,
+			Validator:         field.Validator,
+			ValidationMessage: field.ValidationMessage,
+			Separator:         field.Separator,
+			AllowedValues:     field.AllowedValues,
+			Required:          field.Required,
+			MountPath:         field.MountPath,
+			Requires:          field.Requires,
+			MutuallyExcludes:  field.MutuallyExcludes,
+			Secret:            field.Secret,
+		})
+	}
+
+	response := ScenarioDetailResponse{
+		Name:         globalDetail.Name,
+		Digest:       globalDetail.Digest,
+		Size:         globalDetail.Size,
+		LastModified: globalDetail.LastModified,
+		Title:        globalDetail.Title,
+		Description:  globalDetail.Description,
+		Fields:       fields,
+	}
+
+	writeJSON(w, http.StatusOK, response)
+}

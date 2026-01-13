@@ -65,8 +65,20 @@ container in the same pod.
 - - if no payload is passed it must default on quay.io
 - the purpose is to return the detail of the scenario in json format using the `GetScenarioDetail` method or 404 if not found
 
-#### refactoring ✅ COMPLETED
-- type should be returned with the string value of the enum and not with the numeric value
+### /scenarios/globals/{scenario_name} ✅ COMPLETED
+- this method must be built using the already available golang package made for krknctl to retrieve
+  the available krkn scenarios either from quay.io or from a private registry
+- the package is on the following repo https://github.com/krkn-chaos/krknctl/tree/main/pkg/provider
+- the method must instantiate the factory of the scenario providers based on the user parameters
+- - if the payload contains private registry infos `RegistryV2` provider must be instantiated
+- - if no payload is passed it must default on quay.io
+- the purpose is to return the global fields of the scenario using the `GetGlobalEnvironment` method of the provider
+- the method takes scenario_name as path parameter (same pattern as /scenarios/detail/{scenario_name})
+- the method returns 404 if global environment not found 
+
+
+#### refactoring 
+- type should be returned with the string value of the enum and not with the numeric value ✅ COMPLETED
 
 # Grpc python service requirement
 

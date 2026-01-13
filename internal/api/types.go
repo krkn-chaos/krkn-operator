@@ -109,3 +109,16 @@ type ScenarioDetailResponse struct {
 	Description  string               `json:"description"`
 	Fields       []InputFieldResponse `json:"fields"`
 }
+
+// GlobalsRequest represents the request body for POST /scenarios/globals
+type GlobalsRequest struct {
+	ScenariosRequest
+	// ScenarioNames is the list of scenario names to get global environments for
+	ScenarioNames []string `json:"scenarioNames"`
+}
+
+// GlobalsResponse represents the response for POST /scenarios/globals endpoint
+type GlobalsResponse struct {
+	// Globals is a map of scenario name to global environment details
+	Globals map[string]ScenarioDetailResponse `json:"globals"`
+}

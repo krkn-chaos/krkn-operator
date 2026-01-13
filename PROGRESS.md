@@ -3,7 +3,7 @@
 ## Current Status
 
 **Last updated:** 2026-01-13
-**Current phase:** REST API Enhancement - POST /scenarios/detail COMPLETED
+**Current phase:** REST API Enhancement - POST /scenarios/globals COMPLETED
 
 ### Completed
 - Project scaffolding with Kubebuilder
@@ -70,6 +70,16 @@
   - ✅ Returns detailed scenario information (title, description, input fields)
   - ✅ Returns 404 if scenario not found
   - ✅ Handler registered at POST /scenarios/detail/{scenario_name}
+- **POST /scenarios/globals/{scenario_name} endpoint completed:**
+  - ✅ Extracts scenario_name from URL path
+  - ✅ Same registry configuration pattern as /scenarios and /scenarios/detail
+  - ✅ Body is optional (registry config only)
+  - ✅ Defaults to quay.io when no body provided
+  - ✅ Calls GetGlobalEnvironment(registry, scenario_name)
+  - ✅ Returns global environment details for single scenario
+  - ✅ Returns 404 if global environment not found
+  - ✅ Type fields converted to strings (not enum integers)
+  - ✅ Handler registered at POST /scenarios/globals/{scenario_name}
 
 ### In Progress
 - None
@@ -732,6 +742,101 @@ Same as POST /scenarios - registry configuration for private registry
   - Dependencies and mutual exclusions
   - Secret field marking
 
+### Refactoring: Type Field as String ✅
+**Status:** COMPLETED
+
+**Issue:** The `Type` field in input fields was being serialized as integer (enum value) instead of string.
+
+**Solution:**
+1. Created `InputFieldResponse` and `ScenarioDetailResponse` wrapper types
+2. Convert `typing.Type` enum to string using `Type.String()` method
+3. Map all fields from krknctl models to response models
+
+**Before (incorrect):**
+```json
+{
+  "type": 0  // Integer enum value
+}
+```
+
+**After (correct):**
+```json
+{
+  "type": "string"  // Human-readable string
+}
+```
+
+**Possible type values:**
+- `"string"`, `"number"`, `"boolean"`, `"enum"`, `"file"`, `"file_base64"`
+
+### Phase 11: POST /scenarios/globals/{scenario_name} Endpoint ✅
+**Status:** COMPLETED
+
+1. ✅ Handler Implementation (internal/api/handlers.go)
+   - Implemented `PostScenarioGlobals(w, r)` handler
+   - Extracts scenario_name from URL path
+   - Request body is optional (same as /scenarios/detail)
+   - Same registry configuration pattern as other scenario endpoints
+   - Mode selection: provider.Quay (default) vs provider.Private
+   - Factory pattern: `factory.NewProviderFactory(&cfg).NewInstance(mode)`
+   - Calls `GetGlobalEnvironment(registry, scenarioName)` for single scenario
+   - Returns 404 if global environment not found
+   - Converts Type fields to strings using `field.Type.String()`
+   - Returns `ScenarioDetailResponse` directly (not a map)
+   - Comprehensive error handling (400, 404, 500)
+
+2. ✅ Route Registration (internal/api/server.go)
+   - Registered POST /scenarios/globals/{scenario_name} route
+   - Handler accessible at http://operator:8080/scenarios/globals/{scenario_name}
+
+3. ✅ Build Verification
+   - Successful compilation with no errors
+   - All dependencies resolved
+   - Binary built and ready for testing
+
+**Implementation Highlights:**
+- **Path parameter**: scenario_name in URL path (same as /scenarios/detail)
+- **Body optional**: Only for private registry configuration
+- **Default mode**: Uses quay.io when no body provided
+- **Response format**: Single ScenarioDetailResponse (not a map)
+- **Consistency**: Identical pattern to /scenarios/detail/{scenario_name}
+- **Error handling**: 404 when global environment not found
+
+**Usage Examples:**
+
+Default (quay.io):
+```bash
+curl -X POST http://localhost:8080/scenarios/globals/pod-scenarios | jq
+```
+
+With private registry:
+```bash
+curl -X POST http://localhost:8080/scenarios/globals/pod-scenarios \
+  -H "Content-Type: application/json" \
+  -d '{
+    "registryUrl": "registry.example.com",
+    "scenarioRepository": "org/krkn-scenarios"
+  }' | jq
+```
+
+**Response Example:**
+```json
+{
+  "name": "krkn",
+  "title": "Global Environment",
+  "description": "Global environment variables for krkn",
+  "fields": [
+    {
+      "name": "kubeconfig",
+      "variable": "KUBECONFIG",
+      "type": "file",
+      "required": true,
+      "mount_path": "/root/.kube/config"
+    }
+  ]
+}
+```
+
 ## Technical Notes
 
 ### KrknTargetRequest Structure
@@ -825,9 +930,10 @@ type KrknTargetRequestStatus struct {
 8. ✅ Kubernetes Service for REST API access
 9. ✅ Implement POST /scenarios endpoint with krknctl integration
 10. ✅ Implement POST /scenarios/detail/{scenario_name} endpoint
-11. Create API documentation (OpenAPI/Swagger spec)
-12. Add additional endpoints as requirements evolve
-13. Implement controller logic for KrknTargetRequest
+11. ✅ Implement POST /scenarios/globals endpoint
+12. Create API documentation (OpenAPI/Swagger spec)
+13. Add additional endpoints as requirements evolve
+14. Implement controller logic for KrknTargetRequest
 
 ## Future Work (Not in Current Scope)
 
