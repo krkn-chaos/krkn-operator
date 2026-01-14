@@ -18,8 +18,11 @@ package api
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -131,76 +134,26 @@ func (h *Handler) GetNodes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Fetch the secret with the same name as the KrknTargetRequest ID
-	var secret corev1.Secret
-	err := h.client.Get(context.Background(), types.NamespacedName{
-		Name:      id,
-		Namespace: h.namespace,
-	}, &secret)
-
+	// Get kubeconfig from target using common helper function
+	kubeconfigBase64, err := h.getKubeconfigFromTarget(context.Background(), id, clusterName)
 	if err != nil {
-		if client.IgnoreNotFound(err) == nil {
-			// Secret not found
+		if client.IgnoreNotFound(err) == nil || strings.Contains(err.Error(), "not found") {
 			writeJSONError(w, http.StatusNotFound, ErrorResponse{
 				Error:   "not_found",
-				Message: "Secret with id '" + id + "' not found",
+				Message: err.Error(),
 			})
 			return
 		}
-		// Other error
 		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
 			Error:   "internal_error",
-			Message: "Failed to fetch Secret: " + err.Error(),
-		})
-		return
-	}
-
-	// Retrieve the managed-clusters JSON from the secret data
-	managedClustersBytes, exists := secret.Data["managed-clusters"]
-	if !exists {
-		writeJSONError(w, http.StatusNotFound, ErrorResponse{
-			Error:   "not_found",
-			Message: "managed-clusters not found in secret",
-		})
-		return
-	}
-
-	// Parse the JSON to extract cluster configurations
-	// Structure: { "krkn-operator-acm": { "cluster-name": { "kubeconfig": "base64..." } } }
-	var managedClusters map[string]map[string]struct {
-		Kubeconfig string `json:"kubeconfig"`
-	}
-	if err := json.Unmarshal(managedClustersBytes, &managedClusters); err != nil {
-		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
-			Error:   "internal_error",
-			Message: "Failed to parse managed-clusters JSON: " + err.Error(),
-		})
-		return
-	}
-
-	// Get the krkn-operator-acm object
-	acmClusters, exists := managedClusters["krkn-operator-acm"]
-	if !exists {
-		writeJSONError(w, http.StatusNotFound, ErrorResponse{
-			Error:   "not_found",
-			Message: "krkn-operator-acm not found in managed-clusters",
-		})
-		return
-	}
-
-	// Check if the requested cluster exists
-	clusterConfig, exists := acmClusters[clusterName]
-	if !exists {
-		writeJSONError(w, http.StatusNotFound, ErrorResponse{
-			Error:   "not_found",
-			Message: "Cluster '" + clusterName + "' not found in krkn-operator-acm",
+			Message: err.Error(),
 		})
 		return
 	}
 
 	// Call gRPC service to get nodes
-	// The kubeconfig is already in base64 format in the secret
-	nodes, err := h.callGetNodesGRPC(clusterConfig.Kubeconfig)
+	// The kubeconfig is already in base64 format
+	nodes, err := h.callGetNodesGRPC(kubeconfigBase64)
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
 			Error:   "internal_error",
@@ -267,6 +220,51 @@ func (h *Handler) callGetNodesGRPC(kubeconfigBase64 string) ([]string, error) {
 	}
 
 	return resp.Nodes, nil
+}
+
+// getKubeconfigFromTarget retrieves the base64-encoded kubeconfig for a specific cluster
+// from the KrknTargetRequest secret
+func (h *Handler) getKubeconfigFromTarget(ctx context.Context, targetId string, clusterName string) (string, error) {
+	// Fetch the secret with the same name as the KrknTargetRequest ID
+	var secret corev1.Secret
+	err := h.client.Get(ctx, types.NamespacedName{
+		Name:      targetId,
+		Namespace: h.namespace,
+	}, &secret)
+
+	if err != nil {
+		return "", fmt.Errorf("failed to fetch secret: %w", err)
+	}
+
+	// Retrieve the managed-clusters JSON from the secret data
+	managedClustersBytes, exists := secret.Data["managed-clusters"]
+	if !exists {
+		return "", fmt.Errorf("managed-clusters not found in secret")
+	}
+
+	// Parse the JSON to extract cluster configurations
+	// Structure: { "krkn-operator-acm": { "cluster-name": { "kubeconfig": "base64..." } } }
+	var managedClusters map[string]map[string]struct {
+		Kubeconfig string `json:"kubeconfig"`
+	}
+	if err := json.Unmarshal(managedClustersBytes, &managedClusters); err != nil {
+		return "", fmt.Errorf("failed to parse managed-clusters JSON: %w", err)
+	}
+
+	// Get the krkn-operator-acm object
+	acmClusters, exists := managedClusters["krkn-operator-acm"]
+	if !exists {
+		return "", fmt.Errorf("krkn-operator-acm not found in managed-clusters")
+	}
+
+	// Check if the requested cluster exists
+	clusterConfig, exists := acmClusters[clusterName]
+	if !exists {
+		return "", fmt.Errorf("cluster '%s' not found in krkn-operator-acm", clusterName)
+	}
+
+	// Return the base64-encoded kubeconfig
+	return clusterConfig.Kubeconfig, nil
 }
 
 // GetTargetByUUID handles GET /targets/{UUID} endpoint
@@ -764,4 +762,764 @@ func (h *Handler) PostScenarioGlobals(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, response)
+}
+// PostScenarioRun handles POST /scenarios/run endpoint
+// It creates and starts a new scenario job as a Kubernetes pod
+func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
+	// Parse request body
+	var req ScenarioRunRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+			Error:   "bad_request",
+			Message: "Invalid request body: " + err.Error(),
+		})
+		return
+	}
+
+	// Validate required fields
+	if req.TargetId == "" {
+		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+			Error:   "bad_request",
+			Message: "targetId is required",
+		})
+		return
+	}
+	if req.ClusterName == "" {
+		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+			Error:   "bad_request",
+			Message: "clusterName is required",
+		})
+		return
+	}
+	if req.ScenarioImage == "" {
+		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+			Error:   "bad_request",
+			Message: "scenarioImage is required",
+		})
+		return
+	}
+	if req.ScenarioName == "" {
+		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+			Error:   "bad_request",
+			Message: "scenarioName is required",
+		})
+		return
+	}
+
+	// Set default kubeconfig path if not provided
+	kubeconfigPath := req.KubeconfigPath
+	if kubeconfigPath == "" {
+		kubeconfigPath = "/home/krkn/.kube/config"
+	}
+
+	// Generate unique job ID
+	jobId := uuid.New().String()
+
+	ctx := context.Background()
+
+	// Get kubeconfig from target using common helper function
+	kubeconfigBase64, err := h.getKubeconfigFromTarget(ctx, req.TargetId, req.ClusterName)
+	if err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			writeJSONError(w, http.StatusNotFound, ErrorResponse{
+				Error:   "not_found",
+				Message: err.Error(),
+			})
+			return
+		}
+		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+			Error:   "internal_error",
+			Message: err.Error(),
+		})
+		return
+	}
+
+	// Kubeconfig is base64 encoded, decode it for ConfigMap
+	kubeconfigDecoded, err := base64.StdEncoding.DecodeString(kubeconfigBase64)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+			Error:   "internal_error",
+			Message: "Failed to decode kubeconfig: " + err.Error(),
+		})
+		return
+	}
+
+	// Create ConfigMap for kubeconfig
+	kubeconfigConfigMapName := fmt.Sprintf("krkn-job-%s-kubeconfig", jobId)
+	kubeconfigConfigMap := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      kubeconfigConfigMapName,
+			Namespace: h.namespace,
+			Labels: map[string]string{
+				"krkn-job-id": jobId,
+			},
+		},
+		Data: map[string]string{
+			"config": string(kubeconfigDecoded),
+		},
+	}
+
+	if err := h.client.Create(ctx, kubeconfigConfigMap); err != nil {
+		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+			Error:   "internal_error",
+			Message: "Failed to create kubeconfig ConfigMap: " + err.Error(),
+		})
+		return
+	}
+
+	// Create ConfigMaps for user-provided files
+	var fileConfigMaps []string
+	for _, file := range req.Files {
+		// Sanitize filename for ConfigMap name
+		sanitizedName := strings.ReplaceAll(file.Name, "/", "-")
+		sanitizedName = strings.ReplaceAll(sanitizedName, ".", "-")
+		configMapName := fmt.Sprintf("krkn-job-%s-file-%s", jobId, sanitizedName)
+
+		// Decode base64 content
+		fileContent, err := base64.StdEncoding.DecodeString(file.Content)
+		if err != nil {
+			// Cleanup created ConfigMaps on error
+			h.client.Delete(ctx, kubeconfigConfigMap)
+			for _, cm := range fileConfigMaps {
+				h.client.Delete(ctx, &corev1.ConfigMap{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      cm,
+						Namespace: h.namespace,
+					},
+				})
+			}
+			writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+				Error:   "bad_request",
+				Message: "Failed to decode file content for '" + file.Name + "': " + err.Error(),
+			})
+			return
+		}
+
+		fileConfigMap := &corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      configMapName,
+				Namespace: h.namespace,
+				Labels: map[string]string{
+					"krkn-job-id": jobId,
+				},
+			},
+			Data: map[string]string{
+				file.Name: string(fileContent),
+			},
+		}
+
+		if err := h.client.Create(ctx, fileConfigMap); err != nil {
+			// Cleanup on error
+			h.client.Delete(ctx, kubeconfigConfigMap)
+			for _, cm := range fileConfigMaps {
+				h.client.Delete(ctx, &corev1.ConfigMap{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      cm,
+						Namespace: h.namespace,
+					},
+				})
+			}
+			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+				Error:   "internal_error",
+				Message: "Failed to create file ConfigMap: " + err.Error(),
+			})
+			return
+		}
+
+		fileConfigMaps = append(fileConfigMaps, configMapName)
+	}
+
+	// Prepare pod specification
+	podName := fmt.Sprintf("krkn-job-%s", jobId)
+
+	// Build environment variables
+	envVars := []corev1.EnvVar{}
+	for key, value := range req.Environment {
+		envVars = append(envVars, corev1.EnvVar{
+			Name:  key,
+			Value: value,
+		})
+	}
+
+	// Build volumes and volume mounts
+	volumes := []corev1.Volume{
+		{
+			Name: "kubeconfig",
+			VolumeSource: corev1.VolumeSource{
+				ConfigMap: &corev1.ConfigMapVolumeSource{
+					LocalObjectReference: corev1.LocalObjectReference{
+						Name: kubeconfigConfigMapName,
+					},
+				},
+			},
+		},
+	}
+
+	volumeMounts := []corev1.VolumeMount{
+		{
+			Name:      "kubeconfig",
+			MountPath: kubeconfigPath,
+			SubPath:   "config",
+		},
+	}
+
+	// Add file mounts
+	for i, file := range req.Files {
+		sanitizedName := strings.ReplaceAll(file.Name, "/", "-")
+		sanitizedName = strings.ReplaceAll(sanitizedName, ".", "-")
+		volumeName := fmt.Sprintf("file-%d", i)
+
+		volumes = append(volumes, corev1.Volume{
+			Name: volumeName,
+			VolumeSource: corev1.VolumeSource{
+				ConfigMap: &corev1.ConfigMapVolumeSource{
+					LocalObjectReference: corev1.LocalObjectReference{
+						Name: fileConfigMaps[i],
+					},
+				},
+			},
+		})
+
+		volumeMounts = append(volumeMounts, corev1.VolumeMount{
+			Name:      volumeName,
+			MountPath: file.MountPath,
+			SubPath:   file.Name,
+		})
+	}
+
+	// Handle private registry authentication
+	var imagePullSecrets []corev1.LocalObjectReference
+	if req.RegistryURL != "" && req.ScenarioRepository != "" {
+		// Create ImagePullSecret
+		imagePullSecretName := fmt.Sprintf("krkn-job-%s-registry", jobId)
+
+		// Build docker config JSON
+		authStr := ""
+		if req.Token != nil && *req.Token != "" {
+			authStr = base64.StdEncoding.EncodeToString([]byte(*req.Token))
+		} else if req.Username != nil && req.Password != nil {
+			authStr = base64.StdEncoding.EncodeToString([]byte(*req.Username + ":" + *req.Password))
+		}
+
+		dockerConfig := map[string]interface{}{
+			"auths": map[string]interface{}{
+				req.RegistryURL: map[string]string{
+					"auth": authStr,
+				},
+			},
+		}
+
+		dockerConfigJSON, _ := json.Marshal(dockerConfig)
+
+		imagePullSecret := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      imagePullSecretName,
+				Namespace: h.namespace,
+				Labels: map[string]string{
+					"krkn-job-id": jobId,
+				},
+			},
+			Type: corev1.SecretTypeDockerConfigJson,
+			Data: map[string][]byte{
+				".dockerconfigjson": dockerConfigJSON,
+			},
+		}
+
+		if err := h.client.Create(ctx, imagePullSecret); err != nil {
+			// Cleanup on error
+			h.client.Delete(ctx, kubeconfigConfigMap)
+			for _, cm := range fileConfigMaps {
+				h.client.Delete(ctx, &corev1.ConfigMap{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      cm,
+						Namespace: h.namespace,
+					},
+				})
+			}
+			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+				Error:   "internal_error",
+				Message: "Failed to create ImagePullSecret: " + err.Error(),
+			})
+			return
+		}
+
+		imagePullSecrets = append(imagePullSecrets, corev1.LocalObjectReference{
+			Name: imagePullSecretName,
+		})
+	}
+
+	// Create the pod
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      podName,
+			Namespace: h.namespace,
+			Labels: map[string]string{
+				"app":                 "krkn-scenario",
+				"krkn-job-id":         jobId,
+				"krkn-scenario-name":  req.ScenarioName,
+				"krkn-target-id":      req.TargetId,
+				"krkn-cluster-name":   req.ClusterName,
+			},
+		},
+		Spec: corev1.PodSpec{
+			RestartPolicy:    corev1.RestartPolicyNever,
+			ImagePullSecrets: imagePullSecrets,
+			Containers: []corev1.Container{
+				{
+					Name:            "scenario",
+					Image:           req.ScenarioImage,
+					Env:             envVars,
+					VolumeMounts:    volumeMounts,
+					ImagePullPolicy: corev1.PullAlways,
+				},
+			},
+			Volumes: volumes,
+		},
+	}
+
+	if err := h.client.Create(ctx, pod); err != nil {
+		// Cleanup on error
+		h.client.Delete(ctx, kubeconfigConfigMap)
+		for _, cm := range fileConfigMaps {
+			h.client.Delete(ctx, &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      cm,
+					Namespace: h.namespace,
+				},
+			})
+		}
+		if len(imagePullSecrets) > 0 {
+			h.client.Delete(ctx, &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      imagePullSecrets[0].Name,
+					Namespace: h.namespace,
+				},
+			})
+		}
+		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+			Error:   "internal_error",
+			Message: "Failed to create pod: " + err.Error(),
+		})
+		return
+	}
+
+	// Return response
+	response := ScenarioRunResponse{
+		JobId:   jobId,
+		Status:  "Pending",
+		PodName: podName,
+	}
+
+	writeJSON(w, http.StatusCreated, response)
+}
+// GetScenarioRunStatus handles GET /scenarios/run/{jobId} endpoint
+// It returns the current status of a specific job
+func (h *Handler) GetScenarioRunStatus(w http.ResponseWriter, r *http.Request) {
+	// Extract jobId from path
+	path := r.URL.Path
+	prefix := "/scenarios/run/"
+
+	if len(path) <= len(prefix) {
+		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+			Error:   "bad_request",
+			Message: "jobId parameter is required in path",
+		})
+		return
+	}
+
+	// Check if this is the logs endpoint
+	if strings.HasSuffix(path, "/logs") {
+		// This should be handled by GetScenarioRunLogs
+		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+			Error:   "bad_request",
+			Message: "Invalid endpoint",
+		})
+		return
+	}
+
+	jobId := path[len(prefix):]
+	if jobId == "" {
+		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+			Error:   "bad_request",
+			Message: "jobId parameter cannot be empty",
+		})
+		return
+	}
+
+	ctx := context.Background()
+
+	// Find pod by label
+	var podList corev1.PodList
+	err := h.client.List(ctx, &podList, client.InNamespace(h.namespace), client.MatchingLabels{
+		"krkn-job-id": jobId,
+	})
+
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+			Error:   "internal_error",
+			Message: "Failed to list pods: " + err.Error(),
+		})
+		return
+	}
+
+	if len(podList.Items) == 0 {
+		writeJSONError(w, http.StatusNotFound, ErrorResponse{
+			Error:   "not_found",
+			Message: "Job with ID '" + jobId + "' not found",
+		})
+		return
+	}
+
+	pod := podList.Items[0]
+
+	// Extract info from labels
+	targetId := pod.Labels["krkn-target-id"]
+	clusterName := pod.Labels["krkn-cluster-name"]
+	scenarioName := pod.Labels["krkn-scenario-name"]
+
+	// Map pod phase to job status
+	status := string(pod.Status.Phase)
+	if status == "Succeeded" || status == "Failed" {
+		// Keep as is
+	} else if status == "Running" {
+		status = "Running"
+	} else if status == "Pending" {
+		status = "Pending"
+	} else {
+		status = "Unknown"
+	}
+
+	// Build response
+	response := JobStatusResponse{
+		JobId:        jobId,
+		TargetId:     targetId,
+		ClusterName:  clusterName,
+		ScenarioName: scenarioName,
+		Status:       status,
+		PodName:      pod.Name,
+	}
+
+	// Add timestamps if available
+	if pod.Status.StartTime != nil {
+		startTime := pod.Status.StartTime.Time
+		response.StartTime = &startTime
+	}
+
+	// Check for completion time
+	for _, condition := range pod.Status.Conditions {
+		if condition.Type == corev1.PodReady && condition.Status == corev1.ConditionFalse {
+			if pod.Status.Phase == "Succeeded" || pod.Status.Phase == "Failed" {
+				completionTime := condition.LastTransitionTime.Time
+				response.CompletionTime = &completionTime
+			}
+		}
+	}
+
+	// Add message if pod failed
+	if pod.Status.Phase == "Failed" {
+		response.Message = pod.Status.Message
+		if response.Message == "" && len(pod.Status.ContainerStatuses) > 0 {
+			if pod.Status.ContainerStatuses[0].State.Terminated != nil {
+				response.Message = pod.Status.ContainerStatuses[0].State.Terminated.Reason
+			}
+		}
+	}
+
+	writeJSON(w, http.StatusOK, response)
+}
+
+// GetScenarioRunLogs handles GET /scenarios/run/{jobId}/logs endpoint
+// It streams the stdout/stderr logs of a running or completed job
+func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
+	// Extract jobId from path
+	path := r.URL.Path
+	prefix := "/scenarios/run/"
+	suffix := "/logs"
+
+	if !strings.HasSuffix(path, suffix) {
+		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+			Error:   "bad_request",
+			Message: "Invalid logs endpoint",
+		})
+		return
+	}
+
+	jobId := path[len(prefix) : len(path)-len(suffix)]
+	if jobId == "" {
+		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+			Error:   "bad_request",
+			Message: "jobId parameter cannot be empty",
+		})
+		return
+	}
+
+	ctx := context.Background()
+
+	// Find pod by label
+	var podList corev1.PodList
+	err := h.client.List(ctx, &podList, client.InNamespace(h.namespace), client.MatchingLabels{
+		"krkn-job-id": jobId,
+	})
+
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+			Error:   "internal_error",
+			Message: "Failed to list pods: " + err.Error(),
+		})
+		return
+	}
+
+	if len(podList.Items) == 0 {
+		writeJSONError(w, http.StatusNotFound, ErrorResponse{
+			Error:   "not_found",
+			Message: "Job with ID '" + jobId + "' not found",
+		})
+		return
+	}
+
+	_ = podList.Items[0] // pod not used yet
+
+	// Parse query parameters (will be used in future implementation)
+	_ = r.URL.Query().Get("follow") == "true"      // follow
+	_ = r.URL.Query().Get("timestamps") == "true"  // timestamps
+	_ = r.URL.Query().Get("tailLines")             // tailLinesStr
+
+	// Get clientset for pod logs API
+	// Note: We need to use clientset instead of controller-runtime client for logs
+	// This requires access to the rest config
+	// For now, we'll return an error indicating this needs implementation
+
+	// TODO: This needs the Kubernetes clientset which requires rest.Config
+	// We need to add this to the Handler struct during initialization
+
+	writeJSONError(w, http.StatusNotImplemented, ErrorResponse{
+		Error:   "not_implemented",
+		Message: "Log streaming requires clientset integration - to be implemented",
+	})
+}
+
+// ListScenarioRuns handles GET /scenarios/run endpoint
+// It returns a list of all scenario jobs
+func (h *Handler) ListScenarioRuns(w http.ResponseWriter, r *http.Request) {
+	ctx := context.Background()
+
+	// Parse query parameters for filtering
+	statusFilter := r.URL.Query().Get("status")
+	scenarioNameFilter := r.URL.Query().Get("scenarioName")
+	targetIdFilter := r.URL.Query().Get("targetId")
+	clusterNameFilter := r.URL.Query().Get("clusterName")
+
+	// List all pods with krkn-scenario label
+	var podList corev1.PodList
+	err := h.client.List(ctx, &podList, client.InNamespace(h.namespace), client.MatchingLabels{
+		"app": "krkn-scenario",
+	})
+
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+			Error:   "internal_error",
+			Message: "Failed to list pods: " + err.Error(),
+		})
+		return
+	}
+
+	var jobs []JobStatusResponse
+
+	for _, pod := range podList.Items {
+		jobId := pod.Labels["krkn-job-id"]
+		targetId := pod.Labels["krkn-target-id"]
+		clusterName := pod.Labels["krkn-cluster-name"]
+		scenarioName := pod.Labels["krkn-scenario-name"]
+
+		// Apply filters
+		if statusFilter != "" && string(pod.Status.Phase) != statusFilter {
+			continue
+		}
+		if scenarioNameFilter != "" && scenarioName != scenarioNameFilter {
+			continue
+		}
+		if targetIdFilter != "" && targetId != targetIdFilter {
+			continue
+		}
+		if clusterNameFilter != "" && clusterName != clusterNameFilter {
+			continue
+		}
+
+		// Map pod phase to job status
+		status := string(pod.Status.Phase)
+
+		jobStatus := JobStatusResponse{
+			JobId:        jobId,
+			TargetId:     targetId,
+			ClusterName:  clusterName,
+			ScenarioName: scenarioName,
+			Status:       status,
+			PodName:      pod.Name,
+		}
+
+		// Add timestamps
+		if pod.Status.StartTime != nil {
+			startTime := pod.Status.StartTime.Time
+			jobStatus.StartTime = &startTime
+		}
+
+		// Check for completion time
+		for _, condition := range pod.Status.Conditions {
+			if condition.Type == corev1.PodReady && condition.Status == corev1.ConditionFalse {
+				if pod.Status.Phase == "Succeeded" || pod.Status.Phase == "Failed" {
+					completionTime := condition.LastTransitionTime.Time
+					jobStatus.CompletionTime = &completionTime
+				}
+			}
+		}
+
+		jobs = append(jobs, jobStatus)
+	}
+
+	response := JobsListResponse{
+		Jobs: jobs,
+	}
+
+	writeJSON(w, http.StatusOK, response)
+}
+
+// DeleteScenarioRun handles DELETE /scenarios/run/{jobId} endpoint
+// It stops and deletes a running job
+func (h *Handler) DeleteScenarioRun(w http.ResponseWriter, r *http.Request) {
+	// Extract jobId from path
+	path := r.URL.Path
+	prefix := "/scenarios/run/"
+
+	if len(path) <= len(prefix) {
+		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+			Error:   "bad_request",
+			Message: "jobId parameter is required in path",
+		})
+		return
+	}
+
+	jobId := path[len(prefix):]
+	if jobId == "" {
+		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+			Error:   "bad_request",
+			Message: "jobId parameter cannot be empty",
+		})
+		return
+	}
+
+	ctx := context.Background()
+
+	// Find pod by label
+	var podList corev1.PodList
+	err := h.client.List(ctx, &podList, client.InNamespace(h.namespace), client.MatchingLabels{
+		"krkn-job-id": jobId,
+	})
+
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+			Error:   "internal_error",
+			Message: "Failed to list pods: " + err.Error(),
+		})
+		return
+	}
+
+	if len(podList.Items) == 0 {
+		writeJSONError(w, http.StatusNotFound, ErrorResponse{
+			Error:   "not_found",
+			Message: "Job with ID '" + jobId + "' not found",
+		})
+		return
+	}
+
+	pod := podList.Items[0]
+
+	// Delete pod with 5 second grace period
+	gracePeriod := int64(5)
+	deleteOptions := client.DeleteOptions{
+		GracePeriodSeconds: &gracePeriod,
+	}
+
+	if err := h.client.Delete(ctx, &pod, &deleteOptions); err != nil {
+		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+			Error:   "internal_error",
+			Message: "Failed to delete pod: " + err.Error(),
+		})
+		return
+	}
+
+	// Delete associated ConfigMaps
+	var configMapList corev1.ConfigMapList
+	err = h.client.List(ctx, &configMapList, client.InNamespace(h.namespace), client.MatchingLabels{
+		"krkn-job-id": jobId,
+	})
+
+	if err == nil {
+		for _, cm := range configMapList.Items {
+			h.client.Delete(ctx, &cm)
+		}
+	}
+
+	// Delete associated Secrets (ImagePullSecrets)
+	var secretList corev1.SecretList
+	err = h.client.List(ctx, &secretList, client.InNamespace(h.namespace), client.MatchingLabels{
+		"krkn-job-id": jobId,
+	})
+
+	if err == nil {
+		for _, secret := range secretList.Items {
+			h.client.Delete(ctx, &secret)
+		}
+	}
+
+	response := JobStatusResponse{
+		JobId:   jobId,
+		Status:  "Stopped",
+		Message: "Job stopped and deleted successfully",
+	}
+
+	writeJSON(w, http.StatusOK, response)
+}
+
+// ScenariosRunRouter routes requests to /scenarios/run endpoints
+func (h *Handler) ScenariosRunRouter(w http.ResponseWriter, r *http.Request) {
+	path := r.URL.Path
+
+	// POST /scenarios/run - create new job
+	if path == "/scenarios/run" && r.Method == http.MethodPost {
+		h.PostScenarioRun(w, r)
+		return
+	}
+
+	// GET /scenarios/run - list all jobs
+	if path == "/scenarios/run" && r.Method == http.MethodGet {
+		h.ListScenarioRuns(w, r)
+		return
+	}
+
+	// Path with jobId: /scenarios/run/{jobId}...
+	if strings.HasPrefix(path, "/scenarios/run/") {
+		// GET /scenarios/run/{jobId}/logs - stream logs
+		if strings.HasSuffix(path, "/logs") && r.Method == http.MethodGet {
+			h.GetScenarioRunLogs(w, r)
+			return
+		}
+
+		// GET /scenarios/run/{jobId} - get job status
+		if r.Method == http.MethodGet {
+			h.GetScenarioRunStatus(w, r)
+			return
+		}
+
+		// DELETE /scenarios/run/{jobId} - delete job
+		if r.Method == http.MethodDelete {
+			h.DeleteScenarioRun(w, r)
+			return
+		}
+	}
+
+	// Method not allowed
+	writeJSONError(w, http.StatusMethodNotAllowed, ErrorResponse{
+		Error:   "method_not_allowed",
+		Message: "Method " + r.Method + " not allowed for path " + path,
+	})
 }

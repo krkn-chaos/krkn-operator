@@ -42,11 +42,13 @@ func NewServer(port int, client client.Client, namespace string, grpcServerAddr 
 	mux.HandleFunc("/health", handler.HealthCheck)
 	mux.HandleFunc("/clusters", handler.GetClusters)
 	mux.HandleFunc("/nodes", handler.GetNodes)
-	mux.HandleFunc("/targets", handler.PostTarget)                 // POST /targets
-	mux.HandleFunc("/targets/", handler.GetTargetByUUID)           // GET /targets/{uuid}
-	mux.HandleFunc("/scenarios", handler.PostScenarios)            // POST /scenarios
+	mux.HandleFunc("/targets", handler.PostTarget)                   // POST /targets
+	mux.HandleFunc("/targets/", handler.GetTargetByUUID)             // GET /targets/{uuid}
+	mux.HandleFunc("/scenarios", handler.PostScenarios)              // POST /scenarios
 	mux.HandleFunc("/scenarios/detail/", handler.PostScenarioDetail) // POST /scenarios/detail/{scenario_name}
 	mux.HandleFunc("/scenarios/globals/", handler.PostScenarioGlobals) // POST /scenarios/globals/{scenario_name}
+	mux.HandleFunc("/scenarios/run", handler.ScenariosRunRouter)     // Router for /scenarios/run endpoints
+	mux.HandleFunc("/scenarios/run/", handler.ScenariosRunRouter)    // Router for /scenarios/run/{jobId} endpoints
 
 	// Wrap mux with logging middleware
 	server := &http.Server{

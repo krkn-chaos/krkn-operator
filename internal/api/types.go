@@ -122,3 +122,71 @@ type GlobalsResponse struct {
 	// Globals is a map of scenario name to global environment details
 	Globals map[string]ScenarioDetailResponse `json:"globals"`
 }
+
+// FileMount represents a file to be mounted in the scenario pod
+type FileMount struct {
+	// Name is the file name
+	Name string `json:"name"`
+	// Content is the base64-encoded file content
+	Content string `json:"content"`
+	// MountPath is the absolute path where the file should be mounted
+	MountPath string `json:"mountPath"`
+}
+
+// ScenarioRunRequest represents the request body for POST /scenarios/run
+type ScenarioRunRequest struct {
+	// TargetId is the UUID of the KrknTargetRequest CR
+	TargetId string `json:"targetId"`
+	// ClusterName is the name of the target cluster
+	ClusterName string `json:"clusterName"`
+	// ScenarioImage is the container image to run
+	ScenarioImage string `json:"scenarioImage"`
+	// ScenarioName is the name of the scenario being executed
+	ScenarioName string `json:"scenarioName"`
+	// KubeconfigPath is the path where kubeconfig should be mounted (optional, default: /home/krkn/.kube/config)
+	KubeconfigPath string `json:"kubeconfigPath,omitempty"`
+	// Environment is a map of environment variables to pass to the container (optional)
+	Environment map[string]string `json:"environment,omitempty"`
+	// Files is an array of file objects to mount in the container (optional)
+	Files []FileMount `json:"files,omitempty"`
+	// Private registry configuration (optional)
+	ScenariosRequest
+}
+
+// ScenarioRunResponse represents the response for POST /scenarios/run
+type ScenarioRunResponse struct {
+	// JobId is the unique job identifier
+	JobId string `json:"jobId"`
+	// Status is the initial job status (usually "Pending")
+	Status string `json:"status"`
+	// PodName is the Kubernetes pod name
+	PodName string `json:"podName"`
+}
+
+// JobStatusResponse represents the response for GET /scenarios/run/{jobId}
+type JobStatusResponse struct {
+	// JobId is the unique job identifier
+	JobId string `json:"jobId"`
+	// TargetId is the KrknTargetRequest UUID
+	TargetId string `json:"targetId"`
+	// ClusterName is the target cluster name
+	ClusterName string `json:"clusterName"`
+	// ScenarioName is the scenario name
+	ScenarioName string `json:"scenarioName"`
+	// Status is the current job status (Pending, Running, Succeeded, Failed, Stopped)
+	Status string `json:"status"`
+	// PodName is the Kubernetes pod name
+	PodName string `json:"podName"`
+	// StartTime is when the job started (optional)
+	StartTime *time.Time `json:"startTime,omitempty"`
+	// CompletionTime is when the job completed (optional)
+	CompletionTime *time.Time `json:"completionTime,omitempty"`
+	// Message is additional status message or error details (optional)
+	Message string `json:"message,omitempty"`
+}
+
+// JobsListResponse represents the response for GET /scenarios/run
+type JobsListResponse struct {
+	// Jobs is the array of job status objects
+	Jobs []JobStatusResponse `json:"jobs"`
+}
