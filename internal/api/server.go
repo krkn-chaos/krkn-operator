@@ -22,6 +22,7 @@ import (
 	"net/http"
 	"time"
 
+	"k8s.io/client-go/kubernetes"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
@@ -33,8 +34,8 @@ type Server struct {
 }
 
 // NewServer creates a new API server
-func NewServer(port int, client client.Client, namespace string, grpcServerAddr string) *Server {
-	handler := NewHandler(client, namespace, grpcServerAddr)
+func NewServer(port int, client client.Client, clientset kubernetes.Interface, namespace string, grpcServerAddr string) *Server {
+	handler := NewHandler(client, clientset, namespace, grpcServerAddr)
 
 	mux := http.NewServeMux()
 

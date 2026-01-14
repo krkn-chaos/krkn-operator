@@ -21,7 +21,9 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -32,26 +34,29 @@ import (
 	"github.com/krkn-chaos/krknctl/pkg/provider/models"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/kubernetes"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
 	pb "github.com/krkn-chaos/krkn-operator/proto/dataprovider"
-	corev1 "k8s.io/api/core/v1"
 )
 
 // Handler contains the dependencies for API handlers
 type Handler struct {
 	client         client.Client
+	clientset      kubernetes.Interface
 	namespace      string
 	grpcServerAddr string
 }
 
 // NewHandler creates a new Handler
-func NewHandler(client client.Client, namespace string, grpcServerAddr string) *Handler {
+func NewHandler(client client.Client, clientset kubernetes.Interface, namespace string, grpcServerAddr string) *Handler {
 	return &Handler{
 		client:         client,
+		clientset:      clientset,
 		namespace:      namespace,
 		grpcServerAddr: grpcServerAddr,
 	}
@@ -1302,25 +1307,60 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_ = podList.Items[0] // pod not used yet
+	pod := podList.Items[0]
 
-	// Parse query parameters (will be used in future implementation)
-	_ = r.URL.Query().Get("follow") == "true"      // follow
-	_ = r.URL.Query().Get("timestamps") == "true"  // timestamps
-	_ = r.URL.Query().Get("tailLines")             // tailLinesStr
+	// Parse query parameters
+	follow := r.URL.Query().Get("follow") == "true"
+	timestamps := r.URL.Query().Get("timestamps") == "true"
+	tailLinesStr := r.URL.Query().Get("tailLines")
 
-	// Get clientset for pod logs API
-	// Note: We need to use clientset instead of controller-runtime client for logs
-	// This requires access to the rest config
-	// For now, we'll return an error indicating this needs implementation
+	// Build pod logs options
+	logOptions := &corev1.PodLogOptions{
+		Container:  "scenario",
+		Follow:     follow,
+		Timestamps: timestamps,
+	}
 
-	// TODO: This needs the Kubernetes clientset which requires rest.Config
-	// We need to add this to the Handler struct during initialization
+	// Parse tailLines if provided
+	if tailLinesStr != "" {
+		tailLines, err := strconv.ParseInt(tailLinesStr, 10, 64)
+		if err == nil && tailLines > 0 {
+			logOptions.TailLines = &tailLines
+		}
+	}
 
-	writeJSONError(w, http.StatusNotImplemented, ErrorResponse{
-		Error:   "not_implemented",
-		Message: "Log streaming requires clientset integration - to be implemented",
-	})
+	// Get log stream from Kubernetes API
+	req := h.clientset.CoreV1().Pods(h.namespace).GetLogs(pod.Name, logOptions)
+	stream, err := req.Stream(ctx)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+			Error:   "internal_error",
+			Message: "Failed to open log stream: " + err.Error(),
+		})
+		return
+	}
+	defer stream.Close()
+
+	// Set headers for streaming
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+
+	// If following logs, use chunked transfer encoding
+	if follow {
+		w.Header().Set("Transfer-Encoding", "chunked")
+	}
+
+	w.WriteHeader(http.StatusOK)
+
+	// Stream logs to response
+	// Use a buffer for efficient streaming
+	_, err = io.Copy(w, stream)
+	if err != nil {
+		// Can't write JSON error after streaming started
+		// Client will see connection closed
+		return
+	}
 }
 
 // ListScenarioRuns handles GET /scenarios/run endpoint

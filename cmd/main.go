@@ -28,6 +28,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	"k8s.io/client-go/kubernetes"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
@@ -230,8 +231,16 @@ func main() {
 
 	// +kubebuilder:scaffold:builder
 
+	// Create Kubernetes clientset for pod logs API
+	config := ctrl.GetConfigOrDie()
+	clientset, err := kubernetes.NewForConfig(config)
+	if err != nil {
+		setupLog.Error(err, "unable to create Kubernetes clientset")
+		os.Exit(1)
+	}
+
 	// Setup and add REST API server
-	apiServer := api.NewServer(apiPort, mgr.GetClient(), krknNamespace, grpcServerAddr)
+	apiServer := api.NewServer(apiPort, mgr.GetClient(), clientset, krknNamespace, grpcServerAddr)
 	setupLog.Info("gRPC server address", "address", grpcServerAddr)
 	if err := mgr.Add(apiServer); err != nil {
 		setupLog.Error(err, "unable to add REST API server to manager")
