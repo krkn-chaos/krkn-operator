@@ -1048,6 +1048,25 @@ func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
+	// Add writable tmp volume for scenarios that need to write temporary files
+	volumes = append(volumes, corev1.Volume{
+		Name: "tmp",
+		VolumeSource: corev1.VolumeSource{
+			EmptyDir: &corev1.EmptyDirVolumeSource{},
+		},
+	})
+
+	volumeMounts = append(volumeMounts, corev1.VolumeMount{
+		Name:      "tmp",
+		MountPath: "/tmp",
+	})
+
+	// SecurityContext for running as krkn user (UID 1000)
+	// Requires ServiceAccount with anyuid SCC permissions
+	var runAsUser int64 = 1000
+	var runAsGroup int64 = 1000
+	var fsGroup int64 = 1000
+
 	// Create the pod
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
@@ -1062,8 +1081,14 @@ func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
 			},
 		},
 		Spec: corev1.PodSpec{
-			RestartPolicy:    corev1.RestartPolicyNever,
-			ImagePullSecrets: imagePullSecrets,
+			ServiceAccountName: "krkn-operator-krkn-scenario-runner",
+			RestartPolicy:      corev1.RestartPolicyNever,
+			ImagePullSecrets:   imagePullSecrets,
+			SecurityContext: &corev1.PodSecurityContext{
+				RunAsUser:  &runAsUser,
+				RunAsGroup: &runAsGroup,
+				FSGroup:    &fsGroup,
+			},
 			Containers: []corev1.Container{
 				{
 					Name:            "scenario",

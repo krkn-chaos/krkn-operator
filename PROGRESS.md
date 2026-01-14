@@ -2,8 +2,8 @@
 
 ## Current Status
 
-**Last updated:** 2026-01-13
-**Current phase:** REST API Enhancement - POST /scenarios/globals COMPLETED
+**Last updated:** 2026-01-14
+**Current phase:** Scenario Job Management - COMPLETED
 
 ### Completed
 - Project scaffolding with Kubebuilder
@@ -80,6 +80,23 @@
   - ✅ Returns 404 if global environment not found
   - ✅ Type fields converted to strings (not enum integers)
   - ✅ Handler registered at POST /scenarios/globals/{scenario_name}
+- **Scenario Job Management endpoints completed:**
+  - ✅ POST /scenarios/run - Create and start scenario job
+  - ✅ GET /scenarios/run/{jobId} - Get job status
+  - ✅ GET /scenarios/run/{jobId}/logs - Stream logs (stub, requires clientset)
+  - ✅ GET /scenarios/run - List all jobs with filtering
+  - ✅ DELETE /scenarios/run/{jobId} - Stop and delete job
+  - ✅ Router handler for endpoint dispatching
+  - ✅ Complete kubeconfig retrieval and mounting
+  - ✅ File mounts via ConfigMaps (base64 encoded)
+  - ✅ Private registry support with ImagePullSecrets
+  - ✅ Pod lifecycle management with cleanup
+  - ✅ RBAC permissions updated
+- **Code refactoring completed:**
+  - ✅ Extracted getKubeconfigFromTarget() helper function
+  - ✅ Refactored GET /nodes to use helper
+  - ✅ Refactored POST /scenarios/run to use helper
+  - ✅ Eliminated ~130 lines of duplicated code
 
 ### In Progress
 - None
@@ -837,6 +854,159 @@ curl -X POST http://localhost:8080/scenarios/globals/pod-scenarios \
 }
 ```
 
+### Phase 12: Scenario Job Management - /scenarios/run Endpoints ✅
+**Status:** COMPLETED
+
+1. ✅ Type Definitions (internal/api/types.go)
+   - Created `FileMount` struct for user file uploads
+   - Created `ScenarioRunRequest` with embedded `ScenariosRequest`
+   - Created `ScenarioRunResponse` for job creation
+   - Created `JobStatusResponse` with targetId, clusterName metadata
+   - Created `JobsListResponse` for listing jobs
+
+2. ✅ POST /scenarios/run Implementation (internal/api/handlers.go)
+   - Validates required fields: targetId, clusterName, scenarioImage, scenarioName
+   - Uses `getKubeconfigFromTarget()` helper to retrieve kubeconfig
+   - Creates ConfigMap for kubeconfig (decoded from base64)
+   - Creates ConfigMaps for user-provided files (base64 decoded)
+   - Supports private registry with ImagePullSecret creation
+   - Creates pod with:
+     - RestartPolicy: Never (one-time execution)
+     - Labels: app, krkn-job-id, krkn-scenario-name, krkn-target-id, krkn-cluster-name
+     - Environment variables from request
+     - Volume mounts for kubeconfig and user files
+     - ImagePullSecrets if registry credentials provided
+   - Returns 201 Created with jobId, status "Pending", podName
+   - Complete cleanup on error (deletes created ConfigMaps/Secrets)
+
+3. ✅ GET /scenarios/run/{jobId} Implementation
+   - Finds pod by label `krkn-job-id`
+   - Maps pod phase to job status
+   - Extracts metadata from pod labels
+   - Returns timestamps (startTime, completionTime)
+   - Returns error messages for failed jobs
+
+4. ✅ GET /scenarios/run/{jobId}/logs Implementation (STUB)
+   - Endpoint registered and routed correctly
+   - Returns 501 Not Implemented
+   - TODO: Requires Kubernetes clientset integration for actual log streaming
+   - Query parameter parsing ready (follow, timestamps, tailLines)
+
+5. ✅ GET /scenarios/run Implementation
+   - Lists all pods with label `app=krkn-scenario`
+   - Supports filtering by: status, scenarioName, targetId, clusterName
+   - Returns array of JobStatusResponse
+   - Includes timestamps and metadata for each job
+
+6. ✅ DELETE /scenarios/run/{jobId} Implementation
+   - Finds and deletes pod with 5 second grace period
+   - Cleanup associated ConfigMaps (by label `krkn-job-id`)
+   - Cleanup associated Secrets (ImagePullSecrets)
+   - Returns status "Stopped" with success message
+
+7. ✅ Router Handler (ScenariosRunRouter)
+   - Dispatches requests based on path and method
+   - POST /scenarios/run → PostScenarioRun
+   - GET /scenarios/run → ListScenarioRuns
+   - GET /scenarios/run/{jobId} → GetScenarioRunStatus
+   - GET /scenarios/run/{jobId}/logs → GetScenarioRunLogs
+   - DELETE /scenarios/run/{jobId} → DeleteScenarioRun
+   - Returns 405 Method Not Allowed for invalid methods
+
+8. ✅ RBAC Updates (config/rbac/role.yaml)
+   - pods: added create, delete verbs
+   - pods/log: added get verb
+   - configmaps: added get, list, create, delete verbs
+   - secrets: added create, delete verbs
+
+9. ✅ Build Verification
+   - Successful compilation with no errors
+   - All handlers properly integrated
+   - Routes registered correctly
+
+**Implementation Highlights:**
+- **Pod naming**: `krkn-job-{jobId}`
+- **ConfigMap naming**: `krkn-job-{jobId}-kubeconfig`, `krkn-job-{jobId}-file-{sanitized-name}`
+- **Default kubeconfig path**: `/home/krkn/.kube/config` (configurable)
+- **Error handling**: Comprehensive cleanup on failures
+- **Label-based tracking**: No CRD required, uses pod labels
+- **Private registry**: Full support with ImagePullSecret creation
+
+**Request Example:**
+```json
+{
+  "targetId": "550e8400-e29b-41d4-a716-446655440000",
+  "clusterName": "my-cluster-1",
+  "scenarioImage": "quay.io/krkn-chaos/krkn-hub:pod-scenarios",
+  "scenarioName": "pod-scenarios",
+  "kubeconfigPath": "/home/krkn/.kube/config",
+  "environment": {
+    "NAMESPACE": "default",
+    "LABEL_SELECTOR": "app=myapp"
+  },
+  "files": [
+    {
+      "name": "config.yaml",
+      "content": "base64-encoded-content",
+      "mountPath": "/config/scenario.yaml"
+    }
+  ]
+}
+```
+
+**Response Example:**
+```json
+{
+  "jobId": "generated-uuid",
+  "status": "Pending",
+  "podName": "krkn-job-generated-uuid"
+}
+```
+
+### Code Refactoring: getKubeconfigFromTarget() Helper ✅
+**Status:** COMPLETED
+
+**Problem:** Kubeconfig retrieval logic was duplicated in GET /nodes and POST /scenarios/run (~130 lines total)
+
+**Solution:** Extracted common helper function `getKubeconfigFromTarget(ctx, targetId, clusterName)`
+
+**Location:** internal/api/handlers.go:275-318
+
+**Functionality:**
+1. Fetches secret named `targetId` from operator namespace
+2. Parses `managed-clusters` JSON from secret data
+3. Navigates structure: `["krkn-operator-acm"][clusterName]["kubeconfig"]`
+4. Returns base64-encoded kubeconfig string
+5. Returns descriptive errors for all failure cases
+
+**Refactored Endpoints:**
+1. GET /nodes (lines ~137-156): Replaced ~65 lines with helper call
+2. POST /scenarios/run (lines ~820-838): Replaced ~70 lines with helper call
+
+**Benefits:**
+- **DRY Principle**: Single source of truth for kubeconfig retrieval
+- **Maintainability**: Changes only needed in one place
+- **Consistency**: Identical error handling across endpoints
+- **Testability**: Helper can be unit tested independently
+- **Code reduction**: ~130 lines eliminated
+
+**Before:**
+```go
+// Duplicated in GET /nodes and POST /scenarios/run
+var secret corev1.Secret
+err := h.client.Get(ctx, ...)
+// ... 60+ lines of identical code ...
+```
+
+**After:**
+```go
+// Both endpoints now use:
+kubeconfigBase64, err := h.getKubeconfigFromTarget(ctx, targetId, clusterName)
+if err != nil {
+    // Error handling
+}
+```
+
 ## Technical Notes
 
 ### KrknTargetRequest Structure
@@ -931,12 +1101,19 @@ type KrknTargetRequestStatus struct {
 9. ✅ Implement POST /scenarios endpoint with krknctl integration
 10. ✅ Implement POST /scenarios/detail/{scenario_name} endpoint
 11. ✅ Implement POST /scenarios/globals endpoint
-12. Create API documentation (OpenAPI/Swagger spec)
-13. Add additional endpoints as requirements evolve
-14. Implement controller logic for KrknTargetRequest
+12. ✅ Implement Scenario Job Management (/scenarios/run endpoints)
+13. ✅ Code refactoring - extract getKubeconfigFromTarget() helper
+14. Complete GET /scenarios/run/{jobId}/logs endpoint (requires Kubernetes clientset)
+15. Create API documentation (OpenAPI/Swagger spec)
+16. Add additional endpoints as requirements evolve
+17. Implement controller logic for KrknTargetRequest
 
 ## Future Work (Not in Current Scope)
 
+- Complete log streaming implementation for GET /scenarios/run/{jobId}/logs
+  - Requires Kubernetes clientset integration (rest.Config)
+  - Need to add clientset to Handler struct
+  - Implement actual streaming with io.Copy from pod logs API
 - Controller implementation for KrknTargetRequest
 - Controller implementation for KrknOperatorTargetProvider
 - Migration from environment variable to ConfigMap for namespace configuration
