@@ -267,6 +267,17 @@ deploy: manifests kustomize ## Deploy controller to the K8s cluster specified in
 	$(KUSTOMIZE) build config/default | $(KUBECTL) apply -f -
 	@echo "✓ Deployment complete!"
 
+.PHONY: deploy-openshift
+deploy-openshift: deploy ## Deploy controller and configure OpenShift SCC for scenario runner.
+	@echo "Configuring OpenShift SCC for scenario runner..."
+	@which oc >/dev/null 2>&1 || \
+		(echo "❌ ERROR: 'oc' CLI not found!" && \
+		 echo "Please install the OpenShift CLI (oc) first." && \
+		 exit 1)
+	oc adm policy add-scc-to-user anyuid -z krkn-operator-krkn-scenario-runner -n krkn-operator-system
+	@echo "✓ SCC configured successfully!"
+	@echo "✓ OpenShift deployment complete!"
+
 .PHONY: undeploy
 undeploy: kustomize ## Undeploy controller from the K8s cluster specified in ~/.kube/config. Call with ignore-not-found=true to ignore resource not found errors during deletion.
 	$(KUSTOMIZE) build config/default | $(KUBECTL) delete --ignore-not-found=$(ignore-not-found) -f -

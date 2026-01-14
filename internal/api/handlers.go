@@ -1061,11 +1061,11 @@ func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
 		MountPath: "/tmp",
 	})
 
-	// SecurityContext for running as krkn user (UID 1000)
+	// SecurityContext for running as krkn user (UID 1001)
 	// Requires ServiceAccount with anyuid SCC permissions
-	var runAsUser int64 = 1000
-	var runAsGroup int64 = 1000
-	var fsGroup int64 = 1000
+	var runAsUser int64 = 1001
+	var runAsGroup int64 = 1001
+	var fsGroup int64 = 1001
 
 	// Create the pod
 	pod := &corev1.Pod{
