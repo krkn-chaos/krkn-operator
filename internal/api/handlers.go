@@ -17,17 +17,18 @@ limitations under the License.
 package api
 
 import (
+	"bufio"
 	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/gorilla/websocket"
 	"github.com/krkn-chaos/krknctl/pkg/config"
 	"github.com/krkn-chaos/krknctl/pkg/provider"
 	"github.com/krkn-chaos/krknctl/pkg/provider/factory"
@@ -768,6 +769,7 @@ func (h *Handler) PostScenarioGlobals(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, response)
 }
+
 // PostScenarioRun handles POST /scenarios/run endpoint
 // It creates and starts a new scenario job as a Kubernetes pod
 func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
@@ -1078,11 +1080,11 @@ func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
 			Name:      podName,
 			Namespace: h.namespace,
 			Labels: map[string]string{
-				"app":                 "krkn-scenario",
-				"krkn-job-id":         jobId,
-				"krkn-scenario-name":  req.ScenarioName,
-				"krkn-target-id":      req.TargetId,
-				"krkn-cluster-name":   req.ClusterName,
+				"app":                "krkn-scenario",
+				"krkn-job-id":        jobId,
+				"krkn-scenario-name": req.ScenarioName,
+				"krkn-target-id":     req.TargetId,
+				"krkn-cluster-name":  req.ClusterName,
 			},
 		},
 		Spec: corev1.PodSpec{
@@ -1142,6 +1144,7 @@ func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusCreated, response)
 }
+
 // GetScenarioRunStatus handles GET /scenarios/run/{jobId} endpoint
 // It returns the current status of a specific job
 func (h *Handler) GetScenarioRunStatus(w http.ResponseWriter, r *http.Request) {
@@ -1258,28 +1261,40 @@ func (h *Handler) GetScenarioRunStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, response)
 }
 
+// WebSocket upgrader
+var upgrader = websocket.Upgrader{
+	ReadBufferSize:  1024,
+	WriteBufferSize: 1024,
+	CheckOrigin: func(r *http.Request) bool {
+		// Allow all origins for now - in production you should validate the origin
+		return true
+	},
+}
+
 // GetScenarioRunLogs handles GET /scenarios/run/{jobId}/logs endpoint
-// It streams the stdout/stderr logs of a running or completed job
+// It streams the stdout/stderr logs of a running or completed job via WebSocket
 func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
+	// Upgrade to WebSocket IMMEDIATELY to avoid protocol mismatch
+	conn, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		// Upgrade error is already sent to client by upgrader
+		return
+	}
+	defer conn.Close()
+
 	// Extract jobId from path
 	path := r.URL.Path
 	prefix := "/scenarios/run/"
 	suffix := "/logs"
 
 	if !strings.HasSuffix(path, suffix) {
-		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
-			Error:   "bad_request",
-			Message: "Invalid logs endpoint",
-		})
+		conn.WriteMessage(websocket.TextMessage, []byte("ERROR: Invalid logs endpoint"))
 		return
 	}
 
 	jobId := path[len(prefix) : len(path)-len(suffix)]
 	if jobId == "" {
-		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
-			Error:   "bad_request",
-			Message: "jobId parameter cannot be empty",
-		})
+		conn.WriteMessage(websocket.TextMessage, []byte("ERROR: jobId parameter cannot be empty"))
 		return
 	}
 
@@ -1287,23 +1302,17 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 
 	// Find pod by label
 	var podList corev1.PodList
-	err := h.client.List(ctx, &podList, client.InNamespace(h.namespace), client.MatchingLabels{
+	err = h.client.List(ctx, &podList, client.InNamespace(h.namespace), client.MatchingLabels{
 		"krkn-job-id": jobId,
 	})
 
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
-			Error:   "internal_error",
-			Message: "Failed to list pods: " + err.Error(),
-		})
+		conn.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("ERROR: Failed to list pods: %s", err.Error())))
 		return
 	}
 
 	if len(podList.Items) == 0 {
-		writeJSONError(w, http.StatusNotFound, ErrorResponse{
-			Error:   "not_found",
-			Message: "Job with ID '" + jobId + "' not found",
-		})
+		conn.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("ERROR: Job with ID '%s' not found", jobId)))
 		return
 	}
 
@@ -1333,34 +1342,30 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 	req := h.clientset.CoreV1().Pods(h.namespace).GetLogs(pod.Name, logOptions)
 	stream, err := req.Stream(ctx)
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
-			Error:   "internal_error",
-			Message: "Failed to open log stream: " + err.Error(),
-		})
+		// Send error via WebSocket
+		conn.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("ERROR: Failed to open log stream: %s", err.Error())))
 		return
 	}
 	defer stream.Close()
 
-	// Set headers for streaming
-	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("X-Content-Type-Options", "nosniff")
-
-	// If following logs, use chunked transfer encoding
-	if follow {
-		w.Header().Set("Transfer-Encoding", "chunked")
+	// Read logs line by line and send via WebSocket
+	scanner := bufio.NewScanner(stream)
+	for scanner.Scan() {
+		line := scanner.Text()
+		err := conn.WriteMessage(websocket.TextMessage, []byte(line))
+		if err != nil {
+			// Client disconnected or error writing
+			return
+		}
 	}
 
-	w.WriteHeader(http.StatusOK)
-
-	// Stream logs to response
-	// Use a buffer for efficient streaming
-	_, err = io.Copy(w, stream)
-	if err != nil {
-		// Can't write JSON error after streaming started
-		// Client will see connection closed
-		return
+	// Check for scanner errors
+	if err := scanner.Err(); err != nil {
+		conn.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("ERROR: Log stream error: %s", err.Error())))
 	}
+
+	// Send close message
+	conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
 }
 
 // ListScenarioRuns handles GET /scenarios/run endpoint
