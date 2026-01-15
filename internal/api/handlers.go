@@ -40,6 +40,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
 	pb "github.com/krkn-chaos/krkn-operator/proto/dataprovider"
@@ -1274,10 +1275,15 @@ var upgrader = websocket.Upgrader{
 // GetScenarioRunLogs handles GET /scenarios/run/{jobId}/logs endpoint
 // It streams the stdout/stderr logs of a running or completed job via WebSocket
 func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
+	logger := log.Log.WithName("websocket-logs")
+
 	// Upgrade to WebSocket IMMEDIATELY to avoid protocol mismatch
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		// Upgrade error is already sent to client by upgrader
+		logger.Error(err, "WebSocket upgrade failed",
+			"url", r.URL.String(),
+			"headers", r.Header,
+			"client_ip", r.RemoteAddr)
 		return
 	}
 	defer conn.Close()
@@ -1288,15 +1294,21 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 	suffix := "/logs"
 
 	if !strings.HasSuffix(path, suffix) {
+		logger.Error(nil, "Invalid logs endpoint path",
+			"path", path,
+			"expected_suffix", suffix)
 		conn.WriteMessage(websocket.TextMessage, []byte("ERROR: Invalid logs endpoint"))
 		return
 	}
 
 	jobId := path[len(prefix) : len(path)-len(suffix)]
 	if jobId == "" {
+		logger.Error(nil, "Empty jobId in request path", "path", path)
 		conn.WriteMessage(websocket.TextMessage, []byte("ERROR: jobId parameter cannot be empty"))
 		return
 	}
+
+	logger.Info("WebSocket connection established", "jobId", jobId, "client_ip", r.RemoteAddr)
 
 	ctx := context.Background()
 
@@ -1307,16 +1319,23 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 	})
 
 	if err != nil {
+		logger.Error(err, "Failed to list pods",
+			"jobId", jobId,
+			"namespace", h.namespace)
 		conn.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("ERROR: Failed to list pods: %s", err.Error())))
 		return
 	}
 
 	if len(podList.Items) == 0 {
+		logger.Error(nil, "Job not found",
+			"jobId", jobId,
+			"namespace", h.namespace)
 		conn.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("ERROR: Job with ID '%s' not found", jobId)))
 		return
 	}
 
 	pod := podList.Items[0]
+	logger.Info("Found pod for job", "jobId", jobId, "podName", pod.Name, "podPhase", pod.Status.Phase)
 
 	// Parse query parameters
 	follow := r.URL.Query().Get("follow") == "true"
@@ -1338,31 +1357,57 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	logger.Info("Opening log stream",
+		"jobId", jobId,
+		"podName", pod.Name,
+		"follow", follow,
+		"timestamps", timestamps)
+
 	// Get log stream from Kubernetes API
 	req := h.clientset.CoreV1().Pods(h.namespace).GetLogs(pod.Name, logOptions)
 	stream, err := req.Stream(ctx)
 	if err != nil {
-		// Send error via WebSocket
+		logger.Error(err, "Failed to open log stream",
+			"jobId", jobId,
+			"podName", pod.Name,
+			"namespace", h.namespace)
 		conn.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("ERROR: Failed to open log stream: %s", err.Error())))
 		return
 	}
 	defer stream.Close()
 
+	logger.Info("Streaming logs started", "jobId", jobId, "podName", pod.Name)
+
 	// Read logs line by line and send via WebSocket
 	scanner := bufio.NewScanner(stream)
+	lineCount := 0
 	for scanner.Scan() {
 		line := scanner.Text()
 		err := conn.WriteMessage(websocket.TextMessage, []byte(line))
 		if err != nil {
-			// Client disconnected or error writing
+			logger.Error(err, "Failed to write log line to WebSocket, client likely disconnected",
+				"jobId", jobId,
+				"podName", pod.Name,
+				"linesStreamed", lineCount)
 			return
 		}
+		lineCount++
 	}
 
 	// Check for scanner errors
 	if err := scanner.Err(); err != nil {
+		logger.Error(err, "Log stream scanner error",
+			"jobId", jobId,
+			"podName", pod.Name,
+			"linesStreamed", lineCount)
 		conn.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("ERROR: Log stream error: %s", err.Error())))
+		return
 	}
+
+	logger.Info("Log streaming completed",
+		"jobId", jobId,
+		"podName", pod.Name,
+		"totalLines", lineCount)
 
 	// Send close message
 	conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
