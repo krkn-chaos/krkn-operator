@@ -64,7 +64,7 @@ func NewHandler(client client.Client, clientset kubernetes.Interface, namespace 
 	}
 }
 
-// GetClusters handles GET /clusters endpoint
+// GetClusters handles GET /api/v1/clusters endpoint
 // It fetches the KrknTargetRequest CR by the provided ID and returns the target data
 func (h *Handler) GetClusters(w http.ResponseWriter, r *http.Request) {
 	id := r.URL.Query().Get("id")
@@ -118,31 +118,31 @@ func (h *Handler) GetClusters(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, response)
 }
 
-// GetNodes handles GET /nodes endpoint
-// It retrieves the kubeconfig for a specific cluster from a secret
+// GetNodes handles GET /api/v1/nodes endpoint
+// Supports both new and legacy parameter formats:
+// - New: ?targetUUID=<uuid>
+// - Legacy: ?id=<targetRequestId>&cluster-name=<clusterName>
 func (h *Handler) GetNodes(w http.ResponseWriter, r *http.Request) {
+	ctx := context.Background()
+
+	// New parameter (KrknOperatorTarget)
+	targetUUID := r.URL.Query().Get("targetUUID")
+
+	// Legacy parameters (KrknTargetRequest)
 	id := r.URL.Query().Get("id")
 	clusterName := r.URL.Query().Get("cluster-name")
 
-	// Validate required parameters
-	if id == "" {
+	// Validate that at least one set of parameters is provided
+	if targetUUID == "" && (id == "" || clusterName == "") {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
 			Error:   "bad_request",
-			Message: "id parameter is required",
+			Message: "Either targetUUID (new) or id+cluster-name (legacy) parameters are required",
 		})
 		return
 	}
 
-	if clusterName == "" {
-		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
-			Error:   "bad_request",
-			Message: "cluster-name parameter is required",
-		})
-		return
-	}
-
-	// Get kubeconfig from target using common helper function
-	kubeconfigBase64, err := h.getKubeconfigFromTarget(context.Background(), id, clusterName)
+	// Get kubeconfig using unified helper function
+	kubeconfigBase64, err := h.getKubeconfig(ctx, targetUUID, id, clusterName)
 	if err != nil {
 		if client.IgnoreNotFound(err) == nil || strings.Contains(err.Error(), "not found") {
 			writeJSONError(w, http.StatusNotFound, ErrorResponse{
@@ -159,7 +159,6 @@ func (h *Handler) GetNodes(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Call gRPC service to get nodes
-	// The kubeconfig is already in base64 format
 	nodes, err := h.callGetNodesGRPC(kubeconfigBase64)
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
@@ -177,7 +176,7 @@ func (h *Handler) GetNodes(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, response)
 }
 
-// HealthCheck handles GET /health endpoint
+// HealthCheck handles GET /api/v1/health endpoint
 func (h *Handler) HealthCheck(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{
 		"status": "healthy",
@@ -229,159 +228,7 @@ func (h *Handler) callGetNodesGRPC(kubeconfigBase64 string) ([]string, error) {
 	return resp.Nodes, nil
 }
 
-// getKubeconfigFromTarget retrieves the base64-encoded kubeconfig for a specific cluster
-// from the KrknTargetRequest secret
-func (h *Handler) getKubeconfigFromTarget(ctx context.Context, targetId string, clusterName string) (string, error) {
-	// Fetch the secret with the same name as the KrknTargetRequest ID
-	var secret corev1.Secret
-	err := h.client.Get(ctx, types.NamespacedName{
-		Name:      targetId,
-		Namespace: h.namespace,
-	}, &secret)
-
-	if err != nil {
-		return "", fmt.Errorf("failed to fetch secret: %w", err)
-	}
-
-	// Retrieve the managed-clusters JSON from the secret data
-	managedClustersBytes, exists := secret.Data["managed-clusters"]
-	if !exists {
-		return "", fmt.Errorf("managed-clusters not found in secret")
-	}
-
-	// Parse the JSON to extract cluster configurations
-	// Structure: { "krkn-operator-acm": { "cluster-name": { "kubeconfig": "base64..." } } }
-	var managedClusters map[string]map[string]struct {
-		Kubeconfig string `json:"kubeconfig"`
-	}
-	if err := json.Unmarshal(managedClustersBytes, &managedClusters); err != nil {
-		return "", fmt.Errorf("failed to parse managed-clusters JSON: %w", err)
-	}
-
-	// Get the krkn-operator-acm object
-	acmClusters, exists := managedClusters["krkn-operator-acm"]
-	if !exists {
-		return "", fmt.Errorf("krkn-operator-acm not found in managed-clusters")
-	}
-
-	// Check if the requested cluster exists
-	clusterConfig, exists := acmClusters[clusterName]
-	if !exists {
-		return "", fmt.Errorf("cluster '%s' not found in krkn-operator-acm", clusterName)
-	}
-
-	// Return the base64-encoded kubeconfig
-	return clusterConfig.Kubeconfig, nil
-}
-
-// GetTargetByUUID handles GET /targets/{UUID} endpoint
-// It checks the status of a KrknTargetRequest CR by UUID
-func (h *Handler) GetTargetByUUID(w http.ResponseWriter, r *http.Request) {
-	// Extract UUID from path: /targets/{UUID}
-	// r.URL.Path looks like "/targets/some-uuid-here"
-	path := r.URL.Path
-	prefix := "/targets/"
-
-	if len(path) <= len(prefix) {
-		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
-			Error:   "bad_request",
-			Message: "UUID parameter is required in path",
-		})
-		return
-	}
-
-	uuid := path[len(prefix):]
-	if uuid == "" {
-		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
-			Error:   "bad_request",
-			Message: "UUID parameter is required",
-		})
-		return
-	}
-
-	// Fetch the KrknTargetRequest CR by UUID
-	var targetRequest krknv1alpha1.KrknTargetRequest
-	err := h.client.Get(context.Background(), types.NamespacedName{
-		Name:      uuid,
-		Namespace: h.namespace,
-	}, &targetRequest)
-
-	if err != nil {
-		if client.IgnoreNotFound(err) == nil {
-			// CR not found - return 404
-			w.WriteHeader(http.StatusNotFound)
-			return
-		}
-		// Other error
-		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
-			Error:   "internal_error",
-			Message: "Failed to fetch KrknTargetRequest: " + err.Error(),
-		})
-		return
-	}
-
-	// Check status
-	if targetRequest.Status.Status != "Completed" {
-		// Not completed - return 100 Continue
-		w.WriteHeader(http.StatusContinue)
-		return
-	}
-
-	// Completed - return 200 OK
-	w.WriteHeader(http.StatusOK)
-}
-
-// TargetsHandler handles both GET /targets/{UUID} and POST /targets endpoints
-// It routes to the appropriate handler based on the HTTP method
-func (h *Handler) TargetsHandler(w http.ResponseWriter, r *http.Request) {
-	switch r.Method {
-	case http.MethodGet:
-		h.GetTargetByUUID(w, r)
-	case http.MethodPost:
-		h.PostTarget(w, r)
-	default:
-		writeJSONError(w, http.StatusMethodNotAllowed, ErrorResponse{
-			Error:   "method_not_allowed",
-			Message: "Only GET and POST methods are allowed",
-		})
-	}
-}
-
-// PostTarget handles POST /targets endpoint
-// It creates a new KrknTargetRequest CR with a generated UUID
-func (h *Handler) PostTarget(w http.ResponseWriter, r *http.Request) {
-	// Generate a new UUID
-	newUUID := uuid.New().String()
-
-	// Create a new KrknTargetRequest CR
-	targetRequest := &krknv1alpha1.KrknTargetRequest{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      newUUID,
-			Namespace: h.namespace,
-		},
-		Spec: krknv1alpha1.KrknTargetRequestSpec{
-			UUID: newUUID,
-		},
-	}
-
-	// Create the CR in the cluster
-	err := h.client.Create(context.Background(), targetRequest)
-	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
-			Error:   "internal_error",
-			Message: "Failed to create KrknTargetRequest: " + err.Error(),
-		})
-		return
-	}
-
-	// Return 102 Processing with the UUID
-	response := map[string]string{
-		"uuid": newUUID,
-	}
-	writeJSON(w, http.StatusProcessing, response)
-}
-
-// PostScenarios handles POST /scenarios endpoint
+// PostScenarios handles POST /api/v1/scenarios endpoint
 // It returns the list of available krkn scenarios from quay.io or a private registry
 func (h *Handler) PostScenarios(w http.ResponseWriter, r *http.Request) {
 	// Parse optional request body
@@ -481,12 +328,12 @@ func (h *Handler) PostScenarios(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, response)
 }
 
-// PostScenarioDetail handles POST /scenarios/detail/{scenario_name} endpoint
+// PostScenarioDetail handles POST /api/v1/scenarios/detail/{scenario_name} endpoint
 // It returns detailed information about a specific scenario including input fields
 func (h *Handler) PostScenarioDetail(w http.ResponseWriter, r *http.Request) {
-	// Extract scenario_name from path: /scenarios/detail/{scenario_name}
+	// Extract scenario_name from path: /api/v1/scenarios/detail/{scenario_name}
 	path := r.URL.Path
-	prefix := "/scenarios/detail/"
+	prefix := "/api/v1/scenarios/detail/"
 
 	if len(path) <= len(prefix) {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
@@ -626,12 +473,12 @@ func (h *Handler) PostScenarioDetail(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, response)
 }
 
-// PostScenarioGlobals handles POST /scenarios/globals/{scenario_name} endpoint
+// PostScenarioGlobals handles POST /api/v1/scenarios/globals/{scenario_name} endpoint
 // It returns global environment fields for a specific scenario
 func (h *Handler) PostScenarioGlobals(w http.ResponseWriter, r *http.Request) {
-	// Extract scenario_name from path: /scenarios/globals/{scenario_name}
+	// Extract scenario_name from path: /api/v1/scenarios/globals/{scenario_name}
 	path := r.URL.Path
-	prefix := "/scenarios/globals/"
+	prefix := "/api/v1/scenarios/globals/"
 
 	if len(path) <= len(prefix) {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
@@ -771,7 +618,7 @@ func (h *Handler) PostScenarioGlobals(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, response)
 }
 
-// PostScenarioRun handles POST /scenarios/run endpoint
+// PostScenarioRun handles POST /api/v1/scenarios/run endpoint
 // It creates and starts a new scenario job as a Kubernetes pod
 func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
 	// Parse request body
@@ -784,21 +631,15 @@ func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate required fields
-	if req.TargetId == "" {
+	// Validate required fields - support both new and legacy parameters
+	if req.TargetUUID == "" && (req.TargetId == "" || req.ClusterName == "") {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
 			Error:   "bad_request",
-			Message: "targetId is required",
+			Message: "Either targetUUID (new) or targetId+clusterName (legacy) parameters are required",
 		})
 		return
 	}
-	if req.ClusterName == "" {
-		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
-			Error:   "bad_request",
-			Message: "clusterName is required",
-		})
-		return
-	}
+
 	if req.ScenarioImage == "" {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
 			Error:   "bad_request",
@@ -825,8 +666,8 @@ func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
 
 	ctx := context.Background()
 
-	// Get kubeconfig from target using common helper function
-	kubeconfigBase64, err := h.getKubeconfigFromTarget(ctx, req.TargetId, req.ClusterName)
+	// Get kubeconfig using unified helper function
+	kubeconfigBase64, err := h.getKubeconfig(ctx, req.TargetUUID, req.TargetId, req.ClusterName)
 	if err != nil {
 		if strings.Contains(err.Error(), "not found") {
 			writeJSONError(w, http.StatusNotFound, ErrorResponse{
@@ -1146,12 +987,12 @@ func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, response)
 }
 
-// GetScenarioRunStatus handles GET /scenarios/run/{jobId} endpoint
+// GetScenarioRunStatus handles GET /api/v1/scenarios/run/{jobId} endpoint
 // It returns the current status of a specific job
 func (h *Handler) GetScenarioRunStatus(w http.ResponseWriter, r *http.Request) {
 	// Extract jobId from path
 	path := r.URL.Path
-	prefix := "/scenarios/run/"
+	prefix := "/api/v1/scenarios/run/"
 
 	if len(path) <= len(prefix) {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
@@ -1272,7 +1113,7 @@ var upgrader = websocket.Upgrader{
 	},
 }
 
-// GetScenarioRunLogs handles GET /scenarios/run/{jobId}/logs endpoint
+// GetScenarioRunLogs handles GET /api/v1/scenarios/run/{jobId}/logs endpoint
 // It streams the stdout/stderr logs of a running or completed job via WebSocket
 func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 	logger := log.Log.WithName("websocket-logs")
@@ -1290,7 +1131,7 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 
 	// Extract jobId from path
 	path := r.URL.Path
-	prefix := "/scenarios/run/"
+	prefix := "/api/v1/scenarios/run/"
 	suffix := "/logs"
 
 	if !strings.HasSuffix(path, suffix) {
@@ -1413,7 +1254,7 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 	conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
 }
 
-// ListScenarioRuns handles GET /scenarios/run endpoint
+// ListScenarioRuns handles GET /api/v1/scenarios/run endpoint
 // It returns a list of all scenario jobs
 func (h *Handler) ListScenarioRuns(w http.ResponseWriter, r *http.Request) {
 	ctx := context.Background()
@@ -1498,12 +1339,12 @@ func (h *Handler) ListScenarioRuns(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, response)
 }
 
-// DeleteScenarioRun handles DELETE /scenarios/run/{jobId} endpoint
+// DeleteScenarioRun handles DELETE /api/v1/scenarios/run/{jobId} endpoint
 // It stops and deletes a running job
 func (h *Handler) DeleteScenarioRun(w http.ResponseWriter, r *http.Request) {
 	// Extract jobId from path
 	path := r.URL.Path
-	prefix := "/scenarios/run/"
+	prefix := "/api/v1/scenarios/run/"
 
 	if len(path) <= len(prefix) {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
@@ -1595,37 +1436,37 @@ func (h *Handler) DeleteScenarioRun(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, response)
 }
 
-// ScenariosRunRouter routes requests to /scenarios/run endpoints
+// ScenariosRunRouter routes requests to /api/v1/scenarios/run endpoints
 func (h *Handler) ScenariosRunRouter(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path
 
-	// POST /scenarios/run - create new job
-	if path == "/scenarios/run" && r.Method == http.MethodPost {
+	// POST /api/v1/scenarios/run - create new job
+	if path == "/api/v1/scenarios/run" && r.Method == http.MethodPost {
 		h.PostScenarioRun(w, r)
 		return
 	}
 
-	// GET /scenarios/run - list all jobs
-	if path == "/scenarios/run" && r.Method == http.MethodGet {
+	// GET /api/v1/scenarios/run - list all jobs
+	if path == "/api/v1/scenarios/run" && r.Method == http.MethodGet {
 		h.ListScenarioRuns(w, r)
 		return
 	}
 
-	// Path with jobId: /scenarios/run/{jobId}...
-	if strings.HasPrefix(path, "/scenarios/run/") {
-		// GET /scenarios/run/{jobId}/logs - stream logs
+	// Path with jobId: /api/v1/scenarios/run/{jobId}...
+	if strings.HasPrefix(path, "/api/v1/scenarios/run/") {
+		// GET /api/v1/scenarios/run/{jobId}/logs - stream logs
 		if strings.HasSuffix(path, "/logs") && r.Method == http.MethodGet {
 			h.GetScenarioRunLogs(w, r)
 			return
 		}
 
-		// GET /scenarios/run/{jobId} - get job status
+		// GET /api/v1/scenarios/run/{jobId} - get job status
 		if r.Method == http.MethodGet {
 			h.GetScenarioRunStatus(w, r)
 			return
 		}
 
-		// DELETE /scenarios/run/{jobId} - delete job
+		// DELETE /api/v1/scenarios/run/{jobId} - delete job
 		if r.Method == http.MethodDelete {
 			h.DeleteScenarioRun(w, r)
 			return

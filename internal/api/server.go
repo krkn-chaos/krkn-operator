@@ -41,17 +41,21 @@ func NewServer(port int, client client.Client, clientset kubernetes.Interface, n
 
 	mux := http.NewServeMux()
 
-	// Routes
-	mux.HandleFunc("/health", handler.HealthCheck)
-	mux.HandleFunc("/clusters", handler.GetClusters)
-	mux.HandleFunc("/nodes", handler.GetNodes)
-	mux.HandleFunc("/targets", handler.PostTarget)                   // POST /targets
-	mux.HandleFunc("/targets/", handler.GetTargetByUUID)             // GET /targets/{uuid}
-	mux.HandleFunc("/scenarios", handler.PostScenarios)              // POST /scenarios
-	mux.HandleFunc("/scenarios/detail/", handler.PostScenarioDetail) // POST /scenarios/detail/{scenario_name}
-	mux.HandleFunc("/scenarios/globals/", handler.PostScenarioGlobals) // POST /scenarios/globals/{scenario_name}
-	mux.HandleFunc("/scenarios/run", handler.ScenariosRunRouter)     // Router for /scenarios/run endpoints
-	mux.HandleFunc("/scenarios/run/", handler.ScenariosRunRouter)    // Router for /scenarios/run/{jobId} endpoints
+	// API v1 routes
+	mux.HandleFunc("/api/v1/health", handler.HealthCheck)
+	mux.HandleFunc("/api/v1/clusters", handler.GetClusters)
+	mux.HandleFunc("/api/v1/nodes", handler.GetNodes)
+
+	// CRUD endpoints for KrknOperatorTarget
+	mux.HandleFunc("/api/v1/targets", handler.TargetsCRUDRouter)  // POST, GET
+	mux.HandleFunc("/api/v1/targets/", handler.TargetsCRUDRouter) // GET, PUT, DELETE /{uuid}
+
+	// Scenario management endpoints
+	mux.HandleFunc("/api/v1/scenarios", handler.PostScenarios)                // POST - list scenarios
+	mux.HandleFunc("/api/v1/scenarios/detail/", handler.PostScenarioDetail)   // POST /{scenario_name}
+	mux.HandleFunc("/api/v1/scenarios/globals/", handler.PostScenarioGlobals) // POST /{scenario_name}
+	mux.HandleFunc("/api/v1/scenarios/run", handler.ScenariosRunRouter)       // POST, GET
+	mux.HandleFunc("/api/v1/scenarios/run/", handler.ScenariosRunRouter)      // GET, DELETE /{jobId}
 
 	// Wrap mux with logging middleware
 	server := &http.Server{

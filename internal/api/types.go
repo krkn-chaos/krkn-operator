@@ -135,10 +135,15 @@ type FileMount struct {
 
 // ScenarioRunRequest represents the request body for POST /scenarios/run
 type ScenarioRunRequest struct {
-	// TargetId is the UUID of the KrknTargetRequest CR
-	TargetId string `json:"targetId"`
-	// ClusterName is the name of the target cluster
-	ClusterName string `json:"clusterName"`
+	// TargetUUID is the UUID of the KrknOperatorTarget CR (new system, preferred)
+	TargetUUID string `json:"targetUUID,omitempty"`
+
+	// Legacy parameters for backward compatibility:
+	// TargetId is the UUID of the KrknTargetRequest CR (legacy)
+	TargetId string `json:"targetId,omitempty"`
+	// ClusterName is the name of the target cluster (legacy)
+	ClusterName string `json:"clusterName,omitempty"`
+
 	// ScenarioImage is the container image to run
 	ScenarioImage string `json:"scenarioImage"`
 	// ScenarioName is the name of the scenario being executed
@@ -189,4 +194,75 @@ type JobStatusResponse struct {
 type JobsListResponse struct {
 	// Jobs is the array of job status objects
 	Jobs []JobStatusResponse `json:"jobs"`
+}
+
+// CreateTargetRequest represents the request body for POST /api/v1/targets
+type CreateTargetRequest struct {
+	// ClusterName is the name of the target cluster (required)
+	ClusterName string `json:"clusterName"`
+
+	// ClusterAPIURL is the Kubernetes API server URL (optional if kubeconfig provided)
+	ClusterAPIURL string `json:"clusterAPIURL,omitempty"`
+
+	// SecretType specifies the authentication method: "kubeconfig", "token", or "credentials"
+	SecretType string `json:"secretType"`
+
+	// CABundle is the base64-encoded CA certificate bundle (optional)
+	CABundle string `json:"caBundle,omitempty"`
+
+	// Credentials - provide ONE of the following based on SecretType:
+
+	// Kubeconfig (base64-encoded) - for SecretType="kubeconfig"
+	Kubeconfig string `json:"kubeconfig,omitempty"`
+
+	// Token - for SecretType="token"
+	Token string `json:"token,omitempty"`
+
+	// Username - for SecretType="credentials"
+	Username string `json:"username,omitempty"`
+
+	// Password - for SecretType="credentials"
+	Password string `json:"password,omitempty"`
+}
+
+// CreateTargetResponse represents the response for POST /api/v1/targets
+type CreateTargetResponse struct {
+	// UUID is the unique identifier for the created target
+	UUID string `json:"uuid"`
+
+	// Message contains additional information
+	Message string `json:"message,omitempty"`
+}
+
+// TargetResponse represents a single target in responses
+type TargetResponse struct {
+	// UUID is the unique identifier
+	UUID string `json:"uuid"`
+
+	// ClusterName is the name of the target cluster
+	ClusterName string `json:"clusterName"`
+
+	// ClusterAPIURL is the Kubernetes API server URL
+	ClusterAPIURL string `json:"clusterAPIURL"`
+
+	// SecretType is the authentication method
+	SecretType string `json:"secretType"`
+
+	// Ready indicates if the target is ready
+	Ready bool `json:"ready"`
+
+	// CreatedAt is the creation timestamp
+	CreatedAt *time.Time `json:"createdAt,omitempty"`
+}
+
+// ListTargetsResponse represents the response for GET /api/v1/targets
+type ListTargetsResponse struct {
+	// Targets is the array of target objects
+	Targets []TargetResponse `json:"targets"`
+}
+
+// UpdateTargetRequest represents the request body for PUT /api/v1/targets/{uuid}
+type UpdateTargetRequest struct {
+	// Same fields as CreateTargetRequest
+	CreateTargetRequest
 }
