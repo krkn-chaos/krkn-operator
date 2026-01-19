@@ -35,7 +35,7 @@ import (
 	"github.com/krkn-chaos/krkn-operator/internal/kubeconfig"
 )
 
-// CreateTarget handles POST /api/v1/targets
+// CreateTarget handles POST /api/v1/operator/targets
 // Creates a new KrknOperatorTarget CR with a generated UUID and associated Secret
 func (h *Handler) CreateTarget(w http.ResponseWriter, r *http.Request) {
 	ctx := context.Background()
@@ -297,7 +297,7 @@ func (h *Handler) CreateTarget(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, response)
 }
 
-// ListTargets handles GET /api/v1/targets
+// ListTargets handles GET /api/v1/operator/targets
 // Returns a list of all KrknOperatorTarget CRs
 func (h *Handler) ListTargets(w http.ResponseWriter, r *http.Request) {
 	ctx := context.Background()
@@ -333,14 +333,14 @@ func (h *Handler) ListTargets(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, response)
 }
 
-// GetTarget handles GET /api/v1/targets/{uuid}
+// GetTarget handles GET /api/v1/operator/targets/{uuid}
 // Returns a single KrknOperatorTarget by UUID
 func (h *Handler) GetTarget(w http.ResponseWriter, r *http.Request) {
 	ctx := context.Background()
 
 	// Extract UUID from path
 	path := r.URL.Path
-	prefix := "/api/v1/targets/"
+	prefix := "/api/v1/operator/targets/"
 
 	if len(path) <= len(prefix) {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
@@ -394,14 +394,14 @@ func (h *Handler) GetTarget(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, response)
 }
 
-// UpdateTarget handles PUT /api/v1/targets/{uuid}
+// UpdateTarget handles PUT /api/v1/operator/targets/{uuid}
 // Updates an existing KrknOperatorTarget (overwrites the Secret kubeconfig)
 func (h *Handler) UpdateTarget(w http.ResponseWriter, r *http.Request) {
 	ctx := context.Background()
 
 	// Extract UUID from path
 	path := r.URL.Path
-	prefix := "/api/v1/targets/"
+	prefix := "/api/v1/operator/targets/"
 
 	if len(path) <= len(prefix) {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
@@ -601,14 +601,14 @@ func (h *Handler) UpdateTarget(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, response)
 }
 
-// DeleteTarget handles DELETE /api/v1/targets/{uuid}
+// DeleteTarget handles DELETE /api/v1/operator/targets/{uuid}
 // Deletes a KrknOperatorTarget and its associated Secret
 func (h *Handler) DeleteTarget(w http.ResponseWriter, r *http.Request) {
 	ctx := context.Background()
 
 	// Extract UUID from path
 	path := r.URL.Path
-	prefix := "/api/v1/targets/"
+	prefix := "/api/v1/operator/targets/"
 
 	if len(path) <= len(prefix) {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
@@ -678,37 +678,37 @@ func (h *Handler) DeleteTarget(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, response)
 }
 
-// TargetsCRUDRouter routes requests to /api/v1/targets endpoints
+// TargetsCRUDRouter routes requests to /api/v1/operator/targets endpoints
 func (h *Handler) TargetsCRUDRouter(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path
 
-	// POST /api/v1/targets - create new target
-	if path == "/api/v1/targets" && r.Method == http.MethodPost {
+	// POST /api/v1/operator/targets - create new target
+	if path == "/api/v1/operator/targets" && r.Method == http.MethodPost {
 		h.CreateTarget(w, r)
 		return
 	}
 
-	// GET /api/v1/targets - list all targets
-	if path == "/api/v1/targets" && r.Method == http.MethodGet {
+	// GET /api/v1/operator/targets - list all targets
+	if path == "/api/v1/operator/targets" && r.Method == http.MethodGet {
 		h.ListTargets(w, r)
 		return
 	}
 
-	// Path with UUID: /api/v1/targets/{uuid}
-	if strings.HasPrefix(path, "/api/v1/targets/") {
-		// GET /api/v1/targets/{uuid} - get single target
+	// Path with UUID: /api/v1/operator/targets/{uuid}
+	if strings.HasPrefix(path, "/api/v1/operator/targets/") {
+		// GET /api/v1/operator/targets/{uuid} - get single target
 		if r.Method == http.MethodGet {
 			h.GetTarget(w, r)
 			return
 		}
 
-		// PUT /api/v1/targets/{uuid} - update target
+		// PUT /api/v1/operator/targets/{uuid} - update target
 		if r.Method == http.MethodPut {
 			h.UpdateTarget(w, r)
 			return
 		}
 
-		// DELETE /api/v1/targets/{uuid} - delete target
+		// DELETE /api/v1/operator/targets/{uuid} - delete target
 		if r.Method == http.MethodDelete {
 			h.DeleteTarget(w, r)
 			return

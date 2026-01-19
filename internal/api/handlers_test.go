@@ -26,6 +26,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	fakeclient "sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
@@ -151,5 +152,139 @@ func TestHealthCheck(t *testing.T) {
 
 	if response["status"] != "healthy" {
 		t.Errorf("Expected status 'healthy', got '%s'", response["status"])
+	}
+}
+
+func TestPostTarget_LegacyEndpoint(t *testing.T) {
+	// Setup
+	scheme := runtime.NewScheme()
+	_ = krknv1alpha1.AddToScheme(scheme)
+	_ = corev1.AddToScheme(scheme)
+
+	fakeClient := fakeclient.NewClientBuilder().WithScheme(scheme).Build()
+	fakeClientset := fake.NewSimpleClientset()
+	handler := NewHandler(fakeClient, fakeClientset, "default", "localhost:50051")
+
+	// Test
+	req := httptest.NewRequest("POST", "/api/v1/targets", nil)
+	w := httptest.NewRecorder()
+	handler.PostTarget(w, req)
+
+	// Assert - should return 102 Processing
+	if w.Code != http.StatusProcessing {
+		t.Errorf("Expected status code %d (Processing), got %d", http.StatusProcessing, w.Code)
+	}
+
+	var response map[string]string
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("Failed to unmarshal response: %v", err)
+	}
+
+	if response["uuid"] == "" {
+		t.Error("Expected uuid in response, got empty string")
+	}
+
+	// Verify that KrknTargetRequest CR was created
+	var targetRequest krknv1alpha1.KrknTargetRequest
+	err := fakeClient.Get(req.Context(), client.ObjectKey{
+		Name:      response["uuid"],
+		Namespace: "default",
+	}, &targetRequest)
+
+	if err != nil {
+		t.Errorf("Failed to get created KrknTargetRequest: %v", err)
+	}
+
+	if targetRequest.Spec.UUID != response["uuid"] {
+		t.Errorf("Expected UUID '%s', got '%s'", response["uuid"], targetRequest.Spec.UUID)
+	}
+}
+
+func TestGetTargetByUUID_NotCompleted(t *testing.T) {
+	// Setup
+	scheme := runtime.NewScheme()
+	_ = krknv1alpha1.AddToScheme(scheme)
+	_ = corev1.AddToScheme(scheme)
+
+	targetRequest := &krknv1alpha1.KrknTargetRequest{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-uuid",
+			Namespace: "default",
+		},
+		Spec: krknv1alpha1.KrknTargetRequestSpec{
+			UUID: "test-uuid",
+		},
+		Status: krknv1alpha1.KrknTargetRequestStatus{
+			Status: "Pending",
+		},
+	}
+
+	fakeClient := fakeclient.NewClientBuilder().WithScheme(scheme).WithObjects(targetRequest).Build()
+	fakeClientset := fake.NewSimpleClientset()
+	handler := NewHandler(fakeClient, fakeClientset, "default", "localhost:50051")
+
+	// Test
+	req := httptest.NewRequest("GET", "/api/v1/targets/test-uuid", nil)
+	w := httptest.NewRecorder()
+	handler.GetTargetByUUID(w, req)
+
+	// Assert - should return 100 Continue
+	if w.Code != http.StatusContinue {
+		t.Errorf("Expected status code %d (Continue), got %d", http.StatusContinue, w.Code)
+	}
+}
+
+func TestGetTargetByUUID_Completed(t *testing.T) {
+	// Setup
+	scheme := runtime.NewScheme()
+	_ = krknv1alpha1.AddToScheme(scheme)
+	_ = corev1.AddToScheme(scheme)
+
+	targetRequest := &krknv1alpha1.KrknTargetRequest{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-uuid",
+			Namespace: "default",
+		},
+		Spec: krknv1alpha1.KrknTargetRequestSpec{
+			UUID: "test-uuid",
+		},
+		Status: krknv1alpha1.KrknTargetRequestStatus{
+			Status: "Completed",
+		},
+	}
+
+	fakeClient := fakeclient.NewClientBuilder().WithScheme(scheme).WithObjects(targetRequest).Build()
+	fakeClientset := fake.NewSimpleClientset()
+	handler := NewHandler(fakeClient, fakeClientset, "default", "localhost:50051")
+
+	// Test
+	req := httptest.NewRequest("GET", "/api/v1/targets/test-uuid", nil)
+	w := httptest.NewRecorder()
+	handler.GetTargetByUUID(w, req)
+
+	// Assert - should return 200 OK
+	if w.Code != http.StatusOK {
+		t.Errorf("Expected status code %d (OK), got %d", http.StatusOK, w.Code)
+	}
+}
+
+func TestGetTargetByUUID_NotFound(t *testing.T) {
+	// Setup
+	scheme := runtime.NewScheme()
+	_ = krknv1alpha1.AddToScheme(scheme)
+	_ = corev1.AddToScheme(scheme)
+
+	fakeClient := fakeclient.NewClientBuilder().WithScheme(scheme).Build()
+	fakeClientset := fake.NewSimpleClientset()
+	handler := NewHandler(fakeClient, fakeClientset, "default", "localhost:50051")
+
+	// Test
+	req := httptest.NewRequest("GET", "/api/v1/targets/non-existent-uuid", nil)
+	w := httptest.NewRecorder()
+	handler.GetTargetByUUID(w, req)
+
+	// Assert - should return 404 Not Found
+	if w.Code != http.StatusNotFound {
+		t.Errorf("Expected status code %d (Not Found), got %d", http.StatusNotFound, w.Code)
 	}
 }

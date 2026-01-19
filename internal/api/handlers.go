@@ -183,6 +183,112 @@ func (h *Handler) HealthCheck(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// GetTargetByUUID handles GET /api/v1/targets/{uuid} endpoint (legacy - checks KrknTargetRequest status)
+// This endpoint checks the status of a KrknTargetRequest CR created by krkn-operator-acm
+func (h *Handler) GetTargetByUUID(w http.ResponseWriter, r *http.Request) {
+	// Extract UUID from path: /api/v1/targets/{UUID}
+	path := r.URL.Path
+	prefix := "/api/v1/targets/"
+
+	if len(path) <= len(prefix) {
+		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+			Error:   "bad_request",
+			Message: "UUID parameter is required in path",
+		})
+		return
+	}
+
+	uuid := path[len(prefix):]
+	if uuid == "" {
+		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+			Error:   "bad_request",
+			Message: "UUID parameter is required",
+		})
+		return
+	}
+
+	// Fetch the KrknTargetRequest CR by UUID
+	var targetRequest krknv1alpha1.KrknTargetRequest
+	err := h.client.Get(context.Background(), types.NamespacedName{
+		Name:      uuid,
+		Namespace: h.namespace,
+	}, &targetRequest)
+
+	if err != nil {
+		if client.IgnoreNotFound(err) == nil {
+			// CR not found - return 404
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		// Other error
+		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+			Error:   "internal_error",
+			Message: "Failed to fetch KrknTargetRequest: " + err.Error(),
+		})
+		return
+	}
+
+	// Check status
+	if targetRequest.Status.Status != "Completed" {
+		// Not completed - return 100 Continue
+		w.WriteHeader(http.StatusContinue)
+		return
+	}
+
+	// Completed - return 200 OK
+	w.WriteHeader(http.StatusOK)
+}
+
+// PostTarget handles POST /api/v1/targets endpoint (legacy - creates KrknTargetRequest)
+// This endpoint triggers the krkn-operator-acm to discover and return target clusters
+func (h *Handler) PostTarget(w http.ResponseWriter, r *http.Request) {
+	// Generate a new UUID
+	newUUID := uuid.New().String()
+
+	// Create a new KrknTargetRequest CR
+	targetRequest := &krknv1alpha1.KrknTargetRequest{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      newUUID,
+			Namespace: h.namespace,
+		},
+		Spec: krknv1alpha1.KrknTargetRequestSpec{
+			UUID: newUUID,
+		},
+	}
+
+	// Create the CR in the cluster
+	err := h.client.Create(context.Background(), targetRequest)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+			Error:   "internal_error",
+			Message: "Failed to create KrknTargetRequest: " + err.Error(),
+		})
+		return
+	}
+
+	// Return 102 Processing with the UUID
+	response := map[string]string{
+		"uuid": newUUID,
+	}
+	writeJSON(w, http.StatusProcessing, response)
+}
+
+// TargetsHandler handles both GET /api/v1/targets/{UUID} and POST /api/v1/targets endpoints
+// It routes to the appropriate handler based on the HTTP method
+func (h *Handler) TargetsHandler(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		h.GetTargetByUUID(w, r)
+	case http.MethodPost:
+		h.PostTarget(w, r)
+	default:
+		writeJSONError(w, http.StatusMethodNotAllowed, ErrorResponse{
+			Error:   "method_not_allowed",
+			Message: "Only GET and POST methods are allowed",
+		})
+	}
+}
+
 // writeJSON writes a JSON response with the given status code
 func writeJSON(w http.ResponseWriter, status int, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")

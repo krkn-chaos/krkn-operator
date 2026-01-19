@@ -75,7 +75,7 @@ func TestCreateTarget_WithKubeconfig(t *testing.T) {
 	}
 
 	body, _ := json.Marshal(reqBody)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/targets", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/operator/targets", bytes.NewReader(body))
 	w := httptest.NewRecorder()
 
 	handler.CreateTarget(w, req)
@@ -140,7 +140,7 @@ func TestCreateTarget_WithToken(t *testing.T) {
 	}
 
 	body, _ := json.Marshal(reqBody)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/targets", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/operator/targets", bytes.NewReader(body))
 	w := httptest.NewRecorder()
 
 	handler.CreateTarget(w, req)
@@ -187,7 +187,7 @@ func TestCreateTarget_WithCredentials(t *testing.T) {
 	}
 
 	body, _ := json.Marshal(reqBody)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/targets", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/operator/targets", bytes.NewReader(body))
 	w := httptest.NewRecorder()
 
 	handler.CreateTarget(w, req)
@@ -301,7 +301,7 @@ func TestCreateTarget_MissingRequiredFields(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			body, _ := json.Marshal(tt.reqBody)
-			req := httptest.NewRequest(http.MethodPost, "/api/v1/targets", bytes.NewReader(body))
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/operator/targets", bytes.NewReader(body))
 			w := httptest.NewRecorder()
 
 			handler.CreateTarget(w, req)
@@ -354,7 +354,7 @@ func TestCreateTarget_DuplicateClusterName(t *testing.T) {
 	}
 
 	body, _ := json.Marshal(reqBody)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/targets", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/operator/targets", bytes.NewReader(body))
 	w := httptest.NewRecorder()
 
 	handler.CreateTarget(w, req)
@@ -414,7 +414,7 @@ func TestListTargets(t *testing.T) {
 		}
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/targets", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/operator/targets", nil)
 	w := httptest.NewRecorder()
 
 	handler.ListTargets(w, req)
@@ -475,7 +475,7 @@ func TestGetTarget(t *testing.T) {
 		t.Fatalf("Failed to create test target: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/targets/test-uuid", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/operator/targets/test-uuid", nil)
 	w := httptest.NewRecorder()
 
 	handler.GetTarget(w, req)
@@ -501,7 +501,7 @@ func TestGetTarget(t *testing.T) {
 func TestGetTarget_NotFound(t *testing.T) {
 	handler := setupTestHandler()
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/targets/non-existent-uuid", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/operator/targets/non-existent-uuid", nil)
 	w := httptest.NewRecorder()
 
 	handler.GetTarget(w, req)
@@ -550,7 +550,7 @@ func TestDeleteTarget(t *testing.T) {
 		t.Fatalf("Failed to create target: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodDelete, "/api/v1/targets/"+targetUUID, nil)
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/operator/targets/"+targetUUID, nil)
 	w := httptest.NewRecorder()
 
 	handler.DeleteTarget(w, req)
@@ -633,7 +633,7 @@ func TestUpdateTarget(t *testing.T) {
 	}
 
 	body, _ := json.Marshal(updateReq)
-	req := httptest.NewRequest(http.MethodPut, "/api/v1/targets/"+targetUUID, bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/operator/targets/"+targetUUID, bytes.NewReader(body))
 	w := httptest.NewRecorder()
 
 	handler.UpdateTarget(w, req)

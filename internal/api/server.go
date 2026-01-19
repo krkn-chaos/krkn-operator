@@ -45,10 +45,12 @@ func NewServer(port int, client client.Client, clientset kubernetes.Interface, n
 	mux.HandleFunc("/api/v1/health", handler.HealthCheck)
 	mux.HandleFunc("/api/v1/clusters", handler.GetClusters)
 	mux.HandleFunc("/api/v1/nodes", handler.GetNodes)
+	mux.HandleFunc("/api/v1/targets", handler.TargetsHandler)  // POST, GET - legacy endpoints (KrknTargetRequest)
+	mux.HandleFunc("/api/v1/targets/", handler.TargetsHandler) // GET /{uuid} - legacy endpoint (check status)
 
-	// CRUD endpoints for KrknOperatorTarget
-	mux.HandleFunc("/api/v1/targets", handler.TargetsCRUDRouter)  // POST, GET
-	mux.HandleFunc("/api/v1/targets/", handler.TargetsCRUDRouter) // GET, PUT, DELETE /{uuid}
+	// CRUD endpoints for KrknOperatorTarget (operator-managed targets)
+	mux.HandleFunc("/api/v1/operator/targets", handler.TargetsCRUDRouter)  // POST, GET
+	mux.HandleFunc("/api/v1/operator/targets/", handler.TargetsCRUDRouter) // GET, PUT, DELETE /{uuid}
 
 	// Scenario management endpoints
 	mux.HandleFunc("/api/v1/scenarios", handler.PostScenarios)                // POST - list scenarios
