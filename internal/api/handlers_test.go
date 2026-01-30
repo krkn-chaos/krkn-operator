@@ -269,53 +269,52 @@ func TestGetTargetByUUID_NotFound(t *testing.T) {
 	}
 }
 
-func setupScenarioRunTestHandler(targets ...*krknv1alpha1.KrknOperatorTarget) *Handler {
+func setupScenarioRunTestHandler(targetRequestId string, clusters map[string]string) *Handler {
 	scheme := runtime.NewScheme()
 	krknv1alpha1.AddToScheme(scheme)
 	corev1.AddToScheme(scheme)
 
-	objects := make([]client.Object, 0, len(targets)*2)
-	secretDataJSON := `{"kubeconfig":"YXBpVmVyc2lvbjogdjEKa2luZDogQ29uZmlnCmNsdXN0ZXJzOiBbXQpjb250ZXh0czogW10KdXNlcnM6IFtd"}`
-
-	for _, target := range targets {
-		objects = append(objects, target)
-		objects = append(objects, &corev1.Secret{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      target.Spec.SecretUUID,
-				Namespace: "default",
-			},
-			Data: map[string][]byte{
-				"kubeconfig": []byte(secretDataJSON),
-			},
-		})
+	// Create managed-clusters structure
+	managedClusters := map[string]map[string]map[string]string{
+		"krkn-operator-acm": make(map[string]map[string]string),
 	}
 
-	fakeClient := fakeclient.NewClientBuilder().WithScheme(scheme).WithObjects(objects...).Build()
+	for clusterName, kubeconfig := range clusters {
+		managedClusters["krkn-operator-acm"][clusterName] = map[string]string{
+			"kubeconfig": kubeconfig,
+		}
+	}
+
+	managedClustersJSON, _ := json.Marshal(managedClusters)
+
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      targetRequestId,
+			Namespace: "default",
+		},
+		Data: map[string][]byte{
+			"managed-clusters": managedClustersJSON,
+		},
+	}
+
+	fakeClient := fakeclient.NewClientBuilder().WithScheme(scheme).WithObjects(secret).Build()
 	fakeClientset := fake.NewSimpleClientset()
 	return NewHandler(fakeClient, fakeClientset, "default", "localhost:50051")
 }
 
 func TestPostScenarioRun_SingleTarget_Success(t *testing.T) {
-	target := &krknv1alpha1.KrknOperatorTarget{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "single-uuid",
-			Namespace: "default",
-		},
-		Spec: krknv1alpha1.KrknOperatorTargetSpec{
-			ClusterName: "test-cluster",
-			SecretType:  "kubeconfig",
-			SecretUUID:   "single-uuid-kubeconfig",
-		},
-		Status: krknv1alpha1.KrknOperatorTargetStatus{
-			Ready: true,
-		},
-	}
+	targetRequestId := "test-request-id"
+	clusterName := "test-cluster"
+	kubeconfig := "YXBpVmVyc2lvbjogdjEKa2luZDogQ29uZmlnCmNsdXN0ZXJzOiBbXQpjb250ZXh0czogW10KdXNlcnM6IFtd"
 
-	handler := setupScenarioRunTestHandler(target)
+	handler := setupScenarioRunTestHandler(targetRequestId, map[string]string{
+		clusterName: kubeconfig,
+	})
 
 	// Test
 	reqBody := `{
-		"targetUUIDs": ["single-uuid"],
+		"targetRequestId": "test-request-id",
+		"clusterNames": ["test-cluster"],
 		"scenarioImage": "quay.io/krkn/pod-scenarios:latest",
 		"scenarioName": "pod-delete"
 	}`
@@ -351,8 +350,8 @@ func TestPostScenarioRun_SingleTarget_Success(t *testing.T) {
 	}
 
 	job := response.Jobs[0]
-	if job.TargetUUID != "single-uuid" {
-		t.Errorf("Expected TargetUUID='single-uuid', got '%s'", job.TargetUUID)
+	if job.ClusterName != clusterName {
+		t.Errorf("Expected ClusterName='%s', got '%s'", clusterName, job.ClusterName)
 	}
 
 	if !job.Success {
@@ -373,7 +372,7 @@ func TestPostScenarioRun_SingleTarget_Success(t *testing.T) {
 }
 
 func TestPostScenarioRun_MissingTargetUUIDs(t *testing.T) {
-	handler := setupScenarioRunTestHandler()
+	handler := setupScenarioRunTestHandler("test-id", map[string]string{})
 
 	// Test
 	reqBody := `{
@@ -401,56 +400,18 @@ func TestPostScenarioRun_MissingTargetUUIDs(t *testing.T) {
 }
 
 func TestPostScenarioRun_MultipleTargets_AllSuccess(t *testing.T) {
-	target1 := &krknv1alpha1.KrknOperatorTarget{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "uuid1",
-			Namespace: "default",
-		},
-		Spec: krknv1alpha1.KrknOperatorTargetSpec{
-			ClusterName: "cluster-1",
-			SecretType:  "kubeconfig",
-			SecretUUID:   "uuid1-kubeconfig",
-		},
-		Status: krknv1alpha1.KrknOperatorTargetStatus{
-			Ready: true,
-		},
-	}
+	kubeconfig := "YXBpVmVyc2lvbjogdjEKa2luZDogQ29uZmlnCmNsdXN0ZXJzOiBbXQpjb250ZXh0czogW10KdXNlcnM6IFtd"
 
-	target2 := &krknv1alpha1.KrknOperatorTarget{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "uuid2",
-			Namespace: "default",
-		},
-		Spec: krknv1alpha1.KrknOperatorTargetSpec{
-			ClusterName: "cluster-2",
-			SecretType:  "kubeconfig",
-			SecretUUID:   "uuid2-kubeconfig",
-		},
-		Status: krknv1alpha1.KrknOperatorTargetStatus{
-			Ready: true,
-		},
-	}
-
-	target3 := &krknv1alpha1.KrknOperatorTarget{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "uuid3",
-			Namespace: "default",
-		},
-		Spec: krknv1alpha1.KrknOperatorTargetSpec{
-			ClusterName: "cluster-3",
-			SecretType:  "kubeconfig",
-			SecretUUID:   "uuid3-kubeconfig",
-		},
-		Status: krknv1alpha1.KrknOperatorTargetStatus{
-			Ready: true,
-		},
-	}
-
-	handler := setupScenarioRunTestHandler(target1, target2, target3)
+	handler := setupScenarioRunTestHandler("test-request-id", map[string]string{
+		"cluster-1": kubeconfig,
+		"cluster-2": kubeconfig,
+		"cluster-3": kubeconfig,
+	})
 
 	// Test
 	reqBody := `{
-		"targetUUIDs": ["uuid1", "uuid2", "uuid3"],
+		"targetRequestId": "test-request-id",
+		"clusterNames": ["cluster-1", "cluster-2", "cluster-3"],
 		"scenarioImage": "quay.io/krkn/pod-scenarios:latest",
 		"scenarioName": "pod-delete"
 	}`
@@ -493,40 +454,17 @@ func TestPostScenarioRun_MultipleTargets_AllSuccess(t *testing.T) {
 }
 
 func TestPostScenarioRun_MultipleTargets_PartialFailure(t *testing.T) {
-	target1 := &krknv1alpha1.KrknOperatorTarget{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "valid-1",
-			Namespace: "default",
-		},
-		Spec: krknv1alpha1.KrknOperatorTargetSpec{
-			ClusterName: "cluster-1",
-			SecretType:  "kubeconfig",
-			SecretUUID:   "valid-1-kubeconfig",
-		},
-		Status: krknv1alpha1.KrknOperatorTargetStatus{
-			Ready: true,
-		},
-	}
+	kubeconfig := "YXBpVmVyc2lvbjogdjEKa2luZDogQ29uZmlnCmNsdXN0ZXJzOiBbXQpjb250ZXh0czogW10KdXNlcnM6IFtd"
 
-	target2 := &krknv1alpha1.KrknOperatorTarget{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "valid-2",
-			Namespace: "default",
-		},
-		Spec: krknv1alpha1.KrknOperatorTargetSpec{
-			ClusterName: "cluster-2",
-			SecretType:  "kubeconfig",
-			SecretUUID:   "valid-2-kubeconfig",
-		},
-		Status: krknv1alpha1.KrknOperatorTargetStatus{
-			Ready: true,
-		},
-	}
-
-	handler := setupScenarioRunTestHandler(target1, target2)
+	handler := setupScenarioRunTestHandler("test-request-id", map[string]string{
+		"cluster-1": kubeconfig,
+		"cluster-2": kubeconfig,
+		// "invalid" cluster is intentionally not included
+	})
 
 	reqBody := `{
-		"targetUUIDs": ["valid-1", "invalid", "valid-2"],
+		"targetRequestId": "test-request-id",
+		"clusterNames": ["cluster-1", "invalid", "cluster-2"],
 		"scenarioImage": "quay.io/krkn/pod-scenarios:latest",
 		"scenarioName": "pod-delete"
 	}`
@@ -561,8 +499,8 @@ func TestPostScenarioRun_MultipleTargets_PartialFailure(t *testing.T) {
 		t.Error("Expected jobs[1] (invalid) to fail")
 	}
 
-	if response.Jobs[1].TargetUUID != "invalid" {
-		t.Errorf("Expected jobs[1].TargetUUID='invalid', got '%s'", response.Jobs[1].TargetUUID)
+	if response.Jobs[1].ClusterName != "invalid" {
+		t.Errorf("Expected jobs[1].ClusterName='invalid', got '%s'", response.Jobs[1].ClusterName)
 	}
 
 	if !response.Jobs[0].Success {
@@ -575,11 +513,13 @@ func TestPostScenarioRun_MultipleTargets_PartialFailure(t *testing.T) {
 }
 
 func TestPostScenarioRun_MultipleTargets_AllFailure(t *testing.T) {
-	handler := setupScenarioRunTestHandler()
+	// Empty cluster map - all requests will fail
+	handler := setupScenarioRunTestHandler("test-request-id", map[string]string{})
 
 	// Test
 	reqBody := `{
-		"targetUUIDs": ["invalid-1", "invalid-2"],
+		"targetRequestId": "test-request-id",
+		"clusterNames": ["invalid-1", "invalid-2"],
 		"scenarioImage": "quay.io/krkn/pod-scenarios:latest",
 		"scenarioName": "pod-delete"
 	}`
@@ -607,7 +547,7 @@ func TestPostScenarioRun_MultipleTargets_AllFailure(t *testing.T) {
 	}
 }
 
-func TestPostScenarioRun_Validation_TargetUUIDs(t *testing.T) {
+func TestPostScenarioRun_Validation_ClusterNames(t *testing.T) {
 	tests := []struct {
 		name        string
 		reqBody     string
@@ -615,24 +555,24 @@ func TestPostScenarioRun_Validation_TargetUUIDs(t *testing.T) {
 	}{
 		{
 			name:        "Empty array",
-			reqBody:     `{"targetUUIDs": [], "scenarioImage": "img", "scenarioName": "test"}`,
-			expectedErr: "targetUUIDs is required and must contain at least one UUID",
+			reqBody:     `{"targetRequestId": "test-id", "clusterNames": [], "scenarioImage": "img", "scenarioName": "test"}`,
+			expectedErr: "clusterNames is required and must contain at least one cluster name",
 		},
 		{
 			name:        "Duplicates",
-			reqBody:     `{"targetUUIDs": ["uuid1", "uuid1"], "scenarioImage": "img", "scenarioName": "test"}`,
-			expectedErr: "targetUUIDs contains duplicates",
+			reqBody:     `{"targetRequestId": "test-id", "clusterNames": ["cluster1", "cluster1"], "scenarioImage": "img", "scenarioName": "test"}`,
+			expectedErr: "clusterNames contains duplicates",
 		},
 		{
 			name:        "Empty string",
-			reqBody:     `{"targetUUIDs": ["uuid1", ""], "scenarioImage": "img", "scenarioName": "test"}`,
-			expectedErr: "targetUUIDs cannot contain empty strings",
+			reqBody:     `{"targetRequestId": "test-id", "clusterNames": ["cluster1", ""], "scenarioImage": "img", "scenarioName": "test"}`,
+			expectedErr: "clusterNames cannot contain empty strings",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			handler := setupScenarioRunTestHandler()
+			handler := setupScenarioRunTestHandler("test-id", map[string]string{})
 
 			req := httptest.NewRequest("POST", "/api/v1/scenarios/run", strings.NewReader(tt.reqBody))
 			req.Header.Set("Content-Type", "application/json")
@@ -667,7 +607,7 @@ func TestListScenarioRuns_Success(t *testing.T) {
 			Labels: map[string]string{
 				"app":                "krkn-scenario",
 				"krkn-job-id":        "job-1",
-				"krkn-target-uuid":   "uuid1",
+				"krkn-cluster-name":   "uuid1",
 				"krkn-scenario-name": "pod-delete",
 			},
 		},
@@ -683,7 +623,7 @@ func TestListScenarioRuns_Success(t *testing.T) {
 			Labels: map[string]string{
 				"app":                "krkn-scenario",
 				"krkn-job-id":        "job-2",
-				"krkn-target-uuid":   "uuid2",
+				"krkn-cluster-name":   "uuid2",
 				"krkn-scenario-name": "node-drain",
 			},
 		},
@@ -699,7 +639,7 @@ func TestListScenarioRuns_Success(t *testing.T) {
 			Labels: map[string]string{
 				"app":                "krkn-scenario",
 				"krkn-job-id":        "job-3",
-				"krkn-target-uuid":   "uuid3",
+				"krkn-cluster-name":   "uuid3",
 				"krkn-scenario-name": "pod-delete",
 			},
 		},
@@ -729,15 +669,15 @@ func TestListScenarioRuns_Success(t *testing.T) {
 		t.Errorf("Expected 3 jobs, got %d", len(response.Jobs))
 	}
 
-	// Verify targetUUID is populated
+	// Verify clusterName is populated
 	for _, job := range response.Jobs {
-		if job.TargetUUID == "" {
-			t.Errorf("Expected TargetUUID to be set for job %s", job.JobId)
+		if job.ClusterName == "" {
+			t.Errorf("Expected ClusterName to be set for job %s", job.JobId)
 		}
 	}
 }
 
-func TestListScenarioRuns_FilterByTargetUUID(t *testing.T) {
+func TestListScenarioRuns_FilterByClusterName(t *testing.T) {
 	scheme := runtime.NewScheme()
 	krknv1alpha1.AddToScheme(scheme)
 	corev1.AddToScheme(scheme)
@@ -749,7 +689,7 @@ func TestListScenarioRuns_FilterByTargetUUID(t *testing.T) {
 			Labels: map[string]string{
 				"app":                "krkn-scenario",
 				"krkn-job-id":        "job-1",
-				"krkn-target-uuid":   "uuid1",
+				"krkn-cluster-name":  "cluster-1",
 				"krkn-scenario-name": "pod-delete",
 			},
 		},
@@ -765,7 +705,7 @@ func TestListScenarioRuns_FilterByTargetUUID(t *testing.T) {
 			Labels: map[string]string{
 				"app":                "krkn-scenario",
 				"krkn-job-id":        "job-2",
-				"krkn-target-uuid":   "uuid2",
+				"krkn-cluster-name":  "cluster-2",
 				"krkn-scenario-name": "node-drain",
 			},
 		},
@@ -778,7 +718,7 @@ func TestListScenarioRuns_FilterByTargetUUID(t *testing.T) {
 	fakeClientset := fake.NewSimpleClientset()
 	handler := NewHandler(fakeClient, fakeClientset, "default", "localhost:50051")
 
-	req := httptest.NewRequest("GET", "/api/v1/scenarios/run?targetUUID=uuid1", nil)
+	req := httptest.NewRequest("GET", "/api/v1/scenarios/run?clusterName=cluster-1", nil)
 	w := httptest.NewRecorder()
 	handler.ListScenarioRuns(w, req)
 
@@ -795,7 +735,7 @@ func TestListScenarioRuns_FilterByTargetUUID(t *testing.T) {
 		t.Errorf("Expected 1 job, got %d", len(response.Jobs))
 	}
 
-	if response.Jobs[0].TargetUUID != "uuid1" {
-		t.Errorf("Expected TargetUUID='uuid1', got '%s'", response.Jobs[0].TargetUUID)
+	if response.Jobs[0].ClusterName != "cluster-1" {
+		t.Errorf("Expected ClusterName='cluster-1', got '%s'", response.Jobs[0].ClusterName)
 	}
 }

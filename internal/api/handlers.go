@@ -577,12 +577,12 @@ func (h *Handler) PostScenarioGlobals(w http.ResponseWriter, r *http.Request) {
 
 // PostScenarioRun handles POST /api/v1/scenarios/run endpoint
 // It creates and starts a new scenario job as a Kubernetes pod
-// createScenarioJob creates a krkn scenario job for a single target
+// createScenarioJob creates a krkn scenario job for a single cluster
 // Returns jobId, podName, and error
 func (h *Handler) createScenarioJob(
 	ctx context.Context,
 	req ScenarioRunRequest,
-	targetUUID string,
+	clusterName string,
 ) (jobId string, podName string, err error) {
 	// Generate unique job ID
 	jobId = uuid.New().String()
@@ -593,8 +593,8 @@ func (h *Handler) createScenarioJob(
 		kubeconfigPath = "/home/krkn/.kube/config"
 	}
 
-	// Get kubeconfig using new system only
-	kubeconfigBase64, err := h.getKubeconfig(ctx, targetUUID, "", "")
+	// Get kubeconfig using targetRequestId and clusterName
+	kubeconfigBase64, err := h.getKubeconfig(ctx, "", req.TargetRequestId, clusterName)
 	if err != nil {
 		return "", "", fmt.Errorf("failed to get kubeconfig: %w", err)
 	}
@@ -810,10 +810,11 @@ func (h *Handler) createScenarioJob(
 			Name:      podName,
 			Namespace: h.namespace,
 			Labels: map[string]string{
-				"app":                "krkn-scenario",
-				"krkn-job-id":        jobId,
-				"krkn-scenario-name": req.ScenarioName,
-				"krkn-target-uuid":   targetUUID,
+				"app":                 "krkn-scenario",
+				"krkn-job-id":         jobId,
+				"krkn-scenario-name":  req.ScenarioName,
+				"krkn-cluster-name":   clusterName,
+				"krkn-target-request": req.TargetRequestId,
 			},
 		},
 		Spec: corev1.PodSpec{
@@ -858,10 +859,18 @@ func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Validate required fields
-	if len(req.TargetUUIDs) == 0 {
+	if req.TargetRequestId == "" {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
 			Error:   "bad_request",
-			Message: "targetUUIDs is required and must contain at least one UUID",
+			Message: "targetRequestId is required",
+		})
+		return
+	}
+
+	if len(req.ClusterNames) == 0 {
+		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+			Error:   "bad_request",
+			Message: "clusterNames is required and must contain at least one cluster name",
 		})
 		return
 	}
@@ -882,55 +891,51 @@ func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check for duplicates
-	seen := make(map[string]bool)
-	for _, uuid := range req.TargetUUIDs {
-		if uuid == "" {
+	// Validate cluster names (no duplicates or empty strings)
+	seen := make(map[string]bool, len(req.ClusterNames))
+	for _, clusterName := range req.ClusterNames {
+		if clusterName == "" {
 			writeJSONError(w, http.StatusBadRequest, ErrorResponse{
 				Error:   "bad_request",
-				Message: "targetUUIDs cannot contain empty strings",
+				Message: "clusterNames cannot contain empty strings",
 			})
 			return
 		}
-		if seen[uuid] {
+		if seen[clusterName] {
 			writeJSONError(w, http.StatusBadRequest, ErrorResponse{
 				Error:   "bad_request",
-				Message: "targetUUIDs contains duplicates: " + uuid,
+				Message: "clusterNames contains duplicates: " + clusterName,
 			})
 			return
 		}
-		seen[uuid] = true
+		seen[clusterName] = true
 	}
 
 	ctx := context.Background()
 
-	// Execute job creation for each target (best-effort)
+	// Execute job creation for each cluster (best-effort)
 	var results []TargetJobResult
 
-	for _, targetUUID := range req.TargetUUIDs {
-		jobId, podName, err := h.createScenarioJob(ctx, req, targetUUID)
+	for _, clusterName := range req.ClusterNames {
+		jobId, podName, err := h.createScenarioJob(ctx, req, clusterName)
+
+		result := TargetJobResult{
+			ClusterName: clusterName,
+			JobId:       jobId,
+			PodName:     podName,
+		}
 
 		if err != nil {
-			// Job creation failed for this target
-			results = append(results, TargetJobResult{
-				TargetUUID: targetUUID,
-				JobId:      "",
-				Status:     "Failed",
-				PodName:    "",
-				Success:    false,
-				Error:      err.Error(),
-			})
+			// Job creation failed for this cluster
+			result.Status = "Failed"
+			result.Error = err.Error()
 		} else {
 			// Job created successfully
-			results = append(results, TargetJobResult{
-				TargetUUID: targetUUID,
-				JobId:      jobId,
-				Status:     "Pending",
-				PodName:    podName,
-				Success:    true,
-				Error:      "",
-			})
+			result.Status = "Pending"
+			result.Success = true
 		}
+
+		results = append(results, result)
 	}
 
 	successfulJobs := 0
@@ -992,7 +997,7 @@ func (h *Handler) GetScenarioRunStatus(w http.ResponseWriter, r *http.Request) {
 
 	response := JobStatusResponse{
 		JobId:        jobId,
-		TargetUUID:   pod.Labels["krkn-target-uuid"],
+		ClusterName:  pod.Labels["krkn-cluster-name"],
 		ScenarioName: pod.Labels["krkn-scenario-name"],
 		Status:       string(pod.Status.Phase),
 		PodName:      pod.Name,
@@ -1182,7 +1187,7 @@ func (h *Handler) ListScenarioRuns(w http.ResponseWriter, r *http.Request) {
 	// Parse query parameters for filtering
 	statusFilter := r.URL.Query().Get("status")
 	scenarioNameFilter := r.URL.Query().Get("scenarioName")
-	targetUUIDFilter := r.URL.Query().Get("targetUUID")
+	clusterNameFilter := r.URL.Query().Get("clusterName")
 
 	// List all pods with krkn-scenario label
 	var podList corev1.PodList
@@ -1202,18 +1207,18 @@ func (h *Handler) ListScenarioRuns(w http.ResponseWriter, r *http.Request) {
 
 	for _, pod := range podList.Items {
 		jobId := pod.Labels["krkn-job-id"]
-		targetUUID := pod.Labels["krkn-target-uuid"]
+		clusterName := pod.Labels["krkn-cluster-name"]
 		scenarioName := pod.Labels["krkn-scenario-name"]
 
 		if (statusFilter != "" && string(pod.Status.Phase) != statusFilter) ||
 			(scenarioNameFilter != "" && scenarioName != scenarioNameFilter) ||
-			(targetUUIDFilter != "" && targetUUID != targetUUIDFilter) {
+			(clusterNameFilter != "" && clusterName != clusterNameFilter) {
 			continue
 		}
 
 		jobStatus := JobStatusResponse{
 			JobId:        jobId,
-			TargetUUID:   targetUUID,
+			ClusterName:  clusterName,
 			ScenarioName: scenarioName,
 			Status:       string(pod.Status.Phase),
 			PodName:      pod.Name,

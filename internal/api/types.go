@@ -135,8 +135,10 @@ type FileMount struct {
 
 // ScenarioRunRequest represents the request body for POST /scenarios/run
 type ScenarioRunRequest struct {
-	// TargetUUIDs is the array of KrknOperatorTarget UUIDs (required, minimum 1 element)
-	TargetUUIDs []string `json:"targetUUIDs"`
+	// TargetRequestId is the UUID of the KrknTargetRequest (required)
+	TargetRequestId string `json:"targetRequestId"`
+	// ClusterNames is the array of cluster names to target (required, minimum 1 element)
+	ClusterNames []string `json:"clusterNames"`
 
 	// ScenarioImage is the container image to run
 	ScenarioImage string `json:"scenarioImage"`
@@ -154,8 +156,8 @@ type ScenarioRunRequest struct {
 
 // TargetJobResult represents the result of creating a job for a specific target
 type TargetJobResult struct {
-	// TargetUUID is the UUID of the target
-	TargetUUID string `json:"targetUUID"`
+	// ClusterName is the name of the target cluster
+	ClusterName string `json:"clusterName"`
 	// JobId is the unique job identifier
 	JobId string `json:"jobId"`
 	// Status is the initial job status (usually "Pending" or "Failed")
@@ -184,8 +186,8 @@ type ScenarioRunResponse struct {
 type JobStatusResponse struct {
 	// JobId is the unique job identifier
 	JobId string `json:"jobId"`
-	// TargetUUID is the KrknOperatorTarget UUID
-	TargetUUID string `json:"targetUUID"`
+	// ClusterName is the target cluster name
+	ClusterName string `json:"clusterName"`
 	// ScenarioName is the scenario name
 	ScenarioName string `json:"scenarioName"`
 	// Status is the current job status (Pending, Running, Succeeded, Failed, Stopped)
