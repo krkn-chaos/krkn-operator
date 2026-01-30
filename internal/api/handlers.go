@@ -86,18 +86,16 @@ func (h *Handler) GetClusters(w http.ResponseWriter, r *http.Request) {
 
 	if err != nil {
 		if client.IgnoreNotFound(err) == nil {
-			// CR not found
 			writeJSONError(w, http.StatusNotFound, ErrorResponse{
 				Error:   "not_found",
 				Message: "KrknTargetRequest with id '" + id + "' not found",
 			})
-			return
+		} else {
+			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+				Error:   "internal_error",
+				Message: "Failed to fetch KrknTargetRequest: " + err.Error(),
+			})
 		}
-		// Other error
-		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
-			Error:   "internal_error",
-			Message: "Failed to fetch KrknTargetRequest: " + err.Error(),
-		})
 		return
 	}
 
@@ -202,27 +200,21 @@ func (h *Handler) GetTargetByUUID(w http.ResponseWriter, r *http.Request) {
 		Namespace: h.namespace,
 	}, &targetRequest); err != nil {
 		if client.IgnoreNotFound(err) == nil {
-			// CR not found - return 404
 			w.WriteHeader(http.StatusNotFound)
-			return
+		} else {
+			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+				Error:   "internal_error",
+				Message: "Failed to fetch KrknTargetRequest: " + err.Error(),
+			})
 		}
-		// Other error
-		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
-			Error:   "internal_error",
-			Message: "Failed to fetch KrknTargetRequest: " + err.Error(),
-		})
 		return
 	}
 
-	// Check status
 	if targetRequest.Status.Status != "Completed" {
-		// Not completed - return 100 Continue
 		w.WriteHeader(http.StatusContinue)
-		return
+	} else {
+		w.WriteHeader(http.StatusOK)
 	}
-
-	// Completed - return 200 OK
-	w.WriteHeader(http.StatusOK)
 }
 
 // PostTarget handles POST /api/v1/targets endpoint (legacy - creates KrknTargetRequest)
@@ -262,12 +254,11 @@ func (h *Handler) PostTarget(w http.ResponseWriter, r *http.Request) {
 // TargetsHandler handles both GET /api/v1/targets/{UUID} and POST /api/v1/targets endpoints
 // It routes to the appropriate handler based on the HTTP method
 func (h *Handler) TargetsHandler(w http.ResponseWriter, r *http.Request) {
-	switch r.Method {
-	case http.MethodGet:
+	if r.Method == http.MethodGet {
 		h.GetTargetByUUID(w, r)
-	case http.MethodPost:
+	} else if r.Method == http.MethodPost {
 		h.PostTarget(w, r)
-	default:
+	} else {
 		writeJSONError(w, http.StatusMethodNotAllowed, ErrorResponse{
 			Error:   "method_not_allowed",
 			Message: "Only GET and POST methods are allowed",
@@ -427,8 +418,7 @@ func (h *Handler) PostScenarios(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Convert krknctl models to API response types
-	var scenarios []ScenarioTag
+	scenarios := make([]ScenarioTag, 0)
 	if scenarioTags != nil {
 		for _, tag := range *scenarioTags {
 			scenarios = append(scenarios, ScenarioTag{
@@ -587,40 +577,15 @@ func (h *Handler) PostScenarioGlobals(w http.ResponseWriter, r *http.Request) {
 
 // PostScenarioRun handles POST /api/v1/scenarios/run endpoint
 // It creates and starts a new scenario job as a Kubernetes pod
-func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
-	// Parse request body
-	var req ScenarioRunRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
-			Error:   "bad_request",
-			Message: "Invalid request body: " + err.Error(),
-		})
-		return
-	}
-
-	// Validate required fields - support both new and legacy parameters
-	if req.TargetUUID == "" && (req.TargetId == "" || req.ClusterName == "") {
-		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
-			Error:   "bad_request",
-			Message: "Either targetUUID (new) or targetId+clusterName (legacy) parameters are required",
-		})
-		return
-	}
-
-	if req.ScenarioImage == "" {
-		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
-			Error:   "bad_request",
-			Message: "scenarioImage is required",
-		})
-		return
-	}
-	if req.ScenarioName == "" {
-		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
-			Error:   "bad_request",
-			Message: "scenarioName is required",
-		})
-		return
-	}
+// createScenarioJob creates a krkn scenario job for a single target
+// Returns jobId, podName, and error
+func (h *Handler) createScenarioJob(
+	ctx context.Context,
+	req ScenarioRunRequest,
+	targetUUID string,
+) (jobId string, podName string, err error) {
+	// Generate unique job ID
+	jobId = uuid.New().String()
 
 	// Set default kubeconfig path if not provided
 	kubeconfigPath := req.KubeconfigPath
@@ -628,36 +593,16 @@ func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
 		kubeconfigPath = "/home/krkn/.kube/config"
 	}
 
-	// Generate unique job ID
-	jobId := uuid.New().String()
-
-	ctx := context.Background()
-
-	// Get kubeconfig using unified helper function
-	kubeconfigBase64, err := h.getKubeconfig(ctx, req.TargetUUID, req.TargetId, req.ClusterName)
+	// Get kubeconfig using new system only
+	kubeconfigBase64, err := h.getKubeconfig(ctx, targetUUID, "", "")
 	if err != nil {
-		if strings.Contains(err.Error(), "not found") {
-			writeJSONError(w, http.StatusNotFound, ErrorResponse{
-				Error:   "not_found",
-				Message: err.Error(),
-			})
-			return
-		}
-		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
-			Error:   "internal_error",
-			Message: err.Error(),
-		})
-		return
+		return "", "", fmt.Errorf("failed to get kubeconfig: %w", err)
 	}
 
-	// Kubeconfig is base64 encoded, decode it for ConfigMap
+	// Decode kubeconfig for ConfigMap
 	kubeconfigDecoded, err := base64.StdEncoding.DecodeString(kubeconfigBase64)
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
-			Error:   "internal_error",
-			Message: "Failed to decode kubeconfig: " + err.Error(),
-		})
-		return
+		return "", "", fmt.Errorf("failed to decode kubeconfig: %w", err)
 	}
 
 	// Create ConfigMap for kubeconfig
@@ -676,15 +621,35 @@ func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.client.Create(ctx, kubeconfigConfigMap); err != nil {
-		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
-			Error:   "internal_error",
-			Message: "Failed to create kubeconfig ConfigMap: " + err.Error(),
-		})
-		return
+		return "", "", fmt.Errorf("failed to create kubeconfig ConfigMap: %w", err)
+	}
+
+	// Track created resources for cleanup on error
+	var fileConfigMaps []string
+	var imagePullSecretName string
+
+	// Cleanup helper
+	cleanup := func() {
+		h.client.Delete(ctx, kubeconfigConfigMap)
+		for _, cm := range fileConfigMaps {
+			h.client.Delete(ctx, &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      cm,
+					Namespace: h.namespace,
+				},
+			})
+		}
+		if imagePullSecretName != "" {
+			h.client.Delete(ctx, &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      imagePullSecretName,
+					Namespace: h.namespace,
+				},
+			})
+		}
 	}
 
 	// Create ConfigMaps for user-provided files
-	var fileConfigMaps []string
 	for _, file := range req.Files {
 		// Sanitize filename for ConfigMap name
 		sanitizedName := strings.ReplaceAll(file.Name, "/", "-")
@@ -694,21 +659,8 @@ func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
 		// Decode base64 content
 		fileContent, err := base64.StdEncoding.DecodeString(file.Content)
 		if err != nil {
-			// Cleanup created ConfigMaps on error
-			h.client.Delete(ctx, kubeconfigConfigMap)
-			for _, cm := range fileConfigMaps {
-				h.client.Delete(ctx, &corev1.ConfigMap{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      cm,
-						Namespace: h.namespace,
-					},
-				})
-			}
-			writeJSONError(w, http.StatusBadRequest, ErrorResponse{
-				Error:   "bad_request",
-				Message: "Failed to decode file content for '" + file.Name + "': " + err.Error(),
-			})
-			return
+			cleanup()
+			return "", "", fmt.Errorf("failed to decode file content for '%s': %w", file.Name, err)
 		}
 
 		fileConfigMap := &corev1.ConfigMap{
@@ -725,35 +677,57 @@ func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if err := h.client.Create(ctx, fileConfigMap); err != nil {
-			// Cleanup on error
-			h.client.Delete(ctx, kubeconfigConfigMap)
-			for _, cm := range fileConfigMaps {
-				h.client.Delete(ctx, &corev1.ConfigMap{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      cm,
-						Namespace: h.namespace,
-					},
-				})
-			}
-			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
-				Error:   "internal_error",
-				Message: "Failed to create file ConfigMap: " + err.Error(),
-			})
-			return
+			cleanup()
+			return "", "", fmt.Errorf("failed to create file ConfigMap: %w", err)
 		}
 
 		fileConfigMaps = append(fileConfigMaps, configMapName)
 	}
 
-	// Prepare pod specification
-	podName := fmt.Sprintf("krkn-job-%s", jobId)
+	// Handle private registry authentication
+	var imagePullSecrets []corev1.LocalObjectReference
+	if req.RegistryURL != "" && req.ScenarioRepository != "" {
+		imagePullSecretName = fmt.Sprintf("krkn-job-%s-registry", jobId)
 
-	// Build environment variables
-	envVars := []corev1.EnvVar{}
-	for key, value := range req.Environment {
-		envVars = append(envVars, corev1.EnvVar{
-			Name:  key,
-			Value: value,
+		// Build docker config JSON
+		authStr := ""
+		if req.Token != nil && *req.Token != "" {
+			authStr = base64.StdEncoding.EncodeToString([]byte(*req.Token))
+		} else if req.Username != nil && req.Password != nil {
+			authStr = base64.StdEncoding.EncodeToString([]byte(*req.Username + ":" + *req.Password))
+		}
+
+		dockerConfig := map[string]interface{}{
+			"auths": map[string]interface{}{
+				req.RegistryURL: map[string]string{
+					"auth": authStr,
+				},
+			},
+		}
+
+		dockerConfigJSON, _ := json.Marshal(dockerConfig)
+
+		imagePullSecret := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      imagePullSecretName,
+				Namespace: h.namespace,
+				Labels: map[string]string{
+					"krkn-job-id": jobId,
+				},
+			},
+			Type: corev1.SecretTypeDockerConfigJson,
+			Data: map[string][]byte{
+				".dockerconfigjson": dockerConfigJSON,
+			},
+		}
+
+		if err := h.client.Create(ctx, imagePullSecret); err != nil {
+			cleanup()
+			return "", "", fmt.Errorf("failed to create ImagePullSecret: %w", err)
+		}
+
+		imagePullSecrets = append(imagePullSecrets, corev1.LocalObjectReference{
+			Name: imagePullSecretName,
 		})
 	}
 
@@ -803,68 +777,7 @@ func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	// Handle private registry authentication
-	var imagePullSecrets []corev1.LocalObjectReference
-	if req.RegistryURL != "" && req.ScenarioRepository != "" {
-		// Create ImagePullSecret
-		imagePullSecretName := fmt.Sprintf("krkn-job-%s-registry", jobId)
-
-		// Build docker config JSON
-		authStr := ""
-		if req.Token != nil && *req.Token != "" {
-			authStr = base64.StdEncoding.EncodeToString([]byte(*req.Token))
-		} else if req.Username != nil && req.Password != nil {
-			authStr = base64.StdEncoding.EncodeToString([]byte(*req.Username + ":" + *req.Password))
-		}
-
-		dockerConfig := map[string]interface{}{
-			"auths": map[string]interface{}{
-				req.RegistryURL: map[string]string{
-					"auth": authStr,
-				},
-			},
-		}
-
-		dockerConfigJSON, _ := json.Marshal(dockerConfig)
-
-		imagePullSecret := &corev1.Secret{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      imagePullSecretName,
-				Namespace: h.namespace,
-				Labels: map[string]string{
-					"krkn-job-id": jobId,
-				},
-			},
-			Type: corev1.SecretTypeDockerConfigJson,
-			Data: map[string][]byte{
-				".dockerconfigjson": dockerConfigJSON,
-			},
-		}
-
-		if err := h.client.Create(ctx, imagePullSecret); err != nil {
-			// Cleanup on error
-			h.client.Delete(ctx, kubeconfigConfigMap)
-			for _, cm := range fileConfigMaps {
-				h.client.Delete(ctx, &corev1.ConfigMap{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      cm,
-						Namespace: h.namespace,
-					},
-				})
-			}
-			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
-				Error:   "internal_error",
-				Message: "Failed to create ImagePullSecret: " + err.Error(),
-			})
-			return
-		}
-
-		imagePullSecrets = append(imagePullSecrets, corev1.LocalObjectReference{
-			Name: imagePullSecretName,
-		})
-	}
-
-	// Add writable tmp volume for scenarios that need to write temporary files
+	// Add writable tmp volume
 	volumes = append(volumes, corev1.Volume{
 		Name: "tmp",
 		VolumeSource: corev1.VolumeSource{
@@ -877,13 +790,21 @@ func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
 		MountPath: "/tmp",
 	})
 
+	envVars := make([]corev1.EnvVar, 0, len(req.Environment))
+	for key, value := range req.Environment {
+		envVars = append(envVars, corev1.EnvVar{
+			Name:  key,
+			Value: value,
+		})
+	}
+
 	// SecurityContext for running as krkn user (UID 1001)
-	// Requires ServiceAccount with anyuid SCC permissions
 	var runAsUser int64 = 1001
 	var runAsGroup int64 = 1001
 	var fsGroup int64 = 1001
 
 	// Create the pod
+	podName = fmt.Sprintf("krkn-job-%s", jobId)
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      podName,
@@ -892,8 +813,7 @@ func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
 				"app":                "krkn-scenario",
 				"krkn-job-id":        jobId,
 				"krkn-scenario-name": req.ScenarioName,
-				"krkn-target-id":     req.TargetId,
-				"krkn-cluster-name":  req.ClusterName,
+				"krkn-target-uuid":   targetUUID,
 			},
 		},
 		Spec: corev1.PodSpec{
@@ -919,52 +839,125 @@ func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.client.Create(ctx, pod); err != nil {
-		// Cleanup on error
-		h.client.Delete(ctx, kubeconfigConfigMap)
-		for _, cm := range fileConfigMaps {
-			h.client.Delete(ctx, &corev1.ConfigMap{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      cm,
-					Namespace: h.namespace,
-				},
-			})
-		}
-		if len(imagePullSecrets) > 0 {
-			h.client.Delete(ctx, &corev1.Secret{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      imagePullSecrets[0].Name,
-					Namespace: h.namespace,
-				},
-			})
-		}
-		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
-			Error:   "internal_error",
-			Message: "Failed to create pod: " + err.Error(),
+		cleanup()
+		return "", "", fmt.Errorf("failed to create pod: %w", err)
+	}
+
+	return jobId, podName, nil
+}
+
+func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
+	// Parse request body
+	var req ScenarioRunRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+			Error:   "bad_request",
+			Message: "Invalid request body: " + err.Error(),
 		})
 		return
 	}
 
-	// Return response
-	response := ScenarioRunResponse{
-		JobId:   jobId,
-		Status:  "Pending",
-		PodName: podName,
+	// Validate required fields
+	if len(req.TargetUUIDs) == 0 {
+		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+			Error:   "bad_request",
+			Message: "targetUUIDs is required and must contain at least one UUID",
+		})
+		return
 	}
 
-	writeJSON(w, http.StatusCreated, response)
+	if req.ScenarioImage == "" {
+		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+			Error:   "bad_request",
+			Message: "scenarioImage is required",
+		})
+		return
+	}
+
+	if req.ScenarioName == "" {
+		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+			Error:   "bad_request",
+			Message: "scenarioName is required",
+		})
+		return
+	}
+
+	// Check for duplicates
+	seen := make(map[string]bool)
+	for _, uuid := range req.TargetUUIDs {
+		if uuid == "" {
+			writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+				Error:   "bad_request",
+				Message: "targetUUIDs cannot contain empty strings",
+			})
+			return
+		}
+		if seen[uuid] {
+			writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+				Error:   "bad_request",
+				Message: "targetUUIDs contains duplicates: " + uuid,
+			})
+			return
+		}
+		seen[uuid] = true
+	}
+
+	ctx := context.Background()
+
+	// Execute job creation for each target (best-effort)
+	var results []TargetJobResult
+
+	for _, targetUUID := range req.TargetUUIDs {
+		jobId, podName, err := h.createScenarioJob(ctx, req, targetUUID)
+
+		if err != nil {
+			// Job creation failed for this target
+			results = append(results, TargetJobResult{
+				TargetUUID: targetUUID,
+				JobId:      "",
+				Status:     "Failed",
+				PodName:    "",
+				Success:    false,
+				Error:      err.Error(),
+			})
+		} else {
+			// Job created successfully
+			results = append(results, TargetJobResult{
+				TargetUUID: targetUUID,
+				JobId:      jobId,
+				Status:     "Pending",
+				PodName:    podName,
+				Success:    true,
+				Error:      "",
+			})
+		}
+	}
+
+	successfulJobs := 0
+	for _, result := range results {
+		if result.Success {
+			successfulJobs++
+		}
+	}
+
+	response := ScenarioRunResponse{
+		Jobs:           results,
+		TotalTargets:   len(results),
+		SuccessfulJobs: successfulJobs,
+		FailedJobs:     len(results) - successfulJobs,
+	}
+
+	statusCode := http.StatusCreated
+	if successfulJobs == 0 {
+		statusCode = http.StatusInternalServerError
+	}
+
+	writeJSON(w, statusCode, response)
 }
 
 // GetScenarioRunStatus handles GET /api/v1/scenarios/run/{jobId} endpoint
 // It returns the current status of a specific job
 func (h *Handler) GetScenarioRunStatus(w http.ResponseWriter, r *http.Request) {
-	if strings.HasSuffix(r.URL.Path, "/logs") {
-		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
-			Error:   "bad_request",
-			Message: "Invalid endpoint",
-		})
-		return
-	}
-
 	jobId, err := extractPathSuffix(r.URL.Path, "/api/v1/scenarios/run/")
 	if err != nil {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
@@ -996,15 +989,12 @@ func (h *Handler) GetScenarioRunStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	pod := podList.Items[0]
-	status := string(pod.Status.Phase)
 
-	// Build response
 	response := JobStatusResponse{
 		JobId:        jobId,
-		TargetId:     pod.Labels["krkn-target-id"],
-		ClusterName:  pod.Labels["krkn-cluster-name"],
+		TargetUUID:   pod.Labels["krkn-target-uuid"],
 		ScenarioName: pod.Labels["krkn-scenario-name"],
-		Status:       status,
+		Status:       string(pod.Status.Phase),
 		PodName:      pod.Name,
 	}
 
@@ -1014,23 +1004,19 @@ func (h *Handler) GetScenarioRunStatus(w http.ResponseWriter, r *http.Request) {
 		response.StartTime = &startTime
 	}
 
-	// Check for completion time
 	for _, condition := range pod.Status.Conditions {
-		if condition.Type == corev1.PodReady && condition.Status == corev1.ConditionFalse {
-			if pod.Status.Phase == "Succeeded" || pod.Status.Phase == "Failed" {
-				completionTime := condition.LastTransitionTime.Time
-				response.CompletionTime = &completionTime
-			}
+		if condition.Type == corev1.PodReady && condition.Status == corev1.ConditionFalse &&
+			(pod.Status.Phase == "Succeeded" || pod.Status.Phase == "Failed") {
+			completionTime := condition.LastTransitionTime.Time
+			response.CompletionTime = &completionTime
 		}
 	}
 
-	// Add message if pod failed
 	if pod.Status.Phase == "Failed" {
 		response.Message = pod.Status.Message
-		if response.Message == "" && len(pod.Status.ContainerStatuses) > 0 {
-			if pod.Status.ContainerStatuses[0].State.Terminated != nil {
-				response.Message = pod.Status.ContainerStatuses[0].State.Terminated.Reason
-			}
+		if response.Message == "" && len(pod.Status.ContainerStatuses) > 0 &&
+			pod.Status.ContainerStatuses[0].State.Terminated != nil {
+			response.Message = pod.Status.ContainerStatuses[0].State.Terminated.Reason
 		}
 	}
 
@@ -1196,8 +1182,7 @@ func (h *Handler) ListScenarioRuns(w http.ResponseWriter, r *http.Request) {
 	// Parse query parameters for filtering
 	statusFilter := r.URL.Query().Get("status")
 	scenarioNameFilter := r.URL.Query().Get("scenarioName")
-	targetIdFilter := r.URL.Query().Get("targetId")
-	clusterNameFilter := r.URL.Query().Get("clusterName")
+	targetUUIDFilter := r.URL.Query().Get("targetUUID")
 
 	// List all pods with krkn-scenario label
 	var podList corev1.PodList
@@ -1217,49 +1202,33 @@ func (h *Handler) ListScenarioRuns(w http.ResponseWriter, r *http.Request) {
 
 	for _, pod := range podList.Items {
 		jobId := pod.Labels["krkn-job-id"]
-		targetId := pod.Labels["krkn-target-id"]
-		clusterName := pod.Labels["krkn-cluster-name"]
+		targetUUID := pod.Labels["krkn-target-uuid"]
 		scenarioName := pod.Labels["krkn-scenario-name"]
 
-		// Apply filters
-		if statusFilter != "" && string(pod.Status.Phase) != statusFilter {
+		if (statusFilter != "" && string(pod.Status.Phase) != statusFilter) ||
+			(scenarioNameFilter != "" && scenarioName != scenarioNameFilter) ||
+			(targetUUIDFilter != "" && targetUUID != targetUUIDFilter) {
 			continue
 		}
-		if scenarioNameFilter != "" && scenarioName != scenarioNameFilter {
-			continue
-		}
-		if targetIdFilter != "" && targetId != targetIdFilter {
-			continue
-		}
-		if clusterNameFilter != "" && clusterName != clusterNameFilter {
-			continue
-		}
-
-		// Map pod phase to job status
-		status := string(pod.Status.Phase)
 
 		jobStatus := JobStatusResponse{
 			JobId:        jobId,
-			TargetId:     targetId,
-			ClusterName:  clusterName,
+			TargetUUID:   targetUUID,
 			ScenarioName: scenarioName,
-			Status:       status,
+			Status:       string(pod.Status.Phase),
 			PodName:      pod.Name,
 		}
 
-		// Add timestamps
 		if pod.Status.StartTime != nil {
 			startTime := pod.Status.StartTime.Time
 			jobStatus.StartTime = &startTime
 		}
 
-		// Check for completion time
 		for _, condition := range pod.Status.Conditions {
-			if condition.Type == corev1.PodReady && condition.Status == corev1.ConditionFalse {
-				if pod.Status.Phase == "Succeeded" || pod.Status.Phase == "Failed" {
-					completionTime := condition.LastTransitionTime.Time
-					jobStatus.CompletionTime = &completionTime
-				}
+			if condition.Type == corev1.PodReady && condition.Status == corev1.ConditionFalse &&
+				(pod.Status.Phase == "Succeeded" || pod.Status.Phase == "Failed") {
+				completionTime := condition.LastTransitionTime.Time
+				jobStatus.CompletionTime = &completionTime
 			}
 		}
 
@@ -1321,25 +1290,19 @@ func (h *Handler) DeleteScenarioRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Delete associated ConfigMaps
 	var configMapList corev1.ConfigMapList
-	err = h.client.List(ctx, &configMapList, client.InNamespace(h.namespace), client.MatchingLabels{
+	if err := h.client.List(ctx, &configMapList, client.InNamespace(h.namespace), client.MatchingLabels{
 		"krkn-job-id": jobId,
-	})
-
-	if err == nil {
+	}); err == nil {
 		for _, cm := range configMapList.Items {
 			h.client.Delete(ctx, &cm)
 		}
 	}
 
-	// Delete associated Secrets (ImagePullSecrets)
 	var secretList corev1.SecretList
-	err = h.client.List(ctx, &secretList, client.InNamespace(h.namespace), client.MatchingLabels{
+	if err := h.client.List(ctx, &secretList, client.InNamespace(h.namespace), client.MatchingLabels{
 		"krkn-job-id": jobId,
-	})
-
-	if err == nil {
+	}); err == nil {
 		for _, secret := range secretList.Items {
 			h.client.Delete(ctx, &secret)
 		}
@@ -1354,44 +1317,39 @@ func (h *Handler) DeleteScenarioRun(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, response)
 }
 
-// ScenariosRunRouter routes requests to /api/v1/scenarios/run endpoints
 func (h *Handler) ScenariosRunRouter(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path
 
-	// POST /api/v1/scenarios/run - create new job
-	if path == "/api/v1/scenarios/run" && r.Method == http.MethodPost {
-		h.PostScenarioRun(w, r)
+	if path == "/api/v1/scenarios/run" {
+		if r.Method == http.MethodPost {
+			h.PostScenarioRun(w, r)
+		} else if r.Method == http.MethodGet {
+			h.ListScenarioRuns(w, r)
+		} else {
+			writeJSONError(w, http.StatusMethodNotAllowed, ErrorResponse{
+				Error:   "method_not_allowed",
+				Message: "Method " + r.Method + " not allowed for path " + path,
+			})
+		}
 		return
 	}
 
-	// GET /api/v1/scenarios/run - list all jobs
-	if path == "/api/v1/scenarios/run" && r.Method == http.MethodGet {
-		h.ListScenarioRuns(w, r)
-		return
-	}
-
-	// Path with jobId: /api/v1/scenarios/run/{jobId}...
 	if strings.HasPrefix(path, "/api/v1/scenarios/run/") {
-		// GET /api/v1/scenarios/run/{jobId}/logs - stream logs
 		if strings.HasSuffix(path, "/logs") && r.Method == http.MethodGet {
 			h.GetScenarioRunLogs(w, r)
-			return
-		}
-
-		// GET /api/v1/scenarios/run/{jobId} - get job status
-		if r.Method == http.MethodGet {
+		} else if r.Method == http.MethodGet {
 			h.GetScenarioRunStatus(w, r)
-			return
-		}
-
-		// DELETE /api/v1/scenarios/run/{jobId} - delete job
-		if r.Method == http.MethodDelete {
+		} else if r.Method == http.MethodDelete {
 			h.DeleteScenarioRun(w, r)
-			return
+		} else {
+			writeJSONError(w, http.StatusMethodNotAllowed, ErrorResponse{
+				Error:   "method_not_allowed",
+				Message: "Method " + r.Method + " not allowed for path " + path,
+			})
 		}
+		return
 	}
 
-	// Method not allowed
 	writeJSONError(w, http.StatusMethodNotAllowed, ErrorResponse{
 		Error:   "method_not_allowed",
 		Message: "Method " + r.Method + " not allowed for path " + path,

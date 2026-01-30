@@ -135,14 +135,8 @@ type FileMount struct {
 
 // ScenarioRunRequest represents the request body for POST /scenarios/run
 type ScenarioRunRequest struct {
-	// TargetUUID is the UUID of the KrknOperatorTarget CR (new system, preferred)
-	TargetUUID string `json:"targetUUID,omitempty"`
-
-	// Legacy parameters for backward compatibility:
-	// TargetId is the UUID of the KrknTargetRequest CR (legacy)
-	TargetId string `json:"targetId,omitempty"`
-	// ClusterName is the name of the target cluster (legacy)
-	ClusterName string `json:"clusterName,omitempty"`
+	// TargetUUIDs is the array of KrknOperatorTarget UUIDs (required, minimum 1 element)
+	TargetUUIDs []string `json:"targetUUIDs"`
 
 	// ScenarioImage is the container image to run
 	ScenarioImage string `json:"scenarioImage"`
@@ -158,24 +152,40 @@ type ScenarioRunRequest struct {
 	ScenariosRequest
 }
 
-// ScenarioRunResponse represents the response for POST /scenarios/run
-type ScenarioRunResponse struct {
+// TargetJobResult represents the result of creating a job for a specific target
+type TargetJobResult struct {
+	// TargetUUID is the UUID of the target
+	TargetUUID string `json:"targetUUID"`
 	// JobId is the unique job identifier
 	JobId string `json:"jobId"`
-	// Status is the initial job status (usually "Pending")
+	// Status is the initial job status (usually "Pending" or "Failed")
 	Status string `json:"status"`
 	// PodName is the Kubernetes pod name
 	PodName string `json:"podName"`
+	// Success indicates if the job was created successfully
+	Success bool `json:"success"`
+	// Error contains error message if Success is false
+	Error string `json:"error,omitempty"`
+}
+
+// ScenarioRunResponse represents the response for POST /scenarios/run
+type ScenarioRunResponse struct {
+	// Jobs is the array of job results for each target
+	Jobs []TargetJobResult `json:"jobs"`
+	// TotalTargets is the total number of targets requested
+	TotalTargets int `json:"totalTargets"`
+	// SuccessfulJobs is the number of jobs created successfully
+	SuccessfulJobs int `json:"successfulJobs"`
+	// FailedJobs is the number of jobs that failed to create
+	FailedJobs int `json:"failedJobs"`
 }
 
 // JobStatusResponse represents the response for GET /scenarios/run/{jobId}
 type JobStatusResponse struct {
 	// JobId is the unique job identifier
 	JobId string `json:"jobId"`
-	// TargetId is the KrknTargetRequest UUID
-	TargetId string `json:"targetId"`
-	// ClusterName is the target cluster name
-	ClusterName string `json:"clusterName"`
+	// TargetUUID is the KrknOperatorTarget UUID
+	TargetUUID string `json:"targetUUID"`
 	// ScenarioName is the scenario name
 	ScenarioName string `json:"scenarioName"`
 	// Status is the current job status (Pending, Running, Succeeded, Failed, Stopped)
@@ -263,6 +273,5 @@ type ListTargetsResponse struct {
 
 // UpdateTargetRequest represents the request body for PUT /api/v1/targets/{uuid}
 type UpdateTargetRequest struct {
-	// Same fields as CreateTargetRequest
 	CreateTargetRequest
 }
