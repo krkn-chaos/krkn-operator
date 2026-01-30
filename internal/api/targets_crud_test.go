@@ -23,6 +23,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -315,7 +316,7 @@ func TestCreateTarget_MissingRequiredFields(t *testing.T) {
 				t.Fatalf("Failed to unmarshal error response: %v", err)
 			}
 
-			if errResp.Message == "" || !contains(errResp.Message, tt.wantError) {
+			if errResp.Message == "" || !strings.Contains(errResp.Message, tt.wantError) {
 				t.Errorf("Expected error containing '%s', got '%s'", tt.wantError, errResp.Message)
 			}
 		})
@@ -366,7 +367,7 @@ func TestCreateTarget_DuplicateClusterName(t *testing.T) {
 	var errResp ErrorResponse
 	json.Unmarshal(w.Body.Bytes(), &errResp)
 
-	if !contains(errResp.Message, "already exists") {
+	if !strings.Contains(errResp.Message, "already exists") {
 		t.Errorf("Expected 'already exists' error, got '%s'", errResp.Message)
 	}
 }
@@ -685,19 +686,4 @@ func TestUpdateTarget(t *testing.T) {
 	if newKubeconfig == "initial-kubeconfig" {
 		t.Error("Expected kubeconfig to be updated, but it's still the initial value")
 	}
-}
-
-// Helper function to check if a string contains a substring
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(substr) == 0 ||
-		(len(s) > 0 && len(substr) > 0 && findSubstring(s, substr)))
-}
-
-func findSubstring(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
 }

@@ -35,6 +35,112 @@ import (
 	"github.com/krkn-chaos/krkn-operator/internal/kubeconfig"
 )
 
+// fetchTarget retrieves a KrknOperatorTarget by UUID.
+// Returns the target and any error encountered.
+func (h *Handler) fetchTarget(ctx context.Context, targetUUID string) (*krknv1alpha1.KrknOperatorTarget, error) {
+	var target krknv1alpha1.KrknOperatorTarget
+	err := h.client.Get(ctx, types.NamespacedName{
+		Name:      targetUUID,
+		Namespace: h.namespace,
+	}, &target)
+
+	if err != nil {
+		if client.IgnoreNotFound(err) == nil {
+			return nil, fmt.Errorf("target with UUID '%s' not found", targetUUID)
+		}
+		return nil, fmt.Errorf("failed to get target: %w", err)
+	}
+
+	return &target, nil
+}
+
+// generateKubeconfigFromRequest generates a kubeconfig based on the provided request parameters.
+// Returns the base64-encoded kubeconfig and the API URL extracted or provided.
+func generateKubeconfigFromRequest(req CreateTargetRequest) (kubeconfigBase64 string, apiURL string, err error) {
+	switch req.SecretType {
+	case "kubeconfig":
+		return generateKubeconfigFromKubeconfigType(req)
+
+	case "token":
+		return generateKubeconfigFromTokenType(req)
+
+	case "credentials":
+		return generateKubeconfigFromCredentialsType(req)
+
+	default:
+		return "", "", fmt.Errorf("secretType must be one of: kubeconfig, token, credentials")
+	}
+}
+
+// generateKubeconfigFromKubeconfigType handles kubeconfig-based authentication.
+func generateKubeconfigFromKubeconfigType(req CreateTargetRequest) (string, string, error) {
+	if req.Kubeconfig == "" {
+		return "", "", fmt.Errorf("kubeconfig is required when secretType is 'kubeconfig'")
+	}
+
+	if err := kubeconfig.Validate(req.Kubeconfig); err != nil {
+		return "", "", fmt.Errorf("invalid kubeconfig: %w", err)
+	}
+
+	apiURL, err := kubeconfig.ExtractAPIURL(req.Kubeconfig)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to extract API URL from kubeconfig: %w", err)
+	}
+
+	return req.Kubeconfig, apiURL, nil
+}
+
+// generateKubeconfigFromTokenType handles token-based authentication.
+func generateKubeconfigFromTokenType(req CreateTargetRequest) (string, string, error) {
+	if req.Token == "" {
+		return "", "", fmt.Errorf("token is required when secretType is 'token'")
+	}
+
+	if req.ClusterAPIURL == "" {
+		return "", "", fmt.Errorf("clusterAPIURL is required when secretType is 'token'")
+	}
+
+	insecureSkipTLS := req.CABundle == ""
+	kubeconfigBase64, err := kubeconfig.GenerateFromToken(
+		req.ClusterName,
+		req.ClusterAPIURL,
+		req.CABundle,
+		req.Token,
+		insecureSkipTLS,
+	)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to generate kubeconfig from token: %w", err)
+	}
+
+	return kubeconfigBase64, req.ClusterAPIURL, nil
+}
+
+// generateKubeconfigFromCredentialsType handles username/password authentication.
+func generateKubeconfigFromCredentialsType(req CreateTargetRequest) (string, string, error) {
+	if req.Username == "" || req.Password == "" {
+		return "", "", fmt.Errorf("username and password are required when secretType is 'credentials'")
+	}
+
+	if req.ClusterAPIURL == "" {
+		return "", "", fmt.Errorf("clusterAPIURL is required when secretType is 'credentials'")
+	}
+
+	insecureSkipTLS := req.CABundle == ""
+	kubeconfigBase64, err := kubeconfig.GenerateFromCredentials(
+		req.ClusterName,
+		req.ClusterAPIURL,
+		req.CABundle,
+		req.Username,
+		req.Password,
+		insecureSkipTLS,
+	)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to generate kubeconfig from credentials: %w", err)
+	}
+
+	return kubeconfigBase64, req.ClusterAPIURL, nil
+}
+
 // CreateTarget handles POST /api/v1/operator/targets
 // Creates a new KrknOperatorTarget CR with a generated UUID and associated Secret
 func (h *Handler) CreateTarget(w http.ResponseWriter, r *http.Request) {
@@ -50,7 +156,6 @@ func (h *Handler) CreateTarget(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate required fields
 	if req.ClusterName == "" {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
 			Error:   "bad_request",
@@ -67,130 +172,13 @@ func (h *Handler) CreateTarget(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate secretType
-	if req.SecretType != "kubeconfig" && req.SecretType != "token" && req.SecretType != "credentials" {
+	kubeconfigBase64, apiURL, err := generateKubeconfigFromRequest(req)
+	if err != nil {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
 			Error:   "bad_request",
-			Message: "secretType must be one of: kubeconfig, token, credentials",
+			Message: err.Error(),
 		})
 		return
-	}
-
-	// Generate kubeconfig and validate based on secretType
-	var kubeconfigBase64 string
-	var apiURL string
-	var err error
-
-	switch req.SecretType {
-	case "kubeconfig":
-		// Validate kubeconfig is provided
-		if req.Kubeconfig == "" {
-			writeJSONError(w, http.StatusBadRequest, ErrorResponse{
-				Error:   "bad_request",
-				Message: "kubeconfig is required when secretType is 'kubeconfig'",
-			})
-			return
-		}
-
-		// Validate kubeconfig format
-		if err := kubeconfig.Validate(req.Kubeconfig); err != nil {
-			writeJSONError(w, http.StatusBadRequest, ErrorResponse{
-				Error:   "bad_request",
-				Message: "Invalid kubeconfig: " + err.Error(),
-			})
-			return
-		}
-
-		// Extract API URL from kubeconfig
-		apiURL, err = kubeconfig.ExtractAPIURL(req.Kubeconfig)
-		if err != nil {
-			writeJSONError(w, http.StatusBadRequest, ErrorResponse{
-				Error:   "bad_request",
-				Message: "Failed to extract API URL from kubeconfig: " + err.Error(),
-			})
-			return
-		}
-
-		kubeconfigBase64 = req.Kubeconfig
-
-	case "token":
-		// Validate token and clusterAPIURL
-		if req.Token == "" {
-			writeJSONError(w, http.StatusBadRequest, ErrorResponse{
-				Error:   "bad_request",
-				Message: "token is required when secretType is 'token'",
-			})
-			return
-		}
-
-		if req.ClusterAPIURL == "" {
-			writeJSONError(w, http.StatusBadRequest, ErrorResponse{
-				Error:   "bad_request",
-				Message: "clusterAPIURL is required when secretType is 'token'",
-			})
-			return
-		}
-
-		// Determine if TLS should be skipped
-		insecureSkipTLS := req.CABundle == ""
-
-		// Generate kubeconfig from token
-		kubeconfigBase64, err = kubeconfig.GenerateFromToken(
-			req.ClusterName,
-			req.ClusterAPIURL,
-			req.CABundle,
-			req.Token,
-			insecureSkipTLS,
-		)
-		if err != nil {
-			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
-				Error:   "internal_error",
-				Message: "Failed to generate kubeconfig from token: " + err.Error(),
-			})
-			return
-		}
-
-		apiURL = req.ClusterAPIURL
-
-	case "credentials":
-		// Validate credentials and clusterAPIURL
-		if req.Username == "" || req.Password == "" {
-			writeJSONError(w, http.StatusBadRequest, ErrorResponse{
-				Error:   "bad_request",
-				Message: "username and password are required when secretType is 'credentials'",
-			})
-			return
-		}
-
-		if req.ClusterAPIURL == "" {
-			writeJSONError(w, http.StatusBadRequest, ErrorResponse{
-				Error:   "bad_request",
-				Message: "clusterAPIURL is required when secretType is 'credentials'",
-			})
-			return
-		}
-
-		// Determine if TLS should be skipped
-		insecureSkipTLS := req.CABundle == ""
-
-		// Generate kubeconfig from credentials
-		kubeconfigBase64, err = kubeconfig.GenerateFromCredentials(
-			req.ClusterName,
-			req.ClusterAPIURL,
-			req.CABundle,
-			req.Username,
-			req.Password,
-			insecureSkipTLS,
-		)
-		if err != nil {
-			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
-				Error:   "internal_error",
-				Message: "Failed to generate kubeconfig from credentials: " + err.Error(),
-			})
-			return
-		}
-
-		apiURL = req.ClusterAPIURL
 	}
 
 	// Check for duplicate clusterName or clusterAPIURL
@@ -314,16 +302,8 @@ func (h *Handler) ListTargets(w http.ResponseWriter, r *http.Request) {
 
 	// Convert to response format
 	var targetResponses []TargetResponse
-	for _, target := range targets.Items {
-		createdAt := target.CreationTimestamp.Time
-		targetResponses = append(targetResponses, TargetResponse{
-			UUID:          target.Spec.UUID,
-			ClusterName:   target.Spec.ClusterName,
-			ClusterAPIURL: target.Spec.ClusterAPIURL,
-			SecretType:    target.Spec.SecretType,
-			Ready:         target.Status.Ready,
-			CreatedAt:     &createdAt,
-		})
+	for i := range targets.Items {
+		targetResponses = append(targetResponses, buildTargetResponse(&targets.Items[i]))
 	}
 
 	response := ListTargetsResponse{
@@ -338,59 +318,22 @@ func (h *Handler) ListTargets(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) GetTarget(w http.ResponseWriter, r *http.Request) {
 	ctx := context.Background()
 
-	// Extract UUID from path
-	path := r.URL.Path
-	prefix := "/api/v1/operator/targets/"
-
-	if len(path) <= len(prefix) {
+	targetUUID, err := extractPathSuffix(r.URL.Path, "/api/v1/operator/targets/")
+	if err != nil {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
 			Error:   "bad_request",
-			Message: "UUID parameter is required in path",
+			Message: "UUID " + err.Error(),
 		})
 		return
 	}
 
-	targetUUID := path[len(prefix):]
-	if targetUUID == "" {
-		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
-			Error:   "bad_request",
-			Message: "UUID parameter cannot be empty",
-		})
+	target, err := h.fetchTarget(ctx, targetUUID)
+	if err != nil {
+		h.writeTargetFetchError(w, err)
 		return
 	}
 
-	// Fetch the target
-	var target krknv1alpha1.KrknOperatorTarget
-	if err := h.client.Get(ctx, types.NamespacedName{
-		Name:      targetUUID,
-		Namespace: h.namespace,
-	}, &target); err != nil {
-		if client.IgnoreNotFound(err) == nil {
-			writeJSONError(w, http.StatusNotFound, ErrorResponse{
-				Error:   "not_found",
-				Message: fmt.Sprintf("Target with UUID '%s' not found", targetUUID),
-			})
-			return
-		}
-
-		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
-			Error:   "internal_error",
-			Message: "Failed to get target: " + err.Error(),
-		})
-		return
-	}
-
-	// Convert to response format
-	createdAt := target.CreationTimestamp.Time
-	response := TargetResponse{
-		UUID:          target.Spec.UUID,
-		ClusterName:   target.Spec.ClusterName,
-		ClusterAPIURL: target.Spec.ClusterAPIURL,
-		SecretType:    target.Spec.SecretType,
-		Ready:         target.Status.Ready,
-		CreatedAt:     &createdAt,
-	}
-
+	response := buildTargetResponse(target)
 	writeJSON(w, http.StatusOK, response)
 }
 
@@ -399,28 +342,15 @@ func (h *Handler) GetTarget(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) UpdateTarget(w http.ResponseWriter, r *http.Request) {
 	ctx := context.Background()
 
-	// Extract UUID from path
-	path := r.URL.Path
-	prefix := "/api/v1/operator/targets/"
-
-	if len(path) <= len(prefix) {
+	targetUUID, err := extractPathSuffix(r.URL.Path, "/api/v1/operator/targets/")
+	if err != nil {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
 			Error:   "bad_request",
-			Message: "UUID parameter is required in path",
+			Message: "UUID " + err.Error(),
 		})
 		return
 	}
 
-	targetUUID := path[len(prefix):]
-	if targetUUID == "" {
-		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
-			Error:   "bad_request",
-			Message: "UUID parameter cannot be empty",
-		})
-		return
-	}
-
-	// Parse request body
 	var req UpdateTargetRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
@@ -430,117 +360,19 @@ func (h *Handler) UpdateTarget(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Fetch existing target
-	var target krknv1alpha1.KrknOperatorTarget
-	if err := h.client.Get(ctx, types.NamespacedName{
-		Name:      targetUUID,
-		Namespace: h.namespace,
-	}, &target); err != nil {
-		if client.IgnoreNotFound(err) == nil {
-			writeJSONError(w, http.StatusNotFound, ErrorResponse{
-				Error:   "not_found",
-				Message: fmt.Sprintf("Target with UUID '%s' not found", targetUUID),
-			})
-			return
-		}
-
-		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
-			Error:   "internal_error",
-			Message: "Failed to get target: " + err.Error(),
-		})
+	target, err := h.fetchTarget(ctx, targetUUID)
+	if err != nil {
+		h.writeTargetFetchError(w, err)
 		return
 	}
 
-	// Generate new kubeconfig based on secretType
-	var kubeconfigBase64 string
-	var apiURL string
-	var err error
-
-	switch req.SecretType {
-	case "kubeconfig":
-		if req.Kubeconfig == "" {
-			writeJSONError(w, http.StatusBadRequest, ErrorResponse{
-				Error:   "bad_request",
-				Message: "kubeconfig is required when secretType is 'kubeconfig'",
-			})
-			return
-		}
-
-		if err := kubeconfig.Validate(req.Kubeconfig); err != nil {
-			writeJSONError(w, http.StatusBadRequest, ErrorResponse{
-				Error:   "bad_request",
-				Message: "Invalid kubeconfig: " + err.Error(),
-			})
-			return
-		}
-
-		apiURL, err = kubeconfig.ExtractAPIURL(req.Kubeconfig)
-		if err != nil {
-			writeJSONError(w, http.StatusBadRequest, ErrorResponse{
-				Error:   "bad_request",
-				Message: "Failed to extract API URL from kubeconfig: " + err.Error(),
-			})
-			return
-		}
-
-		kubeconfigBase64 = req.Kubeconfig
-
-	case "token":
-		if req.Token == "" || req.ClusterAPIURL == "" {
-			writeJSONError(w, http.StatusBadRequest, ErrorResponse{
-				Error:   "bad_request",
-				Message: "token and clusterAPIURL are required when secretType is 'token'",
-			})
-			return
-		}
-
-		insecureSkipTLS := req.CABundle == ""
-
-		kubeconfigBase64, err = kubeconfig.GenerateFromToken(
-			req.ClusterName,
-			req.ClusterAPIURL,
-			req.CABundle,
-			req.Token,
-			insecureSkipTLS,
-		)
-		if err != nil {
-			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
-				Error:   "internal_error",
-				Message: "Failed to generate kubeconfig from token: " + err.Error(),
-			})
-			return
-		}
-
-		apiURL = req.ClusterAPIURL
-
-	case "credentials":
-		if req.Username == "" || req.Password == "" || req.ClusterAPIURL == "" {
-			writeJSONError(w, http.StatusBadRequest, ErrorResponse{
-				Error:   "bad_request",
-				Message: "username, password, and clusterAPIURL are required when secretType is 'credentials'",
-			})
-			return
-		}
-
-		insecureSkipTLS := req.CABundle == ""
-
-		kubeconfigBase64, err = kubeconfig.GenerateFromCredentials(
-			req.ClusterName,
-			req.ClusterAPIURL,
-			req.CABundle,
-			req.Username,
-			req.Password,
-			insecureSkipTLS,
-		)
-		if err != nil {
-			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
-				Error:   "internal_error",
-				Message: "Failed to generate kubeconfig from credentials: " + err.Error(),
-			})
-			return
-		}
-
-		apiURL = req.ClusterAPIURL
+	kubeconfigBase64, apiURL, err := generateKubeconfigFromRequest(req.CreateTargetRequest)
+	if err != nil {
+		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+			Error:   "bad_request",
+			Message: err.Error(),
+		})
+		return
 	}
 
 	// Update Secret with new kubeconfig
@@ -585,7 +417,7 @@ func (h *Handler) UpdateTarget(w http.ResponseWriter, r *http.Request) {
 	target.Spec.InsecureSkipTLSVerify = req.CABundle == ""
 	target.Status.LastUpdated = metav1.Now()
 
-	if err := h.client.Update(ctx, &target); err != nil {
+	if err := h.client.Update(ctx, target); err != nil {
 		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
 			Error:   "internal_error",
 			Message: "Failed to update target: " + err.Error(),
@@ -606,49 +438,21 @@ func (h *Handler) UpdateTarget(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) DeleteTarget(w http.ResponseWriter, r *http.Request) {
 	ctx := context.Background()
 
-	// Extract UUID from path
-	path := r.URL.Path
-	prefix := "/api/v1/operator/targets/"
-
-	if len(path) <= len(prefix) {
+	targetUUID, err := extractPathSuffix(r.URL.Path, "/api/v1/operator/targets/")
+	if err != nil {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
 			Error:   "bad_request",
-			Message: "UUID parameter is required in path",
+			Message: "UUID " + err.Error(),
 		})
 		return
 	}
 
-	targetUUID := path[len(prefix):]
-	if targetUUID == "" {
-		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
-			Error:   "bad_request",
-			Message: "UUID parameter cannot be empty",
-		})
+	target, err := h.fetchTarget(ctx, targetUUID)
+	if err != nil {
+		h.writeTargetFetchError(w, err)
 		return
 	}
 
-	// Fetch the target
-	var target krknv1alpha1.KrknOperatorTarget
-	if err := h.client.Get(ctx, types.NamespacedName{
-		Name:      targetUUID,
-		Namespace: h.namespace,
-	}, &target); err != nil {
-		if client.IgnoreNotFound(err) == nil {
-			writeJSONError(w, http.StatusNotFound, ErrorResponse{
-				Error:   "not_found",
-				Message: fmt.Sprintf("Target with UUID '%s' not found", targetUUID),
-			})
-			return
-		}
-
-		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
-			Error:   "internal_error",
-			Message: "Failed to get target: " + err.Error(),
-		})
-		return
-	}
-
-	// Delete associated Secret
 	secret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      target.Spec.SecretUUID,
@@ -658,11 +462,9 @@ func (h *Handler) DeleteTarget(w http.ResponseWriter, r *http.Request) {
 
 	if err := h.client.Delete(ctx, secret); err != nil && client.IgnoreNotFound(err) != nil {
 		// Log error but continue with target deletion
-		// The secret might have been manually deleted
 	}
 
-	// Delete the target
-	if err := h.client.Delete(ctx, &target); err != nil {
+	if err := h.client.Delete(ctx, target); err != nil {
 		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
 			Error:   "internal_error",
 			Message: "Failed to delete target: " + err.Error(),
@@ -720,4 +522,29 @@ func (h *Handler) TargetsCRUDRouter(w http.ResponseWriter, r *http.Request) {
 		Error:   "method_not_allowed",
 		Message: "Method " + r.Method + " not allowed for path " + path,
 	})
+}
+
+// writeTargetFetchError writes appropriate error response based on the fetch error.
+func (h *Handler) writeTargetFetchError(w http.ResponseWriter, err error) {
+	statusCode := http.StatusInternalServerError
+	if strings.Contains(err.Error(), "not found") {
+		statusCode = http.StatusNotFound
+	}
+	writeJSONError(w, statusCode, ErrorResponse{
+		Error:   "error",
+		Message: err.Error(),
+	})
+}
+
+// buildTargetResponse constructs a TargetResponse from a KrknOperatorTarget CR.
+func buildTargetResponse(target *krknv1alpha1.KrknOperatorTarget) TargetResponse {
+	createdAt := target.CreationTimestamp.Time
+	return TargetResponse{
+		UUID:          target.Spec.UUID,
+		ClusterName:   target.Spec.ClusterName,
+		ClusterAPIURL: target.Spec.ClusterAPIURL,
+		SecretType:    target.Spec.SecretType,
+		Ready:         target.Status.Ready,
+		CreatedAt:     &createdAt,
+	}
 }

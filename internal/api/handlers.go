@@ -33,6 +33,7 @@ import (
 	"github.com/krkn-chaos/krknctl/pkg/provider"
 	"github.com/krkn-chaos/krknctl/pkg/provider/factory"
 	"github.com/krkn-chaos/krknctl/pkg/provider/models"
+	"github.com/krkn-chaos/krknctl/pkg/typing"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	corev1 "k8s.io/api/core/v1"
@@ -186,35 +187,20 @@ func (h *Handler) HealthCheck(w http.ResponseWriter, r *http.Request) {
 // GetTargetByUUID handles GET /api/v1/targets/{uuid} endpoint (legacy - checks KrknTargetRequest status)
 // This endpoint checks the status of a KrknTargetRequest CR created by krkn-operator-acm
 func (h *Handler) GetTargetByUUID(w http.ResponseWriter, r *http.Request) {
-	// Extract UUID from path: /api/v1/targets/{UUID}
-	path := r.URL.Path
-	prefix := "/api/v1/targets/"
-
-	if len(path) <= len(prefix) {
+	uuid, err := extractPathSuffix(r.URL.Path, "/api/v1/targets/")
+	if err != nil {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
 			Error:   "bad_request",
-			Message: "UUID parameter is required in path",
+			Message: "UUID " + err.Error(),
 		})
 		return
 	}
 
-	uuid := path[len(prefix):]
-	if uuid == "" {
-		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
-			Error:   "bad_request",
-			Message: "UUID parameter is required",
-		})
-		return
-	}
-
-	// Fetch the KrknTargetRequest CR by UUID
 	var targetRequest krknv1alpha1.KrknTargetRequest
-	err := h.client.Get(context.Background(), types.NamespacedName{
+	if err := h.client.Get(context.Background(), types.NamespacedName{
 		Name:      uuid,
 		Namespace: h.namespace,
-	}, &targetRequest)
-
-	if err != nil {
+	}, &targetRequest); err != nil {
 		if client.IgnoreNotFound(err) == nil {
 			// CR not found - return 404
 			w.WriteHeader(http.StatusNotFound)
@@ -289,6 +275,32 @@ func (h *Handler) TargetsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// convertInputFields converts krknctl InputField models to API InputFieldResponse format.
+// This ensures Type fields are serialized as strings instead of int64 enums.
+func convertInputFields(fields []typing.InputField) []InputFieldResponse {
+	result := make([]InputFieldResponse, 0, len(fields))
+	for _, field := range fields {
+		result = append(result, InputFieldResponse{
+			Name:              field.Name,
+			ShortDescription:  field.ShortDescription,
+			Description:       field.Description,
+			Variable:          field.Variable,
+			Type:              field.Type.String(),
+			Default:           field.Default,
+			Validator:         field.Validator,
+			ValidationMessage: field.ValidationMessage,
+			Separator:         field.Separator,
+			AllowedValues:     field.AllowedValues,
+			Required:          field.Required,
+			MountPath:         field.MountPath,
+			Requires:          field.Requires,
+			MutuallyExcludes:  field.MutuallyExcludes,
+			Secret:            field.Secret,
+		})
+	}
+	return result
+}
+
 // writeJSON writes a JSON response with the given status code
 func writeJSON(w http.ResponseWriter, status int, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
@@ -334,71 +346,73 @@ func (h *Handler) callGetNodesGRPC(kubeconfigBase64 string) ([]string, error) {
 	return resp.Nodes, nil
 }
 
+// parseRegistryRequest parses and validates the registry request from the HTTP body.
+// Returns the registry configuration, provider mode, and any error.
+func parseRegistryRequest(r *http.Request) (*models.RegistryV2, provider.Mode, error) {
+	if r.ContentLength == 0 {
+		return nil, provider.Quay, nil
+	}
+
+	var req ScenariosRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		return nil, provider.Quay, fmt.Errorf("invalid request body: %w", err)
+	}
+
+	if req.RegistryURL == "" && req.ScenarioRepository == "" {
+		return nil, provider.Quay, nil
+	}
+
+	if req.RegistryURL == "" || req.ScenarioRepository == "" {
+		return nil, provider.Quay, fmt.Errorf("both registryUrl and scenarioRepository are required for private registry")
+	}
+
+	registry := &models.RegistryV2{
+		Username:           req.Username,
+		Password:           req.Password,
+		Token:              req.Token,
+		RegistryURL:        req.RegistryURL,
+		ScenarioRepository: req.ScenarioRepository,
+		SkipTLS:            req.SkipTLS,
+		Insecure:           req.Insecure,
+	}
+
+	return registry, provider.Private, nil
+}
+
+// createScenarioProvider creates and returns a scenario provider instance.
+// Returns an error if config loading or provider creation fails.
+func createScenarioProvider(mode provider.Mode) (provider.ScenarioDataProvider, error) {
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		return nil, fmt.Errorf("failed to load krknctl config: %w", err)
+	}
+
+	providerFactory := factory.NewProviderFactory(&cfg)
+	scenarioProvider := providerFactory.NewInstance(mode)
+	if scenarioProvider == nil {
+		return nil, fmt.Errorf("failed to create scenario provider")
+	}
+
+	return scenarioProvider, nil
+}
+
 // PostScenarios handles POST /api/v1/scenarios endpoint
 // It returns the list of available krkn scenarios from quay.io or a private registry
 func (h *Handler) PostScenarios(w http.ResponseWriter, r *http.Request) {
-	// Parse optional request body
-	var req ScenariosRequest
-	var registry *models.RegistryV2
-	var mode provider.Mode
-
-	// Check if body is provided
-	if r.ContentLength > 0 {
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeJSONError(w, http.StatusBadRequest, ErrorResponse{
-				Error:   "bad_request",
-				Message: "Invalid request body: " + err.Error(),
-			})
-			return
-		}
-
-		// If registry info is provided, validate and use private registry mode
-		if req.RegistryURL != "" && req.ScenarioRepository != "" {
-			registry = &models.RegistryV2{
-				Username:           req.Username,
-				Password:           req.Password,
-				Token:              req.Token,
-				RegistryURL:        req.RegistryURL,
-				ScenarioRepository: req.ScenarioRepository,
-				SkipTLS:            req.SkipTLS,
-				Insecure:           req.Insecure,
-			}
-			mode = provider.Private
-		} else if req.RegistryURL != "" || req.ScenarioRepository != "" {
-			// Partial registry info provided - error
-			writeJSONError(w, http.StatusBadRequest, ErrorResponse{
-				Error:   "bad_request",
-				Message: "Both registryUrl and scenarioRepository are required for private registry",
-			})
-			return
-		} else {
-			// Body provided but no registry info - use quay.io
-			mode = provider.Quay
-		}
-	} else {
-		// No body provided - default to quay.io
-		mode = provider.Quay
-	}
-
-	// Load krknctl config
-	cfg, err := config.LoadConfig()
+	registry, mode, err := parseRegistryRequest(r)
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
-			Error:   "internal_error",
-			Message: "Failed to load krknctl config: " + err.Error(),
+		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+			Error:   "bad_request",
+			Message: err.Error(),
 		})
 		return
 	}
 
-	// Create provider factory
-	providerFactory := factory.NewProviderFactory(&cfg)
-
-	// Get provider instance based on mode
-	scenarioProvider := providerFactory.NewInstance(mode)
-	if scenarioProvider == nil {
+	scenarioProvider, err := createScenarioProvider(mode)
+	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
 			Error:   "internal_error",
-			Message: "Failed to create scenario provider",
+			Message: err.Error(),
 		})
 		return
 	}
@@ -434,92 +448,47 @@ func (h *Handler) PostScenarios(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, response)
 }
 
+// extractPathSuffix extracts a suffix from a URL path given a prefix.
+// Returns the suffix and an error if the path is invalid.
+func extractPathSuffix(path string, prefix string) (string, error) {
+	if len(path) <= len(prefix) {
+		return "", fmt.Errorf("path parameter is required")
+	}
+
+	suffix := path[len(prefix):]
+	if suffix == "" {
+		return "", fmt.Errorf("path parameter cannot be empty")
+	}
+
+	return suffix, nil
+}
+
 // PostScenarioDetail handles POST /api/v1/scenarios/detail/{scenario_name} endpoint
 // It returns detailed information about a specific scenario including input fields
 func (h *Handler) PostScenarioDetail(w http.ResponseWriter, r *http.Request) {
-	// Extract scenario_name from path: /api/v1/scenarios/detail/{scenario_name}
-	path := r.URL.Path
-	prefix := "/api/v1/scenarios/detail/"
-
-	if len(path) <= len(prefix) {
+	scenarioName, err := extractPathSuffix(r.URL.Path, "/api/v1/scenarios/detail/")
+	if err != nil {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
 			Error:   "bad_request",
-			Message: "scenario_name parameter is required in path",
+			Message: "scenario_name " + err.Error(),
 		})
 		return
 	}
 
-	scenarioName := path[len(prefix):]
-	if scenarioName == "" {
+	registry, mode, err := parseRegistryRequest(r)
+	if err != nil {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
 			Error:   "bad_request",
-			Message: "scenario_name parameter cannot be empty",
+			Message: err.Error(),
 		})
 		return
 	}
 
-	// Parse optional request body (same as /scenarios for registry config)
-	var req ScenariosRequest
-	var registry *models.RegistryV2
-	var mode provider.Mode
-
-	// Check if body is provided
-	if r.ContentLength > 0 {
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeJSONError(w, http.StatusBadRequest, ErrorResponse{
-				Error:   "bad_request",
-				Message: "Invalid request body: " + err.Error(),
-			})
-			return
-		}
-
-		// If registry info is provided, validate and use private registry mode
-		if req.RegistryURL != "" && req.ScenarioRepository != "" {
-			registry = &models.RegistryV2{
-				Username:           req.Username,
-				Password:           req.Password,
-				Token:              req.Token,
-				RegistryURL:        req.RegistryURL,
-				ScenarioRepository: req.ScenarioRepository,
-				SkipTLS:            req.SkipTLS,
-				Insecure:           req.Insecure,
-			}
-			mode = provider.Private
-		} else if req.RegistryURL != "" || req.ScenarioRepository != "" {
-			// Partial registry info provided - error
-			writeJSONError(w, http.StatusBadRequest, ErrorResponse{
-				Error:   "bad_request",
-				Message: "Both registryUrl and scenarioRepository are required for private registry",
-			})
-			return
-		} else {
-			// Body provided but no registry info - use quay.io
-			mode = provider.Quay
-		}
-	} else {
-		// No body provided - default to quay.io
-		mode = provider.Quay
-	}
-
-	// Load krknctl config
-	cfg, err := config.LoadConfig()
+	scenarioProvider, err := createScenarioProvider(mode)
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
 			Error:   "internal_error",
-			Message: "Failed to load krknctl config: " + err.Error(),
-		})
-		return
-	}
-
-	// Create provider factory
-	providerFactory := factory.NewProviderFactory(&cfg)
-
-	// Get provider instance based on mode
-	scenarioProvider := providerFactory.NewInstance(mode)
-	if scenarioProvider == nil {
-		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
-			Error:   "internal_error",
-			Message: "Failed to create scenario provider",
+			Message: err.Error(),
 		})
 		return
 	}
@@ -534,36 +503,12 @@ func (h *Handler) PostScenarioDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check if scenario was found
 	if scenarioDetail == nil {
 		writeJSONError(w, http.StatusNotFound, ErrorResponse{
 			Error:   "not_found",
 			Message: "Scenario '" + scenarioName + "' not found",
 		})
 		return
-	}
-
-	// Convert krknctl models.ScenarioDetail to ScenarioDetailResponse
-	// This ensures Type fields are serialized as strings instead of int64
-	var fields []InputFieldResponse
-	for _, field := range scenarioDetail.Fields {
-		fields = append(fields, InputFieldResponse{
-			Name:              field.Name,
-			ShortDescription:  field.ShortDescription,
-			Description:       field.Description,
-			Variable:          field.Variable,
-			Type:              field.Type.String(), // Convert enum to string
-			Default:           field.Default,
-			Validator:         field.Validator,
-			ValidationMessage: field.ValidationMessage,
-			Separator:         field.Separator,
-			AllowedValues:     field.AllowedValues,
-			Required:          field.Required,
-			MountPath:         field.MountPath,
-			Requires:          field.Requires,
-			MutuallyExcludes:  field.MutuallyExcludes,
-			Secret:            field.Secret,
-		})
 	}
 
 	response := ScenarioDetailResponse{
@@ -573,7 +518,7 @@ func (h *Handler) PostScenarioDetail(w http.ResponseWriter, r *http.Request) {
 		LastModified: scenarioDetail.LastModified,
 		Title:        scenarioDetail.Title,
 		Description:  scenarioDetail.Description,
-		Fields:       fields,
+		Fields:       convertInputFields(scenarioDetail.Fields),
 	}
 
 	writeJSON(w, http.StatusOK, response)
@@ -582,89 +527,29 @@ func (h *Handler) PostScenarioDetail(w http.ResponseWriter, r *http.Request) {
 // PostScenarioGlobals handles POST /api/v1/scenarios/globals/{scenario_name} endpoint
 // It returns global environment fields for a specific scenario
 func (h *Handler) PostScenarioGlobals(w http.ResponseWriter, r *http.Request) {
-	// Extract scenario_name from path: /api/v1/scenarios/globals/{scenario_name}
-	path := r.URL.Path
-	prefix := "/api/v1/scenarios/globals/"
-
-	if len(path) <= len(prefix) {
+	scenarioName, err := extractPathSuffix(r.URL.Path, "/api/v1/scenarios/globals/")
+	if err != nil {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
 			Error:   "bad_request",
-			Message: "scenario_name parameter is required in path",
+			Message: "scenario_name " + err.Error(),
 		})
 		return
 	}
 
-	scenarioName := path[len(prefix):]
-	if scenarioName == "" {
+	registry, mode, err := parseRegistryRequest(r)
+	if err != nil {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
 			Error:   "bad_request",
-			Message: "scenario_name parameter cannot be empty",
+			Message: err.Error(),
 		})
 		return
 	}
 
-	// Parse optional request body (same as /scenarios for registry config)
-	var req ScenariosRequest
-	var registry *models.RegistryV2
-	var mode provider.Mode
-
-	// Check if body is provided
-	if r.ContentLength > 0 {
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeJSONError(w, http.StatusBadRequest, ErrorResponse{
-				Error:   "bad_request",
-				Message: "Invalid request body: " + err.Error(),
-			})
-			return
-		}
-
-		// If registry info is provided, validate and use private registry mode
-		if req.RegistryURL != "" && req.ScenarioRepository != "" {
-			registry = &models.RegistryV2{
-				Username:           req.Username,
-				Password:           req.Password,
-				Token:              req.Token,
-				RegistryURL:        req.RegistryURL,
-				ScenarioRepository: req.ScenarioRepository,
-				SkipTLS:            req.SkipTLS,
-				Insecure:           req.Insecure,
-			}
-			mode = provider.Private
-		} else if req.RegistryURL != "" || req.ScenarioRepository != "" {
-			// Partial registry info provided - error
-			writeJSONError(w, http.StatusBadRequest, ErrorResponse{
-				Error:   "bad_request",
-				Message: "Both registryUrl and scenarioRepository are required for private registry",
-			})
-			return
-		} else {
-			// Body provided but no registry info - use quay.io
-			mode = provider.Quay
-		}
-	} else {
-		// No body provided - default to quay.io
-		mode = provider.Quay
-	}
-
-	// Load krknctl config
-	cfg, err := config.LoadConfig()
+	scenarioProvider, err := createScenarioProvider(mode)
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
 			Error:   "internal_error",
-			Message: "Failed to load krknctl config: " + err.Error(),
-		})
-		return
-	}
-
-	// Create provider factory
-	providerFactory := factory.NewProviderFactory(&cfg)
-
-	// Get provider instance based on mode
-	scenarioProvider := providerFactory.NewInstance(mode)
-	if scenarioProvider == nil {
-		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
-			Error:   "internal_error",
-			Message: "Failed to create scenario provider",
+			Message: err.Error(),
 		})
 		return
 	}
@@ -679,36 +564,12 @@ func (h *Handler) PostScenarioGlobals(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check if global environment was found
 	if globalDetail == nil {
 		writeJSONError(w, http.StatusNotFound, ErrorResponse{
 			Error:   "not_found",
 			Message: "Global environment for scenario '" + scenarioName + "' not found",
 		})
 		return
-	}
-
-	// Convert krknctl models.ScenarioDetail to ScenarioDetailResponse
-	// This ensures Type fields are serialized as strings instead of int64
-	var fields []InputFieldResponse
-	for _, field := range globalDetail.Fields {
-		fields = append(fields, InputFieldResponse{
-			Name:              field.Name,
-			ShortDescription:  field.ShortDescription,
-			Description:       field.Description,
-			Variable:          field.Variable,
-			Type:              field.Type.String(), // Convert enum to string
-			Default:           field.Default,
-			Validator:         field.Validator,
-			ValidationMessage: field.ValidationMessage,
-			Separator:         field.Separator,
-			AllowedValues:     field.AllowedValues,
-			Required:          field.Required,
-			MountPath:         field.MountPath,
-			Requires:          field.Requires,
-			MutuallyExcludes:  field.MutuallyExcludes,
-			Secret:            field.Secret,
-		})
 	}
 
 	response := ScenarioDetailResponse{
@@ -718,7 +579,7 @@ func (h *Handler) PostScenarioGlobals(w http.ResponseWriter, r *http.Request) {
 		LastModified: globalDetail.LastModified,
 		Title:        globalDetail.Title,
 		Description:  globalDetail.Description,
-		Fields:       fields,
+		Fields:       convertInputFields(globalDetail.Fields),
 	}
 
 	writeJSON(w, http.StatusOK, response)
@@ -1096,21 +957,7 @@ func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
 // GetScenarioRunStatus handles GET /api/v1/scenarios/run/{jobId} endpoint
 // It returns the current status of a specific job
 func (h *Handler) GetScenarioRunStatus(w http.ResponseWriter, r *http.Request) {
-	// Extract jobId from path
-	path := r.URL.Path
-	prefix := "/api/v1/scenarios/run/"
-
-	if len(path) <= len(prefix) {
-		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
-			Error:   "bad_request",
-			Message: "jobId parameter is required in path",
-		})
-		return
-	}
-
-	// Check if this is the logs endpoint
-	if strings.HasSuffix(path, "/logs") {
-		// This should be handled by GetScenarioRunLogs
+	if strings.HasSuffix(r.URL.Path, "/logs") {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
 			Error:   "bad_request",
 			Message: "Invalid endpoint",
@@ -1118,24 +965,21 @@ func (h *Handler) GetScenarioRunStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	jobId := path[len(prefix):]
-	if jobId == "" {
+	jobId, err := extractPathSuffix(r.URL.Path, "/api/v1/scenarios/run/")
+	if err != nil {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
 			Error:   "bad_request",
-			Message: "jobId parameter cannot be empty",
+			Message: "jobId " + err.Error(),
 		})
 		return
 	}
 
 	ctx := context.Background()
 
-	// Find pod by label
 	var podList corev1.PodList
-	err := h.client.List(ctx, &podList, client.InNamespace(h.namespace), client.MatchingLabels{
+	if err := h.client.List(ctx, &podList, client.InNamespace(h.namespace), client.MatchingLabels{
 		"krkn-job-id": jobId,
-	})
-
-	if err != nil {
+	}); err != nil {
 		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
 			Error:   "internal_error",
 			Message: "Failed to list pods: " + err.Error(),
@@ -1152,30 +996,14 @@ func (h *Handler) GetScenarioRunStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	pod := podList.Items[0]
-
-	// Extract info from labels
-	targetId := pod.Labels["krkn-target-id"]
-	clusterName := pod.Labels["krkn-cluster-name"]
-	scenarioName := pod.Labels["krkn-scenario-name"]
-
-	// Map pod phase to job status
 	status := string(pod.Status.Phase)
-	if status == "Succeeded" || status == "Failed" {
-		// Keep as is
-	} else if status == "Running" {
-		status = "Running"
-	} else if status == "Pending" {
-		status = "Pending"
-	} else {
-		status = "Unknown"
-	}
 
 	// Build response
 	response := JobStatusResponse{
 		JobId:        jobId,
-		TargetId:     targetId,
-		ClusterName:  clusterName,
-		ScenarioName: scenarioName,
+		TargetId:     pod.Labels["krkn-target-id"],
+		ClusterName:  pod.Labels["krkn-cluster-name"],
+		ScenarioName: pod.Labels["krkn-scenario-name"],
 		Status:       status,
 		PodName:      pod.Name,
 	}
@@ -1448,36 +1276,21 @@ func (h *Handler) ListScenarioRuns(w http.ResponseWriter, r *http.Request) {
 // DeleteScenarioRun handles DELETE /api/v1/scenarios/run/{jobId} endpoint
 // It stops and deletes a running job
 func (h *Handler) DeleteScenarioRun(w http.ResponseWriter, r *http.Request) {
-	// Extract jobId from path
-	path := r.URL.Path
-	prefix := "/api/v1/scenarios/run/"
-
-	if len(path) <= len(prefix) {
+	jobId, err := extractPathSuffix(r.URL.Path, "/api/v1/scenarios/run/")
+	if err != nil {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
 			Error:   "bad_request",
-			Message: "jobId parameter is required in path",
-		})
-		return
-	}
-
-	jobId := path[len(prefix):]
-	if jobId == "" {
-		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
-			Error:   "bad_request",
-			Message: "jobId parameter cannot be empty",
+			Message: "jobId " + err.Error(),
 		})
 		return
 	}
 
 	ctx := context.Background()
 
-	// Find pod by label
 	var podList corev1.PodList
-	err := h.client.List(ctx, &podList, client.InNamespace(h.namespace), client.MatchingLabels{
+	if err := h.client.List(ctx, &podList, client.InNamespace(h.namespace), client.MatchingLabels{
 		"krkn-job-id": jobId,
-	})
-
-	if err != nil {
+	}); err != nil {
 		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
 			Error:   "internal_error",
 			Message: "Failed to list pods: " + err.Error(),
@@ -1495,7 +1308,6 @@ func (h *Handler) DeleteScenarioRun(w http.ResponseWriter, r *http.Request) {
 
 	pod := podList.Items[0]
 
-	// Delete pod with 5 second grace period
 	gracePeriod := int64(5)
 	deleteOptions := client.DeleteOptions{
 		GracePeriodSeconds: &gracePeriod,
