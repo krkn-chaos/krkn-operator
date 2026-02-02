@@ -98,13 +98,163 @@ All tests passing ✅
 
 ## Moving from direct scenario creation to CRD approach
 
-- I want to change the current implementation of the KRKN job creation, I want to have a CRD called `KrknChaosJob` that must have 
-  all the details currently defined in the `createScenarioJob` method in internal/api/handlers.go to instantiate a job
-- I'd like that the reconcile loop keeps track of the Job status and updates the `KrknChaosJob` accordinglyall
-- I want to have a controller able to reconcile the `KrknChaosJob` and instantiate the the chaos job as it does the createScenarioJob
-- I want that the current /scenarios/run methods creates the new CR `KrknChaosJob` and returns the job uuid
-- I want that the `GetScenarioRunStatus` is eventually adapted to this new behaviour
+### ✅ Implemented
+- Changed from direct Pod creation to CRD-based approach with `KrknScenarioRun`
+- Controller reconciles `KrknScenarioRun` and creates jobs for each target cluster
+- API endpoints updated to use `scenarioRunName` as primary identifier
+- Multi-cluster support with aggregated status
+
+### API Endpoints Structure (Nested Approach)
+
+```
+POST   /api/v1/scenarios/run
+       → Creates KrknScenarioRun CR
+       → Returns: {scenarioRunName, clusterNames, totalTargets}
+
+GET    /api/v1/scenarios/run/{scenarioRunName}
+       → Returns aggregated status with list of clusterJobs (each with jobId)
+
+GET    /api/v1/scenarios/run/{scenarioRunName}/jobs/{jobId}
+       → Returns status of a single job (TODO)
+
+GET    /api/v1/scenarios/run/{scenarioRunName}/jobs/{jobId}/logs
+       → WebSocket stream of logs for specific job (TODO - currently uses clusterName)
+
+DELETE /api/v1/scenarios/run/{scenarioRunName}
+       → Deletes entire scenario run (all jobs)
+
+DELETE /api/v1/scenarios/run/{scenarioRunName}/jobs/{jobId}
+       → Terminates a single job (TODO)
+```
+
+### 🔧 TODO: Pod Recreation and Retry Logic
+
+#### Current Behavior
+- Controller creates one pod per cluster when KrknScenarioRun is created
+- No automatic retry on pod failure
+- No distinction between user-initiated deletion and failure
+
+#### Requirements
+
+**1. Automatic Retry on Failure**
+- When a pod fails (phase=Failed), the controller should retry creating a new pod
+- Maximum number of retry attempts should be configurable (suggested: 3)
+- Retry attempts should be tracked in ClusterJobStatus
+- Exponential backoff between retries (suggested: 10s, 30s, 60s)
+
+**2. Manual Cancellation vs Failure**
+- User-initiated job deletion (DELETE /jobs/{jobId}) should NOT trigger retry
+- Need to distinguish between "pod failed" and "user cancelled"
+- Proposed solution: Add a field to ClusterJobStatus to track cancellation intent
+
+**3. Job Lifecycle States**
+```
+Pending → Running → Succeeded (terminal)
+                  → Failed → Retrying → Running → ...
+                          → Cancelled (terminal, no retry)
+                          → MaxRetriesExceeded (terminal)
+```
+
+#### Proposed Solution Options
+
+##### Option A: Cancellation Field in Status (Recommended)
+```go
+type ClusterJobStatus struct {
+    ClusterName string
+    JobId       string
+    PodName     string
+    Phase       string  // Pending, Running, Succeeded, Failed, Cancelled, MaxRetriesExceeded
+
+    // NEW FIELDS
+    RetryCount      int       `json:"retryCount,omitempty"`
+    MaxRetries      int       `json:"maxRetries,omitempty"`  // Default: 3
+    CancelRequested bool      `json:"cancelRequested,omitempty"`
+    LastRetryTime   *metav1.Time `json:"lastRetryTime,omitempty"`
+
+    StartTime      *metav1.Time
+    CompletionTime *metav1.Time
+    Message        string
+}
+```
+
+**Controller Logic**:
+```go
+// In updateClusterJobStatuses()
+if pod.Status.Phase == corev1.PodFailed {
+    if job.CancelRequested {
+        job.Phase = "Cancelled"  // Terminal, no retry
+    } else if job.RetryCount < job.MaxRetries {
+        job.Phase = "Retrying"
+        job.RetryCount++
+        job.LastRetryTime = now
+        // Create new pod with new jobId
+        createClusterJob(ctx, scenarioRun, clusterName)
+    } else {
+        job.Phase = "MaxRetriesExceeded"  // Terminal
+    }
+}
+```
+
+**DELETE /jobs/{jobId} Handler**:
+```go
+func (h *Handler) DeleteJob(w http.ResponseWriter, r *http.Request) {
+    // 1. Find KrknScenarioRun containing this jobId
+    // 2. Set job.CancelRequested = true in status
+    // 3. Delete the pod
+    // 4. Controller sees CancelRequested → does NOT retry
+}
+```
+
+##### Option B: Finalizers for Cancellation Tracking
+- Add finalizer `krkn.krkn-chaos.dev/job-cancellation` to ClusterJobStatus
+- When user deletes job, add finalizer before deleting pod
+- Controller checks for finalizer → skips retry
+- More complex, but leverages K8s patterns
+
+##### Option C: Separate CancellationRequest CR
+- Create a new CRD `KrknJobCancellation` to track cancellation intent
+- Controller watches both KrknScenarioRun and KrknJobCancellation
+- More decoupled, but adds complexity
+
+#### Implementation Plan (TODO)
+
+1. **Phase 1: Add Retry Fields to CRD**
+   - Update `ClusterJobStatus` with retry tracking fields
+   - Add `maxRetries` to `KrknScenarioRunSpec` (default: 3)
+   - Regenerate manifests
+
+2. **Phase 2: Implement Retry Logic in Controller**
+   - Detect pod failure vs cancellation
+   - Implement retry with exponential backoff
+   - Update job phase to reflect retry state
+   - Create new pod with new jobId on retry
+
+3. **Phase 3: Add DELETE /jobs/{jobId} Endpoint**
+   - Parse scenarioRunName and jobId from path
+   - Set CancelRequested flag in CR status
+   - Delete pod
+   - Return success
+
+4. **Phase 4: Update GET /jobs/{jobId} and Logs Endpoints**
+   - Change from `/logs/{clusterName}` to `/logs/{jobId}`
+   - Support nested path: `/scenarios/run/{scenarioRunName}/jobs/{jobId}/logs`
+   - Add endpoint: `GET /scenarios/run/{scenarioRunName}/jobs/{jobId}` for single job status
+
+#### Configuration
+
+Add to KrknScenarioRunSpec:
+```yaml
+apiVersion: krkn.krkn-chaos.dev/v1alpha1
+kind: KrknScenarioRun
+spec:
+  # ... existing fields ...
+
+  # Retry configuration
+  maxRetries: 3  # Default: 3, set to 0 to disable retry
+  retryBackoff: exponential  # exponential or fixed
+  retryDelay: 10s  # Initial delay for exponential, fixed delay for fixed
+```
 
 ### Overview
-TODO
+The CRD-based approach provides better state management, automatic reconciliation, and improved observability compared to direct Pod creation.
 

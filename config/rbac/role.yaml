@@ -44,3 +44,30 @@ rules:
   - get
   - patch
   - update
+- apiGroups:
+  - krkn.krkn-chaos.dev
+  resources:
+  - krknoperatortargets
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - krkn.krkn-chaos.dev
+  resources:
+  - krkntargetrequests
+  verbs:
+  - create
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - krkn.krkn-chaos.dev
+  resources:
+  - krkntargetrequests/status
+  verbs:
+  - get
+  - patch
+  - update

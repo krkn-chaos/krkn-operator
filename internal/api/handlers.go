@@ -1048,7 +1048,7 @@ var upgrader = websocket.Upgrader{
 	},
 }
 
-// GetScenarioRunLogs handles GET /api/v1/scenarios/run/{scenarioRunName}/logs/{clusterName} endpoint
+// GetScenarioRunLogs handles GET /api/v1/scenarios/run/{scenarioRunName}/jobs/{jobId}/logs endpoint
 // It streams the stdout/stderr logs of a running or completed job via WebSocket
 func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 	logger := log.Log.WithName("websocket-logs")
@@ -1064,8 +1064,8 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Close()
 
-	// Extract scenarioRunName and clusterName from path
-	// Path format: /api/v1/scenarios/run/{scenarioRunName}/logs/{clusterName}
+	// Extract scenarioRunName and jobId from path
+	// Path format: /api/v1/scenarios/run/{scenarioRunName}/jobs/{jobId}/logs
 	path := r.URL.Path
 	prefix := "/api/v1/scenarios/run/"
 
@@ -1078,68 +1078,54 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 	// Remove prefix
 	remainder := path[len(prefix):]
 
-	// Split by "/logs/"
-	parts := strings.Split(remainder, "/logs/")
+	// Split by "/jobs/" and "/logs"
+	parts := strings.Split(remainder, "/jobs/")
 	if len(parts) != 2 {
 		logger.Error(nil, "Invalid logs endpoint path format", "path", path)
-		conn.WriteMessage(websocket.TextMessage, []byte("ERROR: Invalid path format. Expected: /api/v1/scenarios/run/{scenarioRunName}/logs/{clusterName}"))
+		conn.WriteMessage(websocket.TextMessage, []byte("ERROR: Invalid path format. Expected: /api/v1/scenarios/run/{scenarioRunName}/jobs/{jobId}/logs"))
 		return
 	}
 
 	scenarioRunName := parts[0]
-	clusterName := parts[1]
+	jobIdAndLogs := parts[1]
 
-	if scenarioRunName == "" || clusterName == "" {
-		logger.Error(nil, "Empty scenarioRunName or clusterName in request path", "path", path)
-		conn.WriteMessage(websocket.TextMessage, []byte("ERROR: scenarioRunName and clusterName cannot be empty"))
+	// Extract jobId (remove "/logs" suffix)
+	if !strings.HasSuffix(jobIdAndLogs, "/logs") {
+		logger.Error(nil, "Invalid logs endpoint path format", "path", path)
+		conn.WriteMessage(websocket.TextMessage, []byte("ERROR: Invalid path format. Expected: /api/v1/scenarios/run/{scenarioRunName}/jobs/{jobId}/logs"))
 		return
 	}
 
-	logger.Info("WebSocket connection established", "scenarioRunName", scenarioRunName, "clusterName", clusterName, "client_ip", r.RemoteAddr)
+	jobId := strings.TrimSuffix(jobIdAndLogs, "/logs")
+
+	if scenarioRunName == "" || jobId == "" {
+		logger.Error(nil, "Empty scenarioRunName or jobId in request path", "path", path)
+		conn.WriteMessage(websocket.TextMessage, []byte("ERROR: scenarioRunName and jobId cannot be empty"))
+		return
+	}
+
+	logger.Info("WebSocket connection established", "scenarioRunName", scenarioRunName, "jobId", jobId, "client_ip", r.RemoteAddr)
 
 	ctx := context.Background()
 
-	// Fetch the KrknScenarioRun CR
-	var scenarioRun krknv1alpha1.KrknScenarioRun
-	if err := h.client.Get(ctx, client.ObjectKey{
-		Name:      scenarioRunName,
-		Namespace: h.namespace,
-	}, &scenarioRun); err != nil {
-		logger.Error(err, "Failed to fetch scenario run", "scenarioRunName", scenarioRunName)
-		conn.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("ERROR: Scenario run '%s' not found", scenarioRunName)))
+	// Find pod by jobId label (no need to fetch the CR)
+	var podList corev1.PodList
+	if err := h.client.List(ctx, &podList, client.InNamespace(h.namespace), client.MatchingLabels{
+		"krkn-job-id": jobId,
+	}); err != nil {
+		logger.Error(err, "Failed to list pods", "jobId", jobId)
+		conn.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("ERROR: Failed to list pods: %s", err.Error())))
 		return
 	}
 
-	// Find the job for the requested cluster
-	var jobId, podName string
-	for _, job := range scenarioRun.Status.ClusterJobs {
-		if job.ClusterName == clusterName {
-			jobId = job.JobId
-			podName = job.PodName
-			break
-		}
-	}
-
-	if jobId == "" {
-		logger.Error(nil, "Cluster not found in scenario run",
-			"scenarioRunName", scenarioRunName,
-			"clusterName", clusterName)
-		conn.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("ERROR: Cluster '%s' not found in scenario run '%s'", clusterName, scenarioRunName)))
+	if len(podList.Items) == 0 {
+		logger.Error(nil, "Job not found", "jobId", jobId)
+		conn.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("ERROR: Job with ID '%s' not found", jobId)))
 		return
 	}
 
-	// Fetch the pod
-	var pod corev1.Pod
-	if err := h.client.Get(ctx, client.ObjectKey{
-		Name:      podName,
-		Namespace: h.namespace,
-	}, &pod); err != nil {
-		logger.Error(err, "Failed to fetch pod", "podName", podName)
-		conn.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("ERROR: Pod '%s' not found", podName)))
-		return
-	}
-
-	logger.Info("Found pod for cluster", "scenarioRunName", scenarioRunName, "clusterName", clusterName, "podName", pod.Name, "podPhase", pod.Status.Phase)
+	pod := podList.Items[0]
+	logger.Info("Found pod for job", "scenarioRunName", scenarioRunName, "jobId", jobId, "podName", pod.Name, "podPhase", pod.Status.Phase)
 
 	// Parse query parameters
 	follow := r.URL.Query().Get("follow") == "true"
@@ -1163,7 +1149,7 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 
 	logger.Info("Opening log stream",
 		"scenarioRunName", scenarioRunName,
-		"clusterName", clusterName,
+		"jobId", jobId,
 		"podName", pod.Name,
 		"follow", follow,
 		"timestamps", timestamps)
@@ -1174,7 +1160,7 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		logger.Error(err, "Failed to open log stream",
 			"scenarioRunName", scenarioRunName,
-			"clusterName", clusterName,
+			"jobId", jobId,
 			"podName", pod.Name,
 			"namespace", h.namespace)
 		conn.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("ERROR: Failed to open log stream: %s", err.Error())))
@@ -1182,7 +1168,7 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 	}
 	defer stream.Close()
 
-	logger.Info("Streaming logs started", "scenarioRunName", scenarioRunName, "clusterName", clusterName, "podName", pod.Name)
+	logger.Info("Streaming logs started", "scenarioRunName", scenarioRunName, "jobId", jobId, "podName", pod.Name)
 
 	// Read logs line by line and send via WebSocket
 	scanner := bufio.NewScanner(stream)
@@ -1193,7 +1179,7 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			logger.Error(err, "Failed to write log line to WebSocket, client likely disconnected",
 				"scenarioRunName", scenarioRunName,
-				"clusterName", clusterName,
+				"jobId", jobId,
 				"podName", pod.Name,
 				"linesStreamed", lineCount)
 			return
@@ -1205,7 +1191,7 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 	if err := scanner.Err(); err != nil {
 		logger.Error(err, "Log stream scanner error",
 			"scenarioRunName", scenarioRunName,
-			"clusterName", clusterName,
+			"jobId", jobId,
 			"podName", pod.Name,
 			"linesStreamed", lineCount)
 		conn.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("ERROR: Log stream error: %s", err.Error())))
@@ -1214,7 +1200,7 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 
 	logger.Info("Log streaming completed",
 		"scenarioRunName", scenarioRunName,
-		"clusterName", clusterName,
+		"jobId", jobId,
 		"podName", pod.Name,
 		"totalLines", lineCount)
 
@@ -1383,8 +1369,8 @@ func (h *Handler) ScenariosRunRouter(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if strings.HasPrefix(path, "/api/v1/scenarios/run/") {
-		// Check for logs endpoint: /api/v1/scenarios/run/{scenarioRunName}/logs/{clusterName}
-		if strings.Contains(path, "/logs/") && r.Method == http.MethodGet {
+		// Check for logs endpoint: /api/v1/scenarios/run/{scenarioRunName}/jobs/{jobId}/logs
+		if strings.Contains(path, "/jobs/") && strings.HasSuffix(path, "/logs") && r.Method == http.MethodGet {
 			h.GetScenarioRunLogs(w, r)
 		} else if r.Method == http.MethodGet {
 			h.GetScenarioRunStatus(w, r)
