@@ -98,6 +98,13 @@ All tests passing ✅
 
 ## Moving from direct scenario creation to CRD approach
 
+- I want to change the current implementation of the KRKN job creation, I want to have a CRD called `KrknChaosJob` that must have 
+  all the details currently defined in the `createScenarioJob` method in internal/api/handlers.go to instantiate a job
+- I'd like that the reconcile loop keeps track of the Job status and updates the `KrknChaosJob` accordinglyall
+- I want to have a controller able to reconcile the `KrknChaosJob` and instantiate the the chaos job as it does the createScenarioJob
+- I want that the current /scenarios/run methods creates the new CR `KrknChaosJob` and returns the job uuid
+- I want that the `GetScenarioRunStatus` is eventually adapted to this new behaviour
+
 ### Overview
 TODO
 

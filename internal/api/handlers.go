@@ -913,116 +913,126 @@ func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
 
 	ctx := context.Background()
 
-	// Execute job creation for each cluster (best-effort)
-	var results []TargetJobResult
+	// Generate scenario run name
+	scenarioRunName := fmt.Sprintf("%s-%s", req.ScenarioName, uuid.New().String()[:8])
 
-	for _, clusterName := range req.ClusterNames {
-		jobId, podName, err := h.createScenarioJob(ctx, req, clusterName)
+	// Create KrknScenarioRun CR
+	scenarioRun := &krknv1alpha1.KrknScenarioRun{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      scenarioRunName,
+			Namespace: h.namespace,
+		},
+		Spec: krknv1alpha1.KrknScenarioRunSpec{
+			TargetRequestId: req.TargetRequestId,
+			ClusterNames:    req.ClusterNames,
+			ScenarioName:    req.ScenarioName,
+			ScenarioImage:   req.ScenarioImage,
+			KubeconfigPath:  req.KubeconfigPath,
+			Environment:     req.Environment,
+			RegistryURL:     req.RegistryURL,
+			ScenarioRepository: req.ScenarioRepository,
+		},
+	}
 
-		result := TargetJobResult{
-			ClusterName: clusterName,
-			JobId:       jobId,
-			PodName:     podName,
+	// Convert FileMount from API type to CRD type
+	if len(req.Files) > 0 {
+		scenarioRun.Spec.Files = make([]krknv1alpha1.FileMount, len(req.Files))
+		for i, f := range req.Files {
+			scenarioRun.Spec.Files[i] = krknv1alpha1.FileMount{
+				Name:      f.Name,
+				Content:   f.Content,
+				MountPath: f.MountPath,
+			}
 		}
-
-		if err != nil {
-			// Job creation failed for this cluster
-			result.Status = "Failed"
-			result.Error = err.Error()
-		} else {
-			// Job created successfully
-			result.Status = "Pending"
-			result.Success = true
-		}
-
-		results = append(results, result)
 	}
 
-	successfulJobs := 0
-	for _, result := range results {
-		if result.Success {
-			successfulJobs++
-		}
+	// Set optional registry auth fields
+	if req.Token != nil {
+		scenarioRun.Spec.Token = *req.Token
+	}
+	if req.Username != nil {
+		scenarioRun.Spec.Username = *req.Username
+	}
+	if req.Password != nil {
+		scenarioRun.Spec.Password = *req.Password
 	}
 
-	response := ScenarioRunResponse{
-		Jobs:           results,
-		TotalTargets:   len(results),
-		SuccessfulJobs: successfulJobs,
-		FailedJobs:     len(results) - successfulJobs,
+	// Create the CR
+	if err := h.client.Create(ctx, scenarioRun); err != nil {
+		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+			Error:   "internal_error",
+			Message: "Failed to create scenario run: " + err.Error(),
+		})
+		return
 	}
 
-	statusCode := http.StatusCreated
-	if successfulJobs == 0 {
-		statusCode = http.StatusInternalServerError
+	response := ScenarioRunCreateResponse{
+		ScenarioRunName: scenarioRunName,
+		ClusterNames:    req.ClusterNames,
+		TotalTargets:    len(req.ClusterNames),
 	}
 
-	writeJSON(w, statusCode, response)
+	writeJSON(w, http.StatusCreated, response)
 }
 
-// GetScenarioRunStatus handles GET /api/v1/scenarios/run/{jobId} endpoint
-// It returns the current status of a specific job
+// GetScenarioRunStatus handles GET /api/v1/scenarios/run/{scenarioRunName} endpoint
+// It returns the current status of a scenario run
 func (h *Handler) GetScenarioRunStatus(w http.ResponseWriter, r *http.Request) {
-	jobId, err := extractPathSuffix(r.URL.Path, "/api/v1/scenarios/run/")
+	scenarioRunName, err := extractPathSuffix(r.URL.Path, "/api/v1/scenarios/run/")
 	if err != nil {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
 			Error:   "bad_request",
-			Message: "jobId " + err.Error(),
+			Message: "scenarioRunName " + err.Error(),
 		})
 		return
 	}
 
 	ctx := context.Background()
 
-	var podList corev1.PodList
-	if err := h.client.List(ctx, &podList, client.InNamespace(h.namespace), client.MatchingLabels{
-		"krkn-job-id": jobId,
-	}); err != nil {
-		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
-			Error:   "internal_error",
-			Message: "Failed to list pods: " + err.Error(),
-		})
+	// Fetch the KrknScenarioRun CR
+	var scenarioRun krknv1alpha1.KrknScenarioRun
+	err = h.client.Get(ctx, client.ObjectKey{
+		Name:      scenarioRunName,
+		Namespace: h.namespace,
+	}, &scenarioRun)
+
+	if err != nil {
+		status := http.StatusInternalServerError
+		errMsg := "Failed to fetch scenario run: " + err.Error()
+		errCode := "internal_error"
+
+		if client.IgnoreNotFound(err) == nil {
+			status = http.StatusNotFound
+			errMsg = "Scenario run '" + scenarioRunName + "' not found"
+			errCode = "not_found"
+		}
+
+		writeJSONError(w, status, ErrorResponse{Error: errCode, Message: errMsg})
 		return
 	}
 
-	if len(podList.Items) == 0 {
-		writeJSONError(w, http.StatusNotFound, ErrorResponse{
-			Error:   "not_found",
-			Message: "Job with ID '" + jobId + "' not found",
-		})
-		return
-	}
-
-	pod := podList.Items[0]
-
-	response := JobStatusResponse{
-		JobId:        jobId,
-		ClusterName:  pod.Labels["krkn-cluster-name"],
-		ScenarioName: pod.Labels["krkn-scenario-name"],
-		Status:       string(pod.Status.Phase),
-		PodName:      pod.Name,
-	}
-
-	// Add timestamps if available
-	if pod.Status.StartTime != nil {
-		startTime := pod.Status.StartTime.Time
-		response.StartTime = &startTime
-	}
-
-	for _, condition := range pod.Status.Conditions {
-		if condition.Type == corev1.PodReady && condition.Status == corev1.ConditionFalse &&
-			(pod.Status.Phase == "Succeeded" || pod.Status.Phase == "Failed") {
-			completionTime := condition.LastTransitionTime.Time
-			response.CompletionTime = &completionTime
+	// Convert ClusterJobStatus to response type
+	clusterJobs := make([]ClusterJobStatusResponse, len(scenarioRun.Status.ClusterJobs))
+	for i, job := range scenarioRun.Status.ClusterJobs {
+		clusterJobs[i] = ClusterJobStatusResponse{
+			ClusterName:    job.ClusterName,
+			JobId:          job.JobId,
+			PodName:        job.PodName,
+			Phase:          job.Phase,
+			Message:        job.Message,
+			StartTime:      convertMetaTime(job.StartTime),
+			CompletionTime: convertMetaTime(job.CompletionTime),
 		}
 	}
 
-	if pod.Status.Phase == "Failed" {
-		response.Message = pod.Status.Message
-		if response.Message == "" && len(pod.Status.ContainerStatuses) > 0 &&
-			pod.Status.ContainerStatuses[0].State.Terminated != nil {
-			response.Message = pod.Status.ContainerStatuses[0].State.Terminated.Reason
-		}
+	response := ScenarioRunStatusResponse{
+		ScenarioRunName: scenarioRunName,
+		Phase:           scenarioRun.Status.Phase,
+		TotalTargets:    scenarioRun.Status.TotalTargets,
+		SuccessfulJobs:  scenarioRun.Status.SuccessfulJobs,
+		FailedJobs:      scenarioRun.Status.FailedJobs,
+		RunningJobs:     scenarioRun.Status.RunningJobs,
+		ClusterJobs:     clusterJobs,
 	}
 
 	writeJSON(w, http.StatusOK, response)
@@ -1038,7 +1048,7 @@ var upgrader = websocket.Upgrader{
 	},
 }
 
-// GetScenarioRunLogs handles GET /api/v1/scenarios/run/{jobId}/logs endpoint
+// GetScenarioRunLogs handles GET /api/v1/scenarios/run/{scenarioRunName}/logs/{clusterName} endpoint
 // It streams the stdout/stderr logs of a running or completed job via WebSocket
 func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 	logger := log.Log.WithName("websocket-logs")
@@ -1054,54 +1064,82 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Close()
 
-	// Extract jobId from path
+	// Extract scenarioRunName and clusterName from path
+	// Path format: /api/v1/scenarios/run/{scenarioRunName}/logs/{clusterName}
 	path := r.URL.Path
 	prefix := "/api/v1/scenarios/run/"
-	suffix := "/logs"
 
-	if !strings.HasSuffix(path, suffix) {
-		logger.Error(nil, "Invalid logs endpoint path",
-			"path", path,
-			"expected_suffix", suffix)
+	if !strings.HasPrefix(path, prefix) {
+		logger.Error(nil, "Invalid logs endpoint path", "path", path)
 		conn.WriteMessage(websocket.TextMessage, []byte("ERROR: Invalid logs endpoint"))
 		return
 	}
 
-	jobId := path[len(prefix) : len(path)-len(suffix)]
-	if jobId == "" {
-		logger.Error(nil, "Empty jobId in request path", "path", path)
-		conn.WriteMessage(websocket.TextMessage, []byte("ERROR: jobId parameter cannot be empty"))
+	// Remove prefix
+	remainder := path[len(prefix):]
+
+	// Split by "/logs/"
+	parts := strings.Split(remainder, "/logs/")
+	if len(parts) != 2 {
+		logger.Error(nil, "Invalid logs endpoint path format", "path", path)
+		conn.WriteMessage(websocket.TextMessage, []byte("ERROR: Invalid path format. Expected: /api/v1/scenarios/run/{scenarioRunName}/logs/{clusterName}"))
 		return
 	}
 
-	logger.Info("WebSocket connection established", "jobId", jobId, "client_ip", r.RemoteAddr)
+	scenarioRunName := parts[0]
+	clusterName := parts[1]
+
+	if scenarioRunName == "" || clusterName == "" {
+		logger.Error(nil, "Empty scenarioRunName or clusterName in request path", "path", path)
+		conn.WriteMessage(websocket.TextMessage, []byte("ERROR: scenarioRunName and clusterName cannot be empty"))
+		return
+	}
+
+	logger.Info("WebSocket connection established", "scenarioRunName", scenarioRunName, "clusterName", clusterName, "client_ip", r.RemoteAddr)
 
 	ctx := context.Background()
 
-	// Find pod by label
-	var podList corev1.PodList
-	err = h.client.List(ctx, &podList, client.InNamespace(h.namespace), client.MatchingLabels{
-		"krkn-job-id": jobId,
-	})
-
-	if err != nil {
-		logger.Error(err, "Failed to list pods",
-			"jobId", jobId,
-			"namespace", h.namespace)
-		conn.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("ERROR: Failed to list pods: %s", err.Error())))
+	// Fetch the KrknScenarioRun CR
+	var scenarioRun krknv1alpha1.KrknScenarioRun
+	if err := h.client.Get(ctx, client.ObjectKey{
+		Name:      scenarioRunName,
+		Namespace: h.namespace,
+	}, &scenarioRun); err != nil {
+		logger.Error(err, "Failed to fetch scenario run", "scenarioRunName", scenarioRunName)
+		conn.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("ERROR: Scenario run '%s' not found", scenarioRunName)))
 		return
 	}
 
-	if len(podList.Items) == 0 {
-		logger.Error(nil, "Job not found",
-			"jobId", jobId,
-			"namespace", h.namespace)
-		conn.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("ERROR: Job with ID '%s' not found", jobId)))
+	// Find the job for the requested cluster
+	var jobId, podName string
+	for _, job := range scenarioRun.Status.ClusterJobs {
+		if job.ClusterName == clusterName {
+			jobId = job.JobId
+			podName = job.PodName
+			break
+		}
+	}
+
+	if jobId == "" {
+		logger.Error(nil, "Cluster not found in scenario run",
+			"scenarioRunName", scenarioRunName,
+			"clusterName", clusterName)
+		conn.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("ERROR: Cluster '%s' not found in scenario run '%s'", clusterName, scenarioRunName)))
 		return
 	}
 
-	pod := podList.Items[0]
-	logger.Info("Found pod for job", "jobId", jobId, "podName", pod.Name, "podPhase", pod.Status.Phase)
+	// Fetch the pod
+	var pod corev1.Pod
+	if err := h.client.Get(ctx, client.ObjectKey{
+		Name:      podName,
+		Namespace: h.namespace,
+	}, &pod); err != nil {
+		logger.Error(err, "Failed to fetch pod", "podName", podName)
+		conn.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("ERROR: Pod '%s' not found", podName)))
+		return
+	}
+
+	logger.Info("Found pod for cluster", "scenarioRunName", scenarioRunName, "clusterName", clusterName, "podName", pod.Name, "podPhase", pod.Status.Phase)
 
 	// Parse query parameters
 	follow := r.URL.Query().Get("follow") == "true"
@@ -1124,7 +1162,8 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 	}
 
 	logger.Info("Opening log stream",
-		"jobId", jobId,
+		"scenarioRunName", scenarioRunName,
+		"clusterName", clusterName,
 		"podName", pod.Name,
 		"follow", follow,
 		"timestamps", timestamps)
@@ -1134,7 +1173,8 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 	stream, err := req.Stream(ctx)
 	if err != nil {
 		logger.Error(err, "Failed to open log stream",
-			"jobId", jobId,
+			"scenarioRunName", scenarioRunName,
+			"clusterName", clusterName,
 			"podName", pod.Name,
 			"namespace", h.namespace)
 		conn.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("ERROR: Failed to open log stream: %s", err.Error())))
@@ -1142,7 +1182,7 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 	}
 	defer stream.Close()
 
-	logger.Info("Streaming logs started", "jobId", jobId, "podName", pod.Name)
+	logger.Info("Streaming logs started", "scenarioRunName", scenarioRunName, "clusterName", clusterName, "podName", pod.Name)
 
 	// Read logs line by line and send via WebSocket
 	scanner := bufio.NewScanner(stream)
@@ -1152,7 +1192,8 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 		err := conn.WriteMessage(websocket.TextMessage, []byte(line))
 		if err != nil {
 			logger.Error(err, "Failed to write log line to WebSocket, client likely disconnected",
-				"jobId", jobId,
+				"scenarioRunName", scenarioRunName,
+				"clusterName", clusterName,
 				"podName", pod.Name,
 				"linesStreamed", lineCount)
 			return
@@ -1163,7 +1204,8 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 	// Check for scanner errors
 	if err := scanner.Err(); err != nil {
 		logger.Error(err, "Log stream scanner error",
-			"jobId", jobId,
+			"scenarioRunName", scenarioRunName,
+			"clusterName", clusterName,
 			"podName", pod.Name,
 			"linesStreamed", lineCount)
 		conn.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("ERROR: Log stream error: %s", err.Error())))
@@ -1171,7 +1213,8 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 	}
 
 	logger.Info("Log streaming completed",
-		"jobId", jobId,
+		"scenarioRunName", scenarioRunName,
+		"clusterName", clusterName,
 		"podName", pod.Name,
 		"totalLines", lineCount)
 
@@ -1340,7 +1383,8 @@ func (h *Handler) ScenariosRunRouter(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if strings.HasPrefix(path, "/api/v1/scenarios/run/") {
-		if strings.HasSuffix(path, "/logs") && r.Method == http.MethodGet {
+		// Check for logs endpoint: /api/v1/scenarios/run/{scenarioRunName}/logs/{clusterName}
+		if strings.Contains(path, "/logs/") && r.Method == http.MethodGet {
 			h.GetScenarioRunLogs(w, r)
 		} else if r.Method == http.MethodGet {
 			h.GetScenarioRunStatus(w, r)
@@ -1359,4 +1403,13 @@ func (h *Handler) ScenariosRunRouter(w http.ResponseWriter, r *http.Request) {
 		Error:   "method_not_allowed",
 		Message: "Method " + r.Method + " not allowed for path " + path,
 	})
+}
+
+// convertMetaTime converts metav1.Time to *time.Time
+func convertMetaTime(mt *metav1.Time) *time.Time {
+	if mt == nil {
+		return nil
+	}
+	t := mt.Time
+	return &t
 }

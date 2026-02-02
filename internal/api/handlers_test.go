@@ -328,7 +328,7 @@ func TestPostScenarioRun_SingleTarget_Success(t *testing.T) {
 		t.Errorf("Expected status code %d, got %d. Body: %s", http.StatusCreated, w.Code, w.Body.String())
 	}
 
-	var response ScenarioRunResponse
+	var response ScenarioRunCreateResponse
 	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
 		t.Fatalf("Failed to unmarshal response: %v", err)
 	}
@@ -337,37 +337,20 @@ func TestPostScenarioRun_SingleTarget_Success(t *testing.T) {
 		t.Errorf("Expected TotalTargets=1, got %d", response.TotalTargets)
 	}
 
-	if response.SuccessfulJobs != 1 {
-		t.Errorf("Expected SuccessfulJobs=1, got %d", response.SuccessfulJobs)
+	if len(response.ClusterNames) != 1 {
+		t.Fatalf("Expected 1 cluster in response, got %d", len(response.ClusterNames))
 	}
 
-	if response.FailedJobs != 0 {
-		t.Errorf("Expected FailedJobs=0, got %d", response.FailedJobs)
+	if response.ClusterNames[0] != clusterName {
+		t.Errorf("Expected ClusterName='%s', got '%s'", clusterName, response.ClusterNames[0])
 	}
 
-	if len(response.Jobs) != 1 {
-		t.Fatalf("Expected 1 job in response, got %d", len(response.Jobs))
+	if response.ScenarioRunName == "" {
+		t.Error("Expected ScenarioRunName to be set")
 	}
 
-	job := response.Jobs[0]
-	if job.ClusterName != clusterName {
-		t.Errorf("Expected ClusterName='%s', got '%s'", clusterName, job.ClusterName)
-	}
-
-	if !job.Success {
-		t.Errorf("Expected Success=true, got false. Error: %s", job.Error)
-	}
-
-	if job.JobId == "" {
-		t.Error("Expected JobId to be set")
-	}
-
-	if job.PodName == "" {
-		t.Error("Expected PodName to be set")
-	}
-
-	if job.Status != "Pending" {
-		t.Errorf("Expected Status='Pending', got '%s'", job.Status)
+	if !strings.HasPrefix(response.ScenarioRunName, "pod-delete-") {
+		t.Errorf("Expected ScenarioRunName to start with 'pod-delete-', got '%s'", response.ScenarioRunName)
 	}
 }
 
@@ -425,7 +408,7 @@ func TestPostScenarioRun_MultipleTargets_AllSuccess(t *testing.T) {
 		t.Errorf("Expected status code %d, got %d. Body: %s", http.StatusCreated, w.Code, w.Body.String())
 	}
 
-	var response ScenarioRunResponse
+	var response ScenarioRunCreateResponse
 	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
 		t.Fatalf("Failed to unmarshal response: %v", err)
 	}
@@ -434,22 +417,12 @@ func TestPostScenarioRun_MultipleTargets_AllSuccess(t *testing.T) {
 		t.Errorf("Expected TotalTargets=3, got %d", response.TotalTargets)
 	}
 
-	if response.SuccessfulJobs != 3 {
-		t.Errorf("Expected SuccessfulJobs=3, got %d", response.SuccessfulJobs)
+	if len(response.ClusterNames) != 3 {
+		t.Fatalf("Expected 3 clusters in response, got %d", len(response.ClusterNames))
 	}
 
-	if response.FailedJobs != 0 {
-		t.Errorf("Expected FailedJobs=0, got %d", response.FailedJobs)
-	}
-
-	if len(response.Jobs) != 3 {
-		t.Fatalf("Expected 3 jobs in response, got %d", len(response.Jobs))
-	}
-
-	for i, job := range response.Jobs {
-		if !job.Success {
-			t.Errorf("Job %d failed: %s", i, job.Error)
-		}
+	if response.ScenarioRunName == "" {
+		t.Error("Expected ScenarioRunName to be set")
 	}
 }
 
@@ -474,11 +447,13 @@ func TestPostScenarioRun_MultipleTargets_PartialFailure(t *testing.T) {
 	w := httptest.NewRecorder()
 	handler.PostScenarioRun(w, req)
 
+	// Note: With CRD-based approach, the CR is created successfully even if some clusters are invalid.
+	// The controller will handle the failures when reconciling.
 	if w.Code != http.StatusCreated {
 		t.Errorf("Expected status code %d, got %d", http.StatusCreated, w.Code)
 	}
 
-	var response ScenarioRunResponse
+	var response ScenarioRunCreateResponse
 	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
 		t.Fatalf("Failed to unmarshal response: %v", err)
 	}
@@ -487,33 +462,19 @@ func TestPostScenarioRun_MultipleTargets_PartialFailure(t *testing.T) {
 		t.Errorf("Expected TotalTargets=3, got %d", response.TotalTargets)
 	}
 
-	if response.SuccessfulJobs != 2 {
-		t.Errorf("Expected SuccessfulJobs=2, got %d", response.SuccessfulJobs)
+	if len(response.ClusterNames) != 3 {
+		t.Fatalf("Expected 3 clusters in response, got %d", len(response.ClusterNames))
 	}
 
-	if response.FailedJobs != 1 {
-		t.Errorf("Expected FailedJobs=1, got %d", response.FailedJobs)
-	}
-
-	if response.Jobs[1].Success {
-		t.Error("Expected jobs[1] (invalid) to fail")
-	}
-
-	if response.Jobs[1].ClusterName != "invalid" {
-		t.Errorf("Expected jobs[1].ClusterName='invalid', got '%s'", response.Jobs[1].ClusterName)
-	}
-
-	if !response.Jobs[0].Success {
-		t.Errorf("Expected jobs[0] to succeed, got error: %s", response.Jobs[0].Error)
-	}
-
-	if !response.Jobs[2].Success {
-		t.Errorf("Expected jobs[2] to succeed, got error: %s", response.Jobs[2].Error)
+	if response.ScenarioRunName == "" {
+		t.Error("Expected ScenarioRunName to be set")
 	}
 }
 
 func TestPostScenarioRun_MultipleTargets_AllFailure(t *testing.T) {
-	// Empty cluster map - all requests will fail
+	// Note: With CRD-based approach, the CR is created successfully even with invalid clusters.
+	// The controller will handle the failures when reconciling.
+	// Empty cluster map - all requests will fail at reconciliation time
 	handler := setupScenarioRunTestHandler("test-request-id", map[string]string{})
 
 	// Test
@@ -529,21 +490,22 @@ func TestPostScenarioRun_MultipleTargets_AllFailure(t *testing.T) {
 	w := httptest.NewRecorder()
 	handler.PostScenarioRun(w, req)
 
-	if w.Code != http.StatusInternalServerError {
-		t.Errorf("Expected status code %d, got %d", http.StatusInternalServerError, w.Code)
+	// CR creation succeeds even with invalid clusters
+	if w.Code != http.StatusCreated {
+		t.Errorf("Expected status code %d, got %d", http.StatusCreated, w.Code)
 	}
 
-	var response ScenarioRunResponse
+	var response ScenarioRunCreateResponse
 	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
 		t.Fatalf("Failed to unmarshal response: %v", err)
 	}
 
-	if response.SuccessfulJobs != 0 {
-		t.Errorf("Expected SuccessfulJobs=0, got %d", response.SuccessfulJobs)
+	if response.TotalTargets != 2 {
+		t.Errorf("Expected TotalTargets=2, got %d", response.TotalTargets)
 	}
 
-	if response.FailedJobs != 2 {
-		t.Errorf("Expected FailedJobs=2, got %d", response.FailedJobs)
+	if response.ScenarioRunName == "" {
+		t.Error("Expected ScenarioRunName to be set")
 	}
 }
 

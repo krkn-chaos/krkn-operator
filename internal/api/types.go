@@ -277,3 +277,49 @@ type ListTargetsResponse struct {
 type UpdateTargetRequest struct {
 	CreateTargetRequest
 }
+
+// ScenarioRunCreateResponse represents the response for POST /scenarios/run (new CRD-based approach)
+type ScenarioRunCreateResponse struct {
+	// ScenarioRunName is the name of the created KrknScenarioRun CR
+	ScenarioRunName string `json:"scenarioRunName"`
+	// ClusterNames is the list of target clusters
+	ClusterNames []string `json:"clusterNames"`
+	// TotalTargets is the total number of target clusters
+	TotalTargets int `json:"totalTargets"`
+}
+
+// ScenarioRunStatusResponse represents the response for GET /scenarios/run/{scenarioRunName} (new CRD-based approach)
+type ScenarioRunStatusResponse struct {
+	// ScenarioRunName is the name of the KrknScenarioRun CR
+	ScenarioRunName string `json:"scenarioRunName"`
+	// Phase is the overall phase of the scenario run
+	Phase string `json:"phase"`
+	// TotalTargets is the total number of target clusters
+	TotalTargets int `json:"totalTargets"`
+	// SuccessfulJobs is the number of successfully completed jobs
+	SuccessfulJobs int `json:"successfulJobs"`
+	// FailedJobs is the number of failed jobs
+	FailedJobs int `json:"failedJobs"`
+	// RunningJobs is the number of currently running jobs
+	RunningJobs int `json:"runningJobs"`
+	// ClusterJobs contains the status of each cluster job
+	ClusterJobs []ClusterJobStatusResponse `json:"clusterJobs"`
+}
+
+// ClusterJobStatusResponse represents the status of a job for a specific cluster
+type ClusterJobStatusResponse struct {
+	// ClusterName is the name of the target cluster
+	ClusterName string `json:"clusterName"`
+	// JobId is the unique identifier for this job
+	JobId string `json:"jobId"`
+	// PodName is the name of the pod running the scenario
+	PodName string `json:"podName,omitempty"`
+	// Phase is the current phase of the job
+	Phase string `json:"phase"`
+	// StartTime is when the job started
+	StartTime *time.Time `json:"startTime,omitempty"`
+	// CompletionTime is when the job completed
+	CompletionTime *time.Time `json:"completionTime,omitempty"`
+	// Message contains additional information about the job status
+	Message string `json:"message,omitempty"`
+}

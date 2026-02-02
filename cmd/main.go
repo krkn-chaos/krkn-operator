@@ -41,6 +41,7 @@ import (
 
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
 	"github.com/krkn-chaos/krkn-operator/internal/api"
+	"github.com/krkn-chaos/krkn-operator/internal/controller"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -229,15 +230,24 @@ func main() {
 		os.Exit(1)
 	}
 
-	// +kubebuilder:scaffold:builder
-
-	// Create Kubernetes clientset for pod logs API
+	// Create Kubernetes clientset (needed by controller before API server creation)
 	config := ctrl.GetConfigOrDie()
 	clientset, err := kubernetes.NewForConfig(config)
 	if err != nil {
 		setupLog.Error(err, "unable to create Kubernetes clientset")
 		os.Exit(1)
 	}
+
+	if err = (&controller.KrknScenarioRunReconciler{
+		Client:    mgr.GetClient(),
+		Scheme:    mgr.GetScheme(),
+		Clientset: clientset,
+		Namespace: krknNamespace,
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "KrknScenarioRun")
+		os.Exit(1)
+	}
+	// +kubebuilder:scaffold:builder
 
 	// Setup and add REST API server
 	apiServer := api.NewServer(apiPort, mgr.GetClient(), clientset, krknNamespace, grpcServerAddr)

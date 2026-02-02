@@ -1,48 +1,46 @@
+---
 apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
+kind: ClusterRole
 metadata:
-  labels:
-    app.kubernetes.io/name: krkn-operator
-    app.kubernetes.io/managed-by: kustomize
   name: manager-role
-  namespace: system
 rules:
-- apiGroups: [""]
-  resources: ["pods"]
-  verbs: ["get", "list", "watch", "create", "delete"]
-- apiGroups: [""]
-  resources: ["pods/log"]
-  verbs: ["get"]
-- apiGroups: [""]
-  resources: ["configmaps"]
-  verbs: ["get", "list", "create", "delete"]
-- apiGroups: [""]
-  resources: ["secrets"]
-  verbs: ["get", "list", "watch", "create", "delete"]
-- apiGroups: ["krkn.krkn-chaos.dev"]
-  resources: ["krkntargetrequests"]
-  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-- apiGroups: ["krkn.krkn-chaos.dev"]
-  resources: ["krkntargetrequests/status"]
-  verbs: ["get", "update", "patch"]
-- apiGroups: ["krkn.krkn-chaos.dev"]
-  resources: ["krkntargetrequests/finalizers"]
-  verbs: ["update"]
-- apiGroups: ["krkn.krkn-chaos.dev"]
-  resources: ["krknoperatortargetproviders"]
-  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-- apiGroups: ["krkn.krkn-chaos.dev"]
-  resources: ["krknoperatortargetproviders/status"]
-  verbs: ["get", "update", "patch"]
-- apiGroups: ["krkn.krkn-chaos.dev"]
-  resources: ["krknoperatortargetproviders/finalizers"]
-  verbs: ["update"]
-- apiGroups: ["krkn.krkn-chaos.dev"]
-  resources: ["krknoperatortargets"]
-  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-- apiGroups: ["krkn.krkn-chaos.dev"]
-  resources: ["krknoperatortargets/status"]
-  verbs: ["get", "update", "patch"]
-- apiGroups: ["krkn.krkn-chaos.dev"]
-  resources: ["krknoperatortargets/finalizers"]
-  verbs: ["update"]
+- apiGroups:
+  - ""
+  resources:
+  - configmaps
+  - pods
+  - secrets
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - krkn.krkn-chaos.dev
+  resources:
+  - krknscenarioruns
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - krkn.krkn-chaos.dev
+  resources:
+  - krknscenarioruns/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - krkn.krkn-chaos.dev
+  resources:
+  - krknscenarioruns/status
+  verbs:
+  - get
+  - patch
+  - update
