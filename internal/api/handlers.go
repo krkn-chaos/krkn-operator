@@ -1228,7 +1228,7 @@ func (h *Handler) ListScenarioRuns(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Convert to response format with optional filtering
-	var runs []ScenarioRunListItem
+	runs := make([]ScenarioRunListItem, 0)
 	for _, sr := range scenarioRunList.Items {
 		// Apply filters
 		if phaseFilter != "" && sr.Status.Phase != phaseFilter {
