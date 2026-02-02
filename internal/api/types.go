@@ -323,3 +323,29 @@ type ClusterJobStatusResponse struct {
 	// Message contains additional information about the job status
 	Message string `json:"message,omitempty"`
 }
+
+// ScenarioRunListItem represents a single scenario run in the list view
+type ScenarioRunListItem struct {
+	// ScenarioRunName is the name of the KrknScenarioRun CR
+	ScenarioRunName string `json:"scenarioRunName"`
+	// ScenarioName is the name of the scenario being executed
+	ScenarioName string `json:"scenarioName"`
+	// Phase is the overall phase of the scenario run
+	Phase string `json:"phase"`
+	// TotalTargets is the total number of target clusters
+	TotalTargets int `json:"totalTargets"`
+	// SuccessfulJobs is the number of successfully completed jobs
+	SuccessfulJobs int `json:"successfulJobs"`
+	// FailedJobs is the number of failed jobs
+	FailedJobs int `json:"failedJobs"`
+	// RunningJobs is the number of currently running jobs
+	RunningJobs int `json:"runningJobs"`
+	// CreatedAt is the creation timestamp
+	CreatedAt time.Time `json:"createdAt"`
+}
+
+// ScenarioRunListResponse represents the response for GET /scenarios/run
+type ScenarioRunListResponse struct {
+	// ScenarioRuns is the list of scenario runs
+	ScenarioRuns []ScenarioRunListItem `json:"scenarioRuns"`
+}

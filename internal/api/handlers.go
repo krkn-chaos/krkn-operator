@@ -1209,68 +1209,51 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 }
 
 // ListScenarioRuns handles GET /api/v1/scenarios/run endpoint
-// It returns a list of all scenario jobs
+// It returns a list of all scenario runs (KrknScenarioRun CRs)
 func (h *Handler) ListScenarioRuns(w http.ResponseWriter, r *http.Request) {
 	ctx := context.Background()
 
 	// Parse query parameters for filtering
-	statusFilter := r.URL.Query().Get("status")
+	phaseFilter := r.URL.Query().Get("phase")          // e.g., Running, Succeeded, Failed
 	scenarioNameFilter := r.URL.Query().Get("scenarioName")
-	clusterNameFilter := r.URL.Query().Get("clusterName")
 
-	// List all pods with krkn-scenario label
-	var podList corev1.PodList
-	err := h.client.List(ctx, &podList, client.InNamespace(h.namespace), client.MatchingLabels{
-		"app": "krkn-scenario",
-	})
-
-	if err != nil {
+	// List all KrknScenarioRun CRs in the namespace
+	var scenarioRunList krknv1alpha1.KrknScenarioRunList
+	if err := h.client.List(ctx, &scenarioRunList, client.InNamespace(h.namespace)); err != nil {
 		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
 			Error:   "internal_error",
-			Message: "Failed to list pods: " + err.Error(),
+			Message: "Failed to list scenario runs: " + err.Error(),
 		})
 		return
 	}
 
-	var jobs []JobStatusResponse
-
-	for _, pod := range podList.Items {
-		jobId := pod.Labels["krkn-job-id"]
-		clusterName := pod.Labels["krkn-cluster-name"]
-		scenarioName := pod.Labels["krkn-scenario-name"]
-
-		if (statusFilter != "" && string(pod.Status.Phase) != statusFilter) ||
-			(scenarioNameFilter != "" && scenarioName != scenarioNameFilter) ||
-			(clusterNameFilter != "" && clusterName != clusterNameFilter) {
+	// Convert to response format with optional filtering
+	var runs []ScenarioRunListItem
+	for _, sr := range scenarioRunList.Items {
+		// Apply filters
+		if phaseFilter != "" && sr.Status.Phase != phaseFilter {
+			continue
+		}
+		if scenarioNameFilter != "" && sr.Spec.ScenarioName != scenarioNameFilter {
 			continue
 		}
 
-		jobStatus := JobStatusResponse{
-			JobId:        jobId,
-			ClusterName:  clusterName,
-			ScenarioName: scenarioName,
-			Status:       string(pod.Status.Phase),
-			PodName:      pod.Name,
+		run := ScenarioRunListItem{
+			ScenarioRunName: sr.Name,
+			ScenarioName:    sr.Spec.ScenarioName,
+			Phase:           sr.Status.Phase,
+			TotalTargets:    sr.Status.TotalTargets,
+			SuccessfulJobs:  sr.Status.SuccessfulJobs,
+			FailedJobs:      sr.Status.FailedJobs,
+			RunningJobs:     sr.Status.RunningJobs,
+			CreatedAt:       sr.CreationTimestamp.Time,
 		}
 
-		if pod.Status.StartTime != nil {
-			startTime := pod.Status.StartTime.Time
-			jobStatus.StartTime = &startTime
-		}
-
-		for _, condition := range pod.Status.Conditions {
-			if condition.Type == corev1.PodReady && condition.Status == corev1.ConditionFalse &&
-				(pod.Status.Phase == "Succeeded" || pod.Status.Phase == "Failed") {
-				completionTime := condition.LastTransitionTime.Time
-				jobStatus.CompletionTime = &completionTime
-			}
-		}
-
-		jobs = append(jobs, jobStatus)
+		runs = append(runs, run)
 	}
 
-	response := JobsListResponse{
-		Jobs: jobs,
+	response := ScenarioRunListResponse{
+		ScenarioRuns: runs,
 	}
 
 	writeJSON(w, http.StatusOK, response)
