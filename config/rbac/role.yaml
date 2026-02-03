@@ -19,9 +19,24 @@ rules:
   - update
   - watch
 - apiGroups:
+  - ""
+  resources:
+  - pods/log
+  verbs:
+  - get
+- apiGroups:
+  - krkn.krkn-chaos.dev
+  resources:
+  - krknoperatortargets
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
   - krkn.krkn-chaos.dev
   resources:
   - krknscenarioruns
+  - krkntargetrequests
   verbs:
   - create
   - delete

@@ -40,8 +40,8 @@ type ClusterJobStatus struct {
 	JobId string `json:"jobId"`
 	// PodName is the name of the pod running the scenario
 	PodName string `json:"podName,omitempty"`
-	// Phase is the current phase of the job (Pending, Running, Succeeded, Failed)
-	// +kubebuilder:validation:Enum=Pending;Running;Succeeded;Failed
+	// Phase is the current phase of the job (Pending, Running, Succeeded, Failed, Retrying, Cancelled, MaxRetriesExceeded)
+	// +kubebuilder:validation:Enum=Pending;Running;Succeeded;Failed;Retrying;Cancelled;MaxRetriesExceeded
 	Phase string `json:"phase"`
 	// StartTime is when the job started
 	StartTime *metav1.Time `json:"startTime,omitempty"`
@@ -49,6 +49,22 @@ type ClusterJobStatus struct {
 	CompletionTime *metav1.Time `json:"completionTime,omitempty"`
 	// Message contains additional information about the job status
 	Message string `json:"message,omitempty"`
+
+	// RetryCount is the number of times this job has been retried
+	// +optional
+	RetryCount int `json:"retryCount,omitempty"`
+	// MaxRetries is the maximum number of retries allowed for this job
+	// +optional
+	MaxRetries int `json:"maxRetries,omitempty"`
+	// CancelRequested indicates if the user has requested cancellation
+	// +optional
+	CancelRequested bool `json:"cancelRequested,omitempty"`
+	// LastRetryTime is when the last retry was initiated
+	// +optional
+	LastRetryTime *metav1.Time `json:"lastRetryTime,omitempty"`
+	// FailureReason contains a categorized failure reason (OOMKilled, ContainerError, etc.)
+	// +optional
+	FailureReason string `json:"failureReason,omitempty"`
 }
 
 // KrknScenarioRunSpec defines the desired state of KrknScenarioRun
@@ -98,6 +114,22 @@ type KrknScenarioRunSpec struct {
 	// Password is the password for registry authentication
 	// +optional
 	Password string `json:"password,omitempty"`
+
+	// MaxRetries is the maximum number of times to retry failed jobs
+	// +optional
+	// +kubebuilder:default=3
+	MaxRetries int `json:"maxRetries,omitempty"`
+
+	// RetryBackoff determines the backoff strategy for retries (exponential or fixed)
+	// +optional
+	// +kubebuilder:validation:Enum=exponential;fixed
+	// +kubebuilder:default="exponential"
+	RetryBackoff string `json:"retryBackoff,omitempty"`
+
+	// RetryDelay is the initial delay before retrying (e.g., "10s")
+	// +optional
+	// +kubebuilder:default="10s"
+	RetryDelay string `json:"retryDelay,omitempty"`
 }
 
 // KrknScenarioRunStatus defines the observed state of KrknScenarioRun

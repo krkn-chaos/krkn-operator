@@ -1334,44 +1334,210 @@ func (h *Handler) DeleteScenarioRun(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, response)
 }
 
+// DeleteScenarioRunComplete handles DELETE /api/v1/scenarios/run/{scenarioRunName}
+// It deletes the entire KrknScenarioRun CR (all jobs)
+func (h *Handler) DeleteScenarioRunComplete(w http.ResponseWriter, r *http.Request) {
+	scenarioRunName, err := extractPathSuffix(r.URL.Path, "/api/v1/scenarios/run/")
+	if err != nil {
+		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+			Error:   "bad_request",
+			Message: "scenarioRunName " + err.Error(),
+		})
+		return
+	}
+
+	ctx := context.Background()
+
+	// Fetch the KrknScenarioRun CR
+	var scenarioRun krknv1alpha1.KrknScenarioRun
+	if err := h.client.Get(ctx, client.ObjectKey{
+		Name:      scenarioRunName,
+		Namespace: h.namespace,
+	}, &scenarioRun); err != nil {
+		if client.IgnoreNotFound(err) == nil {
+			writeJSONError(w, http.StatusNotFound, ErrorResponse{
+				Error:   "not_found",
+				Message: "Scenario run '" + scenarioRunName + "' not found",
+			})
+		} else {
+			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+				Error:   "internal_error",
+				Message: "Failed to get scenario run: " + err.Error(),
+			})
+		}
+		return
+	}
+
+	log.Log.Info("deleting entire scenario run",
+		"scenarioRunName", scenarioRunName,
+		"totalJobs", len(scenarioRun.Status.ClusterJobs),
+		"phase", scenarioRun.Status.Phase)
+
+	// Delete the CR - owner references will cascade delete all pods/configmaps/secrets
+	if err := h.client.Delete(ctx, &scenarioRun); err != nil {
+		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+			Error:   "internal_error",
+			Message: "Failed to delete scenario run: " + err.Error(),
+		})
+		return
+	}
+
+	log.Log.Info("scenario run deleted successfully",
+		"scenarioRunName", scenarioRunName)
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// DeleteSingleJob handles DELETE /api/v1/scenarios/run/jobs/{jobId}
+// It cancels a single job by setting CancelRequested flag and deleting the pod
+func (h *Handler) DeleteSingleJob(w http.ResponseWriter, r *http.Request) {
+	// Parse path: /api/v1/scenarios/run/jobs/{jobId}
+	jobId, err := extractPathSuffix(r.URL.Path, "/api/v1/scenarios/run/jobs/")
+	if err != nil {
+		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+			Error:   "bad_request",
+			Message: "jobId " + err.Error(),
+		})
+		return
+	}
+
+	ctx := context.Background()
+
+	// Find KrknScenarioRun containing this jobId
+	var scenarioRunList krknv1alpha1.KrknScenarioRunList
+	if err := h.client.List(ctx, &scenarioRunList, client.InNamespace(h.namespace)); err != nil {
+		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+			Error:   "internal_error",
+			Message: "Failed to list scenario runs: " + err.Error(),
+		})
+		return
+	}
+
+	// Search for job across all scenario runs
+	var foundScenarioRun *krknv1alpha1.KrknScenarioRun
+	var foundJobIndex int = -1
+
+	for i := range scenarioRunList.Items {
+		sr := &scenarioRunList.Items[i]
+		for j, job := range sr.Status.ClusterJobs {
+			if job.JobId == jobId {
+				foundScenarioRun = sr
+				foundJobIndex = j
+				break
+			}
+		}
+		if foundScenarioRun != nil {
+			break
+		}
+	}
+
+	if foundScenarioRun == nil {
+		writeJSONError(w, http.StatusNotFound, ErrorResponse{
+			Error:   "not_found",
+			Message: "Job '" + jobId + "' not found",
+		})
+		return
+	}
+
+	job := &foundScenarioRun.Status.ClusterJobs[foundJobIndex]
+
+	log.Log.Info("cancelling single job",
+		"scenarioRunName", foundScenarioRun.Name,
+		"jobId", jobId,
+		"clusterName", job.ClusterName,
+		"currentPhase", job.Phase)
+
+	// Set CancelRequested flag
+	job.CancelRequested = true
+
+	// Update CR status
+	if err := h.client.Status().Update(ctx, foundScenarioRun); err != nil {
+		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+			Error:   "internal_error",
+			Message: "Failed to update scenario run status: " + err.Error(),
+		})
+		return
+	}
+
+	log.Log.Info("set CancelRequested flag",
+		"scenarioRunName", foundScenarioRun.Name,
+		"jobId", jobId)
+
+	// Delete the pod (controller will see CancelRequested and not retry)
+	var podList corev1.PodList
+	if err := h.client.List(ctx, &podList, client.InNamespace(h.namespace), client.MatchingLabels{
+		"krkn-job-id": jobId,
+	}); err == nil && len(podList.Items) > 0 {
+		pod := podList.Items[0]
+		gracePeriod := int64(5)
+		deleteOptions := client.DeleteOptions{
+			GracePeriodSeconds: &gracePeriod,
+		}
+
+		if err := h.client.Delete(ctx, &pod, &deleteOptions); err != nil {
+			log.Log.Error(err, "failed to delete pod during job cancellation",
+				"scenarioRunName", foundScenarioRun.Name,
+				"jobId", jobId,
+				"podName", pod.Name)
+		} else {
+			log.Log.Info("deleted pod for cancelled job",
+				"scenarioRunName", foundScenarioRun.Name,
+				"jobId", jobId,
+				"podName", pod.Name)
+		}
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (h *Handler) ScenariosRunRouter(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path
 
+	// Root endpoint: /api/v1/scenarios/run
 	if path == "/api/v1/scenarios/run" {
-		if r.Method == http.MethodPost {
+		switch r.Method {
+		case http.MethodPost:
 			h.PostScenarioRun(w, r)
-		} else if r.Method == http.MethodGet {
+		case http.MethodGet:
 			h.ListScenarioRuns(w, r)
-		} else {
-			writeJSONError(w, http.StatusMethodNotAllowed, ErrorResponse{
-				Error:   "method_not_allowed",
-				Message: "Method " + r.Method + " not allowed for path " + path,
-			})
+		default:
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		}
 		return
 	}
 
+	// Nested endpoints
 	if strings.HasPrefix(path, "/api/v1/scenarios/run/") {
-		// Check for logs endpoint: /api/v1/scenarios/run/{scenarioRunName}/jobs/{jobId}/logs
-		if strings.Contains(path, "/jobs/") && strings.HasSuffix(path, "/logs") && r.Method == http.MethodGet {
+		// Check for /jobs/{jobId}/logs pattern
+		if strings.Contains(path, "/jobs/") && strings.HasSuffix(path, "/logs") {
 			h.GetScenarioRunLogs(w, r)
-		} else if r.Method == http.MethodGet {
+			return
+		}
+
+		// Check for /jobs/{jobId} pattern (DELETE single job)
+		if strings.HasPrefix(path, "/api/v1/scenarios/run/jobs/") {
+			switch r.Method {
+			case http.MethodDelete:
+				h.DeleteSingleJob(w, r)
+			default:
+				http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			}
+			return
+		}
+
+		// Single scenario run: /api/v1/scenarios/run/{scenarioRunName}
+		switch r.Method {
+		case http.MethodGet:
 			h.GetScenarioRunStatus(w, r)
-		} else if r.Method == http.MethodDelete {
-			h.DeleteScenarioRun(w, r)
-		} else {
-			writeJSONError(w, http.StatusMethodNotAllowed, ErrorResponse{
-				Error:   "method_not_allowed",
-				Message: "Method " + r.Method + " not allowed for path " + path,
-			})
+		case http.MethodDelete:
+			h.DeleteScenarioRunComplete(w, r)
+		default:
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		}
 		return
 	}
 
-	writeJSONError(w, http.StatusMethodNotAllowed, ErrorResponse{
-		Error:   "method_not_allowed",
-		Message: "Method " + r.Method + " not allowed for path " + path,
-	})
+	http.Error(w, "Not found", http.StatusNotFound)
 }
 
 // convertMetaTime converts metav1.Time to *time.Time

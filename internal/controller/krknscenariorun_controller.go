@@ -55,8 +55,11 @@ type KrknScenarioRunReconciler struct {
 // +kubebuilder:rbac:groups=krkn.krkn-chaos.dev,resources=krknscenarioruns/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=krkn.krkn-chaos.dev,resources=krknscenarioruns/finalizers,verbs=update
 // +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups="",resources=pods/log,verbs=get
 // +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=krkn.krkn-chaos.dev,resources=krkntargetrequests,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=krkn.krkn-chaos.dev,resources=krknoperatortargets,verbs=get;list;watch
 
 // Reconcile handles the reconciliation loop for KrknScenarioRun
 func (r *KrknScenarioRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -127,6 +130,15 @@ func (r *KrknScenarioRunReconciler) createClusterJob(
 	clusterName string,
 ) error {
 	logger := log.FromContext(ctx)
+
+	// Check if this is a retry case
+	existingJobIndex := -1
+	for i, job := range scenarioRun.Status.ClusterJobs {
+		if job.ClusterName == clusterName && job.Phase == "Retrying" {
+			existingJobIndex = i
+			break
+		}
+	}
 
 	// Generate unique job ID
 	jobId := uuid.New().String()
@@ -423,19 +435,39 @@ func (r *KrknScenarioRunReconciler) createClusterJob(
 		return fmt.Errorf("failed to create pod: %w", err)
 	}
 
-	// Add job to status
+	// Update status - either update existing entry (retry) or add new entry
 	now := metav1.Now()
-	jobStatus := krknv1alpha1.ClusterJobStatus{
-		ClusterName: clusterName,
-		JobId:       jobId,
-		PodName:     podName,
-		Phase:       "Pending",
-		StartTime:   &now,
+	if existingJobIndex >= 0 {
+		// Update existing entry (retry case)
+		scenarioRun.Status.ClusterJobs[existingJobIndex].JobId = jobId
+		scenarioRun.Status.ClusterJobs[existingJobIndex].PodName = podName
+		scenarioRun.Status.ClusterJobs[existingJobIndex].Phase = "Pending"
+		scenarioRun.Status.ClusterJobs[existingJobIndex].StartTime = &now
+		scenarioRun.Status.ClusterJobs[existingJobIndex].CompletionTime = nil
+		scenarioRun.Status.ClusterJobs[existingJobIndex].Message = ""
+
+		logger.Info("updated retry job in status",
+			"cluster", clusterName,
+			"newJobId", jobId,
+			"retryAttempt", scenarioRun.Status.ClusterJobs[existingJobIndex].RetryCount)
+	} else {
+		// New job (first attempt)
+		jobStatus := krknv1alpha1.ClusterJobStatus{
+			ClusterName: clusterName,
+			JobId:       jobId,
+			PodName:     podName,
+			Phase:       "Pending",
+			StartTime:   &now,
+			RetryCount:  0,
+			MaxRetries:  0, // Will be set from spec on first failure
+		}
+		scenarioRun.Status.ClusterJobs = append(scenarioRun.Status.ClusterJobs, jobStatus)
+
+		logger.Info("created new cluster job",
+			"cluster", clusterName,
+			"jobId", jobId,
+			"pod", podName)
 	}
-
-	scenarioRun.Status.ClusterJobs = append(scenarioRun.Status.ClusterJobs, jobStatus)
-
-	logger.Info("created cluster job", "cluster", clusterName, "jobId", jobId, "pod", podName)
 
 	return nil
 }
@@ -445,11 +477,18 @@ func (r *KrknScenarioRunReconciler) updateClusterJobStatuses(
 	ctx context.Context,
 	scenarioRun *krknv1alpha1.KrknScenarioRun,
 ) error {
+	logger := log.FromContext(ctx)
+
 	for i := range scenarioRun.Status.ClusterJobs {
 		job := &scenarioRun.Status.ClusterJobs[i]
 
-		// Skip completed jobs
-		if job.Phase == "Succeeded" || job.Phase == "Failed" {
+		// Skip terminal jobs
+		if job.Phase == "Succeeded" || job.Phase == "Cancelled" || job.Phase == "MaxRetriesExceeded" {
+			continue
+		}
+
+		// Skip Failed jobs unless they need retry processing
+		if job.Phase == "Failed" && job.RetryCount >= job.MaxRetries && !job.CancelRequested {
 			continue
 		}
 
@@ -482,7 +521,80 @@ func (r *KrknScenarioRunReconciler) updateClusterJobStatuses(
 		case corev1.PodFailed:
 			job.Phase = "Failed"
 			job.Message = r.extractPodErrorMessage(&pod)
+			job.FailureReason = r.extractFailureReason(&pod)
 			r.setCompletionTime(job)
+
+			// Retry logic
+			logger.Info("pod failed, checking retry eligibility",
+				"cluster", job.ClusterName,
+				"jobId", job.JobId,
+				"retryCount", job.RetryCount,
+				"maxRetries", job.MaxRetries,
+				"cancelRequested", job.CancelRequested,
+				"failureReason", job.FailureReason)
+
+			maxRetries := job.MaxRetries
+			if maxRetries == 0 {
+				maxRetries = scenarioRun.Spec.MaxRetries
+				if maxRetries == 0 {
+					maxRetries = 3 // Default
+				}
+				job.MaxRetries = maxRetries
+			}
+
+			if r.shouldRetryJob(job, maxRetries) {
+				// Calculate backoff delay
+				delay := r.calculateRetryDelay(job.RetryCount,
+					scenarioRun.Spec.RetryBackoff,
+					scenarioRun.Spec.RetryDelay)
+
+				// Check if enough time has passed since last retry
+				now := metav1.Now()
+				if job.LastRetryTime != nil {
+					elapsed := now.Sub(job.LastRetryTime.Time)
+					if elapsed < delay {
+						logger.Info("waiting for retry backoff",
+							"cluster", job.ClusterName,
+							"jobId", job.JobId,
+							"elapsed", elapsed.String(),
+							"requiredDelay", delay.String())
+						// Don't retry yet, will check again on next reconcile
+						continue
+					}
+				}
+
+				// Retry!
+				job.Phase = "Retrying"
+				job.RetryCount++
+				job.LastRetryTime = &now
+
+				logger.Info("retrying failed job",
+					"cluster", job.ClusterName,
+					"previousJobId", job.JobId,
+					"retryAttempt", job.RetryCount,
+					"maxRetries", maxRetries)
+
+				// Create new pod (will get new jobId)
+				if err := r.createClusterJob(ctx, scenarioRun, job.ClusterName); err != nil {
+					logger.Error(err, "failed to create retry job",
+						"cluster", job.ClusterName,
+						"retryAttempt", job.RetryCount)
+					job.Phase = "Failed"
+					job.Message = "Retry failed: " + err.Error()
+				}
+			} else if job.CancelRequested {
+				job.Phase = "Cancelled"
+				logger.Info("job marked as cancelled, no retry",
+					"cluster", job.ClusterName,
+					"jobId", job.JobId)
+			} else {
+				job.Phase = "MaxRetriesExceeded"
+				logger.Info("job exceeded max retries",
+					"cluster", job.ClusterName,
+					"jobId", job.JobId,
+					"retryCount", job.RetryCount,
+					"maxRetries", maxRetries)
+			}
 		case corev1.PodUnknown:
 			job.Phase = "Failed"
 			job.Message = "Pod in unknown state"
@@ -517,10 +629,84 @@ func (r *KrknScenarioRunReconciler) extractPodErrorMessage(pod *corev1.Pod) stri
 	return ""
 }
 
+// extractFailureReason extracts a categorized failure reason from pod
+func (r *KrknScenarioRunReconciler) extractFailureReason(pod *corev1.Pod) string {
+	if len(pod.Status.ContainerStatuses) == 0 {
+		return "PodNotScheduled"
+	}
+
+	cs := pod.Status.ContainerStatuses[0]
+	if cs.State.Terminated != nil {
+		reason := cs.State.Terminated.Reason
+		exitCode := cs.State.Terminated.ExitCode
+
+		// Categorize common failures
+		if exitCode == 137 {
+			return "OOMKilled"
+		}
+		if exitCode == 143 {
+			return "SIGTERM"
+		}
+		if reason == "Error" {
+			return "ContainerError"
+		}
+		return reason
+	}
+
+	if cs.State.Waiting != nil {
+		return cs.State.Waiting.Reason
+	}
+
+	return "Unknown"
+}
+
+// shouldRetryJob determines if a failed job should be retried
+func (r *KrknScenarioRunReconciler) shouldRetryJob(job *krknv1alpha1.ClusterJobStatus, maxRetries int) bool {
+	// Don't retry if user cancelled
+	if job.CancelRequested {
+		return false
+	}
+
+	// Don't retry if phase is already terminal
+	if job.Phase == "Succeeded" || job.Phase == "Cancelled" || job.Phase == "MaxRetriesExceeded" {
+		return false
+	}
+
+	// Check retry count against max
+	if maxRetries == 0 {
+		maxRetries = 3 // Default
+	}
+
+	return job.RetryCount < maxRetries
+}
+
+// calculateRetryDelay calculates backoff delay based on retry count
+func (r *KrknScenarioRunReconciler) calculateRetryDelay(retryCount int, backoffType, delayStr string) time.Duration {
+	baseDelay := 10 * time.Second
+	if delayStr != "" {
+		if d, err := time.ParseDuration(delayStr); err == nil {
+			baseDelay = d
+		}
+	}
+
+	if backoffType == "exponential" {
+		// Exponential: 10s, 20s, 40s, ...
+		return baseDelay * time.Duration(1<<retryCount)
+	}
+
+	// Fixed: always same delay
+	return baseDelay
+}
+
 // jobExistsForCluster checks if a job already exists for the given cluster
 func (r *KrknScenarioRunReconciler) jobExistsForCluster(scenarioRun *krknv1alpha1.KrknScenarioRun, clusterName string) bool {
 	for _, job := range scenarioRun.Status.ClusterJobs {
 		if job.ClusterName == clusterName {
+			// Don't count jobs in "Retrying" phase as existing,
+			// since we need to create a new pod for them
+			if job.Phase == "Retrying" {
+				return false
+			}
 			return true
 		}
 	}
@@ -535,9 +721,9 @@ func (r *KrknScenarioRunReconciler) calculateOverallStatus(scenarioRun *krknv1al
 		switch job.Phase {
 		case "Succeeded":
 			successfulJobs++
-		case "Failed":
+		case "Failed", "Cancelled", "MaxRetriesExceeded":
 			failedJobs++
-		case "Running":
+		case "Running", "Retrying":
 			runningJobs++
 		case "Pending":
 			pendingJobs++

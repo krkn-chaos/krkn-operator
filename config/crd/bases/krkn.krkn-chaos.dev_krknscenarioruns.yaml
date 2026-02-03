@@ -97,11 +97,29 @@ spec:
                 description: KubeconfigPath is the path where kubeconfig will be mounted
                   in the pod
                 type: string
+              maxRetries:
+                default: 3
+                description: MaxRetries is the maximum number of times to retry failed
+                  jobs
+                type: integer
               password:
                 description: Password is the password for registry authentication
                 type: string
               registryURL:
                 description: RegistryURL is the URL of the container registry
+                type: string
+              retryBackoff:
+                default: exponential
+                description: RetryBackoff determines the backoff strategy for retries
+                  (exponential or fixed)
+                enum:
+                - exponential
+                - fixed
+                type: string
+              retryDelay:
+                default: 10s
+                description: RetryDelay is the initial delay before retrying (e.g.,
+                  "10s")
                 type: string
               scenarioImage:
                 description: ScenarioImage is the container image for the scenario
@@ -137,6 +155,10 @@ spec:
                   description: ClusterJobStatus represents the status of a scenario
                     job for a specific cluster
                   properties:
+                    cancelRequested:
+                      description: CancelRequested indicates if the user has requested
+                        cancellation
+                      type: boolean
                     clusterName:
                       description: ClusterName is the name of the target cluster
                       type: string
@@ -144,25 +166,44 @@ spec:
                       description: CompletionTime is when the job completed
                       format: date-time
                       type: string
+                    failureReason:
+                      description: FailureReason contains a categorized failure reason
+                        (OOMKilled, ContainerError, etc.)
+                      type: string
                     jobId:
                       description: JobId is the unique identifier for this job
                       type: string
+                    lastRetryTime:
+                      description: LastRetryTime is when the last retry was initiated
+                      format: date-time
+                      type: string
+                    maxRetries:
+                      description: MaxRetries is the maximum number of retries allowed
+                        for this job
+                      type: integer
                     message:
                       description: Message contains additional information about the
                         job status
                       type: string
                     phase:
                       description: Phase is the current phase of the job (Pending,
-                        Running, Succeeded, Failed)
+                        Running, Succeeded, Failed, Retrying, Cancelled, MaxRetriesExceeded)
                       enum:
                       - Pending
                       - Running
                       - Succeeded
                       - Failed
+                      - Retrying
+                      - Cancelled
+                      - MaxRetriesExceeded
                       type: string
                     podName:
                       description: PodName is the name of the pod running the scenario
                       type: string
+                    retryCount:
+                      description: RetryCount is the number of times this job has
+                        been retried
+                      type: integer
                     startTime:
                       description: StartTime is when the job started
                       format: date-time
