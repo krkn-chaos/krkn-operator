@@ -322,6 +322,14 @@ type ClusterJobStatusResponse struct {
 	CompletionTime *time.Time `json:"completionTime,omitempty"`
 	// Message contains additional information about the job status
 	Message string `json:"message,omitempty"`
+	// RetryCount is the number of times this job has been retried
+	RetryCount int `json:"retryCount,omitempty"`
+	// MaxRetries is the maximum number of retries allowed
+	MaxRetries int `json:"maxRetries,omitempty"`
+	// CancelRequested indicates if cancellation was requested
+	CancelRequested bool `json:"cancelRequested,omitempty"`
+	// FailureReason contains the categorized failure reason
+	FailureReason string `json:"failureReason,omitempty"`
 }
 
 // ScenarioRunListItem represents a single scenario run in the list view

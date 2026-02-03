@@ -1015,13 +1015,17 @@ func (h *Handler) GetScenarioRunStatus(w http.ResponseWriter, r *http.Request) {
 	clusterJobs := make([]ClusterJobStatusResponse, len(scenarioRun.Status.ClusterJobs))
 	for i, job := range scenarioRun.Status.ClusterJobs {
 		clusterJobs[i] = ClusterJobStatusResponse{
-			ClusterName:    job.ClusterName,
-			JobId:          job.JobId,
-			PodName:        job.PodName,
-			Phase:          job.Phase,
-			Message:        job.Message,
-			StartTime:      convertMetaTime(job.StartTime),
-			CompletionTime: convertMetaTime(job.CompletionTime),
+			ClusterName:     job.ClusterName,
+			JobId:           job.JobId,
+			PodName:         job.PodName,
+			Phase:           job.Phase,
+			Message:         job.Message,
+			StartTime:       convertMetaTime(job.StartTime),
+			CompletionTime:  convertMetaTime(job.CompletionTime),
+			RetryCount:      job.RetryCount,
+			MaxRetries:      job.MaxRetries,
+			CancelRequested: job.CancelRequested,
+			FailureReason:   job.FailureReason,
 		}
 	}
 
@@ -1490,6 +1494,73 @@ func (h *Handler) DeleteSingleJob(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// GetSingleJob handles GET /api/v1/scenarios/run/jobs/{jobId}
+// It returns the status of a single job by jobId (jobId is unique across all scenario runs)
+func (h *Handler) GetSingleJob(w http.ResponseWriter, r *http.Request) {
+	// Parse path: /api/v1/scenarios/run/jobs/{jobId}
+	jobId, err := extractPathSuffix(r.URL.Path, "/api/v1/scenarios/run/jobs/")
+	if err != nil {
+		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+			Error:   "bad_request",
+			Message: "jobId " + err.Error(),
+		})
+		return
+	}
+
+	ctx := context.Background()
+
+	// Find KrknScenarioRun containing this jobId
+	var scenarioRunList krknv1alpha1.KrknScenarioRunList
+	if err := h.client.List(ctx, &scenarioRunList, client.InNamespace(h.namespace)); err != nil {
+		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+			Error:   "internal_error",
+			Message: "Failed to list scenario runs: " + err.Error(),
+		})
+		return
+	}
+
+	// Search for job across all scenario runs
+	var foundJob *krknv1alpha1.ClusterJobStatus
+
+	for i := range scenarioRunList.Items {
+		sr := &scenarioRunList.Items[i]
+		for j := range sr.Status.ClusterJobs {
+			if sr.Status.ClusterJobs[j].JobId == jobId {
+				foundJob = &sr.Status.ClusterJobs[j]
+				break
+			}
+		}
+		if foundJob != nil {
+			break
+		}
+	}
+
+	if foundJob == nil {
+		writeJSONError(w, http.StatusNotFound, ErrorResponse{
+			Error:   "not_found",
+			Message: "Job '" + jobId + "' not found",
+		})
+		return
+	}
+
+	// Convert to response type
+	response := ClusterJobStatusResponse{
+		ClusterName:     foundJob.ClusterName,
+		JobId:           foundJob.JobId,
+		PodName:         foundJob.PodName,
+		Phase:           foundJob.Phase,
+		Message:         foundJob.Message,
+		StartTime:       convertMetaTime(foundJob.StartTime),
+		CompletionTime:  convertMetaTime(foundJob.CompletionTime),
+		RetryCount:      foundJob.RetryCount,
+		MaxRetries:      foundJob.MaxRetries,
+		CancelRequested: foundJob.CancelRequested,
+		FailureReason:   foundJob.FailureReason,
+	}
+
+	writeJSON(w, http.StatusOK, response)
+}
+
 func (h *Handler) ScenariosRunRouter(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path
 
@@ -1514,9 +1585,11 @@ func (h *Handler) ScenariosRunRouter(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// Check for /jobs/{jobId} pattern (DELETE single job)
+		// Check for /jobs/{jobId} pattern (GET or DELETE single job)
 		if strings.HasPrefix(path, "/api/v1/scenarios/run/jobs/") {
 			switch r.Method {
+			case http.MethodGet:
+				h.GetSingleJob(w, r)
 			case http.MethodDelete:
 				h.DeleteSingleJob(w, r)
 			default:
