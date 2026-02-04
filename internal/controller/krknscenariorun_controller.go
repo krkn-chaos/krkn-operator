@@ -65,10 +65,15 @@ type KrknScenarioRunReconciler struct {
 func (r *KrknScenarioRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
+	logger.Info("reconcile loop started",
+		"scenarioRun", req.Name,
+		"namespace", req.Namespace)
+
 	// Fetch the KrknScenarioRun instance
 	var scenarioRun krknv1alpha1.KrknScenarioRun
 	if err := r.Get(ctx, req.NamespacedName, &scenarioRun); err != nil {
 		if apierrors.IsNotFound(err) {
+			logger.Info("scenarioRun not found, probably deleted", "scenarioRun", req.Name)
 			return ctrl.Result{}, nil
 		}
 		logger.Error(err, "unable to fetch KrknScenarioRun")
@@ -77,6 +82,11 @@ func (r *KrknScenarioRunReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 
 	// Initialize status if first reconcile
 	if scenarioRun.Status.Phase == "" {
+		logger.Info("initializing scenarioRun status",
+			"scenarioRun", scenarioRun.Name,
+			"totalTargets", len(scenarioRun.Spec.ClusterNames),
+			"clusters", scenarioRun.Spec.ClusterNames)
+
 		scenarioRun.Status.Phase = "Pending"
 		scenarioRun.Status.TotalTargets = len(scenarioRun.Spec.ClusterNames)
 		scenarioRun.Status.ClusterJobs = make([]krknv1alpha1.ClusterJobStatus, 0)
@@ -87,18 +97,40 @@ func (r *KrknScenarioRunReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	}
 
 	// Process each cluster
+	jobsCreated := 0
 	for _, clusterName := range scenarioRun.Spec.ClusterNames {
 		// Check if job already exists for this cluster
 		if r.jobExistsForCluster(&scenarioRun, clusterName) {
+			logger.V(1).Info("job already exists for cluster, skipping",
+				"cluster", clusterName,
+				"scenarioRun", scenarioRun.Name)
 			continue
 		}
 
+		logger.Info("creating job for cluster",
+			"cluster", clusterName,
+			"scenarioRun", scenarioRun.Name)
+
 		// Create new job for this cluster
 		if err := r.createClusterJob(ctx, &scenarioRun, clusterName); err != nil {
-			logger.Error(err, "failed to create cluster job", "cluster", clusterName)
+			logger.Error(err, "failed to create cluster job",
+				"cluster", clusterName,
+				"scenarioRun", scenarioRun.Name)
 			// Continue with best-effort approach for other clusters
+		} else {
+			jobsCreated++
 		}
 	}
+
+	if jobsCreated > 0 {
+		logger.Info("jobs created in this reconcile loop",
+			"count", jobsCreated,
+			"scenarioRun", scenarioRun.Name)
+	}
+
+	logger.V(1).Info("updating cluster job statuses",
+		"scenarioRun", scenarioRun.Name,
+		"totalJobs", len(scenarioRun.Status.ClusterJobs))
 
 	// Update status for all jobs
 	if err := r.updateClusterJobStatuses(ctx, &scenarioRun); err != nil {
@@ -109,6 +141,14 @@ func (r *KrknScenarioRunReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	// Calculate overall status
 	r.calculateOverallStatus(&scenarioRun)
 
+	logger.Info("reconcile loop completed",
+		"scenarioRun", scenarioRun.Name,
+		"phase", scenarioRun.Status.Phase,
+		"totalTargets", scenarioRun.Status.TotalTargets,
+		"successfulJobs", scenarioRun.Status.SuccessfulJobs,
+		"failedJobs", scenarioRun.Status.FailedJobs,
+		"runningJobs", scenarioRun.Status.RunningJobs)
+
 	// Update status
 	if err := r.Status().Update(ctx, &scenarioRun); err != nil {
 		logger.Error(err, "failed to update status")
@@ -117,6 +157,9 @@ func (r *KrknScenarioRunReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 
 	// Requeue if jobs still running
 	if scenarioRun.Status.RunningJobs > 0 {
+		logger.V(1).Info("requeuing because jobs still running",
+			"scenarioRun", scenarioRun.Name,
+			"runningJobs", scenarioRun.Status.RunningJobs)
 		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 	}
 
@@ -482,13 +525,28 @@ func (r *KrknScenarioRunReconciler) updateClusterJobStatuses(
 	for i := range scenarioRun.Status.ClusterJobs {
 		job := &scenarioRun.Status.ClusterJobs[i]
 
+		logger.V(1).Info("checking job status",
+			"cluster", job.ClusterName,
+			"jobId", job.JobId,
+			"currentPhase", job.Phase,
+			"podName", job.PodName)
+
 		// Skip terminal jobs
 		if job.Phase == "Succeeded" || job.Phase == "Cancelled" || job.Phase == "MaxRetriesExceeded" {
+			logger.V(1).Info("skipping terminal job",
+				"cluster", job.ClusterName,
+				"jobId", job.JobId,
+				"phase", job.Phase)
 			continue
 		}
 
 		// Skip Failed jobs unless they need retry processing
 		if job.Phase == "Failed" && job.RetryCount >= job.MaxRetries && !job.CancelRequested {
+			logger.V(1).Info("skipping failed job that exceeded retries",
+				"cluster", job.ClusterName,
+				"jobId", job.JobId,
+				"retryCount", job.RetryCount,
+				"maxRetries", job.MaxRetries)
 			continue
 		}
 
@@ -501,23 +559,79 @@ func (r *KrknScenarioRunReconciler) updateClusterJobStatuses(
 
 		if err != nil {
 			if apierrors.IsNotFound(err) {
+				// IMPORTANT: Don't mark as Failed if pod was just created
+				// Kubernetes might not have created the pod yet
+				if job.Phase == "Pending" {
+					// Calculate time since job start
+					if job.StartTime != nil {
+						timeSinceStart := time.Since(job.StartTime.Time)
+						if timeSinceStart < 30*time.Second {
+							// Pod not found but job is recent - this is normal, keep waiting
+							logger.V(1).Info("pod not found but job is recent, keeping Pending status",
+								"cluster", job.ClusterName,
+								"jobId", job.JobId,
+								"podName", job.PodName,
+								"timeSinceStart", timeSinceStart.String())
+							continue
+						}
+					}
+				}
+
+				// Pod genuinely not found - this is an error
+				logger.Info("pod not found for job",
+					"cluster", job.ClusterName,
+					"jobId", job.JobId,
+					"podName", job.PodName,
+					"currentPhase", job.Phase)
+
 				job.Phase = "Failed"
 				job.Message = "Pod not found"
+				job.FailureReason = "PodNotFound"
 				now := metav1.Now()
 				job.CompletionTime = &now
+			} else {
+				logger.Error(err, "error fetching pod",
+					"cluster", job.ClusterName,
+					"jobId", job.JobId,
+					"podName", job.PodName)
 			}
 			continue
 		}
 
+		logger.V(1).Info("pod found",
+			"cluster", job.ClusterName,
+			"jobId", job.JobId,
+			"podName", job.PodName,
+			"podPhase", pod.Status.Phase)
+
 		// Update job status based on pod phase
+		previousPhase := job.Phase
 		switch pod.Status.Phase {
 		case corev1.PodPending:
 			job.Phase = "Pending"
+			if previousPhase != "Pending" {
+				logger.Info("job phase transition",
+					"cluster", job.ClusterName,
+					"jobId", job.JobId,
+					"from", previousPhase,
+					"to", "Pending")
+			}
 		case corev1.PodRunning:
 			job.Phase = "Running"
+			if previousPhase != "Running" {
+				logger.Info("job phase transition",
+					"cluster", job.ClusterName,
+					"jobId", job.JobId,
+					"from", previousPhase,
+					"to", "Running")
+			}
 		case corev1.PodSucceeded:
 			job.Phase = "Succeeded"
 			r.setCompletionTime(job)
+			logger.Info("job succeeded",
+				"cluster", job.ClusterName,
+				"jobId", job.JobId,
+				"duration", job.CompletionTime.Sub(job.StartTime.Time).String())
 		case corev1.PodFailed:
 			job.Phase = "Failed"
 			job.Message = r.extractPodErrorMessage(&pod)
@@ -598,7 +712,12 @@ func (r *KrknScenarioRunReconciler) updateClusterJobStatuses(
 		case corev1.PodUnknown:
 			job.Phase = "Failed"
 			job.Message = "Pod in unknown state"
+			job.FailureReason = "PodUnknown"
 			r.setCompletionTime(job)
+			logger.Info("pod in unknown state",
+				"cluster", job.ClusterName,
+				"jobId", job.JobId,
+				"podName", job.PodName)
 		}
 	}
 

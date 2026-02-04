@@ -1052,6 +1052,37 @@ var upgrader = websocket.Upgrader{
 	},
 }
 
+// isWebSocketDisconnectError checks if an error is a normal WebSocket client disconnection
+func isWebSocketDisconnectError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	// Check for WebSocket close errors
+	if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
+		return true
+	}
+
+	// Check error message for common disconnection patterns
+	errMsg := err.Error()
+	disconnectPatterns := []string{
+		"broken pipe",
+		"connection reset by peer",
+		"use of closed network connection",
+		"i/o timeout",
+		"EOF",
+		"client disconnected",
+	}
+
+	for _, pattern := range disconnectPatterns {
+		if strings.Contains(errMsg, pattern) {
+			return true
+		}
+	}
+
+	return false
+}
+
 // GetScenarioRunLogs handles GET /api/v1/scenarios/run/{scenarioRunName}/jobs/{jobId}/logs endpoint
 // It streams the stdout/stderr logs of a running or completed job via WebSocket
 func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
@@ -1109,6 +1140,39 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 	}
 
 	logger.Info("WebSocket connection established", "scenarioRunName", scenarioRunName, "jobId", jobId, "client_ip", r.RemoteAddr)
+
+	// Set up ping/pong handlers to detect client disconnection
+	pongWait := 60 * time.Second
+	conn.SetReadDeadline(time.Now().Add(pongWait))
+	conn.SetPongHandler(func(string) error {
+		conn.SetReadDeadline(time.Now().Add(pongWait))
+		return nil
+	})
+
+	// Start ping ticker
+	pingTicker := time.NewTicker(30 * time.Second)
+	defer pingTicker.Stop()
+
+	// Channel to signal when to stop pinging
+	done := make(chan struct{})
+	defer close(done)
+
+	// Goroutine to send periodic pings
+	go func() {
+		for {
+			select {
+			case <-pingTicker.C:
+				if err := conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+					logger.V(1).Info("Failed to send ping, client disconnected",
+						"scenarioRunName", scenarioRunName,
+						"jobId", jobId)
+					return
+				}
+			case <-done:
+				return
+			}
+		}
+	}()
 
 	ctx := context.Background()
 
@@ -1181,11 +1245,20 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 		line := scanner.Text()
 		err := conn.WriteMessage(websocket.TextMessage, []byte(line))
 		if err != nil {
-			logger.Error(err, "Failed to write log line to WebSocket, client likely disconnected",
-				"scenarioRunName", scenarioRunName,
-				"jobId", jobId,
-				"podName", pod.Name,
-				"linesStreamed", lineCount)
+			// Check if this is a normal client disconnection
+			if isWebSocketDisconnectError(err) {
+				logger.Info("WebSocket client disconnected",
+					"scenarioRunName", scenarioRunName,
+					"jobId", jobId,
+					"podName", pod.Name,
+					"linesStreamed", lineCount)
+			} else {
+				logger.Error(err, "Unexpected WebSocket write error",
+					"scenarioRunName", scenarioRunName,
+					"jobId", jobId,
+					"podName", pod.Name,
+					"linesStreamed", lineCount)
+			}
 			return
 		}
 		lineCount++
@@ -1208,8 +1281,15 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 		"podName", pod.Name,
 		"totalLines", lineCount)
 
-	// Send close message
-	conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
+	// Send close message (ignore error if client already disconnected)
+	if err := conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, "")); err != nil {
+		if !isWebSocketDisconnectError(err) {
+			logger.V(1).Info("Failed to send close message, client may have already disconnected",
+				"scenarioRunName", scenarioRunName,
+				"jobId", jobId,
+				"error", err.Error())
+		}
+	}
 }
 
 // ListScenarioRuns handles GET /api/v1/scenarios/run endpoint
