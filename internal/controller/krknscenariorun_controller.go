@@ -23,6 +23,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strings"
 	"time"
 
@@ -132,6 +133,9 @@ func (r *KrknScenarioRunReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		"scenarioRun", scenarioRun.Name,
 		"totalJobs", len(scenarioRun.Status.ClusterJobs))
 
+	// Save original status to detect changes
+	originalStatus := scenarioRun.Status.DeepCopy()
+
 	// Update status for all jobs
 	if err := r.updateClusterJobStatuses(ctx, &scenarioRun); err != nil {
 		logger.Error(err, "failed to update cluster job statuses")
@@ -149,10 +153,33 @@ func (r *KrknScenarioRunReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		"failedJobs", scenarioRun.Status.FailedJobs,
 		"runningJobs", scenarioRun.Status.RunningJobs)
 
-	// Update status
-	if err := r.Status().Update(ctx, &scenarioRun); err != nil {
-		logger.Error(err, "failed to update status")
-		return ctrl.Result{}, err
+	// Update status only if it has changed
+	statusChanged := !r.statusEqual(originalStatus, &scenarioRun.Status)
+
+	logger.V(1).Info("status comparison result",
+		"scenarioRun", scenarioRun.Name,
+		"statusChanged", statusChanged,
+		"oldPhase", originalStatus.Phase,
+		"newPhase", scenarioRun.Status.Phase,
+		"oldRunning", originalStatus.RunningJobs,
+		"newRunning", scenarioRun.Status.RunningJobs)
+
+	if statusChanged {
+		// Log what changed
+		changes := r.detectStatusChanges(originalStatus, &scenarioRun.Status)
+		logger.Info("status changed, updating CR",
+			"scenarioRun", scenarioRun.Name,
+			"changes", changes)
+
+		if err := r.Status().Update(ctx, &scenarioRun); err != nil {
+			logger.Error(err, "failed to update status")
+			return ctrl.Result{}, err
+		}
+	} else {
+		logger.V(1).Info("status unchanged, skipping update",
+			"scenarioRun", scenarioRun.Name,
+			"phase", scenarioRun.Status.Phase,
+			"runningJobs", scenarioRun.Status.RunningJobs)
 	}
 
 	// Requeue if jobs still running
@@ -968,6 +995,134 @@ func (r *KrknScenarioRunReconciler) getKubeconfigFromTargetRequest(ctx context.C
 
 	// Return the base64-encoded kubeconfig
 	return clusterConfig.Kubeconfig, nil
+}
+
+// statusEqual compares two KrknScenarioRunStatus to determine if they are equal
+// This is a semantic comparison that handles pointer fields correctly
+func (r *KrknScenarioRunReconciler) statusEqual(old, new *krknv1alpha1.KrknScenarioRunStatus) bool {
+	// Compare scalar fields
+	if old.Phase != new.Phase {
+		return false
+	}
+	if old.TotalTargets != new.TotalTargets {
+		return false
+	}
+	if old.SuccessfulJobs != new.SuccessfulJobs {
+		return false
+	}
+	if old.FailedJobs != new.FailedJobs {
+		return false
+	}
+	if old.RunningJobs != new.RunningJobs {
+		return false
+	}
+
+	// Compare ClusterJobs array length
+	if len(old.ClusterJobs) != len(new.ClusterJobs) {
+		return false
+	}
+
+	// Compare each job
+	for i := range old.ClusterJobs {
+		if !r.jobStatusEqual(&old.ClusterJobs[i], &new.ClusterJobs[i]) {
+			return false
+		}
+	}
+
+	// Compare Conditions array
+	if !reflect.DeepEqual(old.Conditions, new.Conditions) {
+		return false
+	}
+
+	return true
+}
+
+// jobStatusEqual compares two ClusterJobStatus semantically
+func (r *KrknScenarioRunReconciler) jobStatusEqual(old, new *krknv1alpha1.ClusterJobStatus) bool {
+	// Compare scalar fields
+	if old.ClusterName != new.ClusterName ||
+		old.JobId != new.JobId ||
+		old.PodName != new.PodName ||
+		old.Phase != new.Phase ||
+		old.Message != new.Message ||
+		old.RetryCount != new.RetryCount ||
+		old.MaxRetries != new.MaxRetries ||
+		old.CancelRequested != new.CancelRequested ||
+		old.FailureReason != new.FailureReason {
+		return false
+	}
+
+	// Compare time pointers - check if both nil or both have same value
+	if !timeEqual(old.StartTime, new.StartTime) ||
+		!timeEqual(old.CompletionTime, new.CompletionTime) ||
+		!timeEqual(old.LastRetryTime, new.LastRetryTime) {
+		return false
+	}
+
+	return true
+}
+
+// timeEqual compares two metav1.Time pointers semantically
+func timeEqual(t1, t2 *metav1.Time) bool {
+	if t1 == nil && t2 == nil {
+		return true
+	}
+	if t1 == nil || t2 == nil {
+		return false
+	}
+	// Compare the actual time values, not the pointers
+	return t1.Time.Equal(t2.Time)
+}
+
+// detectStatusChanges returns a human-readable description of what changed between two statuses
+func (r *KrknScenarioRunReconciler) detectStatusChanges(old, new *krknv1alpha1.KrknScenarioRunStatus) string {
+	var changes []string
+
+	// Phase change
+	if old.Phase != new.Phase {
+		changes = append(changes, fmt.Sprintf("phase:%s→%s", old.Phase, new.Phase))
+	}
+
+	// Job count changes
+	addCountChange := func(name string, oldVal, newVal int) {
+		if oldVal != newVal {
+			changes = append(changes, fmt.Sprintf("%s:%d→%d", name, oldVal, newVal))
+		}
+	}
+	addCountChange("successful", old.SuccessfulJobs, new.SuccessfulJobs)
+	addCountChange("failed", old.FailedJobs, new.FailedJobs)
+	addCountChange("running", old.RunningJobs, new.RunningJobs)
+
+	// Job phase changes
+	phaseChanges := countJobPhaseChanges(old.ClusterJobs, new.ClusterJobs)
+	if phaseChanges > 0 {
+		changes = append(changes, fmt.Sprintf("%d job phase changes", phaseChanges))
+	}
+
+	// New jobs
+	if newJobs := len(new.ClusterJobs) - len(old.ClusterJobs); newJobs > 0 {
+		changes = append(changes, fmt.Sprintf("+%d new jobs", newJobs))
+	}
+
+	if len(changes) == 0 {
+		return "unknown changes"
+	}
+	return strings.Join(changes, ", ")
+}
+
+// countJobPhaseChanges counts how many jobs changed phase between old and new
+func countJobPhaseChanges(oldJobs, newJobs []krknv1alpha1.ClusterJobStatus) int {
+	count := 0
+	minLen := len(oldJobs)
+	if len(newJobs) < minLen {
+		minLen = len(newJobs)
+	}
+	for i := 0; i < minLen; i++ {
+		if oldJobs[i].Phase != newJobs[i].Phase {
+			count++
+		}
+	}
+	return count
 }
 
 // SetupWithManager sets up the controller with the Manager
