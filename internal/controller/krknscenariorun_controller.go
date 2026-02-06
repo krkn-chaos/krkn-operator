@@ -39,7 +39,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
-	"github.com/krkn-chaos/krkn-operator/internal/kubeconfig"
 
 	"github.com/google/uuid"
 )
@@ -83,13 +82,19 @@ func (r *KrknScenarioRunReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 
 	// Initialize status if first reconcile
 	if scenarioRun.Status.Phase == "" {
+		// Calculate total targets
+		totalTargets := 0
+		for _, clusters := range scenarioRun.Spec.TargetClusters {
+			totalTargets += len(clusters)
+		}
+
 		logger.Info("initializing scenarioRun status",
 			"scenarioRun", scenarioRun.Name,
-			"totalTargets", len(scenarioRun.Spec.ClusterNames),
-			"clusters", scenarioRun.Spec.ClusterNames)
+			"totalTargets", totalTargets,
+			"targetClusters", scenarioRun.Spec.TargetClusters)
 
 		scenarioRun.Status.Phase = "Pending"
-		scenarioRun.Status.TotalTargets = len(scenarioRun.Spec.ClusterNames)
+		scenarioRun.Status.TotalTargets = totalTargets
 		scenarioRun.Status.ClusterJobs = make([]krknv1alpha1.ClusterJobStatus, 0)
 		if err := r.Status().Update(ctx, &scenarioRun); err != nil {
 			logger.Error(err, "failed to initialize status")
@@ -97,29 +102,34 @@ func (r *KrknScenarioRunReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		}
 	}
 
-	// Process each cluster
+	// Process each provider and their clusters
 	jobsCreated := 0
-	for _, clusterName := range scenarioRun.Spec.ClusterNames {
-		// Check if job already exists for this cluster
-		if r.jobExistsForCluster(&scenarioRun, clusterName) {
-			logger.V(1).Info("job already exists for cluster, skipping",
+	for providerName, clusterNames := range scenarioRun.Spec.TargetClusters {
+		for _, clusterName := range clusterNames {
+			// Check if job already exists for this cluster
+			if r.jobExistsForCluster(&scenarioRun, clusterName) {
+				logger.V(1).Info("job already exists for cluster, skipping",
+					"provider", providerName,
+					"cluster", clusterName,
+					"scenarioRun", scenarioRun.Name)
+				continue
+			}
+
+			logger.Info("creating job for cluster",
+				"provider", providerName,
 				"cluster", clusterName,
 				"scenarioRun", scenarioRun.Name)
-			continue
-		}
 
-		logger.Info("creating job for cluster",
-			"cluster", clusterName,
-			"scenarioRun", scenarioRun.Name)
-
-		// Create new job for this cluster
-		if err := r.createClusterJob(ctx, &scenarioRun, clusterName); err != nil {
-			logger.Error(err, "failed to create cluster job",
-				"cluster", clusterName,
-				"scenarioRun", scenarioRun.Name)
-			// Continue with best-effort approach for other clusters
-		} else {
-			jobsCreated++
+			// Create new job for this cluster
+			if err := r.createClusterJob(ctx, &scenarioRun, providerName, clusterName); err != nil {
+				logger.Error(err, "failed to create cluster job",
+					"provider", providerName,
+					"cluster", clusterName,
+					"scenarioRun", scenarioRun.Name)
+				// Continue with best-effort approach for other clusters
+			} else {
+				jobsCreated++
+			}
 		}
 	}
 
@@ -197,6 +207,7 @@ func (r *KrknScenarioRunReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 func (r *KrknScenarioRunReconciler) createClusterJob(
 	ctx context.Context,
 	scenarioRun *krknv1alpha1.KrknScenarioRun,
+	providerName string,
 	clusterName string,
 ) error {
 	logger := log.FromContext(ctx)
@@ -219,10 +230,15 @@ func (r *KrknScenarioRunReconciler) createClusterJob(
 		kubeconfigPath = "/home/krkn/.kube/config"
 	}
 
-	// Get kubeconfig using targetRequestId and clusterName
-	kubeconfigBase64, err := r.getKubeconfig(ctx, "", scenarioRun.Spec.TargetRequestId, clusterName)
+	logger.Info("getting kubeconfig for cluster",
+		"provider", providerName,
+		"cluster", clusterName,
+		"targetRequestId", scenarioRun.Spec.TargetRequestId)
+
+	// Get kubeconfig from managed-clusters Secret (works for ALL providers)
+	kubeconfigBase64, err := r.getKubeconfigFromProvider(ctx, scenarioRun.Spec.TargetRequestId, providerName, clusterName)
 	if err != nil {
-		return fmt.Errorf("failed to get kubeconfig: %w", err)
+		return fmt.Errorf("failed to get kubeconfig from provider %s: %w", providerName, err)
 	}
 
 	// Decode kubeconfig for ConfigMap
@@ -523,13 +539,14 @@ func (r *KrknScenarioRunReconciler) createClusterJob(
 	} else {
 		// New job (first attempt)
 		jobStatus := krknv1alpha1.ClusterJobStatus{
-			ClusterName: clusterName,
-			JobId:       jobId,
-			PodName:     podName,
-			Phase:       "Pending",
-			StartTime:   &now,
-			RetryCount:  0,
-			MaxRetries:  0, // Will be set from spec on first failure
+			ProviderName: providerName,
+			ClusterName:  clusterName,
+			JobId:        jobId,
+			PodName:      podName,
+			Phase:        "Pending",
+			StartTime:    &now,
+			RetryCount:   0,
+			MaxRetries:   0, // Will be set from spec on first failure
 		}
 		scenarioRun.Status.ClusterJobs = append(scenarioRun.Status.ClusterJobs, jobStatus)
 
@@ -716,7 +733,7 @@ func (r *KrknScenarioRunReconciler) updateClusterJobStatuses(
 					"maxRetries", maxRetries)
 
 				// Create new pod (will get new jobId)
-				if err := r.createClusterJob(ctx, scenarioRun, job.ClusterName); err != nil {
+				if err := r.createClusterJob(ctx, scenarioRun, job.ProviderName, job.ClusterName); err != nil {
 					logger.Error(err, "failed to create retry job",
 						"cluster", job.ClusterName,
 						"retryAttempt", job.RetryCount)
@@ -896,66 +913,9 @@ func (r *KrknScenarioRunReconciler) calculateOverallStatus(scenarioRun *krknv1al
 	}
 }
 
-// getKubeconfig is a helper method adapted from the API handler
-// It retrieves kubeconfig from KrknTargetRequest (legacy) or KrknOperatorTarget (new)
-func (r *KrknScenarioRunReconciler) getKubeconfig(ctx context.Context, targetUUID string, targetId string, clusterName string) (string, error) {
-	// Try new system first (KrknOperatorTarget)
-	if targetUUID != "" {
-		kubeconfigBase64, err := r.getKubeconfigFromOperatorTarget(ctx, targetUUID)
-		if err == nil {
-			return kubeconfigBase64, nil
-		}
-		// If KrknOperatorTarget not found but we have legacy params, try legacy
-		if targetId == "" || clusterName == "" {
-			return "", err
-		}
-	}
 
-	// Fall back to legacy system (KrknTargetRequest)
-	if targetId != "" && clusterName != "" {
-		return r.getKubeconfigFromTargetRequest(ctx, targetId, clusterName)
-	}
-
-	return "", fmt.Errorf("insufficient parameters: provide either targetUUID (new) or targetId+clusterName (legacy)")
-}
-
-// getKubeconfigFromOperatorTarget retrieves kubeconfig from KrknOperatorTarget
-func (r *KrknScenarioRunReconciler) getKubeconfigFromOperatorTarget(ctx context.Context, targetUUID string) (string, error) {
-	// Fetch KrknOperatorTarget
-	var target krknv1alpha1.KrknOperatorTarget
-	if err := r.Get(ctx, types.NamespacedName{
-		Name:      targetUUID,
-		Namespace: r.Namespace,
-	}, &target); err != nil {
-		return "", fmt.Errorf("failed to fetch KrknOperatorTarget: %w", err)
-	}
-
-	// Fetch Secret
-	var secret corev1.Secret
-	if err := r.Get(ctx, types.NamespacedName{
-		Name:      target.Spec.SecretUUID,
-		Namespace: r.Namespace,
-	}, &secret); err != nil {
-		return "", fmt.Errorf("failed to fetch secret: %w", err)
-	}
-
-	// Extract kubeconfig from secret data
-	kubeconfigData, exists := secret.Data["kubeconfig"]
-	if !exists {
-		return "", fmt.Errorf("kubeconfig not found in secret")
-	}
-
-	// Unmarshal JSON to get base64-encoded kubeconfig
-	kubeconfigBase64, err := kubeconfig.UnmarshalSecretData(kubeconfigData)
-	if err != nil {
-		return "", fmt.Errorf("failed to unmarshal kubeconfig from secret: %w", err)
-	}
-
-	return kubeconfigBase64, nil
-}
-
-// getKubeconfigFromTargetRequest retrieves kubeconfig from KrknTargetRequest (legacy)
-func (r *KrknScenarioRunReconciler) getKubeconfigFromTargetRequest(ctx context.Context, targetId string, clusterName string) (string, error) {
+// getKubeconfigFromProvider retrieves kubeconfig from a provider-specific Secret
+func (r *KrknScenarioRunReconciler) getKubeconfigFromProvider(ctx context.Context, targetId string, providerName string, clusterName string) (string, error) {
 	// Fetch the secret with the same name as the KrknTargetRequest ID
 	var secret corev1.Secret
 	err := r.Get(ctx, types.NamespacedName{
@@ -981,16 +941,16 @@ func (r *KrknScenarioRunReconciler) getKubeconfigFromTargetRequest(ctx context.C
 		return "", fmt.Errorf("failed to parse managed-clusters JSON: %w", err)
 	}
 
-	// Get the krkn-operator-acm object
-	acmClusters, exists := managedClusters["krkn-operator-acm"]
+	// Get the provider's clusters
+	providerClusters, exists := managedClusters[providerName]
 	if !exists {
-		return "", fmt.Errorf("krkn-operator-acm not found in managed-clusters")
+		return "", fmt.Errorf("provider '%s' not found in managed-clusters", providerName)
 	}
 
 	// Check if the requested cluster exists
-	clusterConfig, exists := acmClusters[clusterName]
+	clusterConfig, exists := providerClusters[clusterName]
 	if !exists {
-		return "", fmt.Errorf("cluster '%s' not found in krkn-operator-acm", clusterName)
+		return "", fmt.Errorf("cluster '%s' not found in %s", clusterName, providerName)
 	}
 
 	// Return the base64-encoded kubeconfig

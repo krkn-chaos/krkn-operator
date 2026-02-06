@@ -137,8 +137,9 @@ type FileMount struct {
 type ScenarioRunRequest struct {
 	// TargetRequestId is the UUID of the KrknTargetRequest (required)
 	TargetRequestId string `json:"targetRequestId"`
-	// ClusterNames is the array of cluster names to target (required, minimum 1 element)
-	ClusterNames []string `json:"clusterNames"`
+	// TargetClusters is a map of provider-name to list of cluster names
+	// Example: {"krkn-operator": ["cluster1", "cluster2"], "krkn-operator-acm": ["cluster3"]}
+	TargetClusters map[string][]string `json:"targetClusters"`
 
 	// ScenarioImage is the container image to run
 	ScenarioImage string `json:"scenarioImage"`
@@ -282,8 +283,8 @@ type UpdateTargetRequest struct {
 type ScenarioRunCreateResponse struct {
 	// ScenarioRunName is the name of the created KrknScenarioRun CR
 	ScenarioRunName string `json:"scenarioRunName"`
-	// ClusterNames is the list of target clusters
-	ClusterNames []string `json:"clusterNames"`
+	// TargetClusters is a map of provider-name to list of cluster names
+	TargetClusters map[string][]string `json:"targetClusters"`
 	// TotalTargets is the total number of target clusters
 	TotalTargets int `json:"totalTargets"`
 }
@@ -308,6 +309,8 @@ type ScenarioRunStatusResponse struct {
 
 // ClusterJobStatusResponse represents the status of a job for a specific cluster
 type ClusterJobStatusResponse struct {
+	// ProviderName is the name of the provider that owns this cluster
+	ProviderName string `json:"providerName"`
 	// ClusterName is the name of the target cluster
 	ClusterName string `json:"clusterName"`
 	// JobId is the unique identifier for this job

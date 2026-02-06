@@ -34,6 +34,8 @@ type FileMount struct {
 
 // ClusterJobStatus represents the status of a scenario job for a specific cluster
 type ClusterJobStatus struct {
+	// ProviderName is the name of the provider that owns this cluster
+	ProviderName string `json:"providerName"`
 	// ClusterName is the name of the target cluster
 	ClusterName string `json:"clusterName"`
 	// JobId is the unique identifier for this job
@@ -72,9 +74,10 @@ type KrknScenarioRunSpec struct {
 	// TargetRequestId is the reference to the KrknTargetRequest CR
 	TargetRequestId string `json:"targetRequestId"`
 
-	// ClusterNames is the list of target clusters to run the scenario on
-	// +kubebuilder:validation:MinItems=1
-	ClusterNames []string `json:"clusterNames"`
+	// TargetClusters is a map of provider-name to list of cluster names
+	// Example: {"krkn-operator": ["cluster1", "cluster2"], "krkn-operator-acm": ["cluster3"]}
+	// +kubebuilder:validation:MinProperties=1
+	TargetClusters map[string][]string `json:"targetClusters"`
 
 	// ScenarioName is the name of the scenario to run
 	ScenarioName string `json:"scenarioName"`

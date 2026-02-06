@@ -57,13 +57,6 @@ spec:
           spec:
             description: KrknScenarioRunSpec defines the desired state of KrknScenarioRun
             properties:
-              clusterNames:
-                description: ClusterNames is the list of target clusters to run the
-                  scenario on
-                items:
-                  type: string
-                minItems: 1
-                type: array
               environment:
                 additionalProperties:
                   type: string
@@ -130,6 +123,16 @@ spec:
               scenarioRepository:
                 description: ScenarioRepository is the repository path in the registry
                 type: string
+              targetClusters:
+                additionalProperties:
+                  items:
+                    type: string
+                  type: array
+                description: |-
+                  TargetClusters is a map of provider-name to list of cluster names
+                  Example: {"krkn-operator": ["cluster1", "cluster2"], "krkn-operator-acm": ["cluster3"]}
+                minProperties: 1
+                type: object
               targetRequestId:
                 description: TargetRequestId is the reference to the KrknTargetRequest
                   CR
@@ -141,9 +144,9 @@ spec:
                 description: Username is the username for registry authentication
                 type: string
             required:
-            - clusterNames
             - scenarioImage
             - scenarioName
+            - targetClusters
             - targetRequestId
             type: object
           status:
@@ -200,6 +203,10 @@ spec:
                     podName:
                       description: PodName is the name of the pod running the scenario
                       type: string
+                    providerName:
+                      description: ProviderName is the name of the provider that owns
+                        this cluster
+                      type: string
                     retryCount:
                       description: RetryCount is the number of times this job has
                         been retried
@@ -212,6 +219,7 @@ spec:
                   - clusterName
                   - jobId
                   - phase
+                  - providerName
                   type: object
                 type: array
               conditions:

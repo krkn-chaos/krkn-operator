@@ -301,6 +301,11 @@ func writeJSON(w http.ResponseWriter, status int, data interface{}) {
 
 // writeJSONError writes a JSON error response with the given status code
 func writeJSONError(w http.ResponseWriter, status int, err ErrorResponse) {
+	// Log internal server errors for debugging
+	if status >= 500 {
+		logger := log.Log.WithName("api")
+		logger.Error(fmt.Errorf(err.Message), "Internal server error", "error_code", err.Error, "status", status)
+	}
 	writeJSON(w, status, err)
 }
 
@@ -867,10 +872,10 @@ func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if len(req.ClusterNames) == 0 {
+	if len(req.TargetClusters) == 0 {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
 			Error:   "bad_request",
-			Message: "clusterNames is required and must contain at least one cluster name",
+			Message: "targetClusters is required and must contain at least one provider with clusters",
 		})
 		return
 	}
@@ -891,24 +896,40 @@ func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate cluster names (no duplicates or empty strings)
-	seen := make(map[string]bool, len(req.ClusterNames))
-	for _, clusterName := range req.ClusterNames {
-		if clusterName == "" {
+	// Validate cluster names across all providers (no duplicates or empty strings)
+	seen := make(map[string]string) // map[clusterName]providerName
+	for providerName, clusterNames := range req.TargetClusters {
+		if providerName == "" {
 			writeJSONError(w, http.StatusBadRequest, ErrorResponse{
 				Error:   "bad_request",
-				Message: "clusterNames cannot contain empty strings",
+				Message: "provider names cannot be empty",
 			})
 			return
 		}
-		if seen[clusterName] {
+		if len(clusterNames) == 0 {
 			writeJSONError(w, http.StatusBadRequest, ErrorResponse{
 				Error:   "bad_request",
-				Message: "clusterNames contains duplicates: " + clusterName,
+				Message: "provider '" + providerName + "' must have at least one cluster",
 			})
 			return
 		}
-		seen[clusterName] = true
+		for _, clusterName := range clusterNames {
+			if clusterName == "" {
+				writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+					Error:   "bad_request",
+					Message: "cluster names cannot be empty",
+				})
+				return
+			}
+			if existingProvider, exists := seen[clusterName]; exists {
+				writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+					Error:   "bad_request",
+					Message: "cluster '" + clusterName + "' appears in multiple providers: '" + existingProvider + "' and '" + providerName + "'",
+				})
+				return
+			}
+			seen[clusterName] = providerName
+		}
 	}
 
 	ctx := context.Background()
@@ -923,13 +944,13 @@ func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
 			Namespace: h.namespace,
 		},
 		Spec: krknv1alpha1.KrknScenarioRunSpec{
-			TargetRequestId: req.TargetRequestId,
-			ClusterNames:    req.ClusterNames,
-			ScenarioName:    req.ScenarioName,
-			ScenarioImage:   req.ScenarioImage,
-			KubeconfigPath:  req.KubeconfigPath,
-			Environment:     req.Environment,
-			RegistryURL:     req.RegistryURL,
+			TargetRequestId:    req.TargetRequestId,
+			TargetClusters:     req.TargetClusters,
+			ScenarioName:       req.ScenarioName,
+			ScenarioImage:      req.ScenarioImage,
+			KubeconfigPath:     req.KubeconfigPath,
+			Environment:        req.Environment,
+			RegistryURL:        req.RegistryURL,
 			ScenarioRepository: req.ScenarioRepository,
 		},
 	}
@@ -966,10 +987,16 @@ func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Calculate total targets from all providers
+	totalTargets := 0
+	for _, clusters := range req.TargetClusters {
+		totalTargets += len(clusters)
+	}
+
 	response := ScenarioRunCreateResponse{
 		ScenarioRunName: scenarioRunName,
-		ClusterNames:    req.ClusterNames,
-		TotalTargets:    len(req.ClusterNames),
+		TargetClusters:  req.TargetClusters,
+		TotalTargets:    totalTargets,
 	}
 
 	writeJSON(w, http.StatusCreated, response)
@@ -1015,6 +1042,7 @@ func (h *Handler) GetScenarioRunStatus(w http.ResponseWriter, r *http.Request) {
 	clusterJobs := make([]ClusterJobStatusResponse, len(scenarioRun.Status.ClusterJobs))
 	for i, job := range scenarioRun.Status.ClusterJobs {
 		clusterJobs[i] = ClusterJobStatusResponse{
+			ProviderName:    job.ProviderName,
 			ClusterName:     job.ClusterName,
 			JobId:           job.JobId,
 			PodName:         job.PodName,
@@ -1625,6 +1653,7 @@ func (h *Handler) GetSingleJob(w http.ResponseWriter, r *http.Request) {
 
 	// Convert to response type
 	response := ClusterJobStatusResponse{
+		ProviderName:    foundJob.ProviderName,
 		ClusterName:     foundJob.ClusterName,
 		JobId:           foundJob.JobId,
 		PodName:         foundJob.PodName,

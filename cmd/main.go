@@ -42,6 +42,7 @@ import (
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
 	"github.com/krkn-chaos/krkn-operator/internal/api"
 	"github.com/krkn-chaos/krkn-operator/internal/controller"
+	"github.com/krkn-chaos/krkn-operator/internal/provider"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -247,6 +248,16 @@ func main() {
 		setupLog.Error(err, "unable to create controller", "controller", "KrknScenarioRun")
 		os.Exit(1)
 	}
+
+	if err = (&controller.KrknTargetRequestReconciler{
+		Client:            mgr.GetClient(),
+		Scheme:            mgr.GetScheme(),
+		OperatorName:      "krkn-operator",
+		OperatorNamespace: krknNamespace,
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "KrknTargetRequest")
+		os.Exit(1)
+	}
 	// +kubebuilder:scaffold:builder
 
 	// Setup and add REST API server
@@ -256,6 +267,14 @@ func main() {
 		setupLog.Error(err, "unable to add REST API server to manager")
 		os.Exit(1)
 	}
+
+	// Setup and add provider registration
+	providerReg := provider.NewProviderRegistration(mgr.GetClient(), krknNamespace)
+	if err := mgr.Add(providerReg); err != nil {
+		setupLog.Error(err, "unable to add provider registration to manager")
+		os.Exit(1)
+	}
+	setupLog.Info("Provider registration configured", "name", "krkn-operator", "namespace", krknNamespace)
 
 	if metricsCertWatcher != nil {
 		setupLog.Info("Adding metrics certificate watcher to manager")

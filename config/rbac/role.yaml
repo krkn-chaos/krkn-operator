@@ -27,14 +27,29 @@ rules:
 - apiGroups:
   - krkn.krkn-chaos.dev
   resources:
-  - krknoperatortargets
+  - krknoperatortargetproviders
   verbs:
+  - create
   - get
   - list
+  - patch
+  - update
   - watch
 - apiGroups:
   - krkn.krkn-chaos.dev
   resources:
+  - krknoperatortargetproviders/status
+  - krknoperatortargets/status
+  - krknscenarioruns/status
+  - krkntargetrequests/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - krkn.krkn-chaos.dev
+  resources:
+  - krknoperatortargets
   - krknscenarioruns
   - krkntargetrequests
   verbs:
@@ -50,12 +65,4 @@ rules:
   resources:
   - krknscenarioruns/finalizers
   verbs:
-  - update
-- apiGroups:
-  - krkn.krkn-chaos.dev
-  resources:
-  - krknscenarioruns/status
-  verbs:
-  - get
-  - patch
   - update

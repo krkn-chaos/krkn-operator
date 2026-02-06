@@ -35,6 +35,9 @@ import (
 	"github.com/krkn-chaos/krkn-operator/internal/kubeconfig"
 )
 
+// +kubebuilder:rbac:groups=krkn.krkn-chaos.dev,resources=krknoperatortargets,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=krkn.krkn-chaos.dev,resources=krknoperatortargets/status,verbs=get;update;patch
+
 // fetchTarget retrieves a KrknOperatorTarget by UUID.
 // Returns the target and any error encountered.
 func (h *Handler) fetchTarget(ctx context.Context, targetUUID string) (*krknv1alpha1.KrknOperatorTarget, error) {
@@ -301,7 +304,7 @@ func (h *Handler) ListTargets(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Convert to response format
-	var targetResponses []TargetResponse
+	targetResponses := make([]TargetResponse, 0, len(targets.Items))
 	for i := range targets.Items {
 		targetResponses = append(targetResponses, buildTargetResponse(&targets.Items[i]))
 	}
