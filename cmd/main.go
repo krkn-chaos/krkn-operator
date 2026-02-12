@@ -42,7 +42,7 @@ import (
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
 	"github.com/krkn-chaos/krkn-operator/internal/api"
 	"github.com/krkn-chaos/krkn-operator/internal/controller"
-	"github.com/krkn-chaos/krkn-operator/internal/provider"
+	"github.com/krkn-chaos/krkn-operator/pkg/provider"
 	// +kubebuilder:scaffold:imports
 )
 

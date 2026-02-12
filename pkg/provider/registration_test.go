@@ -21,6 +21,7 @@ package provider
 import (
 	"context"
 	"testing"
+	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -32,7 +33,8 @@ import (
 )
 
 const (
-	testNamespace = "krkn-operator-system"
+	testNamespace   = "krkn-operator-system"
+	testProviderName = "test-operator"
 )
 
 func setupTestClient(objs ...client.Object) client.Client {
@@ -48,7 +50,11 @@ func setupTestClient(objs ...client.Object) client.Client {
 
 func TestEnsureProvider_CreatesNewProvider(t *testing.T) {
 	fakeClient := setupTestClient()
-	providerReg := NewProviderRegistration(fakeClient, testNamespace)
+	providerReg := NewProviderRegistrationWithConfig(fakeClient, Config{
+		ProviderName:      testProviderName,
+		HeartbeatInterval: 30 * time.Second,
+		Namespace:         testNamespace,
+	})
 	ctx := context.Background()
 
 	err := providerReg.ensureProvider(ctx)
@@ -59,14 +65,14 @@ func TestEnsureProvider_CreatesNewProvider(t *testing.T) {
 	// Verify provider was created
 	var provider krknv1alpha1.KrknOperatorTargetProvider
 	if err := fakeClient.Get(ctx, types.NamespacedName{
-		Name:      ProviderName,
+		Name:      testProviderName,
 		Namespace: testNamespace,
 	}, &provider); err != nil {
 		t.Fatalf("Failed to get provider: %v", err)
 	}
 
-	if provider.Spec.OperatorName != ProviderName {
-		t.Errorf("Expected operator name %s, got %s", ProviderName, provider.Spec.OperatorName)
+	if provider.Spec.OperatorName != testProviderName {
+		t.Errorf("Expected operator name %s, got %s", testProviderName, provider.Spec.OperatorName)
 	}
 
 	if !provider.Spec.Active {
@@ -77,17 +83,21 @@ func TestEnsureProvider_CreatesNewProvider(t *testing.T) {
 func TestEnsureProvider_UpdatesExistingProvider(t *testing.T) {
 	existingProvider := &krknv1alpha1.KrknOperatorTargetProvider{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      ProviderName,
+			Name:      testProviderName,
 			Namespace: testNamespace,
 		},
 		Spec: krknv1alpha1.KrknOperatorTargetProviderSpec{
-			OperatorName: ProviderName,
+			OperatorName: testProviderName,
 			Active:       false, // Inactive
 		},
 	}
 
 	fakeClient := setupTestClient(existingProvider)
-	providerReg := NewProviderRegistration(fakeClient, testNamespace)
+	providerReg := NewProviderRegistrationWithConfig(fakeClient, Config{
+		ProviderName:      testProviderName,
+		HeartbeatInterval: 30 * time.Second,
+		Namespace:         testNamespace,
+	})
 	ctx := context.Background()
 
 	err := providerReg.ensureProvider(ctx)
@@ -98,7 +108,7 @@ func TestEnsureProvider_UpdatesExistingProvider(t *testing.T) {
 	// Verify provider was updated to active
 	var provider krknv1alpha1.KrknOperatorTargetProvider
 	if err := fakeClient.Get(ctx, types.NamespacedName{
-		Name:      ProviderName,
+		Name:      testProviderName,
 		Namespace: testNamespace,
 	}, &provider); err != nil {
 		t.Fatalf("Failed to get provider: %v", err)
@@ -114,11 +124,11 @@ func TestUpdateHeartbeat_UpdatesTimestamp(t *testing.T) {
 	oldTime := metav1.NewTime(metav1.Now().Add(-1 * 60 * 1000000000)) // 1 minute ago
 	provider := &krknv1alpha1.KrknOperatorTargetProvider{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      ProviderName,
+			Name:      testProviderName,
 			Namespace: testNamespace,
 		},
 		Spec: krknv1alpha1.KrknOperatorTargetProviderSpec{
-			OperatorName: ProviderName,
+			OperatorName: testProviderName,
 			Active:       true,
 		},
 		Status: krknv1alpha1.KrknOperatorTargetProviderStatus{
@@ -127,7 +137,11 @@ func TestUpdateHeartbeat_UpdatesTimestamp(t *testing.T) {
 	}
 
 	fakeClient := setupTestClient(provider)
-	providerReg := NewProviderRegistration(fakeClient, testNamespace)
+	providerReg := NewProviderRegistrationWithConfig(fakeClient, Config{
+		ProviderName:      testProviderName,
+		HeartbeatInterval: 30 * time.Second,
+		Namespace:         testNamespace,
+	})
 	ctx := context.Background()
 
 	err := providerReg.updateHeartbeat(ctx)
@@ -138,7 +152,7 @@ func TestUpdateHeartbeat_UpdatesTimestamp(t *testing.T) {
 	// Verify timestamp was updated
 	var updated krknv1alpha1.KrknOperatorTargetProvider
 	if err := fakeClient.Get(ctx, types.NamespacedName{
-		Name:      ProviderName,
+		Name:      testProviderName,
 		Namespace: testNamespace,
 	}, &updated); err != nil {
 		t.Fatalf("Failed to get provider: %v", err)
@@ -157,17 +171,21 @@ func TestUpdateHeartbeat_UpdatesTimestamp(t *testing.T) {
 func TestDeactivateProvider_SetsActiveToFalse(t *testing.T) {
 	provider := &krknv1alpha1.KrknOperatorTargetProvider{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      ProviderName,
+			Name:      testProviderName,
 			Namespace: testNamespace,
 		},
 		Spec: krknv1alpha1.KrknOperatorTargetProviderSpec{
-			OperatorName: ProviderName,
+			OperatorName: testProviderName,
 			Active:       true,
 		},
 	}
 
 	fakeClient := setupTestClient(provider)
-	providerReg := NewProviderRegistration(fakeClient, testNamespace)
+	providerReg := NewProviderRegistrationWithConfig(fakeClient, Config{
+		ProviderName:      testProviderName,
+		HeartbeatInterval: 30 * time.Second,
+		Namespace:         testNamespace,
+	})
 	ctx := context.Background()
 
 	err := providerReg.deactivateProvider(ctx)
@@ -178,7 +196,7 @@ func TestDeactivateProvider_SetsActiveToFalse(t *testing.T) {
 	// Verify provider was deactivated
 	var updated krknv1alpha1.KrknOperatorTargetProvider
 	if err := fakeClient.Get(ctx, types.NamespacedName{
-		Name:      ProviderName,
+		Name:      testProviderName,
 		Namespace: testNamespace,
 	}, &updated); err != nil {
 		t.Fatalf("Failed to get provider: %v", err)
@@ -191,7 +209,11 @@ func TestDeactivateProvider_SetsActiveToFalse(t *testing.T) {
 
 func TestDeactivateProvider_HandlesNotFound(t *testing.T) {
 	fakeClient := setupTestClient()
-	providerReg := NewProviderRegistration(fakeClient, testNamespace)
+	providerReg := NewProviderRegistrationWithConfig(fakeClient, Config{
+		ProviderName:      testProviderName,
+		HeartbeatInterval: 30 * time.Second,
+		Namespace:         testNamespace,
+	})
 	ctx := context.Background()
 
 	// Should not error if provider doesn't exist
@@ -203,9 +225,65 @@ func TestDeactivateProvider_HandlesNotFound(t *testing.T) {
 
 func TestNeedLeaderElection_ReturnsTrue(t *testing.T) {
 	fakeClient := setupTestClient()
-	providerReg := NewProviderRegistration(fakeClient, testNamespace)
+	providerReg := NewProviderRegistrationWithConfig(fakeClient, Config{
+		ProviderName:      testProviderName,
+		HeartbeatInterval: 30 * time.Second,
+		Namespace:         testNamespace,
+	})
 
 	if !providerReg.NeedLeaderElection() {
 		t.Error("Expected NeedLeaderElection to return true")
+	}
+}
+
+func TestNewProviderRegistration_BackwardsCompatibility(t *testing.T) {
+	fakeClient := setupTestClient()
+	providerReg := NewProviderRegistration(fakeClient, testNamespace)
+
+	// Verify defaults are set correctly
+	if providerReg.providerName != "krkn-operator" {
+		t.Errorf("Expected default provider name 'krkn-operator', got %s", providerReg.providerName)
+	}
+
+	if providerReg.heartbeatInterval != 30*time.Second {
+		t.Errorf("Expected default heartbeat interval 30s, got %v", providerReg.heartbeatInterval)
+	}
+
+	if providerReg.namespace != testNamespace {
+		t.Errorf("Expected namespace %s, got %s", testNamespace, providerReg.namespace)
+	}
+}
+
+func TestNewProviderRegistrationWithConfig_CustomValues(t *testing.T) {
+	fakeClient := setupTestClient()
+	customInterval := 60 * time.Second
+	providerReg := NewProviderRegistrationWithConfig(fakeClient, Config{
+		ProviderName:      "custom-operator",
+		HeartbeatInterval: customInterval,
+		Namespace:         testNamespace,
+	})
+
+	if providerReg.providerName != "custom-operator" {
+		t.Errorf("Expected provider name 'custom-operator', got %s", providerReg.providerName)
+	}
+
+	if providerReg.heartbeatInterval != customInterval {
+		t.Errorf("Expected heartbeat interval %v, got %v", customInterval, providerReg.heartbeatInterval)
+	}
+}
+
+func TestNewProviderRegistrationWithConfig_DefaultValues(t *testing.T) {
+	fakeClient := setupTestClient()
+	providerReg := NewProviderRegistrationWithConfig(fakeClient, Config{
+		Namespace: testNamespace,
+		// ProviderName and HeartbeatInterval not set
+	})
+
+	if providerReg.providerName != "krkn-operator" {
+		t.Errorf("Expected default provider name 'krkn-operator', got %s", providerReg.providerName)
+	}
+
+	if providerReg.heartbeatInterval != 30*time.Second {
+		t.Errorf("Expected default heartbeat interval 30s, got %v", providerReg.heartbeatInterval)
 	}
 }

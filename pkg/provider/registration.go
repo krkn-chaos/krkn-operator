@@ -32,27 +32,54 @@ import (
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
 )
 
-const (
-	// ProviderName is the name of the krkn-operator provider
-	ProviderName = "krkn-operator"
-
-	// HeartbeatInterval is the interval at which the provider heartbeat is updated
-	HeartbeatInterval = 30 * time.Second
-)
-
 // ProviderRegistration manages the KrknOperatorTargetProvider CR registration and heartbeat
 type ProviderRegistration struct {
-	client    client.Client
-	namespace string
-	stopCh    chan struct{}
+	client            client.Client
+	namespace         string
+	providerName      string
+	heartbeatInterval time.Duration
+	stopCh            chan struct{}
+}
+
+// Config holds the configuration for provider registration
+type Config struct {
+	// ProviderName is the name to register as (e.g., "krkn-operator", "my-custom-operator")
+	ProviderName string
+
+	// HeartbeatInterval is the interval at which the provider heartbeat is updated
+	// If not set, defaults to 30 seconds
+	HeartbeatInterval time.Duration
+
+	// Namespace is the namespace where the provider CR will be created
+	Namespace string
 }
 
 // NewProviderRegistration creates a new provider registration manager
+// Deprecated: Use NewProviderRegistrationWithConfig instead
 func NewProviderRegistration(c client.Client, namespace string) *ProviderRegistration {
+	return NewProviderRegistrationWithConfig(c, Config{
+		ProviderName:      "krkn-operator",
+		HeartbeatInterval: 30 * time.Second,
+		Namespace:         namespace,
+	})
+}
+
+// NewProviderRegistrationWithConfig creates a new provider registration manager with custom configuration
+func NewProviderRegistrationWithConfig(c client.Client, cfg Config) *ProviderRegistration {
+	// Set defaults
+	if cfg.HeartbeatInterval == 0 {
+		cfg.HeartbeatInterval = 30 * time.Second
+	}
+	if cfg.ProviderName == "" {
+		cfg.ProviderName = "krkn-operator"
+	}
+
 	return &ProviderRegistration{
-		client:    c,
-		namespace: namespace,
-		stopCh:    make(chan struct{}),
+		client:            c,
+		namespace:         cfg.Namespace,
+		providerName:      cfg.ProviderName,
+		heartbeatInterval: cfg.HeartbeatInterval,
+		stopCh:            make(chan struct{}),
 	}
 }
 
@@ -60,7 +87,7 @@ func NewProviderRegistration(c client.Client, namespace string) *ProviderRegistr
 // It ensures the provider CR exists and starts the heartbeat goroutine
 func (p *ProviderRegistration) Start(ctx context.Context) error {
 	logger := log.FromContext(ctx).WithName("provider-registration")
-	logger.Info("Starting provider registration", "name", ProviderName, "namespace", p.namespace)
+	logger.Info("Starting provider registration", "name", p.providerName, "namespace", p.namespace)
 
 	// Create or update provider CR
 	if err := p.ensureProvider(ctx); err != nil {
@@ -71,10 +98,10 @@ func (p *ProviderRegistration) Start(ctx context.Context) error {
 	logger.Info("Provider CR ensured successfully")
 
 	// Start heartbeat goroutine
-	ticker := time.NewTicker(HeartbeatInterval)
+	ticker := time.NewTicker(p.heartbeatInterval)
 	defer ticker.Stop()
 
-	logger.Info("Starting heartbeat loop", "interval", HeartbeatInterval)
+	logger.Info("Starting heartbeat loop", "interval", p.heartbeatInterval)
 
 	for {
 		select {
@@ -107,14 +134,14 @@ func (p *ProviderRegistration) ensureProvider(ctx context.Context) error {
 
 	provider := &krknv1alpha1.KrknOperatorTargetProvider{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      ProviderName,
+			Name:      p.providerName,
 			Namespace: p.namespace,
 		},
 	}
 
 	result, err := controllerutil.CreateOrUpdate(ctx, p.client, provider, func() error {
 		// Set spec fields
-		provider.Spec.OperatorName = ProviderName
+		provider.Spec.OperatorName = p.providerName
 		provider.Spec.Active = true
 
 		// Initialize status
@@ -129,7 +156,7 @@ func (p *ProviderRegistration) ensureProvider(ctx context.Context) error {
 		return err
 	}
 
-	logger.Info("Provider CR operation completed", "result", result, "name", ProviderName)
+	logger.Info("Provider CR operation completed", "result", result, "name", p.providerName)
 	return nil
 }
 
@@ -137,7 +164,7 @@ func (p *ProviderRegistration) ensureProvider(ctx context.Context) error {
 func (p *ProviderRegistration) updateHeartbeat(ctx context.Context) error {
 	var provider krknv1alpha1.KrknOperatorTargetProvider
 	if err := p.client.Get(ctx, types.NamespacedName{
-		Name:      ProviderName,
+		Name:      p.providerName,
 		Namespace: p.namespace,
 	}, &provider); err != nil {
 		return err
@@ -151,7 +178,7 @@ func (p *ProviderRegistration) updateHeartbeat(ctx context.Context) error {
 func (p *ProviderRegistration) deactivateProvider(ctx context.Context) error {
 	var provider krknv1alpha1.KrknOperatorTargetProvider
 	if err := p.client.Get(ctx, types.NamespacedName{
-		Name:      ProviderName,
+		Name:      p.providerName,
 		Namespace: p.namespace,
 	}, &provider); err != nil {
 		return client.IgnoreNotFound(err)

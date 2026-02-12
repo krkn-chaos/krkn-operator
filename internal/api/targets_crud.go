@@ -262,10 +262,6 @@ func (h *Handler) CreateTarget(w http.ResponseWriter, r *http.Request) {
 			CABundle:              req.CABundle,
 			InsecureSkipTLSVerify: req.CABundle == "",
 		},
-		Status: krknv1alpha1.KrknOperatorTargetStatus{
-			Ready:       true,
-			LastUpdated: metav1.Now(),
-		},
 	}
 
 	if err := h.client.Create(ctx, target); err != nil {
@@ -275,6 +271,23 @@ func (h *Handler) CreateTarget(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
 			Error:   "internal_error",
 			Message: "Failed to create target: " + err.Error(),
+		})
+		return
+	}
+
+	// Update status separately (status is ignored during Create)
+	target.Status = krknv1alpha1.KrknOperatorTargetStatus{
+		Ready:       true,
+		LastUpdated: metav1.Now(),
+	}
+	if err := h.client.Status().Update(ctx, target); err != nil {
+		// Cleanup on error
+		h.client.Delete(ctx, target)
+		h.client.Delete(ctx, secret)
+
+		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+			Error:   "internal_error",
+			Message: "Failed to update target status: " + err.Error(),
 		})
 		return
 	}
