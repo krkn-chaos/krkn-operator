@@ -87,7 +87,7 @@ func (r *KrknTargetRequestReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	if err := r.ensureUUIDLabel(ctx, &krknRequest); err != nil {
 		if isConflictError(err) {
 			logger.Info("Conflict during UUID label update, requeuing", "error", err.Error())
-			return ctrl.Result{Requeue: true}, nil
+			return ctrl.Result{RequeueAfter: 100 * time.Millisecond}, nil
 		}
 		logger.Error(err, "Failed to set UUID label")
 		return ctrl.Result{}, err
@@ -103,7 +103,7 @@ func (r *KrknTargetRequestReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	if err := r.initializeStatus(ctx, &krknRequest); err != nil {
 		if isConflictError(err) {
 			logger.Info("Conflict during status init, requeuing", "error", err.Error())
-			return ctrl.Result{Requeue: true}, nil
+			return ctrl.Result{RequeueAfter: 100 * time.Millisecond}, nil
 		}
 		logger.Error(err, "Failed to initialize status")
 		return ctrl.Result{}, err
@@ -130,7 +130,7 @@ func (r *KrknTargetRequestReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	if err := r.updateTargetData(ctx, &krknRequest, clusterTargets); err != nil {
 		if isConflictError(err) {
 			logger.Info("Conflict during target data update, requeuing", "error", err.Error())
-			return ctrl.Result{Requeue: true}, nil
+			return ctrl.Result{RequeueAfter: 100 * time.Millisecond}, nil
 		}
 		logger.Error(err, "Failed to update target data")
 		return ctrl.Result{}, err
@@ -159,7 +159,7 @@ func (r *KrknTargetRequestReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		// If conflict error, requeue instead of failing
 		if isConflictError(err) {
 			logger.Info("Conflict detected during completion check, requeuing", "error", err.Error())
-			return ctrl.Result{Requeue: true}, nil
+			return ctrl.Result{RequeueAfter: 100 * time.Millisecond}, nil
 		}
 		logger.Error(err, "Failed to check completion")
 		return ctrl.Result{}, err

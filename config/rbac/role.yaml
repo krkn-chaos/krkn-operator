@@ -27,9 +27,8 @@ rules:
 - apiGroups:
   - krkn.krkn-chaos.dev
   resources:
-  - krknoperatortargetproviders
+  - krknoperatortargetproviderconfigs
   verbs:
-  - create
   - get
   - list
   - patch
@@ -38,6 +37,7 @@ rules:
 - apiGroups:
   - krkn.krkn-chaos.dev
   resources:
+  - krknoperatortargetproviderconfigs/status
   - krknoperatortargetproviders/status
   - krknoperatortargets/status
   - krknscenarioruns/status
@@ -46,6 +46,17 @@ rules:
   - get
   - patch
   - update
+- apiGroups:
+  - krkn.krkn-chaos.dev
+  resources:
+  - krknoperatortargetproviders
+  verbs:
+  - create
+  - get
+  - list
+  - patch
+  - update
+  - watch
 - apiGroups:
   - krkn.krkn-chaos.dev
   resources:

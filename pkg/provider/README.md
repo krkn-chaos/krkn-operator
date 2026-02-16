@@ -1,14 +1,21 @@
-# Provider Registration Package
+# Provider Package
 
-This package provides reusable provider registration functionality for Kubernetes operators that implement the Krkn operator target provider pattern.
+This package provides reusable functionality for Kubernetes operators that implement the Krkn operator target provider pattern.
 
 ## Overview
 
-The provider registration package manages the lifecycle of a `KrknOperatorTargetProvider` Custom Resource (CR), including:
-- Creating and registering the provider CR
-- Sending periodic heartbeat updates
-- Deactivating the provider on shutdown
-- Leader election support
+The provider package includes two main components:
+
+1. **Provider Registration** - Manages the lifecycle of a `KrknOperatorTargetProvider` CR:
+   - Creating and registering the provider CR
+   - Sending periodic heartbeat updates
+   - Deactivating the provider on shutdown
+   - Leader election support
+
+2. **Provider Configuration** - Manages provider configuration schemas:
+   - Creating config requests
+   - Contributing configuration data
+   - JSON schema validation
 
 ## Usage
 
@@ -155,7 +162,7 @@ func main() {
 
 ## API Reference
 
-### Functions
+### Provider Registration Functions
 
 #### NewProviderRegistration
 ```go
@@ -169,11 +176,194 @@ func NewProviderRegistrationWithConfig(c client.Client, cfg Config) *ProviderReg
 ```
 Creates a provider registration with custom configuration.
 
+### Provider Configuration Functions
+
+#### CreateProviderConfigRequest
+```go
+func CreateProviderConfigRequest(
+    ctx context.Context,
+    c client.Client,
+    namespace string,
+    name string,
+) (string, error)
+```
+Creates a new KrknOperatorTargetProviderConfig CR and generates a unique UUID. Returns the UUID for tracking the config request.
+
+#### UpdateProviderConfig
+```go
+func UpdateProviderConfig(
+    ctx context.Context,
+    c client.Client,
+    config *krknv1alpha1.KrknOperatorTargetProviderConfig,
+    operatorName string,
+    configMapName string,
+    jsonSchema string,
+) error
+```
+Updates a KrknOperatorTargetProviderConfig CR with provider configuration data. Takes the CR object directly (already fetched by the reconcile loop). Validates JSON schema before updating.
+
 ### Interfaces
 
 `ProviderRegistration` implements:
 - `manager.Runnable` - Can be added to a controller-runtime manager
 - `manager.LeaderElectionRunnable` - Only runs on leader pod
+
+---
+
+## Provider Configuration
+
+The provider package also provides functions for managing provider configuration schemas through `KrknOperatorTargetProviderConfig` resources.
+
+### Configuration Functions
+
+#### CreateProviderConfigRequest
+
+Creates a new config request and generates a unique UUID.
+
+```go
+func CreateProviderConfigRequest(
+    ctx context.Context,
+    c client.Client,
+    namespace string,
+    name string,
+) (string, error)
+```
+
+**Parameters:**
+- `ctx` - Context
+- `c` - Kubernetes client
+- `namespace` - Namespace where the CR will be created
+- `name` - Optional name for the CR (if empty, generates "config-" + UUID prefix)
+
+**Returns:**
+- `uuid` - The generated UUID for this config request
+- `error` - Error if creation fails
+
+**Example:**
+```go
+import (
+    "context"
+    "github.com/krkn-chaos/krkn-operator/pkg/provider"
+)
+
+// Create a new config request
+uuid, err := provider.CreateProviderConfigRequest(
+    context.Background(),
+    k8sClient,
+    "krkn-operator-system",
+    "", // auto-generate name
+)
+if err != nil {
+    log.Fatal(err)
+}
+fmt.Printf("Config request created with UUID: %s\n", uuid)
+```
+
+#### UpdateProviderConfig
+
+Updates a config request with provider configuration data.
+
+```go
+func UpdateProviderConfig(
+    ctx context.Context,
+    c client.Client,
+    config *krknv1alpha1.KrknOperatorTargetProviderConfig,
+    operatorName string,
+    configMapName string,
+    jsonSchema string,
+) error
+```
+
+**Parameters:**
+- `ctx` - Context
+- `c` - Kubernetes client
+- `config` - The KrknOperatorTargetProviderConfig CR object (already fetched by the reconcile loop)
+- `operatorName` - Name of the provider contributing the data (e.g., "krkn-operator-acm")
+- `configMapName` - Name of the ConfigMap containing the provider's configuration
+- `jsonSchema` - JSON schema string for the provider's configuration (must be valid JSON)
+
+**Returns:**
+- `error` - Error if update fails or validation fails
+
+**Note:** Provider controllers have already fetched the CR in their reconcile loop, so they simply pass the CR object directly. This avoids redundant fetches.
+
+**Example (in a controller):**
+```go
+import (
+    "context"
+    "encoding/json"
+    ctrl "sigs.k8s.io/controller-runtime"
+    "sigs.k8s.io/controller-runtime/pkg/client"
+    "github.com/krkn-chaos/krkn-operator/pkg/provider"
+    krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
+)
+
+func (r *MyReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+    // Fetch the config request CR
+    var config krknv1alpha1.KrknOperatorTargetProviderConfig
+    if err := r.Get(ctx, req.NamespacedName, &config); err != nil {
+        return ctrl.Result{}, client.IgnoreNotFound(err)
+    }
+
+    // Skip if already contributed
+    if _, exists := config.Status.ConfigData["my-operator"]; exists {
+        return ctrl.Result{}, nil
+    }
+
+    // Define JSON schema for your operator's configuration
+    schema := map[string]interface{}{
+        "type": "object",
+        "properties": map[string]interface{}{
+            "chaos-level": map[string]interface{}{
+                "type": "string",
+                "enum": []string{"low", "medium", "high"},
+            },
+        },
+    }
+
+    schemaBytes, _ := json.Marshal(schema)
+
+    // Contribute your configuration - pass the CR object directly
+    err := provider.UpdateProviderConfig(
+        ctx,
+        r.Client,
+        &config, // Pass the CR we already fetched
+        "my-operator",
+        "my-operator-config",
+        string(schemaBytes),
+    )
+    if err != nil {
+        return ctrl.Result{}, err
+    }
+
+    return ctrl.Result{}, nil
+}
+```
+
+### Configuration Workflow
+
+1. **Client creates request**: Calls `CreateProviderConfigRequest()` and receives a UUID
+2. **Providers contribute**: Each operator calls `UpdateProviderConfig()` with its schema
+3. **Aggregation**: krkn-operator aggregates all contributions
+4. **Completion**: Status becomes "Completed" when all active providers contribute
+
+### Validation
+
+`UpdateProviderConfig` performs the following validations:
+- All required parameters are non-empty
+- JSON schema (if provided) is valid JSON
+- Config request exists with the given UUID
+
+### Usage in Controllers
+
+Operators should implement a controller that:
+1. Watches for new `KrknOperatorTargetProviderConfig` CRs
+2. Prepares its configuration (creates ConfigMap, generates schema)
+3. Calls `UpdateProviderConfig()` to contribute data
+
+See `docs/provider-config-integration.md` for a complete integration guide.
+
+---
 
 ## License
 

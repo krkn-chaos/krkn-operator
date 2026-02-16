@@ -258,6 +258,25 @@ func main() {
 		setupLog.Error(err, "unable to create controller", "controller", "KrknTargetRequest")
 		os.Exit(1)
 	}
+
+	if err = (&controller.KrknOperatorTargetProviderConfigReconciler{
+		Client:            mgr.GetClient(),
+		Scheme:            mgr.GetScheme(),
+		OperatorNamespace: krknNamespace,
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "KrknOperatorTargetProviderConfig")
+		os.Exit(1)
+	}
+
+	if err = (&controller.ProviderConfigContributorReconciler{
+		Client:            mgr.GetClient(),
+		Scheme:            mgr.GetScheme(),
+		OperatorName:      "krkn-operator",
+		OperatorNamespace: krknNamespace,
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "ProviderConfigContributor")
+		os.Exit(1)
+	}
 	// +kubebuilder:scaffold:builder
 
 	// Setup and add REST API server

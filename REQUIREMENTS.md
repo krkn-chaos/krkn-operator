@@ -258,3 +258,20 @@ spec:
 ### Overview
 The CRD-based approach provides better state management, automatic reconciliation, and improved observability compared to direct Pod creation.
 
+# KrknOperatorTargetProviderConfig
+
+I want to create this new CRD, it must behave exactly on the same way of KrknOperatorTargetRequest, each TargetProvider
+that can share a configuration scheme will populate the CR status the key of the targetData property must be the name of the operator
+the content will be a json with the following structure:
+
+{
+config-map: <config map name>
+config-schema: <the configuration schema of the operator made in json format>
+}
+
+in case the json format could create formatting errors we can consider using base64 format
+
+the status of the CR is completed when all the KrknOperatorTargetProvider registered providers added their entry in the 
+targetData (that can be eventually empty). I want that you create a common function in pkg/provider to handle this CR update 
+that will be reused by all the operator: it could take the operator name the configmap name and the json schema as parameter.
+
