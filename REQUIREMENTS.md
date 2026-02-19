@@ -275,3 +275,27 @@ the status of the CR is completed when all the KrknOperatorTargetProvider regist
 targetData (that can be eventually empty). I want that you create a common function in pkg/provider to handle this CR update 
 that will be reused by all the operator: it could take the operator name the configmap name and the json schema as parameter.
 
+# create configmap for operator based on KrknOperatorTargetProviderConfig
+
+I want a webservice for the creation of the configmap for the one of the operators. The url will be a POST to /api/v1/provider-config/<uuid>
+the body payload will be:
+
+```json
+{
+  "provider_name": "<provider_name>",
+  "values": {
+    "<KEY_1>": "<VALUE>",
+    "<KEY_2>": "<VALUE>",
+    "<KEY_3>": "<VALUE>"
+  }
+}
+```
+
+the method logic will retrieve KrknOperatorTargetProviderConfig from the uuid, if not found return 404 "KrknOperatorTargetProviderConfig not found".
+once retrieved will get from the status configdata the key set in provider_name if not will return 404 "target provider: <provider_name> not found".
+if found will get the configmap from the CR, if not found will create it.
+will get the schema from the CR and will build a list of Types from the krknctl library.
+for each value in values will get the corresponding type and will validate it with the api, if one of the keys is not found
+will return Bad Request "field <KEY> not found in schema", if the validation fails will return bad request "failed to validate <KEY>: <VALUE>".
+if the validation succeeds : updates or creates the values in the configmap.
+once the schema is validated and the confimap is written the 

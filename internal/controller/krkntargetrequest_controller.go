@@ -36,6 +36,7 @@ import (
 
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
 	"github.com/krkn-chaos/krkn-operator/internal/kubeconfig"
+	"github.com/krkn-chaos/krkn-operator/pkg/provider"
 )
 
 // KrknTargetRequestReconciler reconciles a KrknTargetRequest object
@@ -46,7 +47,7 @@ type KrknTargetRequestReconciler struct {
 	OperatorNamespace string
 }
 
-// +kubebuilder:rbac:groups=krkn.krkn-chaos.dev,resources=krkntargetrequests,verbs=get;list;watch;update;patch
+// +kubebuilder:rbac:groups=krkn.krkn-chaos.dev,resources=krkntargetrequests,verbs=get;list;watch;update;patch;delete
 // +kubebuilder:rbac:groups=krkn.krkn-chaos.dev,resources=krkntargetrequests/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=krkn.krkn-chaos.dev,resources=krknoperatortargets,verbs=get;list;watch
 // +kubebuilder:rbac:groups=krkn.krkn-chaos.dev,resources=krknoperatortargetproviders,verbs=get;list;watch;create;update;patch
@@ -164,6 +165,24 @@ func (r *KrknTargetRequestReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		logger.Error(err, "Failed to check completion")
 		return ctrl.Result{}, err
 	}
+
+	// 10. Clean up old completed KrknTargetRequest resources
+	// This runs on every reconcile but is idempotent and logs only deletions/conflicts
+	_, _ = provider.CleanupOldResources(
+		ctx,
+		r.Client,
+		&krknv1alpha1.KrknTargetRequestList{},
+		r.OperatorNamespace,
+		CleanupThresholdSeconds,
+		func(obj client.Object) *metav1.Time {
+			request := obj.(*krknv1alpha1.KrknTargetRequest)
+			// Only delete if Completed to avoid deleting pending requests
+			if request.Status.Status == "Completed" {
+				return request.Status.Created
+			}
+			return nil
+		},
+	)
 
 	return ctrl.Result{}, nil
 }

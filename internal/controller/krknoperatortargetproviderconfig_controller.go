@@ -29,6 +29,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
+	"github.com/krkn-chaos/krkn-operator/pkg/provider"
 )
 
 // KrknOperatorTargetProviderConfigReconciler reconciles a KrknOperatorTargetProviderConfig object
@@ -38,7 +39,7 @@ type KrknOperatorTargetProviderConfigReconciler struct {
 	OperatorNamespace string
 }
 
-// +kubebuilder:rbac:groups=krkn.krkn-chaos.dev,resources=krknoperatortargetproviderconfigs,verbs=get;list;watch;update;patch
+// +kubebuilder:rbac:groups=krkn.krkn-chaos.dev,resources=krknoperatortargetproviderconfigs,verbs=get;list;watch;update;patch;delete
 // +kubebuilder:rbac:groups=krkn.krkn-chaos.dev,resources=krknoperatortargetproviderconfigs/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=krkn.krkn-chaos.dev,resources=krknoperatortargetproviders,verbs=get;list;watch
 
@@ -114,6 +115,24 @@ func (r *KrknOperatorTargetProviderConfigReconciler) Reconcile(ctx context.Conte
 		logger.Error(err, "Failed to check completion")
 		return ctrl.Result{}, err
 	}
+
+	// 6. Clean up old completed KrknOperatorTargetProviderConfig resources
+	// This runs on every reconcile but is idempotent and logs only deletions/conflicts
+	_, _ = provider.CleanupOldResources(
+		ctx,
+		r.Client,
+		&krknv1alpha1.KrknOperatorTargetProviderConfigList{},
+		r.OperatorNamespace,
+		CleanupThresholdSeconds,
+		func(obj client.Object) *metav1.Time {
+			config := obj.(*krknv1alpha1.KrknOperatorTargetProviderConfig)
+			// Only delete if Completed to avoid deleting pending requests
+			if config.Status.Status == "Completed" {
+				return config.Status.Created
+			}
+			return nil
+		},
+	)
 
 	return ctrl.Result{}, nil
 }
