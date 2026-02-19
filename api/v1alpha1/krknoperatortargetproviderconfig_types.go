@@ -26,6 +26,8 @@ import (
 type ProviderConfigData struct {
 	// ConfigMap is the name of the ConfigMap containing the provider's configuration
 	ConfigMap string `json:"config-map"`
+	// Namespace is the namespace where the ConfigMap is located
+	Namespace string `json:"namespace"`
 	// ConfigSchema is the JSON schema for the provider's configuration (as a JSON string)
 	ConfigSchema string `json:"config-schema,omitempty"`
 }

@@ -84,8 +84,13 @@ spec:
                       description: ConfigSchema is the JSON schema for the provider's
                         configuration (as a JSON string)
                       type: string
+                    namespace:
+                      description: Namespace is the namespace where the ConfigMap
+                        is located
+                      type: string
                   required:
                   - config-map
+                  - namespace
                   type: object
                 description: |-
                   ConfigData contains a map of operator-name to provider configuration data

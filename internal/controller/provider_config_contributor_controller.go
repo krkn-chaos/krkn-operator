@@ -97,6 +97,7 @@ func (r *ProviderConfigContributorReconciler) Reconcile(ctx context.Context, req
 		&config, // Pass the CR object directly
 		r.OperatorName,
 		configMapName,
+		r.OperatorNamespace,
 		jsonSchema,
 	); err != nil {
 		logger.Error(err, "Failed to update provider config")

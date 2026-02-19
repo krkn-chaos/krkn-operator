@@ -99,6 +99,7 @@ func CreateProviderConfigRequest(
 //   - config: The KrknOperatorTargetProviderConfig CR object (already fetched by the reconcile loop)
 //   - operatorName: Name of the provider contributing the data (e.g., "krkn-operator-acm")
 //   - configMapName: Name of the ConfigMap containing the provider's configuration
+//   - namespace: Namespace where the ConfigMap is located
 //   - jsonSchema: JSON schema string for the provider's configuration (must be valid JSON, not base64)
 //
 // Returns:
@@ -109,6 +110,7 @@ func UpdateProviderConfig(
 	config *krknv1alpha1.KrknOperatorTargetProviderConfig,
 	operatorName string,
 	configMapName string,
+	namespace string,
 	jsonSchema string,
 ) error {
 	// Validate input
@@ -117,6 +119,9 @@ func UpdateProviderConfig(
 	}
 	if configMapName == "" {
 		return fmt.Errorf("configMapName cannot be empty")
+	}
+	if namespace == "" {
+		return fmt.Errorf("namespace cannot be empty")
 	}
 
 	// Validate JSON schema if provided
@@ -135,6 +140,7 @@ func UpdateProviderConfig(
 	// Update provider data
 	config.Status.ConfigData[operatorName] = krknv1alpha1.ProviderConfigData{
 		ConfigMap:    configMapName,
+		Namespace:    namespace,
 		ConfigSchema: jsonSchema,
 	}
 
