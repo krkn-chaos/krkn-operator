@@ -360,3 +360,19 @@ type ScenarioRunListResponse struct {
 	// ScenarioRuns is the list of scenario runs
 	ScenarioRuns []ScenarioRunListItem `json:"scenarioRuns"`
 }
+
+// ProviderConfigUpdateRequest is the request body for POST /api/v1/provider-config/{uuid}
+type ProviderConfigUpdateRequest struct {
+	// ProviderName is the name of the provider whose config to update
+	ProviderName string `json:"provider_name"`
+	// Values is a map of configuration keys to values
+	Values map[string]interface{} `json:"values"`
+}
+
+// ProviderConfigUpdateResponse is the response for successful config updates
+type ProviderConfigUpdateResponse struct {
+	// Message contains a success message
+	Message string `json:"message"`
+	// UpdatedFields is the list of fields that were updated
+	UpdatedFields []string `json:"updatedFields,omitempty"`
+}
