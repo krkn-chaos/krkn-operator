@@ -365,6 +365,128 @@ See `docs/provider-config-integration.md` for a complete integration guide.
 
 ---
 
+## Resource Cleanup
+
+The provider package provides a generic, idempotent function for cleaning up old CRD instances based on their `Created` timestamp.
+
+### CleanupOldResources
+
+Deletes all instances of a specific CRD type in a namespace whose `Created` field is older than a specified number of seconds.
+
+```go
+func CleanupOldResources(
+    ctx context.Context,
+    c client.Client,
+    emptyList client.ObjectList,
+    namespace string,
+    olderThanSeconds int64,
+    getCreatedTime CreatedTimeExtractor,
+) (int, error)
+```
+
+**Key Features:**
+- **Idempotent**: Safe for concurrent execution by multiple operators
+- **Panic-safe**: Never panics, even if extractor function panics
+- **Conflict-tolerant**: Logs warnings for conflicts but doesn't fail
+- **Generic**: Works with any CRD type that has a `Created` timestamp
+
+**Parameters:**
+- `ctx` - Context for the operation
+- `c` - Kubernetes client
+- `emptyList` - An empty instance of the list type (e.g., `&krknv1alpha1.KrknOperatorTargetProviderConfigList{}`)
+- `namespace` - Namespace to search in
+- `olderThanSeconds` - Age threshold in seconds - resources older than this will be deleted
+- `getCreatedTime` - Function to extract the `Created` timestamp from an object
+
+**Returns:**
+- `deletedCount` - Number of resources successfully deleted
+- `error` - Non-nil only for critical errors (listing failures); deletion conflicts are logged but don't cause errors
+
+**Example Usage:**
+
+```go
+import (
+    "context"
+    "github.com/krkn-chaos/krkn-operator/pkg/provider"
+    krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
+    metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+    "sigs.k8s.io/controller-runtime/pkg/client"
+)
+
+// Clean up KrknOperatorTargetProviderConfig resources older than 1 hour
+deletedCount, err := provider.CleanupOldResources(
+    ctx,
+    k8sClient,
+    &krknv1alpha1.KrknOperatorTargetProviderConfigList{},
+    "krkn-operator-system",
+    3600, // 1 hour in seconds
+    func(obj client.Object) *metav1.Time {
+        config := obj.(*krknv1alpha1.KrknOperatorTargetProviderConfig)
+        return config.Status.Created
+    },
+)
+if err != nil {
+    log.Error(err, "Failed to cleanup old configs")
+}
+log.Info("Cleanup completed", "deletedCount", deletedCount)
+```
+
+**Example: Periodic Cleanup in a Controller**
+
+```go
+import (
+    "context"
+    "time"
+    ctrl "sigs.k8s.io/controller-runtime"
+    "github.com/krkn-chaos/krkn-operator/pkg/provider"
+)
+
+// Run cleanup every hour using a goroutine
+func (r *MyReconciler) setupPeriodicCleanup(ctx context.Context) {
+    ticker := time.NewTicker(1 * time.Hour)
+    go func() {
+        defer ticker.Stop()
+        for {
+            select {
+            case <-ctx.Done():
+                return
+            case <-ticker.C:
+                deletedCount, err := provider.CleanupOldResources(
+                    ctx,
+                    r.Client,
+                    &krknv1alpha1.KrknOperatorTargetProviderConfigList{},
+                    r.Namespace,
+                    7200, // Delete resources older than 2 hours
+                    func(obj client.Object) *metav1.Time {
+                        config := obj.(*krknv1alpha1.KrknOperatorTargetProviderConfig)
+                        return config.Status.Created
+                    },
+                )
+                if err != nil {
+                    log.Error(err, "Periodic cleanup failed")
+                } else {
+                    log.Info("Periodic cleanup completed", "deletedCount", deletedCount)
+                }
+            }
+        }
+    }()
+}
+```
+
+**Safety Guarantees:**
+- **No panics**: Function recovers from panics in the extractor function
+- **Idempotent**: Can be called by multiple operators concurrently without issues
+- **Graceful conflict handling**: Logs warnings for conflicts (e.g., resource already deleted) but continues
+- **Resource skipping**: Skips resources without a `Created` timestamp or with recent timestamps
+
+**Use Cases:**
+- Clean up completed config requests after a retention period
+- Remove old target requests to prevent cluster bloat
+- Implement TTL-like behavior for temporary resources
+- Periodic garbage collection of stale CRs
+
+---
+
 ## License
 
 Copyright 2025. Licensed under the Apache License, Version 2.0.
