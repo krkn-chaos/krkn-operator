@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	corev1 "k8s.io/api/core/v1"
@@ -147,7 +148,8 @@ func generateKubeconfigFromCredentialsType(req CreateTargetRequest) (string, str
 // CreateTarget handles POST /api/v1/operator/targets
 // Creates a new KrknOperatorTarget CR with a generated UUID and associated Secret
 func (h *Handler) CreateTarget(w http.ResponseWriter, r *http.Request) {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 
 	// Parse request body
 	var req CreateTargetRequest
@@ -304,7 +306,8 @@ func (h *Handler) CreateTarget(w http.ResponseWriter, r *http.Request) {
 // ListTargets handles GET /api/v1/operator/targets
 // Returns a list of all KrknOperatorTarget CRs
 func (h *Handler) ListTargets(w http.ResponseWriter, r *http.Request) {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 
 	// List all targets
 	var targets krknv1alpha1.KrknOperatorTargetList
@@ -332,7 +335,8 @@ func (h *Handler) ListTargets(w http.ResponseWriter, r *http.Request) {
 // GetTarget handles GET /api/v1/operator/targets/{uuid}
 // Returns a single KrknOperatorTarget by UUID
 func (h *Handler) GetTarget(w http.ResponseWriter, r *http.Request) {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 
 	targetUUID, err := extractPathSuffix(r.URL.Path, "/api/v1/operator/targets/")
 	if err != nil {
@@ -356,7 +360,8 @@ func (h *Handler) GetTarget(w http.ResponseWriter, r *http.Request) {
 // UpdateTarget handles PUT /api/v1/operator/targets/{uuid}
 // Updates an existing KrknOperatorTarget (overwrites the Secret kubeconfig)
 func (h *Handler) UpdateTarget(w http.ResponseWriter, r *http.Request) {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 
 	targetUUID, err := extractPathSuffix(r.URL.Path, "/api/v1/operator/targets/")
 	if err != nil {
@@ -452,7 +457,8 @@ func (h *Handler) UpdateTarget(w http.ResponseWriter, r *http.Request) {
 // DeleteTarget handles DELETE /api/v1/operator/targets/{uuid}
 // Deletes a KrknOperatorTarget and its associated Secret
 func (h *Handler) DeleteTarget(w http.ResponseWriter, r *http.Request) {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 
 	targetUUID, err := extractPathSuffix(r.URL.Path, "/api/v1/operator/targets/")
 	if err != nil {
