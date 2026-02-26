@@ -33,7 +33,7 @@ import (
 )
 
 const (
-	testNamespace   = "krkn-operator-system"
+	testNamespace    = "krkn-operator-system"
 	testProviderName = "test-operator"
 )
 

@@ -25,8 +25,8 @@ The MVP successfully delivered a fully functional krkn-operator with:
 ## Post-MVP Development
 
 For current development work, see the root-level documentation:
-- [/REQUIREMENTS.md](../REQUIREMENTS.md) - Post-MVP requirements
-- [/PROGRESS.md](../PROGRESS.md) - Current development progress
+- [/REQUIREMENTS.md](../spec.orig/REQUIREMENTS.md) - Post-MVP requirements
+- [/PROGRESS.md](../spec.orig/PROGRESS.md) - Current development progress
 
 ---
 

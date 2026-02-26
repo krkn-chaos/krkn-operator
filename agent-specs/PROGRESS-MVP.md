@@ -229,7 +229,7 @@ k# krkn-operator Development Progress
 
 **Response Codes:**
 - `404 Not Found`: KrknTargetRequest with UUID not found
-- `100 Continue`: KrknTargetRequest found but not completed
+- `202 Accepted`: KrknTargetRequest found but not completed
 - `200 OK`: KrknTargetRequest found and completed
 - `500 Internal Server Error`: Other errors
 
@@ -254,7 +254,7 @@ k# krkn-operator Development Progress
 ```
 
 **Response Codes:**
-- `102 Processing`: KrknTargetRequest created successfully
+- `202 Accepted`: KrknTargetRequest created successfully
 - `500 Internal Server Error`: Failed to create CR
 
 #### POST /scenarios

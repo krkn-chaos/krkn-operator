@@ -160,8 +160,8 @@ func TestPostTarget_LegacyEndpoint(t *testing.T) {
 	w := httptest.NewRecorder()
 	handler.PostTarget(w, req)
 
-	if w.Code != http.StatusProcessing {
-		t.Errorf("Expected status code %d (Processing), got %d", http.StatusProcessing, w.Code)
+	if w.Code != http.StatusAccepted {
+		t.Errorf("Expected status code %d (Processing), got %d", http.StatusAccepted, w.Code)
 	}
 
 	var response map[string]string
@@ -215,8 +215,8 @@ func TestGetTargetByUUID_NotCompleted(t *testing.T) {
 	w := httptest.NewRecorder()
 	handler.GetTargetByUUID(w, req)
 
-	if w.Code != http.StatusContinue {
-		t.Errorf("Expected status code %d (Continue), got %d", http.StatusContinue, w.Code)
+	if w.Code != http.StatusAccepted {
+		t.Errorf("Expected status code %d (Processing), got %d", http.StatusAccepted, w.Code)
 	}
 }
 

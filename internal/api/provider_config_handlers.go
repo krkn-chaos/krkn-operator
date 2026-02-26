@@ -18,6 +18,9 @@ Assisted-by: Claude Sonnet 4.5 (claude-sonnet-4-5@20250929)
 
 package api
 
+// +kubebuilder:rbac:groups=krkn.krkn-chaos.dev,resources=krknoperatortargetproviderconfigs,verbs=get;list;watch;delete
+// +kubebuilder:rbac:groups=krkn.krkn-chaos.dev,resources=krknoperatortargetproviderconfigs/status,verbs=get
+
 import (
 	"context"
 	"encoding/json"
@@ -25,13 +28,13 @@ import (
 	"net/http"
 	"strings"
 
+	"gopkg.in/yaml.v3"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
-	"gopkg.in/yaml.v3"
 
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
 	"github.com/krkn-chaos/krkn-operator/pkg/provider"
@@ -80,7 +83,10 @@ func (h *Handler) GetProviderConfigByUUID(w http.ResponseWriter, r *http.Request
 		Namespace: h.namespace,
 	}, &config); err != nil {
 		if client.IgnoreNotFound(err) == nil {
-			w.WriteHeader(http.StatusNotFound)
+			writeJSONError(w, http.StatusNotFound, ErrorResponse{
+				Error:   "not_found",
+				Message: "KrknOperatorTargetProviderConfig not found",
+			})
 		} else {
 			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
 				Error:   "internal_error",
@@ -90,18 +96,22 @@ func (h *Handler) GetProviderConfigByUUID(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	// Return 202 Accepted when pending, 200 OK when Completed
+	// The controller marks as "Completed" only when all active providers have contributed
 	if config.Status.Status != "Completed" {
-		// Return 100 Continue when pending
-		w.WriteHeader(http.StatusContinue)
-	} else {
-		// Return 200 OK with config_data when Completed
-		response := map[string]interface{}{
-			"uuid":        config.Spec.UUID,
-			"status":      config.Status.Status,
-			"config_data": config.Status.ConfigData,
-		}
-		writeJSON(w, http.StatusOK, response)
+		// Return 202 Accepted when pending (client should retry)
+		// No body needed, just the status code
+		w.WriteHeader(http.StatusAccepted)
+		return
 	}
+
+	// Return 200 OK with config_data when Completed
+	response := map[string]interface{}{
+		"uuid":        config.Spec.UUID,
+		"status":      config.Status.Status,
+		"config_data": config.Status.ConfigData,
+	}
+	writeJSON(w, http.StatusOK, response)
 }
 
 // UpdateProviderConfigValues handles POST /api/v1/provider-config/{uuid}
@@ -189,7 +199,7 @@ func (h *Handler) UpdateProviderConfigValues(w http.ResponseWriter, r *http.Requ
 	}
 
 	// Validate all values against schema
-	updatedFields := []string{}
+	var updatedFields []string
 	for key, value := range req.Values {
 		if err := ValidateValueAgainstSchema(key, value, providerData.ConfigSchema); err != nil {
 			// Check if it's a "field not found" error
@@ -280,6 +290,17 @@ func (h *Handler) UpdateProviderConfigValues(w http.ResponseWriter, r *http.Requ
 		}
 	}
 
+	// Delete the KrknOperatorTargetProviderConfig CR after successful ConfigMap update
+	if err := h.client.Delete(ctx, config); err != nil {
+		logger.Error(err, "Failed to delete KrknOperatorTargetProviderConfig after ConfigMap update",
+			"uuid", uuid)
+		// Don't fail the request, just log the error
+		// The ConfigMap was updated successfully
+	} else {
+		logger.Info("✅ Deleted KrknOperatorTargetProviderConfig after successful ConfigMap update",
+			"uuid", uuid)
+	}
+
 	writeJSON(w, http.StatusOK, ProviderConfigUpdateResponse{
 		Message:       "Configuration updated successfully",
 		UpdatedFields: updatedFields,
@@ -287,7 +308,7 @@ func (h *Handler) UpdateProviderConfigValues(w http.ResponseWriter, r *http.Requ
 }
 
 // convertValuesToYAML converts a map to YAML format
-func convertValuesToYAML(values map[string]interface{}) (string, error) {
+func convertValuesToYAML(values map[string]string) (string, error) {
 	yamlBytes, err := yaml.Marshal(values)
 	if err != nil {
 		return "", err
@@ -296,7 +317,7 @@ func convertValuesToYAML(values map[string]interface{}) (string, error) {
 }
 
 // mergeValuesIntoYAML merges new values into existing YAML
-func mergeValuesIntoYAML(existingYAML string, newValues map[string]interface{}) (string, error) {
+func mergeValuesIntoYAML(existingYAML string, newValues map[string]string) (string, error) {
 	// Parse existing YAML
 	var existing map[string]interface{}
 	if existingYAML != "" {

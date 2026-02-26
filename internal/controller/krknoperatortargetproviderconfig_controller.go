@@ -74,7 +74,14 @@ func (r *KrknOperatorTargetProviderConfigReconciler) Reconcile(ctx context.Conte
 		return ctrl.Result{}, nil
 	}
 
-	// 3. Ensure UUID label is set
+	// 3. Fetch provider list early (will be reused in completion check)
+	providerList := &krknv1alpha1.KrknOperatorTargetProviderList{}
+	if err := r.List(ctx, providerList); err != nil {
+		logger.Error(err, "Failed to list KrknOperatorTargetProviders")
+		return ctrl.Result{}, err
+	}
+
+	// 4. Ensure UUID label is set
 	if err := r.ensureUUIDLabel(ctx, &config); err != nil {
 		if isConflictError(err) {
 			logger.Info("Conflict during UUID label update, requeuing", "error", err.Error())
@@ -90,7 +97,7 @@ func (r *KrknOperatorTargetProviderConfigReconciler) Reconcile(ctx context.Conte
 		return ctrl.Result{}, err
 	}
 
-	// 4. Initialize status if pending
+	// 5. Initialize status if pending
 	if err := r.initializeStatus(ctx, &config); err != nil {
 		if isConflictError(err) {
 			logger.Info("Conflict during status init, requeuing", "error", err.Error())
@@ -106,8 +113,8 @@ func (r *KrknOperatorTargetProviderConfigReconciler) Reconcile(ctx context.Conte
 		return ctrl.Result{}, err
 	}
 
-	// 5. Check if all active providers have contributed
-	if err := r.checkCompletion(ctx, &config); err != nil {
+	// 6. Check if all active providers have contributed (reuse providerList from step 3)
+	if err := r.checkCompletion(ctx, &config, providerList); err != nil {
 		if isConflictError(err) {
 			logger.Info("Conflict detected during completion check, requeuing", "error", err.Error())
 			return ctrl.Result{RequeueAfter: 100 * time.Millisecond}, nil
@@ -116,7 +123,7 @@ func (r *KrknOperatorTargetProviderConfigReconciler) Reconcile(ctx context.Conte
 		return ctrl.Result{}, err
 	}
 
-	// 6. Clean up old completed KrknOperatorTargetProviderConfig resources
+	// 7. Clean up old completed KrknOperatorTargetProviderConfig resources
 	// This runs on every reconcile but is idempotent and logs only deletions/conflicts
 	_, _ = provider.CleanupOldResources(
 		ctx,
@@ -175,25 +182,17 @@ func (r *KrknOperatorTargetProviderConfigReconciler) initializeStatus(ctx contex
 }
 
 // checkCompletion checks if all active providers have contributed and marks the request as completed
-func (r *KrknOperatorTargetProviderConfigReconciler) checkCompletion(ctx context.Context, config *krknv1alpha1.KrknOperatorTargetProviderConfig) error {
+func (r *KrknOperatorTargetProviderConfigReconciler) checkCompletion(ctx context.Context, config *krknv1alpha1.KrknOperatorTargetProviderConfig, providerList *krknv1alpha1.KrknOperatorTargetProviderList) error {
 	logger := log.FromContext(ctx)
 
-	// Query all KrknOperatorTargetProvider CRs
-	var providers krknv1alpha1.KrknOperatorTargetProviderList
-	if err := r.List(ctx, &providers); err != nil {
-		logger.Error(err, "Failed to list KrknOperatorTargetProvider CRs")
-		return err
-	}
+	logger.Info("Found providers", "totalProviders", len(providerList.Items))
 
-	logger.Info("Found providers", "totalProviders", len(providers.Items))
+	// Count active providers (reuse the list from early fetch in Reconcile)
+	activeProviders, activeProviderNames := countActiveProviders(providerList)
 
-	// Count active providers
-	activeProviders := 0
-	activeProviderNames := []string{}
-	for _, provider := range providers.Items {
+	// Log active providers
+	for _, provider := range providerList.Items {
 		if provider.Spec.Active {
-			activeProviders++
-			activeProviderNames = append(activeProviderNames, provider.Spec.OperatorName)
 			logger.Info("Active provider found",
 				"name", provider.Spec.OperatorName,
 				"timestamp", provider.Status.Timestamp)

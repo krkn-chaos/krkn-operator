@@ -25,6 +25,8 @@ import (
 
 	"github.com/google/uuid"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
@@ -132,21 +134,36 @@ func UpdateProviderConfig(
 		}
 	}
 
-	// Initialize ConfigData map if nil
-	if config.Status.ConfigData == nil {
-		config.Status.ConfigData = make(map[string]krknv1alpha1.ProviderConfigData)
-	}
+	// Use retry loop to handle optimistic concurrency conflicts
+	// This is the recommended approach when multiple controllers might update the same resource
+	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		// Re-fetch the latest version of the config to avoid conflicts
+		latestConfig := &krknv1alpha1.KrknOperatorTargetProviderConfig{}
+		if err := c.Get(ctx, types.NamespacedName{
+			Name:      config.Name,
+			Namespace: config.Namespace,
+		}, latestConfig); err != nil {
+			return err
+		}
 
-	// Update provider data
-	config.Status.ConfigData[operatorName] = krknv1alpha1.ProviderConfigData{
-		ConfigMap:    configMapName,
-		Namespace:    namespace,
-		ConfigSchema: jsonSchema,
-	}
+		// Initialize ConfigData map if nil
+		if latestConfig.Status.ConfigData == nil {
+			latestConfig.Status.ConfigData = make(map[string]krknv1alpha1.ProviderConfigData)
+		}
 
-	// Update status
-	if err := c.Status().Update(ctx, config); err != nil {
-		return fmt.Errorf("failed to update KrknOperatorTargetProviderConfig status: %w", err)
+		// Update provider data
+		latestConfig.Status.ConfigData[operatorName] = krknv1alpha1.ProviderConfigData{
+			ConfigMap:    configMapName,
+			Namespace:    namespace,
+			ConfigSchema: jsonSchema,
+		}
+
+		// Update status
+		return c.Status().Update(ctx, latestConfig)
+	})
+
+	if err != nil {
+		return fmt.Errorf("failed to update KrknOperatorTargetProviderConfig status after retries: %w", err)
 	}
 
 	return nil

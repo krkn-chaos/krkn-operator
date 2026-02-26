@@ -26,6 +26,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -84,7 +85,16 @@ func (r *KrknTargetRequestReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		return ctrl.Result{}, nil
 	}
 
-	// 3. Ensure UUID label is set
+	// 3. Check if this operator's provider is active before processing
+	isActive, providerList, err := checkProviderActive(ctx, r.Client, r.OperatorName)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	if !isActive {
+		return ctrl.Result{}, nil
+	}
+
+	// 4. Ensure UUID label is set
 	if err := r.ensureUUIDLabel(ctx, &krknRequest); err != nil {
 		if isConflictError(err) {
 			logger.Info("Conflict during UUID label update, requeuing", "error", err.Error())
@@ -100,7 +110,7 @@ func (r *KrknTargetRequestReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		return ctrl.Result{}, err
 	}
 
-	// 4. Initialize status if pending
+	// 5. Initialize status if pending
 	if err := r.initializeStatus(ctx, &krknRequest); err != nil {
 		if isConflictError(err) {
 			logger.Info("Conflict during status init, requeuing", "error", err.Error())
@@ -116,18 +126,18 @@ func (r *KrknTargetRequestReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		return ctrl.Result{}, err
 	}
 
-	// 5. Query all KrknOperatorTarget CRs in operator namespace
+	// 6. Query all KrknOperatorTarget CRs in operator namespace
 	var targets krknv1alpha1.KrknOperatorTargetList
 	if err := r.List(ctx, &targets, client.InNamespace(r.OperatorNamespace)); err != nil {
 		logger.Error(err, "Failed to list KrknOperatorTarget CRs")
 		return ctrl.Result{}, err
 	}
 
-	// 6. Build ClusterTarget list from ready targets
+	// 7. Build ClusterTarget list from ready targets
 	clusterTargets := r.buildClusterTargets(targets.Items)
 	logger.Info("Built cluster targets", "count", len(clusterTargets), "operator", r.OperatorName)
 
-	// 7. Update Status.TargetData[operatorName]
+	// 8. Update Status.TargetData[operatorName]
 	if err := r.updateTargetData(ctx, &krknRequest, clusterTargets); err != nil {
 		if isConflictError(err) {
 			logger.Info("Conflict during target data update, requeuing", "error", err.Error())
@@ -143,7 +153,7 @@ func (r *KrknTargetRequestReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		return ctrl.Result{}, err
 	}
 
-	// 8. Write kubeconfigs to Secret (managed-clusters format)
+	// 9. Write kubeconfigs to Secret (managed-clusters format)
 	if err := r.writeManagedClustersSecret(ctx, &krknRequest, targets.Items); err != nil {
 		logger.Error(err, "Failed to write managed-clusters Secret")
 		return ctrl.Result{}, err
@@ -155,8 +165,8 @@ func (r *KrknTargetRequestReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		return ctrl.Result{}, err
 	}
 
-	// 9. Check if all active providers have contributed
-	if err := r.checkCompletion(ctx, &krknRequest); err != nil {
+	// 10. Check if all active providers have contributed (reuse providerList from step 3)
+	if err := r.checkCompletion(ctx, &krknRequest, providerList); err != nil {
 		// If conflict error, requeue instead of failing
 		if isConflictError(err) {
 			logger.Info("Conflict detected during completion check, requeuing", "error", err.Error())
@@ -166,7 +176,7 @@ func (r *KrknTargetRequestReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		return ctrl.Result{}, err
 	}
 
-	// 10. Clean up old completed KrknTargetRequest resources
+	// 11. Clean up old completed KrknTargetRequest resources
 	// This runs on every reconcile but is idempotent and logs only deletions/conflicts
 	_, _ = provider.CleanupOldResources(
 		ctx,
@@ -274,25 +284,17 @@ func (r *KrknTargetRequestReconciler) updateTargetData(ctx context.Context, krkn
 }
 
 // checkCompletion checks if all active providers have contributed and marks the request as completed
-func (r *KrknTargetRequestReconciler) checkCompletion(ctx context.Context, krknRequest *krknv1alpha1.KrknTargetRequest) error {
+func (r *KrknTargetRequestReconciler) checkCompletion(ctx context.Context, krknRequest *krknv1alpha1.KrknTargetRequest, providerList *krknv1alpha1.KrknOperatorTargetProviderList) error {
 	logger := log.FromContext(ctx)
 
-	// Query all KrknOperatorTargetProvider CRs
-	var providers krknv1alpha1.KrknOperatorTargetProviderList
-	if err := r.List(ctx, &providers); err != nil {
-		logger.Error(err, "Failed to list KrknOperatorTargetProvider CRs")
-		return err
-	}
+	logger.Info("Found providers", "totalProviders", len(providerList.Items))
 
-	logger.Info("Found providers", "totalProviders", len(providers.Items))
+	// Count active providers (reuse the list from early check in Reconcile)
+	activeProviders, activeProviderNames := countActiveProviders(providerList)
 
-	// Count active providers
-	activeProviders := 0
-	activeProviderNames := []string{}
-	for _, provider := range providers.Items {
+	// Log active providers
+	for _, provider := range providerList.Items {
 		if provider.Spec.Active {
-			activeProviders++
-			activeProviderNames = append(activeProviderNames, provider.Spec.OperatorName)
 			logger.Info("Active provider found",
 				"name", provider.Spec.OperatorName,
 				"timestamp", provider.Status.Timestamp)
@@ -448,9 +450,28 @@ func (r *KrknTargetRequestReconciler) writeManagedClustersSecret(ctx context.Con
 			},
 		}
 		if err := r.Create(ctx, &secret); err != nil {
-			return fmt.Errorf("failed to create Secret: %w", err)
+			// Handle race condition: Secret was created between Get and Create
+			if apierrors.IsAlreadyExists(err) {
+				logger.Info("Secret already exists (race condition), fetching and updating", "secretName", secretName)
+				// Refetch the Secret
+				if err := r.Get(ctx, types.NamespacedName{
+					Name:      secretName,
+					Namespace: r.OperatorNamespace,
+				}, &secret); err != nil {
+					return fmt.Errorf("failed to refetch Secret after AlreadyExists: %w", err)
+				}
+				// Update it
+				secret.Data["managed-clusters"] = managedClustersBytes
+				if err := r.Update(ctx, &secret); err != nil {
+					return fmt.Errorf("failed to update Secret after AlreadyExists: %w", err)
+				}
+				logger.Info("✅ Updated managed-clusters Secret (after race)", "secretName", secretName)
+			} else {
+				return fmt.Errorf("failed to create Secret: %w", err)
+			}
+		} else {
+			logger.Info("✅ Created managed-clusters Secret", "secretName", secretName)
 		}
-		logger.Info("✅ Created managed-clusters Secret", "secretName", secretName)
 	} else {
 		secret.Data["managed-clusters"] = managedClustersBytes
 		if err := r.Update(ctx, &secret); err != nil {

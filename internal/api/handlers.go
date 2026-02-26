@@ -211,7 +211,7 @@ func (h *Handler) GetTargetByUUID(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if targetRequest.Status.Status != "Completed" {
-		w.WriteHeader(http.StatusContinue)
+		w.WriteHeader(http.StatusAccepted)
 	} else {
 		w.WriteHeader(http.StatusOK)
 	}
@@ -248,7 +248,7 @@ func (h *Handler) PostTarget(w http.ResponseWriter, r *http.Request) {
 	response := map[string]string{
 		"uuid": newUUID,
 	}
-	writeJSON(w, http.StatusProcessing, response)
+	writeJSON(w, http.StatusAccepted, response)
 }
 
 // TargetsHandler handles both GET /api/v1/targets/{UUID} and POST /api/v1/targets endpoints

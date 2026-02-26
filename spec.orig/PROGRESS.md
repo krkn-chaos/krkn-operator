@@ -5,7 +5,7 @@
 **Last updated:** 2026-01-15
 **Current phase:** Planning post-MVP features
 
-**MVP Documentation**: See [agent-specs/PROGRESS-MVP.md](agent-specs/PROGRESS-MVP.md) for MVP development history.
+**MVP Documentation**: See [agent-specs/PROGRESS-MVP.md](../agent-specs/PROGRESS-MVP.md) for MVP development history.
 
 ## MVP Completion Summary
 

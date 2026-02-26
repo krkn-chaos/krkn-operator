@@ -17,8 +17,11 @@ limitations under the License.
 package api
 
 import (
-	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
 	"time"
+
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
 )
 
 // ClustersResponse represents the response for GET /clusters endpoint
@@ -365,8 +368,8 @@ type ScenarioRunListResponse struct {
 type ProviderConfigUpdateRequest struct {
 	// ProviderName is the name of the provider whose config to update
 	ProviderName string `json:"provider_name"`
-	// Values is a map of configuration keys to values
-	Values map[string]interface{} `json:"values"`
+	// Values is a map of configuration keys to values (all values are strings)
+	Values map[string]string `json:"values"`
 }
 
 // ProviderConfigUpdateResponse is the response for successful config updates
@@ -375,4 +378,36 @@ type ProviderConfigUpdateResponse struct {
 	Message string `json:"message"`
 	// UpdatedFields is the list of fields that were updated
 	UpdatedFields []string `json:"updatedFields,omitempty"`
+}
+
+// ProviderResponse represents a single provider in the list
+type ProviderResponse struct {
+	// Name is the operator name
+	Name string `json:"name"`
+	// Active indicates if the provider is active
+	Active bool `json:"active"`
+	// LastHeartbeat is the timestamp of the last heartbeat
+	LastHeartbeat *metav1.Time `json:"lastHeartbeat,omitempty"`
+}
+
+// ListProvidersResponse is the response for GET /api/v1/providers
+type ListProvidersResponse struct {
+	// Providers is the list of registered providers
+	Providers []ProviderResponse `json:"providers"`
+}
+
+// UpdateProviderStatusRequest is the request body for PATCH /api/v1/providers/{name}
+type UpdateProviderStatusRequest struct {
+	// Active sets the provider active status
+	Active bool `json:"active"`
+}
+
+// UpdateProviderStatusResponse is the response for successful provider status updates
+type UpdateProviderStatusResponse struct {
+	// Message contains a success message
+	Message string `json:"message"`
+	// Name is the provider name
+	Name string `json:"name"`
+	// Active is the new active status
+	Active bool `json:"active"`
 }

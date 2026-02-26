@@ -51,6 +51,8 @@ func NewServer(port int, client client.Client, clientset kubernetes.Interface, n
 	// Provider config endpoints (KrknOperatorTargetProviderConfig)
 	mux.HandleFunc("/api/v1/provider-config", handler.ProviderConfigHandler)  // POST, GET
 	mux.HandleFunc("/api/v1/provider-config/", handler.ProviderConfigHandler) // GET /{uuid}
+	mux.HandleFunc("/api/v1/providers", handler.ProvidersRouter)              // GET, PATCH
+	mux.HandleFunc("/api/v1/providers/", handler.ProvidersRouter)
 
 	// CRUD endpoints for KrknOperatorTarget (operator-managed targets)
 	mux.HandleFunc("/api/v1/operator/targets", handler.TargetsCRUDRouter)  // POST, GET

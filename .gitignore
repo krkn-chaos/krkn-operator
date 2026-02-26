@@ -29,3 +29,6 @@ go.work
 .idea/
 .specify/
 venv/
+
+# bv (beads viewer) local config and caches
+.bv/

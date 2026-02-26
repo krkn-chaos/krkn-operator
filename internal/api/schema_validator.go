@@ -21,97 +21,53 @@ package api
 import (
 	"encoding/json"
 	"fmt"
-	"strings"
 
-	"github.com/xeipuuv/gojsonschema"
+	"github.com/krkn-chaos/krknctl/pkg/typing"
 )
 
-// ValidateValueAgainstSchema validates a single value against a JSON schema property
+// ValidateValueAgainstSchema validates a single value against typing.InputField schema
+// The schema is a JSON array of typing.InputField objects
 func ValidateValueAgainstSchema(key string, value interface{}, schemaJSON string) error {
-	// Parse the full schema
-	var fullSchema map[string]interface{}
-	if err := json.Unmarshal([]byte(schemaJSON), &fullSchema); err != nil {
+	// Parse as raw JSON array first
+	var rawFields []json.RawMessage
+	if err := json.Unmarshal([]byte(schemaJSON), &rawFields); err != nil {
 		return fmt.Errorf("invalid schema JSON: %w", err)
 	}
 
-	// Extract properties section
-	properties, ok := fullSchema["properties"].(map[string]interface{})
-	if !ok {
-		return fmt.Errorf("schema has no properties section")
-	}
-
-	// Support nested keys (e.g., "api.port" means {"api": {"port": ...}})
-	propertySchema, err := extractNestedProperty(properties, key)
-	if err != nil {
-		return err
-	}
-
-	// Build a mini-schema for validation
-	miniSchema := map[string]interface{}{
-		"type":       "object",
-		"properties": map[string]interface{}{key: propertySchema},
-	}
-
-	// Build document to validate
-	document := map[string]interface{}{key: value}
-
-	// Validate using gojsonschema
-	schemaLoader := gojsonschema.NewGoLoader(miniSchema)
-	documentLoader := gojsonschema.NewGoLoader(document)
-
-	result, err := gojsonschema.Validate(schemaLoader, documentLoader)
-	if err != nil {
-		return fmt.Errorf("validation error: %w", err)
-	}
-
-	if !result.Valid() {
-		// Collect all validation errors
-		var errMsgs []string
-		for _, desc := range result.Errors() {
-			errMsgs = append(errMsgs, desc.String())
+	// Unmarshal each field using InputField's custom UnmarshalJSON
+	fields := make([]typing.InputField, len(rawFields))
+	for i, raw := range rawFields {
+		if err := fields[i].UnmarshalJSON(raw); err != nil {
+			return fmt.Errorf("failed to unmarshal field %d: %w", i, err)
 		}
-		return fmt.Errorf("failed to validate %s: %v - %s", key, value, strings.Join(errMsgs, "; "))
+	}
+
+	// Find the field definition matching the key (check Variable field)
+	var matchingField *typing.InputField
+	for i := range fields {
+		field := &fields[i]
+		// The key should match the Variable field
+		if field.Variable != nil && *field.Variable == key {
+			matchingField = field
+			break
+		}
+	}
+
+	if matchingField == nil {
+		return fmt.Errorf("field %s not found in schema", key)
+	}
+
+	// Convert value to string pointer (all values come as strings from the API)
+	valueStr, ok := value.(string)
+	if !ok {
+		return fmt.Errorf("value must be a string")
+	}
+
+	// Use the typing.InputField.Validate() method
+	_, err := matchingField.Validate(&valueStr)
+	if err != nil {
+		return fmt.Errorf("failed to validate %s: %w", key, err)
 	}
 
 	return nil
-}
-
-// extractNestedProperty extracts a nested property from a schema using dot notation
-// For example, "api.port" will navigate to properties["api"]["properties"]["port"]
-func extractNestedProperty(properties map[string]interface{}, key string) (interface{}, error) {
-	// Split key by dots
-	parts := strings.Split(key, ".")
-
-	current := properties
-	var propertySchema interface{}
-
-	for i, part := range parts {
-		// Get the property at this level
-		prop, ok := current[part]
-		if !ok {
-			return nil, fmt.Errorf("field %s not found in schema", key)
-		}
-
-		// If this is the last part, we found the schema
-		if i == len(parts)-1 {
-			propertySchema = prop
-			break
-		}
-
-		// Otherwise, navigate deeper
-		propMap, ok := prop.(map[string]interface{})
-		if !ok {
-			return nil, fmt.Errorf("field %s is not an object in schema", strings.Join(parts[:i+1], "."))
-		}
-
-		// Get nested properties
-		nestedProps, ok := propMap["properties"].(map[string]interface{})
-		if !ok {
-			return nil, fmt.Errorf("field %s has no nested properties in schema", strings.Join(parts[:i+1], "."))
-		}
-
-		current = nestedProps
-	}
-
-	return propertySchema, nil
 }

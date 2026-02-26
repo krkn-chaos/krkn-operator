@@ -23,6 +23,7 @@ import (
 	"encoding/json"
 	"time"
 
+	"github.com/krkn-chaos/krknctl/pkg/typing"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -70,6 +71,15 @@ func (r *ProviderConfigContributorReconciler) Reconcile(ctx context.Context, req
 	// Skip if already completed
 	if config.Status.Status == "Completed" {
 		logger.Info("Config request already completed, skipping", "uuid", config.Spec.UUID)
+		return ctrl.Result{}, nil
+	}
+
+	// Check if this operator's provider is active before processing
+	isActive, _, err := checkProviderActive(ctx, r.Client, r.OperatorName)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	if !isActive {
 		return ctrl.Result{}, nil
 	}
 
@@ -163,54 +173,64 @@ provider:
 		logger.Info("✅ Updated krkn-operator ConfigMap", "name", configMapName)
 	}
 
-	// Define JSON schema for krkn-operator configuration
-	schema := map[string]interface{}{
-		"type": "object",
-		"properties": map[string]interface{}{
-			"api": map[string]interface{}{
-				"type": "object",
-				"properties": map[string]interface{}{
-					"port": map[string]interface{}{
-						"type":        "number",
-						"description": "Port for the REST API server",
-						"default":     8080,
-					},
-					"enabled": map[string]interface{}{
-						"type":        "boolean",
-						"description": "Whether the REST API is enabled",
-						"default":     true,
-					},
-				},
-			},
-			"scenarios": map[string]interface{}{
-				"type": "object",
-				"properties": map[string]interface{}{
-					"default-timeout": map[string]interface{}{
-						"type":        "string",
-						"description": "Default timeout for scenario execution",
-						"default":     "600s",
-						"pattern":     "^[0-9]+(s|m|h)$",
-					},
-				},
-			},
-			"provider": map[string]interface{}{
-				"type": "object",
-				"properties": map[string]interface{}{
-					"heartbeat-interval": map[string]interface{}{
-						"type":        "string",
-						"description": "Interval for provider heartbeat updates",
-						"default":     "30s",
-						"pattern":     "^[0-9]+(s|m|h)$",
-					},
-				},
-			},
-		},
-	}
+	// Build typing.InputField array for krkn-operator configuration
+	fields := []typing.InputField{}
 
-	// Marshal schema to JSON string
-	schemaBytes, err := json.Marshal(schema)
+	// Helper function to create string pointers
+	strPtr := func(s string) *string { return &s }
+
+	// API Port
+	fields = append(fields, typing.InputField{
+		Name:             strPtr("API Port"),
+		ShortDescription: strPtr("REST API server port"),
+		Description:      strPtr("Port number for the REST API server"),
+		Variable:         strPtr("API_PORT"),
+		Type:             typing.Number,
+		Default:          strPtr("8080"),
+		Required:         false,
+	})
+
+	// API Enabled
+	fields = append(fields, typing.InputField{
+		Name:             strPtr("API Enabled"),
+		ShortDescription: strPtr("Enable REST API"),
+		Description:      strPtr("Whether the REST API server is enabled"),
+		Variable:         strPtr("API_ENABLED"),
+		Type:             typing.Boolean,
+		Default:          strPtr("true"),
+		Required:         false,
+	})
+
+	// Scenarios Default Timeout
+	fields = append(fields, typing.InputField{
+		Name:             strPtr("Scenarios Default Timeout"),
+		ShortDescription: strPtr("Default scenario timeout"),
+		Description:      strPtr("Default timeout for scenario execution (e.g., 600s, 10m, 1h)"),
+		Variable:         strPtr("SCENARIOS_DEFAULT_TIMEOUT"),
+		Type:             typing.String,
+		Default:          strPtr("600s"),
+		Validator:        strPtr("^[0-9]+(s|m|h)$"),
+		ValidationMessage: strPtr("Must be a duration with unit (s, m, or h), e.g., 600s, 10m, 1h"),
+		Required:         false,
+	})
+
+	// Provider Heartbeat Interval
+	fields = append(fields, typing.InputField{
+		Name:             strPtr("Provider Heartbeat Interval"),
+		ShortDescription: strPtr("Heartbeat update interval"),
+		Description:      strPtr("Interval for provider heartbeat updates (e.g., 30s, 1m)"),
+		Variable:         strPtr("PROVIDER_HEARTBEAT_INTERVAL"),
+		Type:             typing.String,
+		Default:          strPtr("30s"),
+		Validator:        strPtr("^[0-9]+(s|m|h)$"),
+		ValidationMessage: strPtr("Must be a duration with unit (s, m, or h), e.g., 30s, 1m"),
+		Required:         false,
+	})
+
+	// Marshal fields to JSON string
+	schemaBytes, err := json.Marshal(fields)
 	if err != nil {
-		logger.Error(err, "Failed to marshal JSON schema")
+		logger.Error(err, "Failed to marshal typing schema")
 		return "", "", err
 	}
 
