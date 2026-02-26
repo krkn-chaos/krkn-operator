@@ -375,7 +375,7 @@ func setNestedValue(data map[string]interface{}, key string, value interface{}) 
 func (h *Handler) ProviderConfigHandler(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path
 
-	// Root endpoint: POST to create new config request
+	// Root endpoint: POST to create new config request (admin only)
 	if path == "/api/v1/provider-config" {
 		if r.Method != http.MethodPost {
 			writeJSONError(w, http.StatusMethodNotAllowed, ErrorResponse{
@@ -384,12 +384,25 @@ func (h *Handler) ProviderConfigHandler(w http.ResponseWriter, r *http.Request) 
 			})
 			return
 		}
+
+		// POST requires admin
+		if !h.requireAdminForMethods(w, r, []string{http.MethodPost}) {
+			return
+		}
+
 		h.PostProviderConfig(w, r)
 		return
 	}
 
-	// Nested endpoints with UUID
+	// Nested endpoints with UUID: GET for all, POST (update) for admin only
 	if strings.HasPrefix(path, "/api/v1/provider-config/") {
+		// POST requires admin
+		if r.Method == http.MethodPost {
+			if !h.requireAdminForMethods(w, r, []string{http.MethodPost}) {
+				return
+			}
+		}
+
 		switch r.Method {
 		case http.MethodGet:
 			h.GetProviderConfigByUUID(w, r)

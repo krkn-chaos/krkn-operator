@@ -14,10 +14,6 @@ The krkn-operator-ecosystem consists of multiple projects (located one folder ab
 
 **Important**: Decisions and changes made in krkn-operator often require reading or modifying the other ecosystem projects. Always consider the impact on krkn-operator-acm and krkn-operator-console when making changes to shared code in `pkg/`.
 
-### Beads Configuration
-
-**Beads storage location**: All beads `.jsonl` files MUST be stored in the `spec/` directory, not `.beads/`.
-
 ## Critical Rules
 
 ### Task Management

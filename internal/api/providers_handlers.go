@@ -163,7 +163,7 @@ func (h *Handler) ProvidersRouter(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Provider-specific endpoint: PATCH to update status
+	// Provider-specific endpoint: PATCH to update status (admin only)
 	if strings.HasPrefix(path, "/api/v1/providers/") {
 		if r.Method != http.MethodPatch {
 			writeJSONError(w, http.StatusMethodNotAllowed, ErrorResponse{
@@ -172,6 +172,12 @@ func (h *Handler) ProvidersRouter(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
+
+		// PATCH requires admin
+		if !h.requireAdminForMethods(w, r, []string{http.MethodPatch}) {
+			return
+		}
+
 		h.UpdateProviderStatus(w, r)
 		return
 	}

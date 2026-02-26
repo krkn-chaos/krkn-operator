@@ -411,3 +411,61 @@ type UpdateProviderStatusResponse struct {
 	// Active is the new active status
 	Active bool `json:"active"`
 }
+
+// Authentication types
+
+// IsRegisteredResponse represents the response for GET /auth/is-registered
+type IsRegisteredResponse struct {
+	// Registered indicates if at least one admin user exists
+	Registered bool `json:"registered"`
+}
+
+// RegisterRequest represents the request body for POST /auth/register
+type RegisterRequest struct {
+	// UserID is the email address of the user (required)
+	UserID string `json:"userId"`
+	// Password is the plaintext password (required, min 8 characters)
+	Password string `json:"password"`
+	// Name is the first name of the user (required)
+	Name string `json:"name"`
+	// Surname is the last name of the user (required)
+	Surname string `json:"surname"`
+	// Organization is the user's organization (optional)
+	Organization string `json:"organization,omitempty"`
+	// Role is either "user" or "admin" (required)
+	Role string `json:"role"`
+}
+
+// RegisterResponse represents the response for POST /auth/register
+type RegisterResponse struct {
+	// Message contains a success message
+	Message string `json:"message"`
+	// UserID is the registered user's email
+	UserID string `json:"userId"`
+	// Role is the user's role
+	Role string `json:"role"`
+}
+
+// LoginRequest represents the request body for POST /auth/login
+type LoginRequest struct {
+	// UserID is the email address of the user (required)
+	UserID string `json:"userId"`
+	// Password is the plaintext password (required)
+	Password string `json:"password"`
+}
+
+// LoginResponse represents the response for POST /auth/login
+type LoginResponse struct {
+	// Token is the JWT authentication token
+	Token string `json:"token"`
+	// ExpiresAt is the token expiration timestamp
+	ExpiresAt string `json:"expiresAt"`
+	// UserID is the authenticated user's email
+	UserID string `json:"userId"`
+	// Role is the user's role
+	Role string `json:"role"`
+	// Name is the user's first name
+	Name string `json:"name"`
+	// Surname is the user's last name
+	Surname string `json:"surname"`
+}

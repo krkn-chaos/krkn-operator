@@ -304,7 +304,7 @@ func writeJSONError(w http.ResponseWriter, status int, err ErrorResponse) {
 	// Log internal server errors for debugging
 	if status >= 500 {
 		logger := log.Log.WithName("api")
-		logger.Error(fmt.Errorf(err.Message), "Internal server error", "error_code", err.Error, "status", status)
+		logger.Error(fmt.Errorf("%s", err.Message), "Internal server error", "error_code", err.Error, "status", status)
 	}
 	writeJSON(w, status, err)
 }
@@ -1326,7 +1326,7 @@ func (h *Handler) ListScenarioRuns(w http.ResponseWriter, r *http.Request) {
 	ctx := context.Background()
 
 	// Parse query parameters for filtering
-	phaseFilter := r.URL.Query().Get("phase")          // e.g., Running, Succeeded, Failed
+	phaseFilter := r.URL.Query().Get("phase") // e.g., Running, Succeeded, Failed
 	scenarioNameFilter := r.URL.Query().Get("scenarioName")
 
 	// List all KrknScenarioRun CRs in the namespace

@@ -4,3 +4,4 @@ resources:
 - bases/krkn.krkn-chaos.dev_krknoperatortargetproviderconfigs.yaml
 - bases/krkn.krkn-chaos.dev_krkntargetrequests.yaml
 - bases/krkn.krkn-chaos.dev_krknscenarioruns.yaml
+- bases/krkn.krkn-chaos.dev_krknusers.yaml

@@ -500,13 +500,18 @@ func (h *Handler) DeleteTarget(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) TargetsCRUDRouter(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path
 
-	// POST /api/v1/operator/targets - create new target
+	// POST, PUT, DELETE require admin privileges
+	if !h.requireAdminForMethods(w, r, []string{http.MethodPost, http.MethodPut, http.MethodDelete}) {
+		return
+	}
+
+	// POST /api/v1/operator/targets - create new target (admin only)
 	if path == "/api/v1/operator/targets" && r.Method == http.MethodPost {
 		h.CreateTarget(w, r)
 		return
 	}
 
-	// GET /api/v1/operator/targets - list all targets
+	// GET /api/v1/operator/targets - list all targets (user and admin)
 	if path == "/api/v1/operator/targets" && r.Method == http.MethodGet {
 		h.ListTargets(w, r)
 		return
@@ -514,19 +519,19 @@ func (h *Handler) TargetsCRUDRouter(w http.ResponseWriter, r *http.Request) {
 
 	// Path with UUID: /api/v1/operator/targets/{uuid}
 	if strings.HasPrefix(path, "/api/v1/operator/targets/") {
-		// GET /api/v1/operator/targets/{uuid} - get single target
+		// GET /api/v1/operator/targets/{uuid} - get single target (user and admin)
 		if r.Method == http.MethodGet {
 			h.GetTarget(w, r)
 			return
 		}
 
-		// PUT /api/v1/operator/targets/{uuid} - update target
+		// PUT /api/v1/operator/targets/{uuid} - update target (admin only)
 		if r.Method == http.MethodPut {
 			h.UpdateTarget(w, r)
 			return
 		}
 
-		// DELETE /api/v1/operator/targets/{uuid} - delete target
+		// DELETE /api/v1/operator/targets/{uuid} - delete target (admin only)
 		if r.Method == http.MethodDelete {
 			h.DeleteTarget(w, r)
 			return

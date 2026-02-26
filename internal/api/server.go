@@ -27,43 +27,66 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+
+	"github.com/krkn-chaos/krkn-operator/pkg/auth"
 )
 
 // Server represents the REST API server
 type Server struct {
-	server  *http.Server
-	handler *Handler
+	server         *http.Server
+	handler        *Handler
+	authMiddleware *auth.Middleware
 }
 
 // NewServer creates a new API server
 func NewServer(port int, client client.Client, clientset kubernetes.Interface, namespace string, grpcServerAddr string) *Server {
 	handler := NewHandler(client, clientset, namespace, grpcServerAddr)
 
+	// Initialize JWT secret and auth middleware
+	jwtSecret, err := handler.getOrCreateJWTSecret(context.Background())
+	if err != nil {
+		log.Log.Error(err, "Failed to initialize JWT secret, authentication will not work")
+		jwtSecret = []byte("fallback-secret-key-change-this-immediately")
+	}
+
+	tokenGen := auth.NewTokenGenerator(jwtSecret, TokenDuration, "krkn-operator")
+	authMw := auth.NewMiddleware(tokenGen)
+
 	mux := http.NewServeMux()
 
-	// API v1 routes
-	mux.HandleFunc("/api/v1/health", handler.HealthCheck)
-	mux.HandleFunc("/api/v1/clusters", handler.GetClusters)
-	mux.HandleFunc("/api/v1/nodes", handler.GetNodes)
-	mux.HandleFunc("/api/v1/targets", handler.TargetsHandler)  // POST, GET - legacy endpoints (KrknTargetRequest)
-	mux.HandleFunc("/api/v1/targets/", handler.TargetsHandler) // GET /{uuid} - legacy endpoint (check status)
+	// Public authentication endpoints (no auth required)
+	mux.HandleFunc("/api/v1/auth/is-registered", handler.IsRegistered)
+	mux.HandleFunc("/api/v1/auth/register", handler.Register)
+	mux.HandleFunc("/api/v1/auth/login", handler.Login)
 
-	// Provider config endpoints (KrknOperatorTargetProviderConfig)
-	mux.HandleFunc("/api/v1/provider-config", handler.ProviderConfigHandler)  // POST, GET
-	mux.HandleFunc("/api/v1/provider-config/", handler.ProviderConfigHandler) // GET /{uuid}
-	mux.HandleFunc("/api/v1/providers", handler.ProvidersRouter)              // GET, PATCH
-	mux.HandleFunc("/api/v1/providers/", handler.ProvidersRouter)
+	// Authenticated endpoints - user and admin access
+	mux.Handle("/api/v1/health", authMw.RequireAuth(http.HandlerFunc(handler.HealthCheck)))
+	mux.Handle("/api/v1/clusters", authMw.RequireAuth(http.HandlerFunc(handler.GetClusters)))
+	mux.Handle("/api/v1/nodes", authMw.RequireAuth(http.HandlerFunc(handler.GetNodes)))
+	mux.Handle("/api/v1/targets", authMw.RequireAuth(http.HandlerFunc(handler.TargetsHandler)))
+	mux.Handle("/api/v1/targets/", authMw.RequireAuth(http.HandlerFunc(handler.TargetsHandler)))
 
-	// CRUD endpoints for KrknOperatorTarget (operator-managed targets)
-	mux.HandleFunc("/api/v1/operator/targets", handler.TargetsCRUDRouter)  // POST, GET
-	mux.HandleFunc("/api/v1/operator/targets/", handler.TargetsCRUDRouter) // GET, PUT, DELETE /{uuid}
+	// Scenario endpoints - user and admin access
+	mux.Handle("/api/v1/scenarios", authMw.RequireAuth(http.HandlerFunc(handler.PostScenarios)))
+	mux.Handle("/api/v1/scenarios/detail/", authMw.RequireAuth(http.HandlerFunc(handler.PostScenarioDetail)))
+	mux.Handle("/api/v1/scenarios/globals/", authMw.RequireAuth(http.HandlerFunc(handler.PostScenarioGlobals)))
+	mux.Handle("/api/v1/scenarios/run", authMw.RequireAuth(http.HandlerFunc(handler.ScenariosRunRouter)))
+	mux.Handle("/api/v1/scenarios/run/", authMw.RequireAuth(http.HandlerFunc(handler.ScenariosRunRouter)))
 
-	// Scenario management endpoints
-	mux.HandleFunc("/api/v1/scenarios", handler.PostScenarios)                // POST - list scenarios
-	mux.HandleFunc("/api/v1/scenarios/detail/", handler.PostScenarioDetail)   // POST /{scenario_name}
-	mux.HandleFunc("/api/v1/scenarios/globals/", handler.PostScenarioGlobals) // POST /{scenario_name}
-	mux.HandleFunc("/api/v1/scenarios/run", handler.ScenariosRunRouter)       // POST, GET
-	mux.HandleFunc("/api/v1/scenarios/run/", handler.ScenariosRunRouter)      // GET, DELETE /{jobId}
+	// Provider config endpoints - admin only (POST), user and admin (GET)
+	// Note: handler.ProviderConfigHandler internally handles method-based authorization
+	mux.Handle("/api/v1/provider-config", authMw.RequireAuth(http.HandlerFunc(handler.ProviderConfigHandler)))
+	mux.Handle("/api/v1/provider-config/", authMw.RequireAuth(http.HandlerFunc(handler.ProviderConfigHandler)))
+
+	// Provider endpoints - GET: user and admin, PATCH: admin only
+	// Note: handler.ProvidersRouter internally handles method-based authorization
+	mux.Handle("/api/v1/providers", authMw.RequireAuth(http.HandlerFunc(handler.ProvidersRouter)))
+	mux.Handle("/api/v1/providers/", authMw.RequireAuth(http.HandlerFunc(handler.ProvidersRouter)))
+
+	// Target CRUD endpoints - GET: user and admin, POST/PUT/DELETE: admin only
+	// Note: handler.TargetsCRUDRouter internally handles method-based authorization
+	mux.Handle("/api/v1/operator/targets", authMw.RequireAuth(http.HandlerFunc(handler.TargetsCRUDRouter)))
+	mux.Handle("/api/v1/operator/targets/", authMw.RequireAuth(http.HandlerFunc(handler.TargetsCRUDRouter)))
 
 	// Wrap mux with logging middleware
 	server := &http.Server{
@@ -72,8 +95,9 @@ func NewServer(port int, client client.Client, clientset kubernetes.Interface, n
 	}
 
 	return &Server{
-		server:  server,
-		handler: handler,
+		server:         server,
+		handler:        handler,
+		authMiddleware: authMw,
 	}
 }
 

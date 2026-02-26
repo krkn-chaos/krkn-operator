@@ -337,12 +337,29 @@ func TestPostScenarioRun_SingleTarget_Success(t *testing.T) {
 		t.Errorf("Expected TotalTargets=1, got %d", response.TotalTargets)
 	}
 
-	if len(response.ClusterNames) != 1 {
-		t.Fatalf("Expected 1 cluster in response, got %d", len(response.ClusterNames))
+	// TargetClusters is a map[string][]string (provider -> cluster names)
+	totalClusters := 0
+	for _, clusters := range response.TargetClusters {
+		totalClusters += len(clusters)
 	}
 
-	if response.ClusterNames[0] != clusterName {
-		t.Errorf("Expected ClusterName='%s', got '%s'", clusterName, response.ClusterNames[0])
+	if totalClusters != 1 {
+		t.Fatalf("Expected 1 cluster in response, got %d", totalClusters)
+	}
+
+	// Verify cluster name exists in any provider
+	foundCluster := false
+	for _, clusters := range response.TargetClusters {
+		for _, cluster := range clusters {
+			if cluster == clusterName {
+				foundCluster = true
+				break
+			}
+		}
+	}
+
+	if !foundCluster {
+		t.Errorf("Expected to find cluster '%s' in TargetClusters", clusterName)
 	}
 
 	if response.ScenarioRunName == "" {
@@ -417,8 +434,14 @@ func TestPostScenarioRun_MultipleTargets_AllSuccess(t *testing.T) {
 		t.Errorf("Expected TotalTargets=3, got %d", response.TotalTargets)
 	}
 
-	if len(response.ClusterNames) != 3 {
-		t.Fatalf("Expected 3 clusters in response, got %d", len(response.ClusterNames))
+	// Count total clusters across all providers
+	totalClusters := 0
+	for _, clusters := range response.TargetClusters {
+		totalClusters += len(clusters)
+	}
+
+	if totalClusters != 3 {
+		t.Fatalf("Expected 3 clusters in response, got %d", totalClusters)
 	}
 
 	if response.ScenarioRunName == "" {
@@ -462,8 +485,14 @@ func TestPostScenarioRun_MultipleTargets_PartialFailure(t *testing.T) {
 		t.Errorf("Expected TotalTargets=3, got %d", response.TotalTargets)
 	}
 
-	if len(response.ClusterNames) != 3 {
-		t.Fatalf("Expected 3 clusters in response, got %d", len(response.ClusterNames))
+	// Count total clusters across all providers
+	totalClusters := 0
+	for _, clusters := range response.TargetClusters {
+		totalClusters += len(clusters)
+	}
+
+	if totalClusters != 3 {
+		t.Fatalf("Expected 3 clusters in response, got %d", totalClusters)
 	}
 
 	if response.ScenarioRunName == "" {
@@ -569,7 +598,7 @@ func TestListScenarioRuns_Success(t *testing.T) {
 			Labels: map[string]string{
 				"app":                "krkn-scenario",
 				"krkn-job-id":        "job-1",
-				"krkn-cluster-name":   "uuid1",
+				"krkn-cluster-name":  "uuid1",
 				"krkn-scenario-name": "pod-delete",
 			},
 		},
@@ -585,7 +614,7 @@ func TestListScenarioRuns_Success(t *testing.T) {
 			Labels: map[string]string{
 				"app":                "krkn-scenario",
 				"krkn-job-id":        "job-2",
-				"krkn-cluster-name":   "uuid2",
+				"krkn-cluster-name":  "uuid2",
 				"krkn-scenario-name": "node-drain",
 			},
 		},
@@ -601,7 +630,7 @@ func TestListScenarioRuns_Success(t *testing.T) {
 			Labels: map[string]string{
 				"app":                "krkn-scenario",
 				"krkn-job-id":        "job-3",
-				"krkn-cluster-name":   "uuid3",
+				"krkn-cluster-name":  "uuid3",
 				"krkn-scenario-name": "pod-delete",
 			},
 		},

@@ -203,28 +203,28 @@ provider:
 
 	// Scenarios Default Timeout
 	fields = append(fields, typing.InputField{
-		Name:             strPtr("Scenarios Default Timeout"),
-		ShortDescription: strPtr("Default scenario timeout"),
-		Description:      strPtr("Default timeout for scenario execution (e.g., 600s, 10m, 1h)"),
-		Variable:         strPtr("SCENARIOS_DEFAULT_TIMEOUT"),
-		Type:             typing.String,
-		Default:          strPtr("600s"),
-		Validator:        strPtr("^[0-9]+(s|m|h)$"),
+		Name:              strPtr("Scenarios Default Timeout"),
+		ShortDescription:  strPtr("Default scenario timeout"),
+		Description:       strPtr("Default timeout for scenario execution (e.g., 600s, 10m, 1h)"),
+		Variable:          strPtr("SCENARIOS_DEFAULT_TIMEOUT"),
+		Type:              typing.String,
+		Default:           strPtr("600s"),
+		Validator:         strPtr("^[0-9]+(s|m|h)$"),
 		ValidationMessage: strPtr("Must be a duration with unit (s, m, or h), e.g., 600s, 10m, 1h"),
-		Required:         false,
+		Required:          false,
 	})
 
 	// Provider Heartbeat Interval
 	fields = append(fields, typing.InputField{
-		Name:             strPtr("Provider Heartbeat Interval"),
-		ShortDescription: strPtr("Heartbeat update interval"),
-		Description:      strPtr("Interval for provider heartbeat updates (e.g., 30s, 1m)"),
-		Variable:         strPtr("PROVIDER_HEARTBEAT_INTERVAL"),
-		Type:             typing.String,
-		Default:          strPtr("30s"),
-		Validator:        strPtr("^[0-9]+(s|m|h)$"),
+		Name:              strPtr("Provider Heartbeat Interval"),
+		ShortDescription:  strPtr("Heartbeat update interval"),
+		Description:       strPtr("Interval for provider heartbeat updates (e.g., 30s, 1m)"),
+		Variable:          strPtr("PROVIDER_HEARTBEAT_INTERVAL"),
+		Type:              typing.String,
+		Default:           strPtr("30s"),
+		Validator:         strPtr("^[0-9]+(s|m|h)$"),
 		ValidationMessage: strPtr("Must be a duration with unit (s, m, or h), e.g., 30s, 1m"),
-		Required:         false,
+		Required:          false,
 	})
 
 	// Marshal fields to JSON string
