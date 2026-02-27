@@ -140,26 +140,23 @@ Check PROJECT.toml for project-specific paths (e.g., `pkg_public_api`, `internal
 4. Review your own changes for duplication
 5. Ensure all public APIs are documented
 6. Close beads issue: `bd close <id>`
-7. Export beads snapshot (filtered by project label):
-   ```bash
-   bd export -l {{PROJECT_LABEL}} -o beads/{{FOLDER_NAME}}-issues.jsonl
-   ```
-8. Commit with meaningful message
+7. Commit with meaningful message (export happens automatically via git hook)
 
 ### Session End Protocol
 **CRITICAL - Always complete these steps:**
 ```bash
-git status                                                    # Check what changed
-git add <files>                                               # Stage code changes
-bd export -l {{PROJECT_LABEL}} -o beads/{{FOLDER_NAME}}-issues.jsonl  # Export filtered snapshot
-git commit -m "type(scope): description"                      # Commit code
-git push                                                      # Push to remote
+git status                                      # Check what changed
+git add <files>                                 # Stage code changes
+git commit -m "type(scope): description"        # Commit code (auto-exports to beads/)
+git push                                        # Push to remote
 ```
 
 **Note**:
 - The centralized beads database (`.beads` symlink) is automatically synced via git hooks
-- The local `beads/` export is filtered by project label and is gitignored
+- The local `beads/` export happens automatically on commit via post-commit hook
+- Export is filtered by project label and gitignored
 - DO NOT add `beads/` to git - it's for offline reference only
+- Manual export: `bd export -l {{PROJECT_LABEL}} -o beads/{{FOLDER_NAME}}-issues.jsonl`
 
 ---
 
