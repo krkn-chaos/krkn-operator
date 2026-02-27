@@ -1,0 +1,46 @@
+# Project Configuration for krkn-operator
+# This file contains project-specific settings used by Claude Code and automation tools.
+# It should be the ONLY file you need to edit when adapting CLAUDE.md to a new project.
+
+[project]
+# Project identifier - used as beads issue_prefix and in documentation
+name = "krkn-operator"
+
+# Project type - determines which sections of CLAUDE.md apply
+type = "go-operator"
+
+# Ecosystem this project belongs to
+ecosystem = "krkn-operator-ecosystem"
+
+# Brief project description
+description = "Core Kubernetes operator providing chaos engineering capabilities for the krkn ecosystem"
+
+[ecosystem_projects]
+# Related projects in the ecosystem (relative paths)
+core = "."  # This project
+acm = "../krkn-operator-acm"
+console = "../krkn-operator-console"
+
+[beads]
+# Beads configuration - uses centralized database via symlink
+central_database = "/Users/tsebasti/Projects/beads/.beads"  # Centralized beads database location
+project_label = "project:krkn-operator"  # Label to identify this project's issues
+default_create_labels = ["project:krkn-operator"]  # Auto-apply to new issues
+export_path = "./beads/"  # Local JSON export path (gitignored)
+
+[go-operator]
+# Go-specific settings and commands
+test_command = "make test"
+lint_command = "make lint"
+build_command = "make build"
+pkg_public_api = "pkg/"  # Public API that other operators can import
+internal_api = "internal/"  # Private implementation details
+
+# Code quality requirements
+min_coverage = 80  # Minimum test coverage percentage
+required_linters = ["golangci-lint"]
+
+[documentation]
+# Documentation standards
+godoc_required = true  # All exports must have godoc comments
+examples_required = true  # Complex APIs need usage examples

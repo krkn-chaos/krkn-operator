@@ -32,3 +32,6 @@ venv/
 
 # bv (beads viewer) local config and caches
 .bv/
+
+# Beads JSON exports (local snapshots from central database)
+beads/
