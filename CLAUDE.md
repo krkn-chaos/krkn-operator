@@ -154,8 +154,8 @@ git push                                        # Push to remote
 **Note**:
 - The centralized beads database (`.beads` symlink) is automatically synced via git hooks
 - The local `beads/` export happens automatically on commit via post-commit hook
-- Export is filtered by project label and gitignored
-- DO NOT add `beads/` to git - it's for offline reference only
+- Export is filtered by project label and **should be committed** (issue history tracking)
+- `beads/` folder is tracked in git alongside code for historical reference
 - Manual export: `bd export -l {{PROJECT_LABEL}} -o beads/{{FOLDER_NAME}}-issues.jsonl`
 
 ---
