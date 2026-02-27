@@ -27,6 +27,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -227,12 +228,35 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.client.Create(ctx, secret); err != nil {
-		logger.Error(err, "Failed to create password secret", "secret", secretName)
-		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
-			Error:   "internal_error",
-			Message: "Failed to create user credentials",
-		})
-		return
+		// If secret already exists, it might be from a previous failed registration
+		// Delete it and create a new one with the fresh password hash
+		if apierrors.IsAlreadyExists(err) {
+			logger.Info("Password secret already exists, deleting and recreating", "secret", secretName)
+			if delErr := h.client.Delete(ctx, secret); delErr != nil {
+				logger.Error(delErr, "Failed to delete existing password secret", "secret", secretName)
+				writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+					Error:   "internal_error",
+					Message: "Failed to clean up existing credentials",
+				})
+				return
+			}
+			// Recreate the secret
+			if createErr := h.client.Create(ctx, secret); createErr != nil {
+				logger.Error(createErr, "Failed to recreate password secret", "secret", secretName)
+				writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+					Error:   "internal_error",
+					Message: "Failed to create user credentials",
+				})
+				return
+			}
+		} else {
+			logger.Error(err, "Failed to create password secret", "secret", secretName)
+			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+				Error:   "internal_error",
+				Message: "Failed to create user credentials",
+			})
+			return
+		}
 	}
 
 	// Create KrknUser CRD
@@ -254,10 +278,6 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 			Role:              req.Role,
 			PasswordSecretRef: secretName,
 		},
-		Status: krknv1alpha1.KrknUserStatus{
-			Active:  true,
-			Created: metav1.Now(),
-		},
 	}
 
 	if err := h.client.Create(ctx, user); err != nil {
@@ -269,6 +289,17 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 			Message: "Failed to create user",
 		})
 		return
+	}
+
+	// Update status separately (Kubernetes ignores status on creation)
+	user.Status = krknv1alpha1.KrknUserStatus{
+		Active:  true,
+		Created: metav1.Now(),
+	}
+	if err := h.client.Status().Update(ctx, user); err != nil {
+		logger.Error(err, "Failed to update KrknUser status", "user", userName)
+		// Don't fail the whole registration, just log the error
+		// The user is created, just the status needs manual fix
 	}
 
 	logger.Info("User registered successfully", "userId", req.UserID, "role", req.Role)

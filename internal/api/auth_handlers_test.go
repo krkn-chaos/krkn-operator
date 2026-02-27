@@ -45,7 +45,11 @@ func setupAuthTestHandler(users ...*krknv1alpha1.KrknUser) *Handler {
 		objects = append(objects, user)
 	}
 
-	fakeClient := fakeclient.NewClientBuilder().WithScheme(scheme).WithRuntimeObjects(objects...).Build()
+	fakeClient := fakeclient.NewClientBuilder().
+		WithScheme(scheme).
+		WithRuntimeObjects(objects...).
+		WithStatusSubresource(&krknv1alpha1.KrknUser{}).
+		Build()
 	fakeClientset := fake.NewSimpleClientset()
 	return NewHandler(fakeClient, fakeClientset, "default", "localhost:50051")
 }
@@ -157,6 +161,25 @@ func TestRegister_FirstAdmin_Success(t *testing.T) {
 
 	if response.Role != "admin" {
 		t.Errorf("Expected role 'admin', got '%s'", response.Role)
+	}
+
+	// Verify the KrknUser was created with Active=true
+	users := &krknv1alpha1.KrknUserList{}
+	if err := handler.client.List(nil, users); err != nil {
+		t.Fatalf("Failed to list users: %v", err)
+	}
+
+	if len(users.Items) != 1 {
+		t.Fatalf("Expected 1 user, got %d", len(users.Items))
+	}
+
+	createdUser := users.Items[0]
+	if !createdUser.Status.Active {
+		t.Error("Expected user Status.Active to be true, got false")
+	}
+
+	if createdUser.Status.Created.IsZero() {
+		t.Error("Expected user Status.Created to be set, got zero time")
 	}
 }
 
