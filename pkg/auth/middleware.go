@@ -22,6 +22,8 @@ import (
 	"context"
 	"net/http"
 	"strings"
+
+	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 // ContextKey is a custom type for context keys to avoid collisions
@@ -48,7 +50,8 @@ const (
 
 // Middleware provides HTTP middleware for JWT authentication and authorization
 type Middleware struct {
-	tokenGen *TokenGenerator
+	tokenGen       *TokenGenerator
+	tokenGenLoader func() *TokenGenerator
 }
 
 // NewMiddleware creates a new authentication middleware
@@ -63,19 +66,56 @@ func NewMiddleware(tokenGen *TokenGenerator) *Middleware {
 	}
 }
 
+// NewLazyMiddleware creates a new authentication middleware with lazy token generator loading
+//
+// Parameters:
+//   - tokenGenLoader: A function that returns the TokenGenerator (called on first use)
+//
+// Returns a new Middleware instance that loads the TokenGenerator when first needed
+func NewLazyMiddleware(tokenGenLoader func() *TokenGenerator) *Middleware {
+	return &Middleware{
+		tokenGenLoader: tokenGenLoader,
+	}
+}
+
 // RequireAuth is a middleware that requires a valid JWT token
 // It validates the token and adds the claims to the request context
 func (m *Middleware) RequireAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		logger := log.Log.WithName("auth-middleware")
+
+		// Get token generator (lazy load if needed)
+		tokenGen := m.tokenGen
+		if tokenGen == nil && m.tokenGenLoader != nil {
+			tokenGen = m.tokenGenLoader()
+			// Cache it for subsequent requests
+			m.tokenGen = tokenGen
+		}
+
+		if tokenGen == nil {
+			logger.Error(nil, "TokenGenerator not initialized")
+			http.Error(w, `{"error":"internal_error","message":"Authentication system not ready"}`, http.StatusInternalServerError)
+			return
+		}
+
 		// Extract token from Authorization header
 		authHeader := r.Header.Get(AuthorizationHeader)
 		if authHeader == "" {
+			logger.Info("Authentication failed: missing Authorization header",
+				"path", r.URL.Path,
+				"method", r.Method,
+			)
 			http.Error(w, `{"error":"unauthorized","message":"Missing authorization token"}`, http.StatusUnauthorized)
 			return
 		}
 
 		// Check for Bearer prefix
 		if !strings.HasPrefix(authHeader, BearerPrefix) {
+			logger.Info("Authentication failed: invalid Authorization header format",
+				"path", r.URL.Path,
+				"method", r.Method,
+				"header", authHeader,
+			)
 			http.Error(w, `{"error":"unauthorized","message":"Invalid authorization header format. Expected: Bearer <token>"}`, http.StatusUnauthorized)
 			return
 		}
@@ -84,11 +124,23 @@ func (m *Middleware) RequireAuth(next http.Handler) http.Handler {
 		token := strings.TrimPrefix(authHeader, BearerPrefix)
 
 		// Validate token
-		claims, err := m.tokenGen.ValidateToken(token)
+		claims, err := tokenGen.ValidateToken(token)
 		if err != nil {
+			logger.Info("Authentication failed: token validation failed",
+				"path", r.URL.Path,
+				"method", r.Method,
+				"error", err.Error(),
+			)
 			http.Error(w, `{"error":"unauthorized","message":"Invalid or expired token"}`, http.StatusUnauthorized)
 			return
 		}
+
+		logger.V(1).Info("Authentication successful",
+			"path", r.URL.Path,
+			"method", r.Method,
+			"userId", claims.UserID,
+			"role", claims.Role,
+		)
 
 		// Add claims to context
 		ctx := context.WithValue(r.Context(), UserClaimsKey, claims)

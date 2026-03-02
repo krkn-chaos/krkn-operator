@@ -42,15 +42,17 @@ type Server struct {
 func NewServer(port int, client client.Client, clientset kubernetes.Interface, namespace string, grpcServerAddr string) *Server {
 	handler := NewHandler(client, clientset, namespace, grpcServerAddr)
 
-	// Initialize JWT secret and auth middleware
-	jwtSecret, err := handler.getOrCreateJWTSecret(context.Background())
-	if err != nil {
-		log.Log.Error(err, "Failed to initialize JWT secret, authentication will not work")
-		jwtSecret = []byte("fallback-secret-key-change-this-immediately")
+	// Create auth middleware with lazy JWT secret loading
+	// The secret will be loaded on first request when the cache is ready
+	getTokenGen := func() *auth.TokenGenerator {
+		jwtSecret, err := handler.getOrCreateJWTSecret(context.Background())
+		if err != nil {
+			log.Log.Error(err, "Failed to get JWT secret, using fallback")
+			jwtSecret = []byte("fallback-secret-key-change-this-immediately")
+		}
+		return auth.NewTokenGenerator(jwtSecret, TokenDuration, "krkn-operator")
 	}
-
-	tokenGen := auth.NewTokenGenerator(jwtSecret, TokenDuration, "krkn-operator")
-	authMw := auth.NewMiddleware(tokenGen)
+	authMw := auth.NewLazyMiddleware(getTokenGen)
 
 	mux := http.NewServeMux()
 
@@ -72,6 +74,10 @@ func NewServer(port int, client client.Client, clientset kubernetes.Interface, n
 	mux.Handle("/api/v1/scenarios/globals/", authMw.RequireAuth(http.HandlerFunc(handler.PostScenarioGlobals)))
 	mux.Handle("/api/v1/scenarios/run", authMw.RequireAuth(http.HandlerFunc(handler.ScenariosRunRouter)))
 	mux.Handle("/api/v1/scenarios/run/", authMw.RequireAuth(http.HandlerFunc(handler.ScenariosRunRouter)))
+
+	// User management endpoints - authenticated users
+	mux.Handle("/api/v1/users", authMw.RequireAuth(http.HandlerFunc(handler.UsersRouter)))
+	mux.Handle("/api/v1/users/", authMw.RequireAuth(http.HandlerFunc(handler.UsersRouter)))
 
 	// Provider config endpoints - admin only (POST), user and admin (GET)
 	// Note: handler.ProviderConfigHandler internally handles method-based authorization

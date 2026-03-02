@@ -33,3 +33,5 @@ venv/
 # bv (beads viewer) local config and caches
 .bv/
 # Test hook
+
+.beads

@@ -469,3 +469,105 @@ type LoginResponse struct {
 	// Surname is the user's last name
 	Surname string `json:"surname"`
 }
+
+// User CRUD types
+
+// UserResponse represents a user in API responses (no password)
+type UserResponse struct {
+	// UserID is the email address of the user
+	UserID string `json:"userId"`
+	// Name is the first name of the user
+	Name string `json:"name"`
+	// Surname is the last name of the user
+	Surname string `json:"surname"`
+	// Organization is the user's organization (optional)
+	Organization string `json:"organization,omitempty"`
+	// Role is either "user" or "admin"
+	Role string `json:"role"`
+	// Active indicates if the user account is active
+	Active bool `json:"active"`
+	// Created is when the user was created
+	Created *time.Time `json:"created,omitempty"`
+	// LastLogin is when the user last logged in
+	LastLogin *time.Time `json:"lastLogin,omitempty"`
+}
+
+// ListUsersResponse represents the response for GET /api/v1/users
+type ListUsersResponse struct {
+	// Users is the array of user objects
+	Users []UserResponse `json:"users"`
+	// Total is the total number of users matching the filter
+	Total int `json:"total"`
+	// Page is the current page number
+	Page int `json:"page"`
+	// Limit is the number of items per page
+	Limit int `json:"limit"`
+}
+
+// CreateUserRequest represents the request body for POST /api/v1/users
+type CreateUserRequest struct {
+	// UserID is the email address of the user (required)
+	UserID string `json:"userId"`
+	// Password is the plaintext password (required, min 8 characters)
+	Password string `json:"password"`
+	// Name is the first name of the user (required)
+	Name string `json:"name"`
+	// Surname is the last name of the user (required)
+	Surname string `json:"surname"`
+	// Organization is the user's organization (optional)
+	Organization string `json:"organization,omitempty"`
+	// Role is either "user" or "admin" (required)
+	Role string `json:"role"`
+}
+
+// CreateUserResponse represents the response for POST /api/v1/users
+type CreateUserResponse struct {
+	// Message contains a success message
+	Message string `json:"message"`
+	// UserID is the created user's email
+	UserID string `json:"userId"`
+	// Role is the user's role
+	Role string `json:"role"`
+}
+
+// UpdateUserRequest represents the request body for PATCH /api/v1/users/:userId
+type UpdateUserRequest struct {
+	// Name is the first name (optional)
+	Name *string `json:"name,omitempty"`
+	// Surname is the last name (optional)
+	Surname *string `json:"surname,omitempty"`
+	// Organization is the user's organization (optional)
+	Organization *string `json:"organization,omitempty"`
+	// Role is either "user" or "admin" (admin only, optional)
+	Role *string `json:"role,omitempty"`
+	// Active indicates if the user account is active (admin only, optional)
+	Active *bool `json:"active,omitempty"`
+}
+
+// UpdateUserResponse represents the response for PATCH /api/v1/users/:userId
+type UpdateUserResponse struct {
+	// Message contains a success message
+	Message string `json:"message"`
+	// User is the updated user object
+	User UserResponse `json:"user"`
+}
+
+// DeleteUserResponse represents the response for DELETE /api/v1/users/:userId
+type DeleteUserResponse struct {
+	// Message contains a success message
+	Message string `json:"message"`
+}
+
+// ChangePasswordRequest represents the request body for PATCH /api/v1/users/:userId/password
+type ChangePasswordRequest struct {
+	// CurrentPassword is the user's current password (required when changing own password)
+	CurrentPassword string `json:"currentPassword,omitempty"`
+	// NewPassword is the new password (required)
+	NewPassword string `json:"newPassword"`
+}
+
+// ChangePasswordResponse represents the response for PATCH /api/v1/users/:userId/password
+type ChangePasswordResponse struct {
+	// Message contains a success message
+	Message string `json:"message"`
+}

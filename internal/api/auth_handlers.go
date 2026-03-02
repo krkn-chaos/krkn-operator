@@ -87,7 +87,7 @@ func (h *Handler) IsRegistered(w http.ResponseWriter, r *http.Request) {
 }
 
 // Register handles POST /auth/register
-// Registers a new user (admin or regular user)
+// Registers the FIRST admin user only. After that, use POST /api/v1/users (admin only).
 func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeJSONError(w, http.StatusMethodNotAllowed, ErrorResponse{
@@ -156,13 +156,11 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 	hasAdmins := len(adminList.Items) > 0
 
 	// If no admins exist, allow first admin registration without authentication
-	// Otherwise, require authentication (will be handled by middleware in the future)
+	// Otherwise, reject - new users must be created by admins via POST /api/v1/users
 	if hasAdmins {
-		// TODO: Add authentication middleware to verify JWT token
-		// For now, reject registration if admins exist (authentication not yet implemented)
-		writeJSONError(w, http.StatusUnauthorized, ErrorResponse{
-			Error:   "authentication_required",
-			Message: "Authentication required to register new users (authentication middleware not yet implemented)",
+		writeJSONError(w, http.StatusForbidden, ErrorResponse{
+			Error:   "registration_closed",
+			Message: "Initial admin registration is complete. New users must be created by an admin using POST /api/v1/users",
 		})
 		return
 	}
@@ -462,6 +460,7 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 
 // getOrCreateJWTSecret retrieves the JWT secret or creates it if it doesn't exist
 func (h *Handler) getOrCreateJWTSecret(ctx context.Context) ([]byte, error) {
+	logger := log.FromContext(ctx).WithName("jwt-secret")
 	secret := &corev1.Secret{}
 	secretKey := client.ObjectKey{
 		Namespace: h.namespace,
@@ -471,6 +470,7 @@ func (h *Handler) getOrCreateJWTSecret(ctx context.Context) ([]byte, error) {
 	err := h.client.Get(ctx, secretKey, secret)
 	if err == nil {
 		// Secret exists
+		logger.V(1).Info("Using existing JWT secret")
 		jwtSecret, ok := secret.Data[JWTSecretKey]
 		if !ok {
 			return nil, fmt.Errorf("jwt-secret key not found in secret")
@@ -501,8 +501,22 @@ func (h *Handler) getOrCreateJWTSecret(ctx context.Context) ([]byte, error) {
 	}
 
 	if err := h.client.Create(ctx, newSecret); err != nil {
+		// If secret already exists (race condition), try to get it
+		if apierrors.IsAlreadyExists(err) {
+			logger.Info("JWT secret already exists, retrieving it")
+			// Retry Get
+			if getErr := h.client.Get(ctx, secretKey, secret); getErr != nil {
+				return nil, fmt.Errorf("JWT secret exists but failed to retrieve it: %w", getErr)
+			}
+			jwtSecret, ok := secret.Data[JWTSecretKey]
+			if !ok {
+				return nil, fmt.Errorf("jwt-secret key not found in existing secret")
+			}
+			return jwtSecret, nil
+		}
 		return nil, fmt.Errorf("failed to create JWT secret: %w", err)
 	}
 
+	logger.Info("Created new JWT secret")
 	return randomSecret, nil
 }
