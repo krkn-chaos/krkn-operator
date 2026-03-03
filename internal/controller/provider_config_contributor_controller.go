@@ -160,6 +160,10 @@ provider:
 				return "", "", err
 			}
 			logger.Info("✅ Created krkn-operator ConfigMap", "name", configMapName)
+			logger.V(1).Info("📋 ConfigMap data dump",
+				"name", configMapName,
+				"namespace", r.OperatorNamespace,
+				"data", configMap.Data)
 		} else {
 			return "", "", err
 		}
@@ -171,6 +175,10 @@ provider:
 			return "", "", err
 		}
 		logger.Info("✅ Updated krkn-operator ConfigMap", "name", configMapName)
+		logger.V(1).Info("📋 ConfigMap data dump",
+			"name", configMapName,
+			"namespace", r.OperatorNamespace,
+			"data", existingConfigMap.Data)
 	}
 
 	// Build typing.InputField array for krkn-operator configuration
@@ -233,6 +241,13 @@ provider:
 		logger.Error(err, "Failed to marshal typing schema")
 		return "", "", err
 	}
+
+	// Log the complete configuration dump
+	logger.V(1).Info("📋 Configuration schema dump",
+		"configMapName", configMapName,
+		"namespace", r.OperatorNamespace,
+		"schemaJSON", string(schemaBytes),
+		"fieldCount", len(fields))
 
 	return configMapName, string(schemaBytes), nil
 }
