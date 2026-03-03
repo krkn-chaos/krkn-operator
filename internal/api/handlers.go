@@ -1130,23 +1130,33 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 	logger := log.Log.WithName("websocket-logs")
 
 	// Extract JWT token from WebSocket subprotocol header BEFORE upgrade
-	// Frontend sends: new WebSocket(url, ['access_token', '<jwt_token>'])
-	subprotocols := websocket.Subprotocols(r)
-	var token string
-
-	// Look for 'access_token' followed by the actual token
-	for i, proto := range subprotocols {
-		if proto == "access_token" && i+1 < len(subprotocols) {
-			token = subprotocols[i+1]
-			break
-		}
+	// Frontend sends: new WebSocket(url, `access_token.${jwt_token}`)
+	// Format: "access_token.<jwt_token>"
+	protocols := r.Header.Get("Sec-WebSocket-Protocol")
+	if protocols == "" {
+		logger.Info("WebSocket authentication failed: missing Sec-WebSocket-Protocol header",
+			"path", r.URL.Path,
+			"client_ip", r.RemoteAddr)
+		http.Error(w, "Unauthorized: Missing Sec-WebSocket-Protocol header", http.StatusUnauthorized)
+		return
 	}
 
-	// Validate JWT token before upgrading connection
-	if token == "" {
-		logger.Info("WebSocket authentication failed: missing token in subprotocol",
+	// Parse protocol: split on first '.' to separate prefix from token
+	// Example: "access_token.eyJhbGc..." → ["access_token", "eyJhbGc..."]
+	protocolParts := strings.SplitN(protocols, ".", 2)
+	if len(protocolParts) != 2 || protocolParts[0] != "access_token" {
+		logger.Info("WebSocket authentication failed: invalid protocol format",
 			"path", r.URL.Path,
-			"subprotocols", subprotocols,
+			"protocol", protocols,
+			"client_ip", r.RemoteAddr)
+		http.Error(w, "Unauthorized: Invalid Sec-WebSocket-Protocol format. Expected: access_token.<jwt>", http.StatusUnauthorized)
+		return
+	}
+
+	token := protocolParts[1]
+	if token == "" {
+		logger.Info("WebSocket authentication failed: empty token in subprotocol",
+			"path", r.URL.Path,
 			"client_ip", r.RemoteAddr)
 		http.Error(w, "Unauthorized: Missing authentication token", http.StatusUnauthorized)
 		return
