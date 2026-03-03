@@ -1233,13 +1233,15 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 		"path", r.URL.Path,
 		"client_ip", r.RemoteAddr)
 
-	// Upgrade to WebSocket with 'access_token' subprotocol in response
-	// This confirms to the client that we accepted their authentication
+	// Upgrade to WebSocket with the FULL subprotocol in response
+	// WebSocket spec requires server to respond with one of the client's requested subprotocols
+	// Client sent: "access_token.<jwt_token>"
+	// Server must respond with the SAME value (not just "access_token")
 	logger.Info("⬆️ Upgrading connection to WebSocket",
-		"response_protocol", "access_token")
+		"response_protocol", protocols)
 
 	conn, err := upgrader.Upgrade(w, r, http.Header{
-		"Sec-WebSocket-Protocol": []string{"access_token"},
+		"Sec-WebSocket-Protocol": []string{protocols}, // Echo back the full protocol
 	})
 	if err != nil {
 		logger.Error(err, "❌ WebSocket upgrade failed",
