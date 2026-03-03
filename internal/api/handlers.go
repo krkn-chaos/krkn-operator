@@ -44,6 +44,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
+	"github.com/krkn-chaos/krkn-operator/pkg/auth"
 	pb "github.com/krkn-chaos/krkn-operator/proto/dataprovider"
 )
 
@@ -63,6 +64,16 @@ func NewHandler(client client.Client, clientset kubernetes.Interface, namespace 
 		namespace:      namespace,
 		grpcServerAddr: grpcServerAddr,
 	}
+}
+
+// getTokenGenerator creates a TokenGenerator for JWT validation (used for WebSocket auth)
+// It uses the same JWT secret as the HTTP middleware
+func (h *Handler) getTokenGenerator(ctx context.Context) (*auth.TokenGenerator, error) {
+	jwtSecret, err := h.getOrCreateJWTSecret(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get JWT secret: %w", err)
+	}
+	return auth.NewTokenGenerator(jwtSecret, TokenDuration, "krkn-operator"), nil
 }
 
 // GetClusters handles GET /api/v1/clusters endpoint
@@ -1078,6 +1089,8 @@ var upgrader = websocket.Upgrader{
 		// Allow all origins for now - in production you should validate the origin
 		return true
 	},
+	// Support "access_token" subprotocol for JWT authentication
+	Subprotocols: []string{"access_token"},
 }
 
 // isWebSocketDisconnectError checks if an error is a normal WebSocket client disconnection
@@ -1116,8 +1129,58 @@ func isWebSocketDisconnectError(err error) bool {
 func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 	logger := log.Log.WithName("websocket-logs")
 
-	// Upgrade to WebSocket IMMEDIATELY to avoid protocol mismatch
-	conn, err := upgrader.Upgrade(w, r, nil)
+	// Extract JWT token from WebSocket subprotocol header BEFORE upgrade
+	// Frontend sends: new WebSocket(url, ['access_token', '<jwt_token>'])
+	subprotocols := websocket.Subprotocols(r)
+	var token string
+
+	// Look for 'access_token' followed by the actual token
+	for i, proto := range subprotocols {
+		if proto == "access_token" && i+1 < len(subprotocols) {
+			token = subprotocols[i+1]
+			break
+		}
+	}
+
+	// Validate JWT token before upgrading connection
+	if token == "" {
+		logger.Info("WebSocket authentication failed: missing token in subprotocol",
+			"path", r.URL.Path,
+			"subprotocols", subprotocols,
+			"client_ip", r.RemoteAddr)
+		http.Error(w, "Unauthorized: Missing authentication token", http.StatusUnauthorized)
+		return
+	}
+
+	// Get TokenGenerator and validate token
+	tokenGen, err := h.getTokenGenerator(r.Context())
+	if err != nil {
+		logger.Error(err, "Failed to get TokenGenerator for WebSocket auth")
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+
+	claims, err := tokenGen.ValidateToken(token)
+	if err != nil {
+		logger.Info("WebSocket authentication failed: invalid token",
+			"path", r.URL.Path,
+			"error", err.Error(),
+			"client_ip", r.RemoteAddr)
+		http.Error(w, "Unauthorized: Invalid or expired token", http.StatusUnauthorized)
+		return
+	}
+
+	logger.Info("WebSocket authentication successful",
+		"userId", claims.UserID,
+		"role", claims.Role,
+		"path", r.URL.Path,
+		"client_ip", r.RemoteAddr)
+
+	// Upgrade to WebSocket with 'access_token' subprotocol in response
+	// This confirms to the client that we accepted their authentication
+	conn, err := upgrader.Upgrade(w, r, http.Header{
+		"Sec-WebSocket-Protocol": []string{"access_token"},
+	})
 	if err != nil {
 		logger.Error(err, "WebSocket upgrade failed",
 			"url", r.URL.String(),
