@@ -449,6 +449,12 @@ func (r *KrknTargetRequestReconciler) writeManagedClustersSecret(ctx context.Con
 				"managed-clusters": managedClustersBytes,
 			},
 		}
+
+		// Set owner reference to enable automatic cleanup when KrknTargetRequest is deleted
+		if err := ctrl.SetControllerReference(krknRequest, &secret, r.Scheme); err != nil {
+			return fmt.Errorf("failed to set owner reference on secret: %w", err)
+		}
+
 		if err := r.Create(ctx, &secret); err != nil {
 			// Handle race condition: Secret was created between Get and Create
 			if apierrors.IsAlreadyExists(err) {
@@ -460,8 +466,14 @@ func (r *KrknTargetRequestReconciler) writeManagedClustersSecret(ctx context.Con
 				}, &secret); err != nil {
 					return fmt.Errorf("failed to refetch Secret after AlreadyExists: %w", err)
 				}
-				// Update it
+				// Update it with data and ownerReference
 				secret.Data["managed-clusters"] = managedClustersBytes
+
+				// Ensure owner reference is set (in case it was missing)
+				if err := ctrl.SetControllerReference(krknRequest, &secret, r.Scheme); err != nil {
+					return fmt.Errorf("failed to set owner reference on secret: %w", err)
+				}
+
 				if err := r.Update(ctx, &secret); err != nil {
 					return fmt.Errorf("failed to update Secret after AlreadyExists: %w", err)
 				}
@@ -474,6 +486,12 @@ func (r *KrknTargetRequestReconciler) writeManagedClustersSecret(ctx context.Con
 		}
 	} else {
 		secret.Data["managed-clusters"] = managedClustersBytes
+
+		// Ensure owner reference is set (in case it was missing from existing secret)
+		if err := ctrl.SetControllerReference(krknRequest, &secret, r.Scheme); err != nil {
+			return fmt.Errorf("failed to set owner reference on secret: %w", err)
+		}
+
 		if err := r.Update(ctx, &secret); err != nil {
 			return fmt.Errorf("failed to update Secret: %w", err)
 		}
