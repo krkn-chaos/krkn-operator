@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"strings"
 	"time"
 
 	"k8s.io/client-go/kubernetes"
@@ -72,8 +73,22 @@ func NewServer(port int, client client.Client, clientset kubernetes.Interface, n
 	mux.Handle("/api/v1/scenarios", authMw.RequireAuth(http.HandlerFunc(handler.PostScenarios)))
 	mux.Handle("/api/v1/scenarios/detail/", authMw.RequireAuth(http.HandlerFunc(handler.PostScenarioDetail)))
 	mux.Handle("/api/v1/scenarios/globals/", authMw.RequireAuth(http.HandlerFunc(handler.PostScenarioGlobals)))
+
+	// WebSocket endpoint for log streaming - handles JWT auth internally via Sec-WebSocket-Protocol
+	// MUST be registered BEFORE the catch-all /api/v1/scenarios/run/ to match first
+	mux.HandleFunc("/api/v1/scenarios/run/", func(w http.ResponseWriter, r *http.Request) {
+		// Check if this is a WebSocket logs request
+		if strings.Contains(r.URL.Path, "/jobs/") && strings.HasSuffix(r.URL.Path, "/logs") {
+			// WebSocket endpoint - auth handled internally via subprotocol
+			handler.GetScenarioRunLogs(w, r)
+			return
+		}
+		// All other /api/v1/scenarios/run/* endpoints require HTTP JWT auth
+		authMw.RequireAuth(http.HandlerFunc(handler.ScenariosRunRouter)).ServeHTTP(w, r)
+	})
+
+	// Scenario run endpoints - user and admin access
 	mux.Handle("/api/v1/scenarios/run", authMw.RequireAuth(http.HandlerFunc(handler.ScenariosRunRouter)))
-	mux.Handle("/api/v1/scenarios/run/", authMw.RequireAuth(http.HandlerFunc(handler.ScenariosRunRouter)))
 
 	// User management endpoints - authenticated users
 	mux.Handle("/api/v1/users", authMw.RequireAuth(http.HandlerFunc(handler.UsersRouter)))
