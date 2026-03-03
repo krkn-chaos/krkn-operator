@@ -590,10 +590,6 @@ func (in *KrknTargetRequestStatus) DeepCopyInto(out *KrknTargetRequestStatus) {
 			(*out)[key] = outVal
 		}
 	}
-	if in.Created != nil {
-		in, out := &in.Created, &out.Created
-		*out = (*in).DeepCopy()
-	}
 	if in.Completed != nil {
 		in, out := &in.Completed, &out.Completed
 		*out = (*in).DeepCopy()

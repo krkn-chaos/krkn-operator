@@ -49,7 +49,7 @@ type KrknTargetRequestStatus struct {
 	// This allows multiple operators to contribute their targets to the same request
 	TargetData map[string][]ClusterTarget `json:"targetData,omitempty"`
 	// Created is the timestamp when the CR was created and set to pending
-	Created *metav1.Time `json:"created,omitempty"`
+
 	// Completed is the timestamp when the CR was marked as completed
 	Completed *metav1.Time `json:"completed,omitempty"`
 }

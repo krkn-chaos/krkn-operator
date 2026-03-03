@@ -68,11 +68,6 @@ spec:
                   completed
                 format: date-time
                 type: string
-              created:
-                description: Created is the timestamp when the CR was created and
-                  set to pending
-                format: date-time
-                type: string
               status:
                 description: Status represents the current state of the request (pending,
                   completed)
