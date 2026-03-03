@@ -235,8 +235,21 @@ provider:
 		Required:          false,
 	})
 
-	// Marshal fields to JSON string
-	schemaBytes, err := json.Marshal(fields)
+	// Marshal each field individually using InputField.MarshalJSON()
+	// This ensures boolean fields (Required, Secret) are serialized as strings
+	// as expected by krknctl's UnmarshalJSON parser
+	rawFields := make([]json.RawMessage, len(fields))
+	for i, field := range fields {
+		fieldJSON, err := field.MarshalJSON()
+		if err != nil {
+			logger.Error(err, "Failed to marshal field", "index", i, "variable", field.Variable)
+			return "", "", err
+		}
+		rawFields[i] = fieldJSON
+	}
+
+	// Marshal the array of raw messages to create the final schema JSON
+	schemaBytes, err := json.Marshal(rawFields)
 	if err != nil {
 		logger.Error(err, "Failed to marshal typing schema")
 		return "", "", err

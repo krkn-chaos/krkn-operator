@@ -24,67 +24,9 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestConvertBoolFieldsToStrings(t *testing.T) {
-	tests := []struct {
-		name        string
-		input       string
-		expected    string
-		expectError bool
-	}{
-		{
-			name:        "boolean true to string",
-			input:       `{"name":"test","variable":"TEST","type":"string","required":true}`,
-			expected:    `{"name":"test","required":"true","type":"string","variable":"TEST"}`,
-			expectError: false,
-		},
-		{
-			name:        "boolean false to string",
-			input:       `{"name":"test","variable":"TEST","type":"string","required":false}`,
-			expected:    `{"name":"test","required":"false","type":"string","variable":"TEST"}`,
-			expectError: false,
-		},
-		{
-			name:        "secret boolean true to string",
-			input:       `{"name":"test","variable":"TEST","type":"string","secret":true}`,
-			expected:    `{"name":"test","secret":"true","type":"string","variable":"TEST"}`,
-			expectError: false,
-		},
-		{
-			name:        "both required and secret as booleans",
-			input:       `{"name":"test","variable":"TEST","type":"string","required":true,"secret":false}`,
-			expected:    `{"name":"test","required":"true","secret":"false","type":"string","variable":"TEST"}`,
-			expectError: false,
-		},
-		{
-			name:        "already string values unchanged",
-			input:       `{"name":"test","variable":"TEST","type":"string","required":"true"}`,
-			expected:    `{"name":"test","required":"true","type":"string","variable":"TEST"}`,
-			expectError: false,
-		},
-		{
-			name:        "no boolean fields",
-			input:       `{"name":"test","variable":"TEST","type":"string"}`,
-			expected:    `{"name":"test","type":"string","variable":"TEST"}`,
-			expectError: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result, err := convertBoolFieldsToStrings([]byte(tt.input))
-
-			if tt.expectError {
-				assert.Error(t, err)
-			} else {
-				assert.NoError(t, err)
-				assert.JSONEq(t, tt.expected, string(result))
-			}
-		})
-	}
-}
-
-func TestValidateValueAgainstSchema_WithBooleanRequired(t *testing.T) {
-	// Schema with boolean required field (the problematic case)
+func TestValidateValueAgainstSchema(t *testing.T) {
+	// Schema with string-formatted boolean fields (as created by InputField.MarshalJSON)
+	// This is the correct format after krknctl v0.10.17-beta upgrade
 	schema := `[
 		{
 			"name": "Cluster Name",
@@ -92,7 +34,7 @@ func TestValidateValueAgainstSchema_WithBooleanRequired(t *testing.T) {
 			"description": "Name of the cluster to target",
 			"variable": "CLUSTER_NAME",
 			"type": "string",
-			"required": true,
+			"required": "true",
 			"validator": "^[a-zA-Z0-9-]+$"
 		},
 		{
@@ -101,7 +43,7 @@ func TestValidateValueAgainstSchema_WithBooleanRequired(t *testing.T) {
 			"description": "This field is optional",
 			"variable": "OPTIONAL_FIELD",
 			"type": "string",
-			"required": false
+			"required": "false"
 		}
 	]`
 
