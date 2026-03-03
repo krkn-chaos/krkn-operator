@@ -34,9 +34,20 @@ func ValidateValueAgainstSchema(key string, value interface{}, schemaJSON string
 		return fmt.Errorf("invalid schema JSON: %w", err)
 	}
 
-	// Unmarshal each field using InputField's custom UnmarshalJSON
-	fields := make([]typing.InputField, len(rawFields))
+	// Pre-process each field to convert boolean values to strings
+	// This is a workaround for krknctl's typing.InputField.UnmarshalJSON expecting all values as strings
+	processedFields := make([]json.RawMessage, len(rawFields))
 	for i, raw := range rawFields {
+		processed, err := convertBoolFieldsToStrings(raw)
+		if err != nil {
+			return fmt.Errorf("failed to process field %d: %w", i, err)
+		}
+		processedFields[i] = processed
+	}
+
+	// Unmarshal each field using InputField's custom UnmarshalJSON
+	fields := make([]typing.InputField, len(processedFields))
+	for i, raw := range processedFields {
 		if err := fields[i].UnmarshalJSON(raw); err != nil {
 			return fmt.Errorf("failed to unmarshal field %d: %w", i, err)
 		}
@@ -70,4 +81,39 @@ func ValidateValueAgainstSchema(key string, value interface{}, schemaJSON string
 	}
 
 	return nil
+}
+
+// convertBoolFieldsToStrings converts boolean values to strings in JSON
+// This is a workaround for krknctl's typing.InputField.UnmarshalJSON which expects
+// all field values as strings (it unmarshals to map[string]string internally)
+func convertBoolFieldsToStrings(raw json.RawMessage) (json.RawMessage, error) {
+	// Unmarshal to generic map to inspect types
+	var fieldMap map[string]interface{}
+	if err := json.Unmarshal(raw, &fieldMap); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal field: %w", err)
+	}
+
+	// Convert boolean values to strings for fields that krknctl expects as strings
+	boolFields := []string{"required", "secret"}
+	for _, fieldName := range boolFields {
+		if val, exists := fieldMap[fieldName]; exists {
+			// Check if it's a boolean
+			if boolVal, ok := val.(bool); ok {
+				// Convert to string representation
+				if boolVal {
+					fieldMap[fieldName] = "true"
+				} else {
+					fieldMap[fieldName] = "false"
+				}
+			}
+		}
+	}
+
+	// Marshal back to JSON
+	processed, err := json.Marshal(fieldMap)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal processed field: %w", err)
+	}
+
+	return processed, nil
 }
