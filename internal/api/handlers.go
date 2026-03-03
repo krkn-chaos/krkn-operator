@@ -1129,25 +1129,57 @@ func isWebSocketDisconnectError(err error) bool {
 func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 	logger := log.Log.WithName("websocket-logs")
 
+	logger.Info("🔌 WebSocket connection request received",
+		"path", r.URL.Path,
+		"client_ip", r.RemoteAddr,
+		"user_agent", r.Header.Get("User-Agent"))
+
 	// Extract JWT token from WebSocket subprotocol header BEFORE upgrade
 	// Frontend sends: new WebSocket(url, `access_token.${jwt_token}`)
 	// Format: "access_token.<jwt_token>"
 	protocols := r.Header.Get("Sec-WebSocket-Protocol")
+	logger.V(1).Info("📋 Received WebSocket headers",
+		"Sec-WebSocket-Protocol", protocols,
+		"Sec-WebSocket-Version", r.Header.Get("Sec-WebSocket-Version"),
+		"Sec-WebSocket-Key", r.Header.Get("Sec-WebSocket-Key"))
+
 	if protocols == "" {
-		logger.Info("WebSocket authentication failed: missing Sec-WebSocket-Protocol header",
+		logger.Info("❌ WebSocket authentication failed: missing Sec-WebSocket-Protocol header",
 			"path", r.URL.Path,
-			"client_ip", r.RemoteAddr)
+			"client_ip", r.RemoteAddr,
+			"headers", r.Header)
 		http.Error(w, "Unauthorized: Missing Sec-WebSocket-Protocol header", http.StatusUnauthorized)
 		return
 	}
 
 	// Parse protocol: split on first '.' to separate prefix from token
 	// Example: "access_token.eyJhbGc..." → ["access_token", "eyJhbGc..."]
+	logger.V(1).Info("🔍 Parsing Sec-WebSocket-Protocol",
+		"raw_protocol", protocols,
+		"protocol_length", len(protocols))
+
 	protocolParts := strings.SplitN(protocols, ".", 2)
+	logger.V(1).Info("🔍 Protocol parts after split",
+		"parts_count", len(protocolParts),
+		"part_0", func() string {
+			if len(protocolParts) > 0 {
+				return protocolParts[0]
+			}
+			return "<none>"
+		}(),
+		"part_1_length", func() int {
+			if len(protocolParts) > 1 {
+				return len(protocolParts[1])
+			}
+			return 0
+		}())
+
 	if len(protocolParts) != 2 || protocolParts[0] != "access_token" {
-		logger.Info("WebSocket authentication failed: invalid protocol format",
+		logger.Info("❌ WebSocket authentication failed: invalid protocol format",
 			"path", r.URL.Path,
 			"protocol", protocols,
+			"parts_count", len(protocolParts),
+			"expected_format", "access_token.<jwt>",
 			"client_ip", r.RemoteAddr)
 		http.Error(w, "Unauthorized: Invalid Sec-WebSocket-Protocol format. Expected: access_token.<jwt>", http.StatusUnauthorized)
 		return
@@ -1155,32 +1187,47 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 
 	token := protocolParts[1]
 	if token == "" {
-		logger.Info("WebSocket authentication failed: empty token in subprotocol",
+		logger.Info("❌ WebSocket authentication failed: empty token in subprotocol",
 			"path", r.URL.Path,
 			"client_ip", r.RemoteAddr)
 		http.Error(w, "Unauthorized: Missing authentication token", http.StatusUnauthorized)
 		return
 	}
 
+	// Mask token for logging (show first/last 10 chars)
+	maskedToken := func() string {
+		if len(token) <= 20 {
+			return "***"
+		}
+		return token[:10] + "..." + token[len(token)-10:]
+	}()
+
+	logger.Info("🔑 JWT token extracted from subprotocol",
+		"token_length", len(token),
+		"token_preview", maskedToken)
+
 	// Get TokenGenerator and validate token
+	logger.V(1).Info("🔐 Getting TokenGenerator for validation")
 	tokenGen, err := h.getTokenGenerator(r.Context())
 	if err != nil {
-		logger.Error(err, "Failed to get TokenGenerator for WebSocket auth")
+		logger.Error(err, "❌ Failed to get TokenGenerator for WebSocket auth")
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
 
+	logger.Info("🔐 Validating JWT token")
 	claims, err := tokenGen.ValidateToken(token)
 	if err != nil {
-		logger.Info("WebSocket authentication failed: invalid token",
+		logger.Info("❌ WebSocket authentication failed: invalid token",
 			"path", r.URL.Path,
 			"error", err.Error(),
+			"token_preview", maskedToken,
 			"client_ip", r.RemoteAddr)
 		http.Error(w, "Unauthorized: Invalid or expired token", http.StatusUnauthorized)
 		return
 	}
 
-	logger.Info("WebSocket authentication successful",
+	logger.Info("✅ WebSocket authentication successful",
 		"userId", claims.UserID,
 		"role", claims.Role,
 		"path", r.URL.Path,
@@ -1188,17 +1235,24 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 
 	// Upgrade to WebSocket with 'access_token' subprotocol in response
 	// This confirms to the client that we accepted their authentication
+	logger.Info("⬆️ Upgrading connection to WebSocket",
+		"response_protocol", "access_token")
+
 	conn, err := upgrader.Upgrade(w, r, http.Header{
 		"Sec-WebSocket-Protocol": []string{"access_token"},
 	})
 	if err != nil {
-		logger.Error(err, "WebSocket upgrade failed",
+		logger.Error(err, "❌ WebSocket upgrade failed",
 			"url", r.URL.String(),
 			"headers", r.Header,
 			"client_ip", r.RemoteAddr)
 		return
 	}
 	defer conn.Close()
+
+	logger.Info("✅ WebSocket connection established",
+		"userId", claims.UserID,
+		"client_ip", r.RemoteAddr)
 
 	// Extract scenarioRunName and jobId from path
 	// Path format: /api/v1/scenarios/run/{scenarioRunName}/jobs/{jobId}/logs
