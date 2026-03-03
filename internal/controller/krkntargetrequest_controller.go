@@ -188,7 +188,7 @@ func (r *KrknTargetRequestReconciler) Reconcile(ctx context.Context, req ctrl.Re
 			request := obj.(*krknv1alpha1.KrknTargetRequest)
 			// Only delete if Completed to avoid deleting pending requests
 			if request.Status.Status == "Completed" {
-				return request.Status.Created
+				return &request.ObjectMeta.CreationTimestamp
 			}
 			return nil
 		},
@@ -220,8 +220,7 @@ func (r *KrknTargetRequestReconciler) initializeStatus(ctx context.Context, krkn
 	if krknRequest.Status.Status == "" {
 		logger.Info("Initializing status to pending")
 		krknRequest.Status.Status = "pending"
-		now := metav1.NewTime(time.Now())
-		krknRequest.Status.Created = &now
+		// Note: metadata.CreationTimestamp is automatically set by Kubernetes
 		if err := r.Status().Update(ctx, krknRequest); err != nil {
 			return err
 		}

@@ -45,7 +45,7 @@ func ExampleCleanupOldResources_providerConfig() {
 		3600, // Delete resources older than 1 hour
 		func(obj client.Object) *metav1.Time {
 			config := obj.(*krknv1alpha1.KrknOperatorTargetProviderConfig)
-			return config.Status.Created
+			return &config.ObjectMeta.CreationTimestamp
 		},
 	)
 
@@ -72,7 +72,7 @@ func ExampleCleanupOldResources_targetRequest() {
 		86400, // 24 hours
 		func(obj client.Object) *metav1.Time {
 			request := obj.(*krknv1alpha1.KrknTargetRequest)
-			return request.Status.Created
+			return &request.ObjectMeta.CreationTimestamp
 		},
 	)
 
@@ -99,7 +99,7 @@ func ExampleCleanupOldResources_cronJob() {
 			7200, // 2 hours
 			func(obj client.Object) *metav1.Time {
 				config := obj.(*krknv1alpha1.KrknOperatorTargetProviderConfig)
-				return config.Status.Created
+				return &config.ObjectMeta.CreationTimestamp
 			},
 		)
 		if err != nil {

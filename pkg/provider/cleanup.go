@@ -62,7 +62,7 @@ type CreatedTimeExtractor func(obj client.Object) *metav1.Time
 //	    3600, // Delete resources older than 1 hour
 //	    func(obj client.Object) *metav1.Time {
 //	        config := obj.(*krknv1alpha1.KrknOperatorTargetProviderConfig)
-//	        return config.Status.Created
+//	        return &config.ObjectMeta.CreationTimestamp
 //	    },
 //	)
 func CleanupOldResources(

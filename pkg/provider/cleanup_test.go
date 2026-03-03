@@ -98,7 +98,7 @@ func TestCleanupOldResources(t *testing.T) {
 			1800, // 30 minutes
 			func(obj client.Object) *metav1.Time {
 				config := obj.(*krknv1alpha1.KrknOperatorTargetProviderConfig)
-				return config.Status.Created
+				return &config.ObjectMeta.CreationTimestamp
 			},
 		)
 
@@ -140,7 +140,7 @@ func TestCleanupOldResources(t *testing.T) {
 			3600,
 			func(obj client.Object) *metav1.Time {
 				config := obj.(*krknv1alpha1.KrknOperatorTargetProviderConfig)
-				return config.Status.Created
+				return &config.ObjectMeta.CreationTimestamp
 			},
 		)
 
@@ -189,7 +189,7 @@ func TestCleanupOldResources(t *testing.T) {
 			3600,
 			func(obj client.Object) *metav1.Time {
 				config := obj.(*krknv1alpha1.KrknOperatorTargetProviderConfig)
-				return config.Status.Created
+				return &config.ObjectMeta.CreationTimestamp
 			},
 		)
 

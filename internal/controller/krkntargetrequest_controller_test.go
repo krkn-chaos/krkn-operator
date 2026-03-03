@@ -21,7 +21,6 @@ package controller
 import (
 	"context"
 	"testing"
-	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -138,8 +137,9 @@ func TestReconcile_InitializesStatus(t *testing.T) {
 		t.Errorf("Expected status to be 'pending', got %s", updated.Status.Status)
 	}
 
-	if updated.Status.Created == nil {
-		t.Error("Expected Created timestamp to be set")
+	// Note: CreationTimestamp is automatically set by Kubernetes when the object is created
+	if updated.ObjectMeta.CreationTimestamp.IsZero() {
+		t.Error("Expected CreationTimestamp to be set")
 	}
 }
 
@@ -156,8 +156,8 @@ func TestReconcile_PopulatesTargetData(t *testing.T) {
 			UUID: testUUID,
 		},
 		Status: krknv1alpha1.KrknTargetRequestStatus{
-			Status:  "pending",
-			Created: &metav1.Time{Time: time.Now()},
+			Status: "pending",
+			// Note: CreationTimestamp is set automatically
 		},
 	}
 
@@ -254,8 +254,8 @@ func TestReconcile_MarksCompleted(t *testing.T) {
 			UUID: testUUID,
 		},
 		Status: krknv1alpha1.KrknTargetRequestStatus{
-			Status:  "pending",
-			Created: &metav1.Time{Time: time.Now()},
+			Status: "pending",
+			// Note: CreationTimestamp is set automatically
 		},
 	}
 
@@ -316,8 +316,8 @@ func TestReconcile_SkipsCompletedRequests(t *testing.T) {
 			UUID: testUUID,
 		},
 		Status: krknv1alpha1.KrknTargetRequestStatus{
-			Status:    "Completed",
-			Created:   &now,
+			Status: "Completed",
+			// Note: CreationTimestamp is used instead
 			Completed: &now,
 		},
 	}
@@ -363,8 +363,8 @@ func TestReconcile_HandlesEmptyTargetList(t *testing.T) {
 			UUID: testUUID,
 		},
 		Status: krknv1alpha1.KrknTargetRequestStatus{
-			Status:  "pending",
-			Created: &metav1.Time{Time: time.Now()},
+			Status: "pending",
+			// Note: CreationTimestamp is set automatically
 		},
 	}
 
@@ -429,8 +429,8 @@ func TestReconcile_OnlyIncludesReadyTargets(t *testing.T) {
 			UUID: testUUID,
 		},
 		Status: krknv1alpha1.KrknTargetRequestStatus{
-			Status:  "pending",
-			Created: &metav1.Time{Time: time.Now()},
+			Status: "pending",
+			// Note: CreationTimestamp is set automatically
 		},
 	}
 
