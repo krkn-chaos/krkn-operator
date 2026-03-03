@@ -140,6 +140,12 @@ func (h *Handler) UpdateProviderConfigValues(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	logger.Info("📥 Received provider config update request",
+		"uuid", uuid,
+		"provider_name", req.ProviderName,
+		"values_count", len(req.Values),
+		"values", req.Values)
+
 	// Validate request
 	if req.ProviderName == "" {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
@@ -191,6 +197,9 @@ func (h *Handler) UpdateProviderConfigValues(w http.ResponseWriter, r *http.Requ
 
 	providerData, exists := config.Status.ConfigData[req.ProviderName]
 	if !exists {
+		logger.Error(nil, "Provider not found in ConfigData",
+			"requested_provider", req.ProviderName,
+			"available_providers", getProviderNames(config.Status.ConfigData))
 		writeJSONError(w, http.StatusNotFound, ErrorResponse{
 			Error:   "not_found",
 			Message: fmt.Sprintf("target provider: %s not found", req.ProviderName),
@@ -198,10 +207,28 @@ func (h *Handler) UpdateProviderConfigValues(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	logger.Info("📋 Provider config data found",
+		"provider_name", req.ProviderName,
+		"configmap_name", providerData.ConfigMap,
+		"namespace", providerData.Namespace,
+		"schema_length", len(providerData.ConfigSchema))
+
 	// Validate all values against schema
 	var updatedFields []string
+	logger.V(1).Info("🔍 Starting validation of values against schema",
+		"schema_json", providerData.ConfigSchema)
+
 	for key, value := range req.Values {
+		logger.V(1).Info("🔍 Validating field",
+			"key", key,
+			"value", value)
+
 		if err := ValidateValueAgainstSchema(key, value, providerData.ConfigSchema); err != nil {
+			logger.Error(err, "❌ Validation failed",
+				"key", key,
+				"value", value,
+				"schema", providerData.ConfigSchema)
+
 			// Check if it's a "field not found" error
 			if strings.Contains(err.Error(), "not found in schema") {
 				writeJSONError(w, http.StatusBadRequest, ErrorResponse{
@@ -217,6 +244,7 @@ func (h *Handler) UpdateProviderConfigValues(w http.ResponseWriter, r *http.Requ
 			})
 			return
 		}
+		logger.V(1).Info("✅ Field validated successfully", "key", key)
 		updatedFields = append(updatedFields, key)
 	}
 
@@ -368,6 +396,15 @@ func setNestedValue(data map[string]interface{}, key string, value interface{}) 
 
 	// Set the final value
 	current[parts[len(parts)-1]] = value
+}
+
+// getProviderNames extracts provider names from ConfigData for logging
+func getProviderNames(configData map[string]krknv1alpha1.ProviderConfigData) []string {
+	names := make([]string, 0, len(configData))
+	for name := range configData {
+		names = append(names, name)
+	}
+	return names
 }
 
 // ProviderConfigHandler handles both GET /api/v1/provider-config/{UUID} and POST /api/v1/provider-config endpoints
