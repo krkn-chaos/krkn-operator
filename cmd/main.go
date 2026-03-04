@@ -17,8 +17,10 @@ limitations under the License.
 package main
 
 import (
+	"context"
 	"crypto/tls"
 	"flag"
+	"fmt"
 	"os"
 	"path/filepath"
 
@@ -26,7 +28,10 @@ import (
 	// to ensure that exec-entrypoint and run can make use of them.
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/client-go/kubernetes"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -42,6 +47,8 @@ import (
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
 	"github.com/krkn-chaos/krkn-operator/internal/api"
 	"github.com/krkn-chaos/krkn-operator/internal/controller"
+	"github.com/krkn-chaos/krkn-operator/pkg/configmap"
+	"github.com/krkn-chaos/krkn-operator/pkg/configstore"
 	"github.com/krkn-chaos/krkn-operator/pkg/provider"
 	// +kubebuilder:scaffold:imports
 )
@@ -280,6 +287,12 @@ func main() {
 	}
 	// +kubebuilder:scaffold:builder
 
+	// Initialize kvstore from ConfigMap before starting controllers
+	if err := initializeConfigStore(mgr, krknNamespace); err != nil {
+		setupLog.Error(err, "failed to initialize configstore")
+		os.Exit(1)
+	}
+
 	// Setup and add REST API server
 	apiServer := api.NewServer(apiPort, mgr.GetClient(), clientset, krknNamespace, grpcServerAddr)
 	setupLog.Info("gRPC server address", "address", grpcServerAddr)
@@ -326,4 +339,40 @@ func main() {
 		setupLog.Error(err, "problem running manager")
 		os.Exit(1)
 	}
+}
+
+// initializeConfigStore loads the krkn-operator-config ConfigMap and syncs it to the kvstore.
+// This ensures the kvstore is populated with configuration values before controllers start.
+// Returns nil if the ConfigMap doesn't exist (not an error - it might be created later).
+func initializeConfigStore(mgr ctrl.Manager, namespace string) error {
+	ctx := context.Background()
+	logger := mgr.GetLogger().WithName("configstore-init")
+
+	cm := &corev1.ConfigMap{}
+	err := mgr.GetClient().Get(ctx, types.NamespacedName{
+		Name:      "krkn-operator-config",
+		Namespace: namespace,
+	}, cm)
+
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			logger.Info("config configmap not found, kvstore not initialized (will be populated when ConfigMap is created)")
+			return nil // Not an error, configmap might not exist yet
+		}
+		return fmt.Errorf("failed to get config configmap: %w", err)
+	}
+
+	store := kvstore.Get()
+	if err := configmap.SyncConfigMapToStore(cm, store); err != nil {
+		return fmt.Errorf("failed to sync configmap to store: %w", err)
+	}
+
+	// Log what was loaded
+	snapshot := store.Snapshot()
+	logger.Info("kvstore initialized from configmap",
+		"configMapName", cm.Name,
+		"namespace", cm.Namespace,
+		"keys", len(snapshot))
+
+	return nil
 }
