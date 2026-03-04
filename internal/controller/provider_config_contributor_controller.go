@@ -34,6 +34,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
+	"github.com/krkn-chaos/krkn-operator/pkg/configmap"
 	"github.com/krkn-chaos/krkn-operator/pkg/provider"
 )
 
@@ -127,22 +128,12 @@ func (r *ProviderConfigContributorReconciler) prepareConfiguration(ctx context.C
 	logger := log.FromContext(ctx)
 	configMapName := "krkn-operator-config"
 
-	// Create or update the ConfigMap with krkn-operator configuration
-	configMap := &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      configMapName,
-			Namespace: r.OperatorNamespace,
-		},
-		Data: map[string]string{
-			"config.yaml": `api:
-  port: 8080
-  enabled: true
-scenarios:
-  default-timeout: 600s
-provider:
-  heartbeat-interval: 30s
-`,
-		},
+	// Prepare configuration data in native key-value format
+	configData := map[string]string{
+		"API_PORT":                      "8080",
+		"API_ENABLED":                   "true",
+		"SCENARIOS_DEFAULT_TIMEOUT":     "600s",
+		"PROVIDER_HEARTBEAT_INTERVAL":   "30s",
 	}
 
 	// Try to get existing ConfigMap
@@ -154,7 +145,20 @@ provider:
 
 	if err != nil {
 		if apierrors.IsNotFound(err) {
-			// Create new ConfigMap
+			// Create new ConfigMap with native key-value format
+			configMap := &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      configMapName,
+					Namespace: r.OperatorNamespace,
+				},
+			}
+
+			// Use WriteConfigMapData to write configuration in native format
+			if err := configmap.WriteConfigMapData(configMap, configData); err != nil {
+				logger.Error(err, "Failed to write ConfigMap data")
+				return "", "", err
+			}
+
 			if err := r.Create(ctx, configMap); err != nil {
 				logger.Error(err, "Failed to create ConfigMap")
 				return "", "", err
@@ -168,8 +172,15 @@ provider:
 			return "", "", err
 		}
 	} else {
-		// ConfigMap already exists, update if needed
-		existingConfigMap.Data = configMap.Data
+		// ConfigMap already exists, replace with native key-value format
+		// Clear existing data to do a full replacement (not merge)
+		existingConfigMap.Data = nil
+
+		if err := configmap.WriteConfigMapData(&existingConfigMap, configData); err != nil {
+			logger.Error(err, "Failed to write ConfigMap data")
+			return "", "", err
+		}
+
 		if err := r.Update(ctx, &existingConfigMap); err != nil {
 			logger.Error(err, "Failed to update ConfigMap")
 			return "", "", err

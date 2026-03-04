@@ -28,7 +28,6 @@ import (
 	"net/http"
 	"strings"
 
-	"gopkg.in/yaml.v3"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -37,6 +36,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
+	"github.com/krkn-chaos/krkn-operator/pkg/configmap"
 	"github.com/krkn-chaos/krkn-operator/pkg/provider"
 )
 
@@ -260,25 +260,23 @@ func (h *Handler) UpdateProviderConfigValues(w http.ResponseWriter, r *http.Requ
 
 	if err != nil {
 		if apierrors.IsNotFound(err) {
-			// Create new ConfigMap
+			// Create new ConfigMap with native key-value format
 			configMap = corev1.ConfigMap{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      configMapName,
 					Namespace: configMapNamespace,
 				},
-				Data: make(map[string]string),
 			}
 
-			// Convert values to YAML and store
-			yamlData, err := convertValuesToYAML(req.Values)
-			if err != nil {
+			// Use WriteConfigMapData to write values in native key-value format
+			if err := configmap.WriteConfigMapData(&configMap, req.Values); err != nil {
+				logger.Error(err, "Failed to write ConfigMap data")
 				writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
 					Error:   "internal_error",
-					Message: fmt.Sprintf("Failed to convert values to YAML: %v", err),
+					Message: fmt.Sprintf("Failed to write ConfigMap data: %v", err),
 				})
 				return
 			}
-			configMap.Data["config.yaml"] = yamlData
 
 			if err := h.client.Create(ctx, &configMap); err != nil {
 				logger.Error(err, "Failed to create ConfigMap")
@@ -297,16 +295,16 @@ func (h *Handler) UpdateProviderConfigValues(w http.ResponseWriter, r *http.Requ
 			return
 		}
 	} else {
-		// Update existing ConfigMap
-		yamlData, err := mergeValuesIntoYAML(configMap.Data["config.yaml"], req.Values)
-		if err != nil {
+		// Update existing ConfigMap with native key-value format
+		// Use WriteConfigMapData to merge new values into existing ConfigMap
+		if err := configmap.WriteConfigMapData(&configMap, req.Values); err != nil {
+			logger.Error(err, "Failed to write ConfigMap data")
 			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
 				Error:   "internal_error",
-				Message: fmt.Sprintf("Failed to merge values: %v", err),
+				Message: fmt.Sprintf("Failed to write ConfigMap data: %v", err),
 			})
 			return
 		}
-		configMap.Data["config.yaml"] = yamlData
 
 		if err := h.client.Update(ctx, &configMap); err != nil {
 			logger.Error(err, "Failed to update ConfigMap")
@@ -333,69 +331,6 @@ func (h *Handler) UpdateProviderConfigValues(w http.ResponseWriter, r *http.Requ
 		Message:       "Configuration updated successfully",
 		UpdatedFields: updatedFields,
 	})
-}
-
-// convertValuesToYAML converts a map to YAML format
-func convertValuesToYAML(values map[string]string) (string, error) {
-	yamlBytes, err := yaml.Marshal(values)
-	if err != nil {
-		return "", err
-	}
-	return string(yamlBytes), nil
-}
-
-// mergeValuesIntoYAML merges new values into existing YAML
-func mergeValuesIntoYAML(existingYAML string, newValues map[string]string) (string, error) {
-	// Parse existing YAML
-	var existing map[string]interface{}
-	if existingYAML != "" {
-		if err := yaml.Unmarshal([]byte(existingYAML), &existing); err != nil {
-			return "", err
-		}
-	} else {
-		existing = make(map[string]interface{})
-	}
-
-	// Merge new values (supports nested keys like "api.port")
-	for k, v := range newValues {
-		setNestedValue(existing, k, v)
-	}
-
-	// Marshal back to YAML
-	yamlBytes, err := yaml.Marshal(existing)
-	if err != nil {
-		return "", err
-	}
-	return string(yamlBytes), nil
-}
-
-// setNestedValue sets a value in a nested map using dot notation
-// For example, "api.port" with value 9090 will set existing["api"]["port"] = 9090
-func setNestedValue(data map[string]interface{}, key string, value interface{}) {
-	parts := strings.Split(key, ".")
-
-	// Navigate to the parent of the final key
-	current := data
-	for i := 0; i < len(parts)-1; i++ {
-		part := parts[i]
-
-		// Create nested map if it doesn't exist
-		if _, exists := current[part]; !exists {
-			current[part] = make(map[string]interface{})
-		}
-
-		// Navigate deeper
-		currentMap, ok := current[part].(map[string]interface{})
-		if !ok {
-			// If it's not a map, replace it with a map
-			currentMap = make(map[string]interface{})
-			current[part] = currentMap
-		}
-		current = currentMap
-	}
-
-	// Set the final value
-	current[parts[len(parts)-1]] = value
 }
 
 // getProviderNames extracts provider names from ConfigData for logging
