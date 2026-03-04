@@ -20,7 +20,6 @@ import (
 	"context"
 	"crypto/tls"
 	"flag"
-	"fmt"
 	"os"
 	"path/filepath"
 
@@ -38,6 +37,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/certwatcher"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/filters"
@@ -287,12 +287,6 @@ func main() {
 	}
 	// +kubebuilder:scaffold:builder
 
-	// Initialize kvstore from ConfigMap before starting controllers
-	if err := initializeConfigStore(mgr, krknNamespace); err != nil {
-		setupLog.Error(err, "failed to initialize configstore")
-		os.Exit(1)
-	}
-
 	// Setup and add REST API server
 	apiServer := api.NewServer(apiPort, mgr.GetClient(), clientset, krknNamespace, grpcServerAddr)
 	setupLog.Info("gRPC server address", "address", grpcServerAddr)
@@ -308,6 +302,13 @@ func main() {
 		os.Exit(1)
 	}
 	setupLog.Info("Provider registration configured", "name", "krkn-operator", "namespace", krknNamespace)
+
+	// Setup ConfigStore initializer (runs after manager cache is ready)
+	configStoreInit := NewConfigStoreInitializer(mgr.GetClient(), krknNamespace)
+	if err := mgr.Add(configStoreInit); err != nil {
+		setupLog.Error(err, "unable to add configstore initializer to manager")
+		os.Exit(1)
+	}
 
 	if metricsCertWatcher != nil {
 		setupLog.Info("Adding metrics certificate watcher to manager")
@@ -341,30 +342,49 @@ func main() {
 	}
 }
 
-// initializeConfigStore loads the krkn-operator-config ConfigMap and syncs it to the kvstore.
-// This ensures the kvstore is populated with configuration values before controllers start.
-// Returns nil if the ConfigMap doesn't exist (not an error - it might be created later).
-func initializeConfigStore(mgr ctrl.Manager, namespace string) error {
-	ctx := context.Background()
-	logger := mgr.GetLogger().WithName("configstore-init")
+// ConfigStoreInitializer is a Runnable that initializes the kvstore from ConfigMap
+// after the manager cache is ready
+type ConfigStoreInitializer struct {
+	client    client.Client
+	namespace string
+}
 
+// NewConfigStoreInitializer creates a new ConfigStoreInitializer
+func NewConfigStoreInitializer(c client.Client, namespace string) *ConfigStoreInitializer {
+	return &ConfigStoreInitializer{
+		client:    c,
+		namespace: namespace,
+	}
+}
+
+// Start implements manager.Runnable
+func (c *ConfigStoreInitializer) Start(ctx context.Context) error {
+	logger := ctrl.Log.WithName("configstore-init")
+
+	// Get ConfigMap (cache is now ready)
 	cm := &corev1.ConfigMap{}
-	err := mgr.GetClient().Get(ctx, types.NamespacedName{
+	err := c.client.Get(ctx, types.NamespacedName{
 		Name:      "krkn-operator-config",
-		Namespace: namespace,
+		Namespace: c.namespace,
 	}, cm)
 
 	if err != nil {
 		if apierrors.IsNotFound(err) {
-			logger.Info("config configmap not found, kvstore not initialized (will be populated when ConfigMap is created)")
-			return nil // Not an error, configmap might not exist yet
+			logger.Info("config configmap not found, kvstore will be initialized when ConfigMap is created")
+			// Not an error - ConfigMap might be created later by controllers
+			return nil
 		}
-		return fmt.Errorf("failed to get config configmap: %w", err)
+		logger.Error(err, "failed to get config configmap")
+		// Don't fail manager startup if ConfigMap read fails
+		return nil
 	}
 
+	// Sync to kvstore
 	store := kvstore.Get()
 	if err := configmap.SyncConfigMapToStore(cm, store); err != nil {
-		return fmt.Errorf("failed to sync configmap to store: %w", err)
+		logger.Error(err, "failed to sync configmap to store")
+		// Don't fail manager startup
+		return nil
 	}
 
 	// Log what was loaded
@@ -375,4 +395,10 @@ func initializeConfigStore(mgr ctrl.Manager, namespace string) error {
 		"keys", len(snapshot))
 
 	return nil
+}
+
+// NeedLeaderElection implements manager.LeaderElectionRunnable
+// Returns false because kvstore initialization should happen on all replicas
+func (c *ConfigStoreInitializer) NeedLeaderElection() bool {
+	return false
 }
