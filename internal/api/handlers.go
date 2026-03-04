@@ -133,7 +133,8 @@ func (h *Handler) GetClusters(w http.ResponseWriter, r *http.Request) {
 // - New: ?targetUUID=<uuid>
 // - Legacy: ?id=<targetRequestId>&cluster-name=<clusterName>
 func (h *Handler) GetNodes(w http.ResponseWriter, r *http.Request) {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 
 	// New parameter (KrknOperatorTarget)
 	targetUUID := r.URL.Query().Get("targetUUID")
@@ -943,7 +944,8 @@ func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 
 	// Generate scenario run name
 	scenarioRunName := fmt.Sprintf("%s-%s", req.ScenarioName, uuid.New().String()[:8])
@@ -1025,7 +1027,8 @@ func (h *Handler) GetScenarioRunStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 
 	// Fetch the KrknScenarioRun CR
 	var scenarioRun krknv1alpha1.KrknScenarioRun
@@ -1331,7 +1334,8 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 
 	// Find pod by jobId label (no need to fetch the CR)
 	var podList corev1.PodList
@@ -1452,7 +1456,8 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 // ListScenarioRuns handles GET /api/v1/scenarios/run endpoint
 // It returns a list of all scenario runs (KrknScenarioRun CRs)
 func (h *Handler) ListScenarioRuns(w http.ResponseWriter, r *http.Request) {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 
 	// Parse query parameters for filtering
 	phaseFilter := r.URL.Query().Get("phase") // e.g., Running, Succeeded, Failed
@@ -1512,7 +1517,8 @@ func (h *Handler) DeleteScenarioRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 
 	var podList corev1.PodList
 	if err := h.client.List(ctx, &podList, client.InNamespace(h.namespace), client.MatchingLabels{
@@ -1587,7 +1593,8 @@ func (h *Handler) DeleteScenarioRunComplete(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 
 	// Fetch the KrknScenarioRun CR
 	var scenarioRun krknv1alpha1.KrknScenarioRun
@@ -1642,7 +1649,8 @@ func (h *Handler) DeleteSingleJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 
 	// Find KrknScenarioRun containing this jobId
 	var scenarioRunList krknv1alpha1.KrknScenarioRunList
@@ -1744,7 +1752,8 @@ func (h *Handler) GetSingleJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 
 	// Find KrknScenarioRun containing this jobId
 	var scenarioRunList krknv1alpha1.KrknScenarioRunList
