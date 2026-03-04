@@ -40,6 +40,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
@@ -864,6 +865,9 @@ func (h *Handler) createScenarioJob(
 }
 
 func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	logger := log.FromContext(ctx)
+
 	// Parse request body
 	var req ScenarioRunRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -943,8 +947,6 @@ func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	ctx := context.Background()
-
 	// Generate scenario run name
 	scenarioRunName := fmt.Sprintf("%s-%s", req.ScenarioName, uuid.New().String()[:8])
 
@@ -998,11 +1000,35 @@ func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Delete the KrknTargetRequest now that the scenario run is created
-	// Deletion failure should be logged but not fail the scenario run creation
-	if err := h.deleteTargetRequest(ctx, req.TargetRequestId); err != nil {
-		// Error is already logged in deleteTargetRequest, just continue
-		// This is not a critical error - scenario run creation succeeded
+	// Set owner reference: ScenarioRun owns KrknTargetRequest
+	// This ensures KrknTargetRequest (and its Secret) are cleaned up when ScenarioRun is deleted
+	// and remain available for job retries while ScenarioRun exists
+	targetRequest := &krknv1alpha1.KrknTargetRequest{}
+	if err := h.client.Get(ctx, types.NamespacedName{
+		Name:      req.TargetRequestId,
+		Namespace: h.namespace,
+	}, targetRequest); err == nil {
+		// Set ScenarioRun as owner of KrknTargetRequest
+		if err := ctrl.SetControllerReference(scenarioRun, targetRequest, h.client.Scheme()); err != nil {
+			logger.Error(err, "failed to set owner reference on KrknTargetRequest",
+				"scenarioRun", scenarioRun.Name,
+				"targetRequestId", req.TargetRequestId)
+			// Continue - not critical for scenario run creation
+		} else {
+			if err := h.client.Update(ctx, targetRequest); err != nil {
+				logger.Error(err, "failed to update KrknTargetRequest with owner reference",
+					"targetRequestId", req.TargetRequestId)
+				// Continue - not critical
+			} else {
+				logger.Info("set owner reference on KrknTargetRequest",
+					"scenarioRun", scenarioRun.Name,
+					"targetRequestId", req.TargetRequestId)
+			}
+		}
+	} else {
+		logger.Error(err, "failed to get KrknTargetRequest for setting owner reference",
+			"targetRequestId", req.TargetRequestId)
+		// Continue - KrknTargetRequest might have been deleted manually
 	}
 
 	// Calculate total targets from all providers
@@ -1867,47 +1893,6 @@ func convertMetaTime(mt *metav1.Time) *time.Time {
 	return &t
 }
 
-// deleteTargetRequest deletes a KrknTargetRequest by UUID
-// Returns nil if the target request is not found or was successfully deleted
-// Logs errors but does not fail the operation, as cleanup is best-effort
-func (h *Handler) deleteTargetRequest(ctx context.Context, uuid string) error {
-	logger := log.FromContext(ctx).WithName("deleteTargetRequest")
-
-	// List KrknTargetRequests with the UUID label
-	targetRequests := &krknv1alpha1.KrknTargetRequestList{}
-	listOpts := []client.ListOption{
-		client.InNamespace(h.namespace),
-		client.MatchingLabels{
-			"krkn.krkn-chaos.dev/uuid": uuid,
-		},
-	}
-
-	if err := h.client.List(ctx, targetRequests, listOpts...); err != nil {
-		logger.Error(err, "failed to list KrknTargetRequests", "uuid", uuid)
-		return fmt.Errorf("failed to list KrknTargetRequests: %w", err)
-	}
-
-	if len(targetRequests.Items) == 0 {
-		logger.Info("no KrknTargetRequest found to delete", "uuid", uuid)
-		return nil
-	}
-
-	if len(targetRequests.Items) > 1 {
-		logger.Info("found multiple KrknTargetRequests with same UUID, deleting all",
-			"uuid", uuid, "count", len(targetRequests.Items))
-	}
-
-	// Delete all found target requests
-	for i := range targetRequests.Items {
-		targetRequest := &targetRequests.Items[i]
-		if err := h.client.Delete(ctx, targetRequest); err != nil {
-			logger.Error(err, "failed to delete KrknTargetRequest",
-				"uuid", uuid, "name", targetRequest.Name)
-			return fmt.Errorf("failed to delete KrknTargetRequest %s: %w", targetRequest.Name, err)
-		}
-		logger.Info("successfully deleted KrknTargetRequest",
-			"uuid", uuid, "name", targetRequest.Name)
-	}
-
-	return nil
-}
+// NOTE: deleteTargetRequest was removed - KrknTargetRequest is now owned by ScenarioRun
+// and will be automatically deleted via Kubernetes garbage collection when ScenarioRun is deleted.
+// This ensures the Secret (which is owned by KrknTargetRequest) remains available for job retries.
