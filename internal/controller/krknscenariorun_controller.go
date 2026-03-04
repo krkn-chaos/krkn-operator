@@ -732,6 +732,28 @@ func (r *KrknScenarioRunReconciler) updateClusterJobStatuses(
 					"retryAttempt", job.RetryCount,
 					"maxRetries", maxRetries)
 
+				// Validate required fields before retry
+				if job.ProviderName == "" {
+					logger.Error(nil, "cannot retry job: ProviderName is empty",
+						"cluster", job.ClusterName,
+						"jobId", job.JobId)
+					job.Phase = "Failed"
+					job.Message = "Retry failed: ProviderName is empty"
+					job.FailureReason = "InvalidJobState"
+					r.setCompletionTime(job)
+					continue
+				}
+
+				if job.ClusterName == "" {
+					logger.Error(nil, "cannot retry job: ClusterName is empty",
+						"jobId", job.JobId)
+					job.Phase = "Failed"
+					job.Message = "Retry failed: ClusterName is empty"
+					job.FailureReason = "InvalidJobState"
+					r.setCompletionTime(job)
+					continue
+				}
+
 				// Create new pod (will get new jobId)
 				if err := r.createClusterJob(ctx, scenarioRun, job.ProviderName, job.ClusterName); err != nil {
 					logger.Error(err, "failed to create retry job",
@@ -739,6 +761,7 @@ func (r *KrknScenarioRunReconciler) updateClusterJobStatuses(
 						"retryAttempt", job.RetryCount)
 					job.Phase = "Failed"
 					job.Message = "Retry failed: " + err.Error()
+					r.setCompletionTime(job)
 				}
 			} else if job.CancelRequested {
 				job.Phase = "Cancelled"
