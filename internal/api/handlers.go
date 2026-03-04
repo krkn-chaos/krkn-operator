@@ -998,6 +998,13 @@ func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Delete the KrknTargetRequest now that the scenario run is created
+	// Deletion failure should be logged but not fail the scenario run creation
+	if err := h.deleteTargetRequest(ctx, req.TargetRequestId); err != nil {
+		// Error is already logged in deleteTargetRequest, just continue
+		// This is not a critical error - scenario run creation succeeded
+	}
+
 	// Calculate total targets from all providers
 	totalTargets := 0
 	for _, clusters := range req.TargetClusters {
@@ -1858,4 +1865,49 @@ func convertMetaTime(mt *metav1.Time) *time.Time {
 	}
 	t := mt.Time
 	return &t
+}
+
+// deleteTargetRequest deletes a KrknTargetRequest by UUID
+// Returns nil if the target request is not found or was successfully deleted
+// Logs errors but does not fail the operation, as cleanup is best-effort
+func (h *Handler) deleteTargetRequest(ctx context.Context, uuid string) error {
+	logger := log.FromContext(ctx).WithName("deleteTargetRequest")
+
+	// List KrknTargetRequests with the UUID label
+	targetRequests := &krknv1alpha1.KrknTargetRequestList{}
+	listOpts := []client.ListOption{
+		client.InNamespace(h.namespace),
+		client.MatchingLabels{
+			"krkn.krkn-chaos.dev/uuid": uuid,
+		},
+	}
+
+	if err := h.client.List(ctx, targetRequests, listOpts...); err != nil {
+		logger.Error(err, "failed to list KrknTargetRequests", "uuid", uuid)
+		return fmt.Errorf("failed to list KrknTargetRequests: %w", err)
+	}
+
+	if len(targetRequests.Items) == 0 {
+		logger.Info("no KrknTargetRequest found to delete", "uuid", uuid)
+		return nil
+	}
+
+	if len(targetRequests.Items) > 1 {
+		logger.Info("found multiple KrknTargetRequests with same UUID, deleting all",
+			"uuid", uuid, "count", len(targetRequests.Items))
+	}
+
+	// Delete all found target requests
+	for i := range targetRequests.Items {
+		targetRequest := &targetRequests.Items[i]
+		if err := h.client.Delete(ctx, targetRequest); err != nil {
+			logger.Error(err, "failed to delete KrknTargetRequest",
+				"uuid", uuid, "name", targetRequest.Name)
+			return fmt.Errorf("failed to delete KrknTargetRequest %s: %w", targetRequest.Name, err)
+		}
+		logger.Info("successfully deleted KrknTargetRequest",
+			"uuid", uuid, "name", targetRequest.Name)
+	}
+
+	return nil
 }
