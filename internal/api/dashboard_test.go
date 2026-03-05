@@ -35,8 +35,8 @@ import (
 	"github.com/krkn-chaos/krkn-operator/pkg/auth"
 )
 
-// TestGetActiveRunsOverview_AdminSeesAll tests that admin sees all active runs
-func TestGetActiveRunsOverview_AdminSeesAll(t *testing.T) {
+// TestGetActiveRunsOverview_AllUsersSeesAll tests that all users see all active runs
+func TestGetActiveRunsOverview_AllUsersSeesAll(t *testing.T) {
 	scheme := runtime.NewScheme()
 	krknv1alpha1.AddToScheme(scheme)
 	corev1.AddToScheme(scheme)
@@ -132,7 +132,7 @@ func TestGetActiveRunsOverview_AdminSeesAll(t *testing.T) {
 		t.Fatalf("Failed to unmarshal response: %v", err)
 	}
 
-	// Admin should see 2 active runs (run1 and run2)
+	// Should see 2 active runs (run1 and run2) - no filtering by ownership
 	if response.TotalActiveRuns != 2 {
 		t.Errorf("Expected 2 active runs, got %d", response.TotalActiveRuns)
 	}
@@ -158,8 +158,8 @@ func TestGetActiveRunsOverview_AdminSeesAll(t *testing.T) {
 	}
 }
 
-// TestGetActiveRunsOverview_UserSeesOwnOnly tests that regular users see only their own runs
-func TestGetActiveRunsOverview_UserSeesOwnOnly(t *testing.T) {
+// TestGetActiveRunsOverview_UserSeesAll tests that regular users see all runs (no filtering)
+func TestGetActiveRunsOverview_UserSeesAll(t *testing.T) {
 	scheme := runtime.NewScheme()
 	krknv1alpha1.AddToScheme(scheme)
 	corev1.AddToScheme(scheme)
@@ -232,14 +232,14 @@ func TestGetActiveRunsOverview_UserSeesOwnOnly(t *testing.T) {
 		t.Fatalf("Failed to unmarshal response: %v", err)
 	}
 
-	// User should see only their own 1 active run
-	if response.TotalActiveRuns != 1 {
-		t.Errorf("Expected 1 active run, got %d", response.TotalActiveRuns)
+	// User should see ALL active runs (2 runs from different owners)
+	if response.TotalActiveRuns != 2 {
+		t.Errorf("Expected 2 active runs, got %d", response.TotalActiveRuns)
 	}
 
-	// Should have only 1 cluster
-	if response.TotalClusters != 1 {
-		t.Errorf("Expected 1 cluster, got %d", response.TotalClusters)
+	// Should have 2 clusters (both cluster1 and cluster2)
+	if response.TotalClusters != 2 {
+		t.Errorf("Expected 2 clusters, got %d", response.TotalClusters)
 	}
 
 	// cluster1 should have run1
@@ -247,9 +247,9 @@ func TestGetActiveRunsOverview_UserSeesOwnOnly(t *testing.T) {
 		t.Errorf("Expected cluster1 to have 1 run, got %d", len(response.ClusterRuns["cluster1"]))
 	}
 
-	// cluster2 should not appear (belongs to other user)
-	if _, exists := response.ClusterRuns["cluster2"]; exists {
-		t.Error("cluster2 should not appear for user1")
+	// cluster2 should also appear (user sees all runs, not just their own)
+	if len(response.ClusterRuns["cluster2"]) != 1 {
+		t.Errorf("Expected cluster2 to have 1 run, got %d", len(response.ClusterRuns["cluster2"]))
 	}
 }
 

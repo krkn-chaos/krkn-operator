@@ -1558,7 +1558,7 @@ func (h *Handler) ListScenarioRuns(w http.ResponseWriter, r *http.Request) {
 
 // GetActiveRunsOverview handles GET /api/v1/dashboard/active-runs endpoint
 // It returns an overview of currently running scenario runs
-// Accessible to all authenticated users (admin sees all runs, users see only their own)
+// Accessible to all authenticated users - all users see all active runs (global dashboard)
 func (h *Handler) GetActiveRunsOverview(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
@@ -1572,8 +1572,7 @@ func (h *Handler) GetActiveRunsOverview(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Filter by ownership (admins see all, users see only their own)
-	scenarioRunList.Items = filterScenarioRunsByOwnership(scenarioRunList.Items, ctx)
+	// NOTE: No ownership filtering - this is a global dashboard showing all active runs to all users
 
 	// Track cluster to runs mapping and active runs count
 	clusterRuns := make(map[string][]string)
