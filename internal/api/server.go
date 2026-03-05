@@ -90,6 +90,9 @@ func NewServer(port int, client client.Client, clientset kubernetes.Interface, n
 	// Scenario run endpoints - user and admin access
 	mux.Handle("/api/v1/scenarios/run", authMw.RequireAuth(http.HandlerFunc(handler.ScenariosRunRouter)))
 
+	// Dashboard endpoints - user and admin access
+	mux.Handle("/api/v1/dashboard/active-runs", authMw.RequireAuth(http.HandlerFunc(handler.GetActiveRunsOverview)))
+
 	// User management endpoints - authenticated users
 	mux.Handle("/api/v1/users", authMw.RequireAuth(http.HandlerFunc(handler.UsersRouter)))
 	mux.Handle("/api/v1/users/", authMw.RequireAuth(http.HandlerFunc(handler.UsersRouter)))

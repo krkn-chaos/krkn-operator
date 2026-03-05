@@ -370,6 +370,17 @@ type ScenarioRunListResponse struct {
 	ScenarioRuns []ScenarioRunListItem `json:"scenarioRuns"`
 }
 
+// ActiveRunsOverviewResponse represents the response for GET /api/v1/dashboard/active-runs
+// It provides an overview of currently running scenario runs
+type ActiveRunsOverviewResponse struct {
+	// TotalActiveRuns is the total number of scenario runs in Running state
+	TotalActiveRuns int `json:"totalActiveRuns"`
+	// TotalClusters is the total number of unique clusters with active runs
+	TotalClusters int `json:"totalClusters"`
+	// ClusterRuns is a map of cluster name to list of scenario run names running on that cluster
+	ClusterRuns map[string][]string `json:"clusterRuns"`
+}
+
 // ProviderConfigUpdateRequest is the request body for POST /api/v1/provider-config/{uuid}
 type ProviderConfigUpdateRequest struct {
 	// ProviderName is the name of the provider whose config to update

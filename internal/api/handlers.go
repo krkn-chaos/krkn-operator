@@ -1556,6 +1556,59 @@ func (h *Handler) ListScenarioRuns(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, response)
 }
 
+// GetActiveRunsOverview handles GET /api/v1/dashboard/active-runs endpoint
+// It returns an overview of currently running scenario runs
+// Accessible to all authenticated users (admin sees all runs, users see only their own)
+func (h *Handler) GetActiveRunsOverview(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	// List all KrknScenarioRun CRs in the namespace
+	var scenarioRunList krknv1alpha1.KrknScenarioRunList
+	if err := h.client.List(ctx, &scenarioRunList, client.InNamespace(h.namespace)); err != nil {
+		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+			Error:   "internal_error",
+			Message: "Failed to list scenario runs: " + err.Error(),
+		})
+		return
+	}
+
+	// Filter by ownership (admins see all, users see only their own)
+	scenarioRunList.Items = filterScenarioRunsByOwnership(scenarioRunList.Items, ctx)
+
+	// Track cluster to runs mapping and active runs count
+	clusterRuns := make(map[string][]string)
+	activeRunsCount := 0
+
+	// Process each scenario run
+	for _, sr := range scenarioRunList.Items {
+		hasRunningJobs := false
+
+		// Check each cluster job in this scenario run
+		for _, job := range sr.Status.ClusterJobs {
+			// Only count jobs that are currently running
+			if job.Phase == "Running" {
+				hasRunningJobs = true
+
+				// Add this scenario run to the cluster's list
+				clusterRuns[job.ClusterName] = append(clusterRuns[job.ClusterName], sr.Name)
+			}
+		}
+
+		// Count this scenario run as active if it has any running jobs
+		if hasRunningJobs {
+			activeRunsCount++
+		}
+	}
+
+	response := ActiveRunsOverviewResponse{
+		TotalActiveRuns: activeRunsCount,
+		TotalClusters:   len(clusterRuns),
+		ClusterRuns:     clusterRuns,
+	}
+
+	writeJSON(w, http.StatusOK, response)
+}
+
 // DeleteScenarioRun handles DELETE /api/v1/scenarios/run/{jobId} endpoint
 // It stops and deletes a running job
 func (h *Handler) DeleteScenarioRun(w http.ResponseWriter, r *http.Request) {
