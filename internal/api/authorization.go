@@ -70,9 +70,9 @@ func sanitizeUserID(email string) string {
 // the given scenario run. Returns true if access is allowed, false otherwise.
 //
 // Access rules:
-// - Admins can access all scenario runs
+// - Admins can access all scenario runs (that have an owner)
 // - Regular users can only access runs where OwnerUserID matches their UserID
-// - Legacy runs (no OwnerUserID set) are admin-only
+// - Scenario runs without OwnerUserID are rejected (should not exist)
 //
 // If access is denied, this function writes a 403 Forbidden response to the writer
 // and returns false. The caller should return immediately without further processing.
@@ -93,15 +93,15 @@ func checkScenarioRunAccess(w http.ResponseWriter, r *http.Request, scenarioRun 
 		return false
 	}
 
+	// Reject runs without owner (should not exist)
+	if scenarioRun.Spec.OwnerUserID == "" {
+		http.Error(w, `{"error":"forbidden","message":"Access denied. This scenario run has no owner"}`, http.StatusForbidden)
+		return false
+	}
+
 	// Admins can access all runs
 	if auth.IsAdmin(ctx) {
 		return true
-	}
-
-	// Legacy runs (no owner) are admin-only
-	if scenarioRun.Spec.OwnerUserID == "" {
-		http.Error(w, `{"error":"forbidden","message":"Access denied. This scenario run has no owner and can only be accessed by administrators"}`, http.StatusForbidden)
-		return false
 	}
 
 	// Regular users can only access their own runs
@@ -117,7 +117,8 @@ func checkScenarioRunAccess(w http.ResponseWriter, r *http.Request, scenarioRun 
 //
 // Filtering rules:
 // - If no claims in context (e.g., tests), return all runs (no filtering)
-// - Admins see all runs
+// - Runs without OwnerUserID are always excluded (should not exist)
+// - Admins see all runs (that have an owner)
 // - Regular users see only runs where OwnerUserID matches their UserID
 //
 // Parameters:
@@ -133,13 +134,19 @@ func filterScenarioRunsByOwnership(runs []krknv1alpha1.KrknScenarioRun, ctx cont
 		return runs
 	}
 
-	// Admins see all runs
+	filtered := make([]krknv1alpha1.KrknScenarioRun, 0)
+
+	// Admins see all runs (excluding those without owner)
 	if claims.Role == string(auth.RoleAdmin) {
-		return runs
+		for _, run := range runs {
+			if run.Spec.OwnerUserID != "" {
+				filtered = append(filtered, run)
+			}
+		}
+		return filtered
 	}
 
 	// Regular users see only their own runs
-	filtered := make([]krknv1alpha1.KrknScenarioRun, 0)
 	for _, run := range runs {
 		if run.Spec.OwnerUserID == claims.UserID {
 			filtered = append(filtered, run)

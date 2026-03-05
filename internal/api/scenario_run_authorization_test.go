@@ -107,14 +107,15 @@ func TestCheckScenarioRunAccess(t *testing.T) {
 			expectAllow: true,
 		},
 		{
-			name:   "admin can access legacy run (no owner)",
+			name:   "run without owner is rejected (admin)",
 			claims: adminClaims,
 			scenarioRun: &krknv1alpha1.KrknScenarioRun{
 				Spec: krknv1alpha1.KrknScenarioRunSpec{
 					OwnerUserID: "",
 				},
 			},
-			expectAllow: true,
+			expectAllow:    false,
+			expectedStatus: http.StatusForbidden,
 		},
 		{
 			name:   "user can access own scenario run",
@@ -138,7 +139,7 @@ func TestCheckScenarioRunAccess(t *testing.T) {
 			expectedStatus: http.StatusForbidden,
 		},
 		{
-			name:   "user cannot access legacy run (no owner)",
+			name:   "run without owner is rejected (user)",
 			claims: userClaims,
 			scenarioRun: &krknv1alpha1.KrknScenarioRun{
 				Spec: krknv1alpha1.KrknScenarioRunSpec{
@@ -219,10 +220,10 @@ func TestFilterScenarioRunsByOwnership(t *testing.T) {
 		expectedNames []string
 	}{
 		{
-			name:          "admin sees all runs",
+			name:          "admin sees all runs (excluding legacy)",
 			claims:        adminClaims,
-			expectedCount: 4,
-			expectedNames: []string{"run1", "run2", "run3-legacy", "run4"},
+			expectedCount: 3,
+			expectedNames: []string{"run1", "run2", "run4"},
 		},
 		{
 			name:          "user sees only own runs",
