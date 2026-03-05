@@ -215,14 +215,14 @@ func TestSyncConfigMapToStore_NilStore(t *testing.T) {
 
 func TestWriteConfigMapData(t *testing.T) {
 	tests := []struct {
-		name             string
-		configMap        *corev1.ConfigMap
-		data             map[string]string
-		expectedData     map[string]string
-		expectError      bool
-		errorMsg         string
-		initializeData   bool
-		initialData      map[string]string
+		name           string
+		configMap      *corev1.ConfigMap
+		data           map[string]string
+		expectedData   map[string]string
+		expectError    bool
+		errorMsg       string
+		initializeData bool
+		initialData    map[string]string
 	}{
 		{
 			name:      "single key-value pair",

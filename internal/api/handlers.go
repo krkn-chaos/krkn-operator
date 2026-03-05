@@ -951,13 +951,25 @@ func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
 	scenarioRunName := fmt.Sprintf("%s-%s", req.ScenarioName, uuid.New().String()[:8])
 
 	// Create KrknScenarioRun CR
+	// Extract user claims for ownership tracking (defensive check for tests)
+	claims := auth.GetClaimsFromContext(ctx)
+
+	labels := make(map[string]string)
+	ownerUserID := ""
+	if claims != nil {
+		labels["krkn.krkn-chaos.dev/owner-user"] = sanitizeUserID(claims.UserID)
+		ownerUserID = claims.UserID
+	}
+
 	scenarioRun := &krknv1alpha1.KrknScenarioRun{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      scenarioRunName,
 			Namespace: h.namespace,
+			Labels:    labels,
 		},
 		Spec: krknv1alpha1.KrknScenarioRunSpec{
 			TargetRequestId:    req.TargetRequestId,
+			OwnerUserID:        ownerUserID,
 			TargetClusters:     req.TargetClusters,
 			ScenarioName:       req.ScenarioName,
 			ScenarioImage:      req.ScenarioImage,
@@ -1058,7 +1070,7 @@ func (h *Handler) GetScenarioRunStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx := context.Background()
+	ctx := r.Context()
 
 	// Fetch the KrknScenarioRun CR
 	var scenarioRun krknv1alpha1.KrknScenarioRun
@@ -1079,6 +1091,11 @@ func (h *Handler) GetScenarioRunStatus(w http.ResponseWriter, r *http.Request) {
 		}
 
 		writeJSONError(w, status, ErrorResponse{Error: errCode, Message: errMsg})
+		return
+	}
+
+	// Check access permissions
+	if !checkScenarioRunAccess(w, r, &scenarioRun) {
 		return
 	}
 
@@ -1485,7 +1502,7 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 // ListScenarioRuns handles GET /api/v1/scenarios/run endpoint
 // It returns a list of all scenario runs (KrknScenarioRun CRs)
 func (h *Handler) ListScenarioRuns(w http.ResponseWriter, r *http.Request) {
-	ctx := context.Background()
+	ctx := r.Context()
 
 	// Parse query parameters for filtering
 	phaseFilter := r.URL.Query().Get("phase") // e.g., Running, Succeeded, Failed
@@ -1500,6 +1517,9 @@ func (h *Handler) ListScenarioRuns(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+
+	// Filter by ownership (admins see all, users see only their own)
+	scenarioRunList.Items = filterScenarioRunsByOwnership(scenarioRunList.Items, ctx)
 
 	// Convert to response format with optional filtering
 	runs := make([]ScenarioRunListItem, 0)
@@ -1545,7 +1565,7 @@ func (h *Handler) DeleteScenarioRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx := context.Background()
+	ctx := r.Context()
 
 	var podList corev1.PodList
 	if err := h.client.List(ctx, &podList, client.InNamespace(h.namespace), client.MatchingLabels{
@@ -1567,6 +1587,22 @@ func (h *Handler) DeleteScenarioRun(w http.ResponseWriter, r *http.Request) {
 	}
 
 	pod := podList.Items[0]
+
+	// Find parent ScenarioRun and check access
+	scenarioRunName := pod.Labels["krkn-scenario-run"]
+	if scenarioRunName != "" {
+		var scenarioRun krknv1alpha1.KrknScenarioRun
+		if err := h.client.Get(ctx, client.ObjectKey{
+			Name:      scenarioRunName,
+			Namespace: h.namespace,
+		}, &scenarioRun); err == nil {
+			// Check access permissions on parent ScenarioRun
+			if !checkScenarioRunAccess(w, r, &scenarioRun) {
+				return
+			}
+		}
+		// If ScenarioRun not found, continue anyway (might have been deleted)
+	}
 
 	gracePeriod := int64(5)
 	deleteOptions := client.DeleteOptions{
@@ -1620,7 +1656,7 @@ func (h *Handler) DeleteScenarioRunComplete(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	ctx := context.Background()
+	ctx := r.Context()
 
 	// Fetch the KrknScenarioRun CR
 	var scenarioRun krknv1alpha1.KrknScenarioRun
@@ -1639,6 +1675,11 @@ func (h *Handler) DeleteScenarioRunComplete(w http.ResponseWriter, r *http.Reque
 				Message: "Failed to get scenario run: " + err.Error(),
 			})
 		}
+		return
+	}
+
+	// Check access permissions
+	if !checkScenarioRunAccess(w, r, &scenarioRun) {
 		return
 	}
 
@@ -1777,7 +1818,7 @@ func (h *Handler) GetSingleJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx := context.Background()
+	ctx := r.Context()
 
 	// Find KrknScenarioRun containing this jobId
 	var scenarioRunList krknv1alpha1.KrknScenarioRunList
@@ -1791,12 +1832,14 @@ func (h *Handler) GetSingleJob(w http.ResponseWriter, r *http.Request) {
 
 	// Search for job across all scenario runs
 	var foundJob *krknv1alpha1.ClusterJobStatus
+	var foundScenarioRun *krknv1alpha1.KrknScenarioRun
 
 	for i := range scenarioRunList.Items {
 		sr := &scenarioRunList.Items[i]
 		for j := range sr.Status.ClusterJobs {
 			if sr.Status.ClusterJobs[j].JobId == jobId {
 				foundJob = &sr.Status.ClusterJobs[j]
+				foundScenarioRun = sr
 				break
 			}
 		}
@@ -1810,6 +1853,11 @@ func (h *Handler) GetSingleJob(w http.ResponseWriter, r *http.Request) {
 			Error:   "not_found",
 			Message: "Job '" + jobId + "' not found",
 		})
+		return
+	}
+
+	// Check access permissions on parent ScenarioRun
+	if !checkScenarioRunAccess(w, r, foundScenarioRun) {
 		return
 	}
 

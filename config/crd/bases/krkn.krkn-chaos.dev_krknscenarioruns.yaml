@@ -95,6 +95,10 @@ spec:
                 description: MaxRetries is the maximum number of times to retry failed
                   jobs
                 type: integer
+              ownerUserId:
+                description: OwnerUserID is the email address of the user who created
+                  this scenario run
+                type: string
               password:
                 description: Password is the password for registry authentication
                 type: string

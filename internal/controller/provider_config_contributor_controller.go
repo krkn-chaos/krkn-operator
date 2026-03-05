@@ -130,10 +130,10 @@ func (r *ProviderConfigContributorReconciler) prepareConfiguration(ctx context.C
 
 	// Prepare configuration data in native key-value format
 	configData := map[string]string{
-		"API_PORT":                      "8080",
-		"API_ENABLED":                   "true",
-		"SCENARIOS_DEFAULT_TIMEOUT":     "600s",
-		"PROVIDER_HEARTBEAT_INTERVAL":   "30s",
+		"API_PORT":                    "8080",
+		"API_ENABLED":                 "true",
+		"SCENARIOS_DEFAULT_TIMEOUT":   "600s",
+		"PROVIDER_HEARTBEAT_INTERVAL": "30s",
 	}
 
 	// Try to get existing ConfigMap

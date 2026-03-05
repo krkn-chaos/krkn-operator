@@ -61,6 +61,18 @@ type KrknScenarioRunReconciler struct {
 // +kubebuilder:rbac:groups=krkn.krkn-chaos.dev,resources=krkntargetrequests,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=krkn.krkn-chaos.dev,resources=krknoperatortargets,verbs=get;list;watch
 
+// getOwnerLabel returns the sanitized owner label value for a scenario run.
+// If the scenario run has no OwnerUserID set, returns an empty string.
+// The label value is sanitized to comply with Kubernetes label requirements (RFC 1123).
+func getOwnerLabel(scenarioRun *krknv1alpha1.KrknScenarioRun) string {
+	if scenarioRun.Spec.OwnerUserID == "" {
+		return ""
+	}
+	sanitized := strings.ReplaceAll(scenarioRun.Spec.OwnerUserID, "@", "-")
+	sanitized = strings.ReplaceAll(sanitized, ".", "-")
+	return strings.ToLower(sanitized)
+}
+
 // Reconcile handles the reconciliation loop for KrknScenarioRun
 func (r *KrknScenarioRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
@@ -249,17 +261,21 @@ func (r *KrknScenarioRunReconciler) createClusterJob(
 
 	// Create ConfigMap for kubeconfig
 	kubeconfigConfigMapName := fmt.Sprintf("krkn-job-%s-kubeconfig", jobId)
+	kubeconfigLabels := map[string]string{
+		"krkn-job-id":         jobId,
+		"krkn-scenario-run":   scenarioRun.Name,
+		"krkn-scenario-name":  scenarioRun.Spec.ScenarioName,
+		"krkn-cluster-name":   clusterName,
+		"krkn-target-request": scenarioRun.Spec.TargetRequestId,
+	}
+	if ownerLabel := getOwnerLabel(scenarioRun); ownerLabel != "" {
+		kubeconfigLabels["krkn.krkn-chaos.dev/owner-user"] = ownerLabel
+	}
 	kubeconfigConfigMap := &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      kubeconfigConfigMapName,
 			Namespace: r.Namespace,
-			Labels: map[string]string{
-				"krkn-job-id":         jobId,
-				"krkn-scenario-run":   scenarioRun.Name,
-				"krkn-scenario-name":  scenarioRun.Spec.ScenarioName,
-				"krkn-cluster-name":   clusterName,
-				"krkn-target-request": scenarioRun.Spec.TargetRequestId,
-			},
+			Labels:    kubeconfigLabels,
 		},
 		Data: map[string]string{
 			"config": string(kubeconfigDecoded),
@@ -314,17 +330,21 @@ func (r *KrknScenarioRunReconciler) createClusterJob(
 			return fmt.Errorf("failed to decode file content for '%s': %w", file.Name, err)
 		}
 
+		fileLabels := map[string]string{
+			"krkn-job-id":         jobId,
+			"krkn-scenario-run":   scenarioRun.Name,
+			"krkn-scenario-name":  scenarioRun.Spec.ScenarioName,
+			"krkn-cluster-name":   clusterName,
+			"krkn-target-request": scenarioRun.Spec.TargetRequestId,
+		}
+		if ownerLabel := getOwnerLabel(scenarioRun); ownerLabel != "" {
+			fileLabels["krkn.krkn-chaos.dev/owner-user"] = ownerLabel
+		}
 		fileConfigMap := &corev1.ConfigMap{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      configMapName,
 				Namespace: r.Namespace,
-				Labels: map[string]string{
-					"krkn-job-id":         jobId,
-					"krkn-scenario-run":   scenarioRun.Name,
-					"krkn-scenario-name":  scenarioRun.Spec.ScenarioName,
-					"krkn-cluster-name":   clusterName,
-					"krkn-target-request": scenarioRun.Spec.TargetRequestId,
-				},
+				Labels:    fileLabels,
 			},
 			Data: map[string]string{
 				file.Name: string(fileContent),
@@ -368,17 +388,21 @@ func (r *KrknScenarioRunReconciler) createClusterJob(
 
 		dockerConfigJSON, _ := json.Marshal(dockerConfig)
 
+		secretLabels := map[string]string{
+			"krkn-job-id":         jobId,
+			"krkn-scenario-run":   scenarioRun.Name,
+			"krkn-scenario-name":  scenarioRun.Spec.ScenarioName,
+			"krkn-cluster-name":   clusterName,
+			"krkn-target-request": scenarioRun.Spec.TargetRequestId,
+		}
+		if ownerLabel := getOwnerLabel(scenarioRun); ownerLabel != "" {
+			secretLabels["krkn.krkn-chaos.dev/owner-user"] = ownerLabel
+		}
 		imagePullSecret := &corev1.Secret{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      imagePullSecretName,
 				Namespace: r.Namespace,
-				Labels: map[string]string{
-					"krkn-job-id":         jobId,
-					"krkn-scenario-run":   scenarioRun.Name,
-					"krkn-scenario-name":  scenarioRun.Spec.ScenarioName,
-					"krkn-cluster-name":   clusterName,
-					"krkn-target-request": scenarioRun.Spec.TargetRequestId,
-				},
+				Labels:    secretLabels,
 			},
 			Type: corev1.SecretTypeDockerConfigJson,
 			Data: map[string][]byte{
@@ -475,18 +499,22 @@ func (r *KrknScenarioRunReconciler) createClusterJob(
 
 	// Create the pod
 	podName := fmt.Sprintf("krkn-job-%s", jobId)
+	podLabels := map[string]string{
+		"app":                 "krkn-scenario",
+		"krkn-job-id":         jobId,
+		"krkn-scenario-run":   scenarioRun.Name,
+		"krkn-scenario-name":  scenarioRun.Spec.ScenarioName,
+		"krkn-cluster-name":   clusterName,
+		"krkn-target-request": scenarioRun.Spec.TargetRequestId,
+	}
+	if ownerLabel := getOwnerLabel(scenarioRun); ownerLabel != "" {
+		podLabels["krkn.krkn-chaos.dev/owner-user"] = ownerLabel
+	}
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      podName,
 			Namespace: r.Namespace,
-			Labels: map[string]string{
-				"app":                 "krkn-scenario",
-				"krkn-job-id":         jobId,
-				"krkn-scenario-run":   scenarioRun.Name,
-				"krkn-scenario-name":  scenarioRun.Spec.ScenarioName,
-				"krkn-cluster-name":   clusterName,
-				"krkn-target-request": scenarioRun.Spec.TargetRequestId,
-			},
+			Labels:    podLabels,
 		},
 		Spec: corev1.PodSpec{
 			ServiceAccountName: "krkn-operator-krkn-scenario-runner",
