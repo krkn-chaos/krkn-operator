@@ -314,7 +314,9 @@ func TestPostScenarioRun_SingleTarget_Success(t *testing.T) {
 	// Test
 	reqBody := `{
 		"targetRequestId": "test-request-id",
-		"clusterNames": ["test-cluster"],
+		"targetClusters": {
+			"krkn-operator": ["test-cluster"]
+		},
 		"scenarioImage": "quay.io/krkn/pod-scenarios:latest",
 		"scenarioName": "pod-delete"
 	}`
@@ -411,7 +413,9 @@ func TestPostScenarioRun_MultipleTargets_AllSuccess(t *testing.T) {
 	// Test
 	reqBody := `{
 		"targetRequestId": "test-request-id",
-		"clusterNames": ["cluster-1", "cluster-2", "cluster-3"],
+		"targetClusters": {
+			"krkn-operator": ["cluster-1", "cluster-2", "cluster-3"]
+		},
 		"scenarioImage": "quay.io/krkn/pod-scenarios:latest",
 		"scenarioName": "pod-delete"
 	}`
@@ -460,7 +464,9 @@ func TestPostScenarioRun_MultipleTargets_PartialFailure(t *testing.T) {
 
 	reqBody := `{
 		"targetRequestId": "test-request-id",
-		"clusterNames": ["cluster-1", "invalid", "cluster-2"],
+		"targetClusters": {
+			"krkn-operator": ["cluster-1", "invalid", "cluster-2"]
+		},
 		"scenarioImage": "quay.io/krkn/pod-scenarios:latest",
 		"scenarioName": "pod-delete"
 	}`
@@ -509,7 +515,9 @@ func TestPostScenarioRun_MultipleTargets_AllFailure(t *testing.T) {
 	// Test
 	reqBody := `{
 		"targetRequestId": "test-request-id",
-		"clusterNames": ["invalid-1", "invalid-2"],
+		"targetClusters": {
+			"krkn-operator": ["invalid-1", "invalid-2"]
+		},
 		"scenarioImage": "quay.io/krkn/pod-scenarios:latest",
 		"scenarioName": "pod-delete"
 	}`
@@ -546,18 +554,18 @@ func TestPostScenarioRun_Validation_ClusterNames(t *testing.T) {
 	}{
 		{
 			name:        "Empty array",
-			reqBody:     `{"targetRequestId": "test-id", "clusterNames": [], "scenarioImage": "img", "scenarioName": "test"}`,
-			expectedErr: "clusterNames is required and must contain at least one cluster name",
+			reqBody:     `{"targetRequestId": "test-id", "targetClusters": {"krkn-operator": []}, "scenarioImage": "img", "scenarioName": "test"}`,
+			expectedErr: "provider 'krkn-operator' must have at least one cluster",
 		},
 		{
 			name:        "Duplicates",
-			reqBody:     `{"targetRequestId": "test-id", "clusterNames": ["cluster1", "cluster1"], "scenarioImage": "img", "scenarioName": "test"}`,
-			expectedErr: "clusterNames contains duplicates",
+			reqBody:     `{"targetRequestId": "test-id", "targetClusters": {"krkn-operator": ["cluster1", "cluster1"]}, "scenarioImage": "img", "scenarioName": "test"}`,
+			expectedErr: "cluster 'cluster1' appears in multiple providers",
 		},
 		{
 			name:        "Empty string",
-			reqBody:     `{"targetRequestId": "test-id", "clusterNames": ["cluster1", ""], "scenarioImage": "img", "scenarioName": "test"}`,
-			expectedErr: "clusterNames cannot contain empty strings",
+			reqBody:     `{"targetRequestId": "test-id", "targetClusters": {"krkn-operator": ["cluster1", ""]}, "scenarioImage": "img", "scenarioName": "test"}`,
+			expectedErr: "cluster names cannot be empty",
 		},
 	}
 
@@ -591,55 +599,61 @@ func TestListScenarioRuns_Success(t *testing.T) {
 	krknv1alpha1.AddToScheme(scheme)
 	corev1.AddToScheme(scheme)
 
-	pod1 := &corev1.Pod{
+	scenarioRun1 := &krknv1alpha1.KrknScenarioRun{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "krkn-job-1",
+			Name:      "run-1",
 			Namespace: "default",
-			Labels: map[string]string{
-				"app":                "krkn-scenario",
-				"krkn-job-id":        "job-1",
-				"krkn-cluster-name":  "uuid1",
-				"krkn-scenario-name": "pod-delete",
+		},
+		Spec: krknv1alpha1.KrknScenarioRunSpec{
+			ScenarioName: "pod-delete",
+			TargetClusters: map[string][]string{
+				"krkn-operator": {"cluster-1"},
 			},
 		},
-		Status: corev1.PodStatus{
-			Phase: corev1.PodPending,
+		Status: krknv1alpha1.KrknScenarioRunStatus{
+			Phase:        "Running",
+			TotalTargets: 1,
 		},
 	}
 
-	pod2 := &corev1.Pod{
+	scenarioRun2 := &krknv1alpha1.KrknScenarioRun{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "krkn-job-2",
+			Name:      "run-2",
 			Namespace: "default",
-			Labels: map[string]string{
-				"app":                "krkn-scenario",
-				"krkn-job-id":        "job-2",
-				"krkn-cluster-name":  "uuid2",
-				"krkn-scenario-name": "node-drain",
+		},
+		Spec: krknv1alpha1.KrknScenarioRunSpec{
+			ScenarioName: "node-drain",
+			TargetClusters: map[string][]string{
+				"krkn-operator": {"cluster-2"},
 			},
 		},
-		Status: corev1.PodStatus{
-			Phase: corev1.PodRunning,
+		Status: krknv1alpha1.KrknScenarioRunStatus{
+			Phase:        "Succeeded",
+			TotalTargets: 1,
 		},
 	}
 
-	pod3 := &corev1.Pod{
+	scenarioRun3 := &krknv1alpha1.KrknScenarioRun{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "krkn-job-3",
+			Name:      "run-3",
 			Namespace: "default",
-			Labels: map[string]string{
-				"app":                "krkn-scenario",
-				"krkn-job-id":        "job-3",
-				"krkn-cluster-name":  "uuid3",
-				"krkn-scenario-name": "pod-delete",
+		},
+		Spec: krknv1alpha1.KrknScenarioRunSpec{
+			ScenarioName: "pod-delete",
+			TargetClusters: map[string][]string{
+				"krkn-operator": {"cluster-3"},
 			},
 		},
-		Status: corev1.PodStatus{
-			Phase: corev1.PodSucceeded,
+		Status: krknv1alpha1.KrknScenarioRunStatus{
+			Phase:        "Failed",
+			TotalTargets: 1,
 		},
 	}
 
-	fakeClient := fakeclient.NewClientBuilder().WithScheme(scheme).WithObjects(pod1, pod2, pod3).Build()
+	fakeClient := fakeclient.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(scenarioRun1, scenarioRun2, scenarioRun3).
+		Build()
 	fakeClientset := fake.NewSimpleClientset()
 	handler := NewHandler(fakeClient, fakeClientset, "default", "localhost:50051")
 
@@ -651,65 +665,70 @@ func TestListScenarioRuns_Success(t *testing.T) {
 		t.Errorf("Expected status code %d, got %d", http.StatusOK, w.Code)
 	}
 
-	var response JobsListResponse
+	var response ScenarioRunListResponse
 	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
 		t.Fatalf("Failed to unmarshal response: %v", err)
 	}
 
-	if len(response.Jobs) != 3 {
-		t.Errorf("Expected 3 jobs, got %d", len(response.Jobs))
+	if len(response.ScenarioRuns) != 3 {
+		t.Errorf("Expected 3 scenario runs, got %d", len(response.ScenarioRuns))
 	}
 
-	// Verify clusterName is populated
-	for _, job := range response.Jobs {
-		if job.ClusterName == "" {
-			t.Errorf("Expected ClusterName to be set for job %s", job.JobId)
+	// Verify scenario names are populated
+	for _, run := range response.ScenarioRuns {
+		if run.ScenarioName == "" {
+			t.Errorf("Expected ScenarioName to be set for run %s", run.ScenarioRunName)
 		}
 	}
 }
 
-func TestListScenarioRuns_FilterByClusterName(t *testing.T) {
+func TestListScenarioRuns_FilterByScenarioName(t *testing.T) {
 	scheme := runtime.NewScheme()
 	krknv1alpha1.AddToScheme(scheme)
 	corev1.AddToScheme(scheme)
 
-	pod1 := &corev1.Pod{
+	scenarioRun1 := &krknv1alpha1.KrknScenarioRun{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "krkn-job-1",
+			Name:      "run-1",
 			Namespace: "default",
-			Labels: map[string]string{
-				"app":                "krkn-scenario",
-				"krkn-job-id":        "job-1",
-				"krkn-cluster-name":  "cluster-1",
-				"krkn-scenario-name": "pod-delete",
+		},
+		Spec: krknv1alpha1.KrknScenarioRunSpec{
+			ScenarioName: "pod-delete",
+			TargetClusters: map[string][]string{
+				"krkn-operator": {"cluster-1"},
 			},
 		},
-		Status: corev1.PodStatus{
-			Phase: corev1.PodPending,
+		Status: krknv1alpha1.KrknScenarioRunStatus{
+			Phase:        "Running",
+			TotalTargets: 1,
 		},
 	}
 
-	pod2 := &corev1.Pod{
+	scenarioRun2 := &krknv1alpha1.KrknScenarioRun{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "krkn-job-2",
+			Name:      "run-2",
 			Namespace: "default",
-			Labels: map[string]string{
-				"app":                "krkn-scenario",
-				"krkn-job-id":        "job-2",
-				"krkn-cluster-name":  "cluster-2",
-				"krkn-scenario-name": "node-drain",
+		},
+		Spec: krknv1alpha1.KrknScenarioRunSpec{
+			ScenarioName: "node-drain",
+			TargetClusters: map[string][]string{
+				"krkn-operator": {"cluster-2"},
 			},
 		},
-		Status: corev1.PodStatus{
-			Phase: corev1.PodRunning,
+		Status: krknv1alpha1.KrknScenarioRunStatus{
+			Phase:        "Running",
+			TotalTargets: 1,
 		},
 	}
 
-	fakeClient := fakeclient.NewClientBuilder().WithScheme(scheme).WithObjects(pod1, pod2).Build()
+	fakeClient := fakeclient.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(scenarioRun1, scenarioRun2).
+		Build()
 	fakeClientset := fake.NewSimpleClientset()
 	handler := NewHandler(fakeClient, fakeClientset, "default", "localhost:50051")
 
-	req := httptest.NewRequest("GET", "/api/v1/scenarios/run?clusterName=cluster-1", nil)
+	req := httptest.NewRequest("GET", "/api/v1/scenarios/run?scenarioName=pod-delete", nil)
 	w := httptest.NewRecorder()
 	handler.ListScenarioRuns(w, req)
 
@@ -717,17 +736,17 @@ func TestListScenarioRuns_FilterByClusterName(t *testing.T) {
 		t.Errorf("Expected status code %d, got %d", http.StatusOK, w.Code)
 	}
 
-	var response JobsListResponse
+	var response ScenarioRunListResponse
 	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
 		t.Fatalf("Failed to unmarshal response: %v", err)
 	}
 
-	if len(response.Jobs) != 1 {
-		t.Errorf("Expected 1 job, got %d", len(response.Jobs))
+	if len(response.ScenarioRuns) != 1 {
+		t.Errorf("Expected 1 scenario run, got %d", len(response.ScenarioRuns))
 	}
 
-	if response.Jobs[0].ClusterName != "cluster-1" {
-		t.Errorf("Expected ClusterName='cluster-1', got '%s'", response.Jobs[0].ClusterName)
+	if response.ScenarioRuns[0].ScenarioName != "pod-delete" {
+		t.Errorf("Expected ScenarioName='pod-delete', got '%s'", response.ScenarioRuns[0].ScenarioName)
 	}
 }
 
