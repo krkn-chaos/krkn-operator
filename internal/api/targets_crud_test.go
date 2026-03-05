@@ -43,7 +43,10 @@ func setupTestHandler() *Handler {
 	_ = krknv1alpha1.AddToScheme(scheme)
 	_ = corev1.AddToScheme(scheme)
 
-	fakeClient := fakeclient.NewClientBuilder().WithScheme(scheme).Build()
+	fakeClient := fakeclient.NewClientBuilder().
+		WithScheme(scheme).
+		WithStatusSubresource(&krknv1alpha1.KrknOperatorTarget{}).
+		Build()
 	fakeClientset := fake.NewSimpleClientset()
 
 	return &Handler{
