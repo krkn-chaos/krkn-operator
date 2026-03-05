@@ -290,6 +290,8 @@ type ScenarioRunCreateResponse struct {
 	TargetClusters map[string][]string `json:"targetClusters"`
 	// TotalTargets is the total number of target clusters
 	TotalTargets int `json:"totalTargets"`
+	// OwnerUserID is the email address of the user who created this scenario run
+	OwnerUserID string `json:"ownerUserId,omitempty"`
 }
 
 // ScenarioRunStatusResponse represents the response for GET /scenarios/run/{scenarioRunName} (new CRD-based approach)
@@ -308,6 +310,8 @@ type ScenarioRunStatusResponse struct {
 	RunningJobs int `json:"runningJobs"`
 	// ClusterJobs contains the status of each cluster job
 	ClusterJobs []ClusterJobStatusResponse `json:"clusterJobs"`
+	// OwnerUserID is the email address of the user who created this scenario run
+	OwnerUserID string `json:"ownerUserId,omitempty"`
 }
 
 // ClusterJobStatusResponse represents the status of a job for a specific cluster
@@ -356,6 +360,8 @@ type ScenarioRunListItem struct {
 	RunningJobs int `json:"runningJobs"`
 	// CreatedAt is the creation timestamp
 	CreatedAt time.Time `json:"createdAt"`
+	// OwnerUserID is the email address of the user who created this scenario run
+	OwnerUserID string `json:"ownerUserId,omitempty"`
 }
 
 // ScenarioRunListResponse represents the response for GET /scenarios/run

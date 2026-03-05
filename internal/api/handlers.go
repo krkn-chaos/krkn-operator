@@ -1053,6 +1053,7 @@ func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
 		ScenarioRunName: scenarioRunName,
 		TargetClusters:  req.TargetClusters,
 		TotalTargets:    totalTargets,
+		OwnerUserID:     ownerUserID,
 	}
 
 	writeJSON(w, http.StatusCreated, response)
@@ -1126,6 +1127,7 @@ func (h *Handler) GetScenarioRunStatus(w http.ResponseWriter, r *http.Request) {
 		FailedJobs:      scenarioRun.Status.FailedJobs,
 		RunningJobs:     scenarioRun.Status.RunningJobs,
 		ClusterJobs:     clusterJobs,
+		OwnerUserID:     scenarioRun.Spec.OwnerUserID,
 	}
 
 	writeJSON(w, http.StatusOK, response)
@@ -1541,6 +1543,7 @@ func (h *Handler) ListScenarioRuns(w http.ResponseWriter, r *http.Request) {
 			FailedJobs:      sr.Status.FailedJobs,
 			RunningJobs:     sr.Status.RunningJobs,
 			CreatedAt:       sr.CreationTimestamp.Time,
+			OwnerUserID:     sr.Spec.OwnerUserID,
 		}
 
 		runs = append(runs, run)
