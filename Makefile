@@ -187,7 +187,7 @@ run: manifests generate fmt vet ## Run a controller from your host.
 .PHONY: docker-build
 docker-build: ## Build docker image with the manager.
 	$(CONTAINER_TOOL) build -t $(REGISTRY)/$(IMG_NAME):latest .
-ifdef GIT_TAG
+ifneq ($(strip $(GIT_TAG)),)
 	$(CONTAINER_TOOL) tag $(REGISTRY)/$(IMG_NAME):latest $(REGISTRY)/$(IMG_NAME):$(GIT_TAG)
 	@echo "✓ Built and tagged: latest and $(GIT_TAG)"
 else
@@ -197,7 +197,7 @@ endif
 .PHONY: docker-push
 docker-push: ## Push docker image with the manager.
 	$(CONTAINER_TOOL) push $(REGISTRY)/$(IMG_NAME):latest
-ifdef GIT_TAG
+ifneq ($(strip $(GIT_TAG)),)
 	$(CONTAINER_TOOL) push $(REGISTRY)/$(IMG_NAME):$(GIT_TAG)
 	@echo "✓ Pushed: latest and $(GIT_TAG)"
 else
@@ -207,7 +207,7 @@ endif
 .PHONY: docker-build-data-provider
 docker-build-data-provider: ## Build docker image for the data-provider.
 	$(CONTAINER_TOOL) build -t $(REGISTRY)/$(DATA_PROVIDER_IMG_NAME):latest -f krkn-operator-data-provider/Dockerfile krkn-operator-data-provider/
-ifdef GIT_TAG
+ifneq ($(strip $(GIT_TAG)),)
 	$(CONTAINER_TOOL) tag $(REGISTRY)/$(DATA_PROVIDER_IMG_NAME):latest $(REGISTRY)/$(DATA_PROVIDER_IMG_NAME):$(GIT_TAG)
 	@echo "✓ Built data-provider and tagged: latest and $(GIT_TAG)"
 else
@@ -217,7 +217,7 @@ endif
 .PHONY: docker-push-data-provider
 docker-push-data-provider: ## Push docker image for the data-provider.
 	$(CONTAINER_TOOL) push $(REGISTRY)/$(DATA_PROVIDER_IMG_NAME):latest
-ifdef GIT_TAG
+ifneq ($(strip $(GIT_TAG)),)
 	$(CONTAINER_TOOL) push $(REGISTRY)/$(DATA_PROVIDER_IMG_NAME):$(GIT_TAG)
 	@echo "✓ Pushed data-provider: latest and $(GIT_TAG)"
 else
