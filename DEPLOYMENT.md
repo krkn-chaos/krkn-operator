@@ -23,7 +23,6 @@ The krkn-operator consists of two components running in a single pod:
 ```bash
 COMPONENT=krkn-operator                    # Component name (default)
 REGISTRY=quay.io/krkn-chaos               # Container registry (default)
-IMG_TAG=latest                             # Image tag (default: latest)
 NAMESPACE=krkn-operator-system            # Deployment namespace (default)
 CONTAINER_TOOL=docker                      # docker or podman (default: docker)
 ```
@@ -34,9 +33,9 @@ CONTAINER_TOOL=docker                      # docker or podman (default: docker)
 IMG_NAME=$(COMPONENT)                                    # krkn-operator
 IMG_DATA_PROVIDER_NAME=$(COMPONENT)-data-provider      # krkn-operator-data-provider
 
-# Full image URLs
-IMG=$(REGISTRY)/$(IMG_NAME):$(IMG_TAG)
-IMG_DATA_PROVIDER=$(REGISTRY)/$(IMG_DATA_PROVIDER_NAME):$(IMG_TAG)
+# Full image URLs (default to :latest tag)
+IMG=$(REGISTRY)/$(IMG_NAME):latest
+IMG_DATA_PROVIDER=$(REGISTRY)/$(IMG_DATA_PROVIDER_NAME):latest
 ```
 
 ### Git Tag Support
@@ -89,16 +88,13 @@ make podman-build-all
 make docker-build-all CONTAINER_TOOL=podman
 ```
 
-### Custom Registry/Tags
+### Custom Registry/Images
 
 ```bash
-# Custom registry
+# Custom registry (uses default :latest and git tag logic)
 make docker-build-all REGISTRY=myregistry.io/myorg
 
-# Custom tag
-make docker-build-all IMG_TAG=v2.0.0
-
-# Custom complete image URLs
+# Custom complete image URLs (skips git tag logic)
 make docker-build IMG=custom.io/operator:beta
 make docker-build-data-provider IMG_DATA_PROVIDER=custom.io/provider:beta
 ```
@@ -206,8 +202,8 @@ make docker-push-all
 # Deploy using :latest
 make deploy
 
-# Or deploy specific version
-make deploy IMG_TAG=v1.0.0
+# Or deploy specific version (use full image URL)
+make deploy IMG=$(REGISTRY)/$(IMG_NAME):v1.0.0
 ```
 
 ### Custom Registry

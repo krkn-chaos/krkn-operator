@@ -59,16 +59,13 @@ REGISTRY ?= quay.io/krkn-chaos
 # Git tag detection for versioning
 GIT_TAG ?= $(shell git describe --tags --exact-match 2>/dev/null)
 
-# Image tag - defaults to latest, can be overridden
-IMG_TAG ?= latest
-
 # Image names
 IMG_NAME ?= $(COMPONENT)
 IMG_DATA_PROVIDER_NAME ?= $(COMPONENT)-data-provider
 
 # Full image URLs (can be overridden with IMG= or IMG_DATA_PROVIDER=)
-IMG ?= $(REGISTRY)/$(IMG_NAME):$(IMG_TAG)
-IMG_DATA_PROVIDER ?= $(REGISTRY)/$(IMG_DATA_PROVIDER_NAME):$(IMG_TAG)
+IMG ?= $(REGISTRY)/$(IMG_NAME):latest
+IMG_DATA_PROVIDER ?= $(REGISTRY)/$(IMG_DATA_PROVIDER_NAME):latest
 
 # Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
 ifeq (,$(shell go env GOBIN))
@@ -186,12 +183,24 @@ run: manifests generate fmt vet ## Run a controller from your host.
 # More info: https://docs.docker.com/develop/develop-images/build_enhancements/
 .PHONY: docker-build
 docker-build: ## Build docker image with the manager.
-# Check if IMG was overridden (different from default)
-ifneq ($(IMG),$(REGISTRY)/$(IMG_NAME):$(IMG_TAG))
+# Override mode: use custom image only (skip git tag logic)
+ifeq ($(origin IMG), command line)
+ifneq ($(strip $(IMG)),)
 	@echo "Building with overridden image: $(IMG)"
 	$(CONTAINER_TOOL) build -t $(IMG) .
 	@echo "✓ Built and tagged: $(IMG)"
 else
+# Default mode: build :latest and optionally :git-tag
+	$(CONTAINER_TOOL) build -t $(REGISTRY)/$(IMG_NAME):latest .
+ifneq ($(strip $(GIT_TAG)),)
+	$(CONTAINER_TOOL) tag $(REGISTRY)/$(IMG_NAME):latest $(REGISTRY)/$(IMG_NAME):$(GIT_TAG)
+	@echo "✓ Built and tagged: latest and $(GIT_TAG)"
+else
+	@echo "✓ Built and tagged: latest (no git tag found)"
+endif
+endif
+else
+# Default mode: build :latest and optionally :git-tag
 	$(CONTAINER_TOOL) build -t $(REGISTRY)/$(IMG_NAME):latest .
 ifneq ($(strip $(GIT_TAG)),)
 	$(CONTAINER_TOOL) tag $(REGISTRY)/$(IMG_NAME):latest $(REGISTRY)/$(IMG_NAME):$(GIT_TAG)
@@ -203,12 +212,24 @@ endif
 
 .PHONY: docker-push
 docker-push: ## Push docker image with the manager.
-# Check if IMG was overridden (different from default)
-ifneq ($(IMG),$(REGISTRY)/$(IMG_NAME):$(IMG_TAG))
+# Override mode: push custom image only (skip git tag logic)
+ifeq ($(origin IMG), command line)
+ifneq ($(strip $(IMG)),)
 	@echo "Pushing overridden image: $(IMG)"
 	$(CONTAINER_TOOL) push $(IMG)
 	@echo "✓ Pushed: $(IMG)"
 else
+# Default mode: push :latest and optionally :git-tag
+	$(CONTAINER_TOOL) push $(REGISTRY)/$(IMG_NAME):latest
+ifneq ($(strip $(GIT_TAG)),)
+	$(CONTAINER_TOOL) push $(REGISTRY)/$(IMG_NAME):$(GIT_TAG)
+	@echo "✓ Pushed: latest and $(GIT_TAG)"
+else
+	@echo "✓ Pushed: latest (no git tag found)"
+endif
+endif
+else
+# Default mode: push :latest and optionally :git-tag
 	$(CONTAINER_TOOL) push $(REGISTRY)/$(IMG_NAME):latest
 ifneq ($(strip $(GIT_TAG)),)
 	$(CONTAINER_TOOL) push $(REGISTRY)/$(IMG_NAME):$(GIT_TAG)
@@ -220,12 +241,25 @@ endif
 
 .PHONY: docker-build-data-provider
 docker-build-data-provider: ## Build docker image for the data-provider.
-# Check if IMG_DATA_PROVIDER was overridden (different from default)
-ifneq ($(IMG_DATA_PROVIDER),$(REGISTRY)/$(IMG_DATA_PROVIDER_NAME):$(IMG_TAG))
+# Override mode: use custom image only (skip git tag logic)
+ifeq ($(origin IMG_DATA_PROVIDER), command line)
+ifneq ($(strip $(IMG_DATA_PROVIDER)),)
 	@echo "Building data-provider with overridden image: $(IMG_DATA_PROVIDER)"
 	$(CONTAINER_TOOL) build -t $(IMG_DATA_PROVIDER) -f krkn-operator-data-provider/Dockerfile krkn-operator-data-provider/
 	@echo "✓ Built and tagged: $(IMG_DATA_PROVIDER)"
 else
+# Default mode: build :latest and optionally :git-tag
+	@echo "Building data-provider with base name: $(REGISTRY)/$(IMG_DATA_PROVIDER_NAME)"
+	$(CONTAINER_TOOL) build -t $(REGISTRY)/$(IMG_DATA_PROVIDER_NAME):latest -f krkn-operator-data-provider/Dockerfile krkn-operator-data-provider/
+ifneq ($(strip $(GIT_TAG)),)
+	$(CONTAINER_TOOL) tag $(REGISTRY)/$(IMG_DATA_PROVIDER_NAME):latest $(REGISTRY)/$(IMG_DATA_PROVIDER_NAME):$(GIT_TAG)
+	@echo "✓ Built data-provider and tagged: latest and $(GIT_TAG)"
+else
+	@echo "✓ Built data-provider and tagged: latest (no git tag found)"
+endif
+endif
+else
+# Default mode: build :latest and optionally :git-tag
 	@echo "Building data-provider with base name: $(REGISTRY)/$(IMG_DATA_PROVIDER_NAME)"
 	$(CONTAINER_TOOL) build -t $(REGISTRY)/$(IMG_DATA_PROVIDER_NAME):latest -f krkn-operator-data-provider/Dockerfile krkn-operator-data-provider/
 ifneq ($(strip $(GIT_TAG)),)
@@ -238,12 +272,24 @@ endif
 
 .PHONY: docker-push-data-provider
 docker-push-data-provider: ## Push docker image for the data-provider.
-# Check if IMG_DATA_PROVIDER was overridden (different from default)
-ifneq ($(IMG_DATA_PROVIDER),$(REGISTRY)/$(IMG_DATA_PROVIDER_NAME):$(IMG_TAG))
+# Override mode: push custom image only (skip git tag logic)
+ifeq ($(origin IMG_DATA_PROVIDER), command line)
+ifneq ($(strip $(IMG_DATA_PROVIDER)),)
 	@echo "Pushing overridden data-provider image: $(IMG_DATA_PROVIDER)"
 	$(CONTAINER_TOOL) push $(IMG_DATA_PROVIDER)
 	@echo "✓ Pushed: $(IMG_DATA_PROVIDER)"
 else
+# Default mode: push :latest and optionally :git-tag
+	$(CONTAINER_TOOL) push $(REGISTRY)/$(IMG_DATA_PROVIDER_NAME):latest
+ifneq ($(strip $(GIT_TAG)),)
+	$(CONTAINER_TOOL) push $(REGISTRY)/$(IMG_DATA_PROVIDER_NAME):$(GIT_TAG)
+	@echo "✓ Pushed data-provider: latest and $(GIT_TAG)"
+else
+	@echo "✓ Pushed data-provider: latest (no git tag found)"
+endif
+endif
+else
+# Default mode: push :latest and optionally :git-tag
 	$(CONTAINER_TOOL) push $(REGISTRY)/$(IMG_DATA_PROVIDER_NAME):latest
 ifneq ($(strip $(GIT_TAG)),)
 	$(CONTAINER_TOOL) push $(REGISTRY)/$(IMG_DATA_PROVIDER_NAME):$(GIT_TAG)
