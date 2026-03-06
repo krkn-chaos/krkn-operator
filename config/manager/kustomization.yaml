@@ -5,4 +5,4 @@ kind: Kustomization
 images:
 - name: controller
   newName: quay.io/krkn-chaos/krkn-operator
-  newTag: operator
+  newTag: latest
