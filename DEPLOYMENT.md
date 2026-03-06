@@ -1,284 +1,382 @@
 # Deployment Guide
 
-This guide explains how to build and deploy the krkn-operator with its data-provider sidecar to a Kubernetes cluster.
+This guide explains how to build, push, and deploy the krkn-operator using the standardized Makefile.
 
 ## Architecture
 
-The krkn-operator consists of two main components:
+The krkn-operator consists of two components running in a single pod:
 
-1. **Operator (Go)**: The main controller that manages KrknTargetRequest CRDs and exposes a REST API
-2. **Data Provider (Python)**: A gRPC service that uses krkn-lib to interact with Kubernetes clusters
-
-These components run as a multi-container pod using the sidecar pattern, communicating via gRPC on localhost:50051.
+1. **Operator (Go)**: Controller managing CRDs and REST API (port 8080)
+2. **Data Provider (Python)**: gRPC service using krkn-lib (port 50051)
 
 ## Prerequisites
 
-- Docker or Podman for building container images
-- Access to a container registry (for pushing images)
-- kubectl configured to access your target Kubernetes cluster
+- Docker or Podman for building images
+- kubectl configured for your target cluster
+- Access to a container registry (for remote deployment)
 - make utility
+
+## Makefile Variables
+
+### Registry and Image Configuration
+
+```bash
+COMPONENT=krkn-operator                    # Component name (default)
+REGISTRY=quay.io/krkn-chaos               # Container registry (default)
+IMG_TAG=latest                             # Image tag (default: latest)
+NAMESPACE=krkn-operator-system            # Deployment namespace (default)
+CONTAINER_TOOL=docker                      # docker or podman (default: docker)
+```
+
+### Image Names (Auto-Generated)
+
+```bash
+IMG_NAME=$(COMPONENT)                                    # krkn-operator
+IMG_DATA_PROVIDER_NAME=$(COMPONENT)-data-provider      # krkn-operator-data-provider
+
+# Full image URLs
+IMG=$(REGISTRY)/$(IMG_NAME):$(IMG_TAG)
+IMG_DATA_PROVIDER=$(REGISTRY)/$(IMG_DATA_PROVIDER_NAME):$(IMG_TAG)
+```
+
+### Git Tag Support
+
+The Makefile automatically detects git tags for versioning:
+
+```bash
+# Without git tag
+make docker-build
+# → quay.io/krkn-chaos/krkn-operator:latest
+
+# With git tag v1.0.0
+git tag v1.0.0
+make docker-build
+# → quay.io/krkn-chaos/krkn-operator:latest
+# → quay.io/krkn-chaos/krkn-operator:v1.0.0
+```
 
 ## Building Images
 
 ### Build Both Images
 
 ```bash
-# Build operator and data-provider images
+# Default: builds with :latest tag
 make docker-build-all
 
-# With custom image tags
-make docker-build-all IMG=myregistry/krkn-operator:v1.0.0 DATA_PROVIDER_IMG=myregistry/data-provider:v1.0.0
+# With git tag: builds :latest and :<git-tag>
+git tag v1.0.0
+make docker-build-all
+# Builds: :latest and :v1.0.0 for both images
 ```
 
 ### Build Individual Images
 
 ```bash
-# Build operator image only
+# Operator only
 make docker-build
 
-# Build data-provider image only
+# Data provider only
 make docker-build-data-provider
 ```
 
-### Using Podman Instead of Docker
-
-If you prefer to use Podman instead of Docker, you can use the dedicated podman targets:
+### Using Podman
 
 ```bash
-# Build both images with podman
-make podman-build-all IMG=myregistry/krkn-operator:v1.0.0 DATA_PROVIDER_IMG=myregistry/data-provider:v1.0.0
+# Option 1: Use podman-specific targets
+make podman-build-all
 
-# Build individual images with podman
-make podman-build IMG=myregistry/krkn-operator:v1.0.0
-make podman-build-data-provider DATA_PROVIDER_IMG=myregistry/data-provider:v1.0.0
-
-# Push images with podman
-make podman-push-all IMG=myregistry/krkn-operator:v1.0.0 DATA_PROVIDER_IMG=myregistry/data-provider:v1.0.0
+# Option 2: Override CONTAINER_TOOL
+make docker-build-all CONTAINER_TOOL=podman
 ```
 
-Alternatively, you can set the `CONTAINER_TOOL` variable:
+### Custom Registry/Tags
 
 ```bash
-# Use podman for all container operations
-make docker-build-all CONTAINER_TOOL=podman IMG=myregistry/krkn-operator:v1.0.0 DATA_PROVIDER_IMG=myregistry/data-provider:v1.0.0
+# Custom registry
+make docker-build-all REGISTRY=myregistry.io/myorg
+
+# Custom tag
+make docker-build-all IMG_TAG=v2.0.0
+
+# Custom complete image URLs
+make docker-build IMG=custom.io/operator:beta
+make docker-build-data-provider IMG_DATA_PROVIDER=custom.io/provider:beta
 ```
 
-## Pushing Images to Registry
+## Pushing Images
 
-Before deploying to a cluster, push the images to a container registry:
+### Push Both Images
 
 ```bash
-# Push both images
-make docker-push-all IMG=myregistry/krkn-operator:v1.0.0 DATA_PROVIDER_IMG=myregistry/data-provider:v1.0.0
+# Push :latest (and :tag if git tag exists)
+make docker-push-all
 
-# Or push individually
-make docker-push IMG=myregistry/krkn-operator:v1.0.0
-make docker-push-data-provider DATA_PROVIDER_IMG=myregistry/data-provider:v1.0.0
+# With git tag
+git tag v1.0.0
+make docker-push-all
+# Pushes: :latest and :v1.0.0 for both images
+```
+
+### Push Individual Images
+
+```bash
+make docker-push
+make docker-push-data-provider
+```
+
+### Custom Push
+
+```bash
+# Custom registry
+make docker-push-all REGISTRY=myregistry.io/myorg
+
+# Override specific images
+make docker-push IMG=custom.io/op:v1
+make docker-push-data-provider IMG_DATA_PROVIDER=custom.io/dp:v1
 ```
 
 ## Deployment
 
-### Option 1: Direct Deployment with kubectl
+### Quick Deploy
 
 ```bash
-# Install CRDs
+# Deploy to default namespace (krkn-operator-system)
+make deploy
+
+# Deploy creates namespace automatically if missing
+```
+
+### Custom Namespace
+
+```bash
+# Deploy to custom namespace
+make deploy NAMESPACE=my-custom-namespace
+```
+
+### Custom Images
+
+```bash
+# Deploy with specific image versions
+make deploy IMG=myregistry.io/operator:v1.0.0 IMG_DATA_PROVIDER=myregistry.io/provider:v1.0.0
+```
+
+### OpenShift Deployment
+
+For OpenShift, use the dedicated target that configures SCC:
+
+```bash
+make deploy-openshift NAMESPACE=krkn-operator-system
+```
+
+### Install CRDs Only
+
+```bash
+# Install only CRDs (without operator deployment)
 make install
-
-# Deploy the operator with both containers
-make deploy IMG=myregistry/krkn-operator:v1.0.0 DATA_PROVIDER_IMG=myregistry/data-provider:v1.0.0
 ```
 
-### Option 2: Generate Installation YAML
+## Complete Workflow Examples
 
-Generate a consolidated YAML file containing all resources:
+### Development (Local)
 
 ```bash
-make build-installer IMG=myregistry/krkn-operator:v1.0.0 DATA_PROVIDER_IMG=myregistry/data-provider:v1.0.0
+# Build locally
+make docker-build-all
+
+# For kind clusters: load images
+kind load docker-image quay.io/krkn-chaos/krkn-operator:latest
+kind load docker-image quay.io/krkn-chaos/krkn-operator-data-provider:latest
+
+# Deploy with local images
+make deploy
 ```
 
-This creates `dist/install.yaml` which you can apply directly:
+### Production (With Git Tag)
 
 ```bash
+# Tag release
+git tag v1.0.0
+
+# Build (creates :latest and :v1.0.0)
+make docker-build-all
+
+# Push both tags to registry
+make docker-push-all
+
+# Deploy using :latest
+make deploy
+
+# Or deploy specific version
+make deploy IMG_TAG=v1.0.0
+```
+
+### Custom Registry
+
+```bash
+# Build for custom registry
+make docker-build-all REGISTRY=harbor.company.com/chaos
+
+# Push to custom registry
+make docker-push-all REGISTRY=harbor.company.com/chaos
+
+# Deploy from custom registry
+make deploy REGISTRY=harbor.company.com/chaos
+```
+
+## Build Installer Bundle
+
+Generate a single YAML file with all resources:
+
+```bash
+make build-installer
+
+# Output: dist/install.yaml
 kubectl apply -f dist/install.yaml
 ```
 
-## Configuration
-
-### Environment Variables
-
-The operator supports the following environment variables:
-
-- `KRKN_NAMESPACE`: Namespace to watch for KrknTargetRequest resources (future: will support ConfigMap)
-
-### Image Configuration
-
-Images are configured via Makefile variables:
-
-- `IMG`: Operator container image (default: `controller:latest`)
-- `DATA_PROVIDER_IMG`: Data provider container image (default: `data-provider:latest`)
-- `CONTAINER_TOOL`: Container tool to use (default: `docker`, can use `podman`)
-
 ## Verification
-
-After deployment, verify the operator is running:
 
 ```bash
 # Check operator pod
 kubectl get pods -n krkn-operator-system
 
-# Check both containers in the pod
+# Check both containers
 kubectl get pods -n krkn-operator-system -o jsonpath='{.items[0].spec.containers[*].name}'
 
-# Check logs for operator
+# Check operator logs
 kubectl logs -n krkn-operator-system deployment/krkn-operator-controller-manager -c manager
 
-# Check logs for data-provider
+# Check data-provider logs
 kubectl logs -n krkn-operator-system deployment/krkn-operator-controller-manager -c data-provider
+
+# Test REST API (port-forward)
+kubectl port-forward -n krkn-operator-system svc/krkn-operator-controller-manager-api-service 8080:8080
+curl http://localhost:8080/api/v1/health
 ```
-
-## REST API Access
-
-The operator exposes a REST API on port 8080 through a Kubernetes Service.
-
-### Access from within the cluster
-
-From any pod in the same namespace:
-
-```bash
-curl http://krkn-operator-controller-manager-api-service:8080/api/v1/targets
-```
-
-From a pod in a different namespace:
-
-```bash
-curl http://krkn-operator-controller-manager-api-service.krkn-operator-system.svc.cluster.local:8080/api/v1/targets
-```
-
-### Access from outside the cluster
-
-#### Option 1: Port Forward
-
-```bash
-# Port forward to the service
-kubectl port-forward -n krkn-operator-system service/krkn-operator-controller-manager-api-service 8080:8080
-
-# In another terminal, test the API
-curl http://localhost:8080/api/v1/targets
-
-# Get nodes for a specific cluster
-curl http://localhost:8080/api/v1/nodes/<secret-id>?cluster-name=<cluster-name>
-```
-
-#### Option 2: NodePort (for development/testing)
-
-Edit the service to use NodePort:
-
-```bash
-kubectl patch service -n krkn-operator-system krkn-operator-controller-manager-api-service -p '{"spec":{"type":"NodePort"}}'
-
-# Get the NodePort
-kubectl get service -n krkn-operator-system krkn-operator-controller-manager-api-service
-```
-
-#### Option 3: LoadBalancer (for production with cloud provider)
-
-```bash
-kubectl patch service -n krkn-operator-system krkn-operator-controller-manager-api-service -p '{"spec":{"type":"LoadBalancer"}}'
-
-# Get the external IP
-kubectl get service -n krkn-operator-system krkn-operator-controller-manager-api-service
-```
-
-#### Option 4: Ingress (recommended for production)
-
-Create an Ingress resource to expose the API with hostname-based routing and TLS.
 
 ## Undeployment
 
-To remove the operator from your cluster:
-
 ```bash
-# Remove the operator deployment
+# Remove operator deployment
 make undeploy
 
-# Remove the CRDs (warning: this will delete all custom resources)
+# Undeploy from custom namespace
+make undeploy NAMESPACE=my-custom-namespace
+
+# Remove CRDs (WARNING: deletes all custom resources)
 make uninstall
 ```
 
+## Available Make Targets
+
+### Build Targets
+- `docker-build` - Build operator image
+- `docker-build-data-provider` - Build data-provider image
+- `docker-build-all` - Build both images
+- `podman-build` - Build operator with podman
+- `podman-build-data-provider` - Build data-provider with podman
+- `podman-build-all` - Build both with podman
+
+### Push Targets
+- `docker-push` - Push operator image
+- `docker-push-data-provider` - Push data-provider image
+- `docker-push-all` - Push both images
+- `podman-push` - Push operator with podman
+- `podman-push-data-provider` - Push data-provider with podman
+- `podman-push-all` - Push both with podman
+
+### Deployment Targets
+- `install` - Install CRDs only
+- `uninstall` - Uninstall CRDs
+- `deploy` - Deploy operator to cluster
+- `deploy-openshift` - Deploy with OpenShift SCC configuration
+- `undeploy` - Remove operator from cluster
+- `build-installer` - Generate dist/install.yaml bundle
+
+### Other Targets
+- `manifests` - Generate CRD manifests
+- `test` - Run unit tests
+- `lint` - Run golangci-lint
+- `help` - Show all available targets
+
 ## Troubleshooting
+
+### Image Pull Errors
+
+Ensure images are pushed and accessible:
+```bash
+# Verify images exist in registry
+docker pull quay.io/krkn-chaos/krkn-operator:latest
+docker pull quay.io/krkn-chaos/krkn-operator-data-provider:latest
+```
 
 ### Pod Not Starting
 
-Check pod events and logs:
-
 ```bash
+# Check pod events
 kubectl describe pod -n krkn-operator-system <pod-name>
+
+# Check both container logs
 kubectl logs -n krkn-operator-system <pod-name> -c manager
 kubectl logs -n krkn-operator-system <pod-name> -c data-provider
 ```
 
 ### gRPC Connection Issues
 
-If the operator cannot connect to the data-provider:
-
-1. Check that both containers are running in the same pod
-2. Verify the data-provider is listening on port 50051:
-   ```bash
-   kubectl exec -n krkn-operator-system <pod-name> -c data-provider -- netstat -ln | grep 50051
-   ```
-3. Check data-provider logs for startup errors
-
-### Image Pull Errors
-
-Ensure:
-- Images are pushed to the registry
-- The cluster has credentials to pull from your registry
-- Image names and tags are correct in the deployment
-
-## Development Workflow
-
-For local development:
-
-1. Build images locally:
-   ```bash
-   make docker-build-all
-   ```
-
-2. For kind clusters, load images directly:
-   ```bash
-   kind load docker-image controller:latest --name <cluster-name>
-   kind load docker-image data-provider:latest --name <cluster-name>
-   ```
-
-3. Deploy with local images:
-   ```bash
-   make deploy
-   ```
-
-## Multi-Architecture Builds
-
-To build for multiple architectures:
-
 ```bash
-make docker-buildx IMG=myregistry/krkn-operator:v1.0.0
+# Verify data-provider is listening on port 50051
+kubectl exec -n krkn-operator-system <pod-name> -c data-provider -- netstat -ln | grep 50051
 ```
 
-This builds and pushes images for: linux/arm64, linux/amd64, linux/s390x, linux/ppc64le
+### Namespace Issues
 
-## Component Details
+If namespace doesn't exist, `make deploy` creates it automatically. To manually create:
 
-### Operator Container
+```bash
+kubectl create namespace krkn-operator-system
+```
 
-- **Port 8080**: REST API endpoint
-- **Port 8083**: Health probe endpoint
-- **Resources**:
-  - Requests: 10m CPU, 64Mi memory
-  - Limits: 500m CPU, 128Mi memory
+## Multi-Architecture Support
 
-### Data Provider Container
+Build for multiple platforms:
 
-- **Port 50051**: gRPC endpoint
-- **Resources**:
-  - Requests: 50m CPU, 128Mi memory
-  - Limits: 200m CPU, 256Mi memory
-- **Health Checks**: TCP socket probes on gRPC port
+```bash
+make docker-buildx
+# Builds for: linux/arm64, linux/amd64, linux/s390x, linux/ppc64le
+```
+
+## Environment Variables
+
+Override Makefile defaults:
+
+```bash
+export REGISTRY=harbor.company.com/chaos
+export NAMESPACE=production-chaos
+export CONTAINER_TOOL=podman
+
+make docker-build-all
+make docker-push-all
+make deploy
+```
+
+## Git Tag Workflow
+
+```bash
+# Check current tags
+git tag
+
+# Create new tag
+git tag v1.0.0
+
+# Build (creates both :latest and :v1.0.0)
+make docker-build-all
+
+# Verify tags
+docker images | grep krkn-operator
+
+# Push both tags
+make docker-push-all
+
+# Delete tag if needed
+git tag -d v1.0.0
+```
