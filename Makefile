@@ -186,6 +186,12 @@ run: manifests generate fmt vet ## Run a controller from your host.
 # More info: https://docs.docker.com/develop/develop-images/build_enhancements/
 .PHONY: docker-build
 docker-build: ## Build docker image with the manager.
+# Check if IMG was overridden (different from default)
+ifneq ($(IMG),$(REGISTRY)/$(IMG_NAME):$(IMG_TAG))
+	@echo "Building with overridden image: $(IMG)"
+	$(CONTAINER_TOOL) build -t $(IMG) .
+	@echo "✓ Built and tagged: $(IMG)"
+else
 	$(CONTAINER_TOOL) build -t $(REGISTRY)/$(IMG_NAME):latest .
 ifneq ($(strip $(GIT_TAG)),)
 	$(CONTAINER_TOOL) tag $(REGISTRY)/$(IMG_NAME):latest $(REGISTRY)/$(IMG_NAME):$(GIT_TAG)
@@ -193,9 +199,16 @@ ifneq ($(strip $(GIT_TAG)),)
 else
 	@echo "✓ Built and tagged: latest (no git tag found)"
 endif
+endif
 
 .PHONY: docker-push
 docker-push: ## Push docker image with the manager.
+# Check if IMG was overridden (different from default)
+ifneq ($(IMG),$(REGISTRY)/$(IMG_NAME):$(IMG_TAG))
+	@echo "Pushing overridden image: $(IMG)"
+	$(CONTAINER_TOOL) push $(IMG)
+	@echo "✓ Pushed: $(IMG)"
+else
 	$(CONTAINER_TOOL) push $(REGISTRY)/$(IMG_NAME):latest
 ifneq ($(strip $(GIT_TAG)),)
 	$(CONTAINER_TOOL) push $(REGISTRY)/$(IMG_NAME):$(GIT_TAG)
@@ -203,9 +216,16 @@ ifneq ($(strip $(GIT_TAG)),)
 else
 	@echo "✓ Pushed: latest (no git tag found)"
 endif
+endif
 
 .PHONY: docker-build-data-provider
 docker-build-data-provider: ## Build docker image for the data-provider.
+# Check if IMG_DATA_PROVIDER was overridden (different from default)
+ifneq ($(IMG_DATA_PROVIDER),$(REGISTRY)/$(IMG_DATA_PROVIDER_NAME):$(IMG_TAG))
+	@echo "Building data-provider with overridden image: $(IMG_DATA_PROVIDER)"
+	$(CONTAINER_TOOL) build -t $(IMG_DATA_PROVIDER) -f krkn-operator-data-provider/Dockerfile krkn-operator-data-provider/
+	@echo "✓ Built and tagged: $(IMG_DATA_PROVIDER)"
+else
 	@echo "Building data-provider with base name: $(REGISTRY)/$(IMG_DATA_PROVIDER_NAME)"
 	$(CONTAINER_TOOL) build -t $(REGISTRY)/$(IMG_DATA_PROVIDER_NAME):latest -f krkn-operator-data-provider/Dockerfile krkn-operator-data-provider/
 ifneq ($(strip $(GIT_TAG)),)
@@ -214,14 +234,16 @@ ifneq ($(strip $(GIT_TAG)),)
 else
 	@echo "✓ Built data-provider and tagged: latest (no git tag found)"
 endif
-# If IMG_DATA_PROVIDER was overridden to a different value, also tag with that
-ifneq ($(IMG_DATA_PROVIDER),$(REGISTRY)/$(IMG_DATA_PROVIDER_NAME):$(IMG_TAG))
-	$(CONTAINER_TOOL) tag $(REGISTRY)/$(IMG_DATA_PROVIDER_NAME):latest $(IMG_DATA_PROVIDER)
-	@echo "✓ Also tagged as: $(IMG_DATA_PROVIDER)"
 endif
 
 .PHONY: docker-push-data-provider
 docker-push-data-provider: ## Push docker image for the data-provider.
+# Check if IMG_DATA_PROVIDER was overridden (different from default)
+ifneq ($(IMG_DATA_PROVIDER),$(REGISTRY)/$(IMG_DATA_PROVIDER_NAME):$(IMG_TAG))
+	@echo "Pushing overridden data-provider image: $(IMG_DATA_PROVIDER)"
+	$(CONTAINER_TOOL) push $(IMG_DATA_PROVIDER)
+	@echo "✓ Pushed: $(IMG_DATA_PROVIDER)"
+else
 	$(CONTAINER_TOOL) push $(REGISTRY)/$(IMG_DATA_PROVIDER_NAME):latest
 ifneq ($(strip $(GIT_TAG)),)
 	$(CONTAINER_TOOL) push $(REGISTRY)/$(IMG_DATA_PROVIDER_NAME):$(GIT_TAG)
@@ -229,10 +251,6 @@ ifneq ($(strip $(GIT_TAG)),)
 else
 	@echo "✓ Pushed data-provider: latest (no git tag found)"
 endif
-# If IMG_DATA_PROVIDER was overridden to a different value, also push that
-ifneq ($(IMG_DATA_PROVIDER),$(REGISTRY)/$(IMG_DATA_PROVIDER_NAME):$(IMG_TAG))
-	$(CONTAINER_TOOL) push $(IMG_DATA_PROVIDER)
-	@echo "✓ Also pushed: $(IMG_DATA_PROVIDER)"
 endif
 
 .PHONY: docker-build-all
