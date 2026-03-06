@@ -206,12 +206,18 @@ endif
 
 .PHONY: docker-build-data-provider
 docker-build-data-provider: ## Build docker image for the data-provider.
+	@echo "Building data-provider with base name: $(REGISTRY)/$(DATA_PROVIDER_IMG_NAME)"
 	$(CONTAINER_TOOL) build -t $(REGISTRY)/$(DATA_PROVIDER_IMG_NAME):latest -f krkn-operator-data-provider/Dockerfile krkn-operator-data-provider/
 ifneq ($(strip $(GIT_TAG)),)
 	$(CONTAINER_TOOL) tag $(REGISTRY)/$(DATA_PROVIDER_IMG_NAME):latest $(REGISTRY)/$(DATA_PROVIDER_IMG_NAME):$(GIT_TAG)
 	@echo "✓ Built data-provider and tagged: latest and $(GIT_TAG)"
 else
 	@echo "✓ Built data-provider and tagged: latest (no git tag found)"
+endif
+# If DATA_PROVIDER_IMG was overridden to a different value, also tag with that
+ifneq ($(DATA_PROVIDER_IMG),$(REGISTRY)/$(DATA_PROVIDER_IMG_NAME):$(IMG_TAG))
+	$(CONTAINER_TOOL) tag $(REGISTRY)/$(DATA_PROVIDER_IMG_NAME):latest $(DATA_PROVIDER_IMG)
+	@echo "✓ Also tagged as: $(DATA_PROVIDER_IMG)"
 endif
 
 .PHONY: docker-push-data-provider
@@ -222,6 +228,11 @@ ifneq ($(strip $(GIT_TAG)),)
 	@echo "✓ Pushed data-provider: latest and $(GIT_TAG)"
 else
 	@echo "✓ Pushed data-provider: latest (no git tag found)"
+endif
+# If DATA_PROVIDER_IMG was overridden to a different value, also push that
+ifneq ($(DATA_PROVIDER_IMG),$(REGISTRY)/$(DATA_PROVIDER_IMG_NAME):$(IMG_TAG))
+	$(CONTAINER_TOOL) push $(DATA_PROVIDER_IMG)
+	@echo "✓ Also pushed: $(DATA_PROVIDER_IMG)"
 endif
 
 .PHONY: docker-build-all
