@@ -64,11 +64,11 @@ IMG_TAG ?= latest
 
 # Image names
 IMG_NAME ?= $(COMPONENT)
-DATA_PROVIDER_IMG_NAME ?= $(COMPONENT)-data-provider
+IMG_DATA_PROVIDER_NAME ?= $(COMPONENT)-data-provider
 
-# Full image URLs (can be overridden with IMG= or DATA_PROVIDER_IMG=)
+# Full image URLs (can be overridden with IMG= or IMG_DATA_PROVIDER=)
 IMG ?= $(REGISTRY)/$(IMG_NAME):$(IMG_TAG)
-DATA_PROVIDER_IMG ?= $(REGISTRY)/$(DATA_PROVIDER_IMG_NAME):$(IMG_TAG)
+IMG_DATA_PROVIDER ?= $(REGISTRY)/$(IMG_DATA_PROVIDER_NAME):$(IMG_TAG)
 
 # Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
 ifeq (,$(shell go env GOBIN))
@@ -206,33 +206,33 @@ endif
 
 .PHONY: docker-build-data-provider
 docker-build-data-provider: ## Build docker image for the data-provider.
-	@echo "Building data-provider with base name: $(REGISTRY)/$(DATA_PROVIDER_IMG_NAME)"
-	$(CONTAINER_TOOL) build -t $(REGISTRY)/$(DATA_PROVIDER_IMG_NAME):latest -f krkn-operator-data-provider/Dockerfile krkn-operator-data-provider/
+	@echo "Building data-provider with base name: $(REGISTRY)/$(IMG_DATA_PROVIDER_NAME)"
+	$(CONTAINER_TOOL) build -t $(REGISTRY)/$(IMG_DATA_PROVIDER_NAME):latest -f krkn-operator-data-provider/Dockerfile krkn-operator-data-provider/
 ifneq ($(strip $(GIT_TAG)),)
-	$(CONTAINER_TOOL) tag $(REGISTRY)/$(DATA_PROVIDER_IMG_NAME):latest $(REGISTRY)/$(DATA_PROVIDER_IMG_NAME):$(GIT_TAG)
+	$(CONTAINER_TOOL) tag $(REGISTRY)/$(IMG_DATA_PROVIDER_NAME):latest $(REGISTRY)/$(IMG_DATA_PROVIDER_NAME):$(GIT_TAG)
 	@echo "✓ Built data-provider and tagged: latest and $(GIT_TAG)"
 else
 	@echo "✓ Built data-provider and tagged: latest (no git tag found)"
 endif
-# If DATA_PROVIDER_IMG was overridden to a different value, also tag with that
-ifneq ($(DATA_PROVIDER_IMG),$(REGISTRY)/$(DATA_PROVIDER_IMG_NAME):$(IMG_TAG))
-	$(CONTAINER_TOOL) tag $(REGISTRY)/$(DATA_PROVIDER_IMG_NAME):latest $(DATA_PROVIDER_IMG)
-	@echo "✓ Also tagged as: $(DATA_PROVIDER_IMG)"
+# If IMG_DATA_PROVIDER was overridden to a different value, also tag with that
+ifneq ($(IMG_DATA_PROVIDER),$(REGISTRY)/$(IMG_DATA_PROVIDER_NAME):$(IMG_TAG))
+	$(CONTAINER_TOOL) tag $(REGISTRY)/$(IMG_DATA_PROVIDER_NAME):latest $(IMG_DATA_PROVIDER)
+	@echo "✓ Also tagged as: $(IMG_DATA_PROVIDER)"
 endif
 
 .PHONY: docker-push-data-provider
 docker-push-data-provider: ## Push docker image for the data-provider.
-	$(CONTAINER_TOOL) push $(REGISTRY)/$(DATA_PROVIDER_IMG_NAME):latest
+	$(CONTAINER_TOOL) push $(REGISTRY)/$(IMG_DATA_PROVIDER_NAME):latest
 ifneq ($(strip $(GIT_TAG)),)
-	$(CONTAINER_TOOL) push $(REGISTRY)/$(DATA_PROVIDER_IMG_NAME):$(GIT_TAG)
+	$(CONTAINER_TOOL) push $(REGISTRY)/$(IMG_DATA_PROVIDER_NAME):$(GIT_TAG)
 	@echo "✓ Pushed data-provider: latest and $(GIT_TAG)"
 else
 	@echo "✓ Pushed data-provider: latest (no git tag found)"
 endif
-# If DATA_PROVIDER_IMG was overridden to a different value, also push that
-ifneq ($(DATA_PROVIDER_IMG),$(REGISTRY)/$(DATA_PROVIDER_IMG_NAME):$(IMG_TAG))
-	$(CONTAINER_TOOL) push $(DATA_PROVIDER_IMG)
-	@echo "✓ Also pushed: $(DATA_PROVIDER_IMG)"
+# If IMG_DATA_PROVIDER was overridden to a different value, also push that
+ifneq ($(IMG_DATA_PROVIDER),$(REGISTRY)/$(IMG_DATA_PROVIDER_NAME):$(IMG_TAG))
+	$(CONTAINER_TOOL) push $(IMG_DATA_PROVIDER)
+	@echo "✓ Also pushed: $(IMG_DATA_PROVIDER)"
 endif
 
 .PHONY: docker-build-all
@@ -286,7 +286,7 @@ docker-buildx: ## Build and push docker image for the manager for cross-platform
 build-installer: manifests generate kustomize ## Generate a consolidated YAML with CRDs and deployment.
 	mkdir -p dist
 	cd config/manager && $(KUSTOMIZE) edit set image controller=${IMG}
-	cd config/default && $(KUSTOMIZE) edit set image data-provider=${DATA_PROVIDER_IMG}
+	cd config/default && $(KUSTOMIZE) edit set image data-provider=${IMG_DATA_PROVIDER}
 	$(KUSTOMIZE) build config/default > dist/install.yaml
 
 ##@ Deployment
@@ -314,12 +314,12 @@ deploy: manifests kustomize ## Deploy controller to the K8s cluster specified in
 		 $(KUBECTL) create namespace $(NAMESPACE))
 	@echo "✓ Namespace ready"
 	cd config/manager && $(KUSTOMIZE) edit set image controller=${IMG}
-	cd config/default && $(KUSTOMIZE) edit set image data-provider=${DATA_PROVIDER_IMG}
+	cd config/default && $(KUSTOMIZE) edit set image data-provider=${IMG_DATA_PROVIDER}
 	cd config/default && $(KUSTOMIZE) edit set namespace $(NAMESPACE)
 	$(KUSTOMIZE) build config/default | $(KUBECTL) apply -f -
 	@echo "✓ Deployed to $(NAMESPACE) with images:"
 	@echo "  - Operator: $(IMG)"
-	@echo "  - Data Provider: $(DATA_PROVIDER_IMG)"
+	@echo "  - Data Provider: $(IMG_DATA_PROVIDER)"
 
 .PHONY: deploy-openshift
 deploy-openshift: deploy ## Deploy controller and configure OpenShift SCC for scenario runner.
