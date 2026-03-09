@@ -71,6 +71,14 @@ var _ = Describe("Manager", Ordered, func() {
 			fmt.Sprintf("IMG_DATA_PROVIDER=%s", dataProviderImage))
 		_, err = utils.Run(cmd)
 		Expect(err).NotTo(HaveOccurred(), "Failed to deploy the controller-manager")
+
+		By("patching deployment to use IfNotPresent for locally loaded images")
+		cmd = exec.Command("kubectl", "patch", "deployment", "krkn-operator-controller-manager",
+			"-n", namespace,
+			"--type=json",
+			"-p", `[{"op": "replace", "path": "/spec/template/spec/containers/0/imagePullPolicy", "value": "IfNotPresent"},{"op": "replace", "path": "/spec/template/spec/containers/1/imagePullPolicy", "value": "IfNotPresent"}]`)
+		_, err = utils.Run(cmd)
+		Expect(err).NotTo(HaveOccurred(), "Failed to patch imagePullPolicy")
 	})
 
 	// After all tests have been executed, clean up by undeploying the controller, uninstalling CRDs,

@@ -39,8 +39,9 @@ var (
 
 	// projectImage is the name of the image which will be build and loaded
 	// with the code source changes to be tested.
-	projectImage         = "localhost/krkn-operator:e2e-test"
-	dataProviderImage    = "localhost/krkn-operator-data-provider:e2e-test"
+	// Note: Don't use registry prefixes (like localhost/) as Kind interprets them as remote registries
+	projectImage         = "krkn-operator:e2e-test"
+	dataProviderImage    = "krkn-operator-data-provider:e2e-test"
 )
 
 // TestE2E runs the end-to-end (e2e) test suite for the project. These tests execute in an isolated,
