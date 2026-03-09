@@ -1953,11 +1953,8 @@ func (h *Handler) ScenariosRunRouter(w http.ResponseWriter, r *http.Request) {
 
 	// Nested endpoints
 	if strings.HasPrefix(path, "/api/v1/scenarios/run/") {
-		// Check for /jobs/{jobId}/logs pattern
-		if strings.Contains(path, "/jobs/") && strings.HasSuffix(path, "/logs") {
-			h.GetScenarioRunLogs(w, r)
-			return
-		}
+		// Note: WebSocket logs endpoint (/jobs/{jobId}/logs) is handled in server.go
+		// before reaching this router, so no need to check for it here
 
 		// Check for /jobs/{jobId} pattern (GET or DELETE single job)
 		if strings.HasPrefix(path, "/api/v1/scenarios/run/jobs/") {
