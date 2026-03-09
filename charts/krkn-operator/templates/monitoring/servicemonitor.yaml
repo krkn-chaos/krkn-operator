@@ -1,0 +1,58 @@
+{{- if .Values.monitoring.enabled }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "krkn-operator.operator.fullname" . }}
+  namespace: {{ include "krkn-operator.namespace" . }}
+  labels:
+    {{- include "krkn-operator.labels" . | nindent 4 }}
+    app.kubernetes.io/component: operator
+    control-plane: controller-manager
+spec:
+  selector:
+    matchLabels:
+      {{- include "krkn-operator.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: operator
+      control-plane: controller-manager
+  endpoints:
+  - port: https
+    scheme: https
+    {{- if .Values.monitoring.serviceMonitor.interval }}
+    interval: {{ .Values.monitoring.serviceMonitor.interval }}
+    {{- end }}
+    {{- if .Values.monitoring.serviceMonitor.scrapeTimeout }}
+    scrapeTimeout: {{ .Values.monitoring.serviceMonitor.scrapeTimeout }}
+    {{- end }}
+    tlsConfig:
+      insecureSkipVerify: true
+{{- if .Values.acm.enabled }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "krkn-operator.acm.fullname" . }}
+  namespace: {{ include "krkn-operator.namespace" . }}
+  labels:
+    {{- include "krkn-operator.labels" . | nindent 4 }}
+    app.kubernetes.io/component: acm
+    control-plane: controller-manager
+spec:
+  selector:
+    matchLabels:
+      {{- include "krkn-operator.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: acm
+      control-plane: controller-manager
+  endpoints:
+  - port: https
+    scheme: https
+    {{- if .Values.monitoring.serviceMonitor.interval }}
+    interval: {{ .Values.monitoring.serviceMonitor.interval }}
+    {{- end }}
+    {{- if .Values.monitoring.serviceMonitor.scrapeTimeout }}
+    scrapeTimeout: {{ .Values.monitoring.serviceMonitor.scrapeTimeout }}
+    {{- end }}
+    tlsConfig:
+      insecureSkipVerify: true
+{{- end }}
+{{- end }}

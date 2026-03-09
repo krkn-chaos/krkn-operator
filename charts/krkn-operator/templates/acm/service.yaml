@@ -1,0 +1,25 @@
+{{- if .Values.acm.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "krkn-operator.acm.fullname" . }}-metrics
+  namespace: {{ include "krkn-operator.namespace" . }}
+  labels:
+    {{- include "krkn-operator.labels" . | nindent 4 }}
+    app.kubernetes.io/component: acm
+    control-plane: controller-manager
+  {{- with .Values.monitoring.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: ClusterIP
+  ports:
+  - name: https
+    port: {{ .Values.monitoring.service.port }}
+    protocol: TCP
+    targetPort: https
+  selector:
+    {{- include "krkn-operator.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: acm
+{{- end }}

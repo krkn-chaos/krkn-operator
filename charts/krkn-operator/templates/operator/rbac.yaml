@@ -1,0 +1,85 @@
+{{- if .Values.rbac.create }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "krkn-operator.fullname" . }}-operator
+  namespace: {{ include "krkn-operator.namespace" . }}
+  labels:
+    {{- include "krkn-operator.labels" . | nindent 4 }}
+    app.kubernetes.io/component: operator
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - configmaps
+  - secrets
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - pods
+  - services
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - krkn.krkn-chaos.dev
+  resources:
+  - krknoperatortargetproviderconfigs
+  - krknoperatortargetproviders
+  - krknoperatortargets
+  - krkntargetrequests
+  - krknscenari oruns
+  - krknusers
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - krkn.krkn-chaos.dev
+  resources:
+  - krknoperatortargetproviderconfigs/status
+  - krknoperatortargetproviders/status
+  - krknoperatortargets/status
+  - krkntargetrequests/status
+  - krknscenari oruns/status
+  - krknusers/status
+  verbs:
+  - get
+  - patch
+  - update
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "krkn-operator.fullname" . }}-operator
+  namespace: {{ include "krkn-operator.namespace" . }}
+  labels:
+    {{- include "krkn-operator.labels" . | nindent 4 }}
+    app.kubernetes.io/component: operator
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "krkn-operator.fullname" . }}-operator
+subjects:
+- kind: ServiceAccount
+  name: {{ include "krkn-operator.serviceAccountName" . }}
+  namespace: {{ include "krkn-operator.namespace" . }}
+{{- end }}

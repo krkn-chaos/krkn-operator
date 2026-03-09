@@ -1,0 +1,179 @@
+✓ Krkn Operator has been installed successfully!
+
+=============================================================================
+📋 INSTALLATION SUMMARY
+=============================================================================
+
+Release Name:    {{ .Release.Name }}
+Namespace:       {{ include "krkn-operator.namespace" . }}
+Chart Version:   {{ .Chart.Version }}
+App Version:     {{ .Chart.AppVersion }}
+
+Components Deployed:
+  ✓ Operator:     {{ .Values.operator.enabled }}
+  {{- if .Values.acm.enabled }}
+  ✓ ACM:          {{ .Values.acm.enabled }}
+  {{- end }}
+  ✓ Console:      {{ .Values.console.enabled }}
+  {{- if .Values.monitoring.enabled }}
+  ✓ Monitoring:   {{ .Values.monitoring.enabled }}
+  {{- end }}
+
+=============================================================================
+🌐 ACCESSING THE CONSOLE
+=============================================================================
+
+{{- if .Values.console.enabled }}
+The Krkn Console is available at:
+
+{{- if .Values.console.route.enabled }}
+  OpenShift Route: https://{{ .Values.console.route.host | default (printf "%s-%s.apps.example.com" (include "krkn-operator.console.fullname" .) (include "krkn-operator.namespace" .)) }}
+
+{{- else if .Values.console.ingress.enabled }}
+  {{- range .Values.console.ingress.hosts }}
+  Ingress: http{{ if $.Values.console.ingress.tls }}s{{ end }}://{{ .host }}
+  {{- end }}
+
+{{- else if eq .Values.console.service.type "NodePort" }}
+  NodePort Service:
+    kubectl get svc {{ include "krkn-operator.console.fullname" . }} -n {{ include "krkn-operator.namespace" . }}
+
+  Access via:
+    http://<NODE_IP>:{{ .Values.console.service.nodePort | default "<NODE_PORT>" }}
+
+{{- else }}
+  Port Forward:
+    kubectl port-forward -n {{ include "krkn-operator.namespace" . }} svc/{{ include "krkn-operator.console.fullname" . }} 8080:{{ .Values.console.service.port }}
+
+  Then access via:
+    http://localhost:8080
+
+{{- end }}
+
+📝 First-Time Setup:
+   The console will guide you through creating the first admin user automatically.
+   Simply open the console URL and follow the on-screen instructions.
+
+{{- else }}
+  Console is disabled. Enable it in values.yaml (console.enabled: true)
+{{- end }}
+
+=============================================================================
+🔌 OPERATOR API ENDPOINT
+=============================================================================
+
+The operator API is accessible at:
+  Service: {{ include "krkn-operator.operator.fullname" . }}.{{ include "krkn-operator.namespace" . }}.svc.cluster.local:{{ .Values.operator.service.port }}
+
+To access externally via port-forward:
+  kubectl port-forward -n {{ include "krkn-operator.namespace" . }} svc/{{ include "krkn-operator.operator.fullname" . }} 8080:{{ .Values.operator.service.port }}
+
+API Documentation:
+  Swagger UI: http://localhost:8080/swagger/index.html (after port-forward)
+
+=============================================================================
+{{- if .Values.acm.enabled }}
+🔗 ACM INTEGRATION (Advanced Cluster Management)
+=============================================================================
+
+The ACM component is enabled and running. This allows:
+  • Automatic discovery of managed clusters via ACM
+  • Automatic target provider creation for ACM clusters
+  • Cross-cluster chaos engineering scenarios
+
+⚠️  REQUIREMENTS:
+  1. ACM (Red Hat Advanced Cluster Management) must be installed on your cluster
+  2. ManagedCluster resources must exist for ACM integration to work
+  3. ACM ConfigMap will be auto-created by the operator API when needed
+
+To verify ACM is working:
+  kubectl get managedclusters
+  kubectl get krknoperatortargetproviders -n {{ include "krkn-operator.namespace" . }}
+
+{{- else }}
+ℹ️  ACM INTEGRATION DISABLED
+=============================================================================
+
+ACM (Advanced Cluster Management) integration is disabled.
+To enable it, set acm.enabled: true in values.yaml
+
+{{- end }}
+
+=============================================================================
+{{- if .Values.monitoring.enabled }}
+📊 MONITORING
+=============================================================================
+
+Prometheus monitoring is ENABLED:
+  • ServiceMonitor resources created for operator{{ if .Values.acm.enabled }} and ACM{{ end }}
+  • Metrics available at :8443/metrics (HTTPS)
+
+⚠️  REQUIRES: Prometheus Operator must be installed on your cluster
+
+To verify monitoring:
+  kubectl get servicemonitor -n {{ include "krkn-operator.namespace" . }}
+
+{{- else }}
+📊 MONITORING
+=============================================================================
+
+Prometheus monitoring is DISABLED (default for Kind/Minikube compatibility).
+
+To enable monitoring:
+  1. Install Prometheus Operator on your cluster
+  2. Set monitoring.enabled: true in values.yaml
+  3. Upgrade the release: helm upgrade {{ .Release.Name }} krkn-operator/krkn-operator
+
+{{- end }}
+
+=============================================================================
+🚀 NEXT STEPS
+=============================================================================
+
+1. Access the console (see URL above)
+2. Create your first admin user through the console UI
+3. Create a Target Provider (local cluster or ACM)
+4. Define chaos scenarios using the console or CRDs
+5. Run your first chaos experiment!
+
+=============================================================================
+📚 DOCUMENTATION & SUPPORT
+=============================================================================
+
+Documentation: https://github.com/krkn-chaos/krkn-operator
+Examples:      https://github.com/krkn-chaos/krkn-operator/tree/main/examples
+Issues:        https://github.com/krkn-chaos/krkn-operator/issues
+
+Quick CRD Examples:
+
+  # Create a local target provider
+  kubectl apply -f - <<EOF
+  apiVersion: krkn.krkn-chaos.dev/v1alpha1
+  kind: KrknOperatorTargetProvider
+  metadata:
+    name: local-cluster
+    namespace: {{ include "krkn-operator.namespace" . }}
+  spec:
+    type: local
+    displayName: "Local Cluster"
+  EOF
+
+  # Create a pod chaos scenario
+  kubectl apply -f - <<EOF
+  apiVersion: krkn.krkn-chaos.dev/v1alpha1
+  kind: KrknScenarioRun
+  metadata:
+    name: my-first-chaos
+    namespace: {{ include "krkn-operator.namespace" . }}
+  spec:
+    scenarioType: "pod-scenarios"
+    config:
+      namespace: default
+      label_selector: "app=nginx"
+    targetProviderRef:
+      name: local-cluster
+  EOF
+
+=============================================================================
+
+Happy Chaos Engineering! 🎯

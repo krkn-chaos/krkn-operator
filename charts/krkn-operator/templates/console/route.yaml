@@ -1,0 +1,29 @@
+{{- if and .Values.console.enabled .Values.console.route.enabled }}
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: {{ include "krkn-operator.console.fullname" . }}
+  namespace: {{ include "krkn-operator.namespace" . }}
+  labels:
+    {{- include "krkn-operator.labels" . | nindent 4 }}
+    app.kubernetes.io/component: console
+  {{- with .Values.console.route.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- if .Values.console.route.host }}
+  host: {{ .Values.console.route.host }}
+  {{- end }}
+  to:
+    kind: Service
+    name: {{ include "krkn-operator.console.fullname" . }}
+    weight: 100
+  port:
+    targetPort: http
+  {{- if .Values.console.route.tls }}
+  tls:
+    {{- toYaml .Values.console.route.tls | nindent 4 }}
+  {{- end }}
+  wildcardPolicy: None
+{{- end }}

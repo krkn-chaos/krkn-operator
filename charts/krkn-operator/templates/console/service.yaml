@@ -1,0 +1,23 @@
+{{- if .Values.console.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "krkn-operator.console.fullname" . }}
+  namespace: {{ include "krkn-operator.namespace" . }}
+  labels:
+    {{- include "krkn-operator.labels" . | nindent 4 }}
+    app.kubernetes.io/component: console
+spec:
+  type: {{ .Values.console.service.type }}
+  ports:
+  - name: http
+    port: {{ .Values.console.service.port }}
+    protocol: TCP
+    targetPort: 8080
+    {{- if and (eq .Values.console.service.type "NodePort") .Values.console.service.nodePort }}
+    nodePort: {{ .Values.console.service.nodePort }}
+    {{- end }}
+  selector:
+    {{- include "krkn-operator.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: console
+{{- end }}

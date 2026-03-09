@@ -1,0 +1,122 @@
+{{- if .Values.operator.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "krkn-operator.operator.fullname" . }}
+  namespace: {{ include "krkn-operator.namespace" . }}
+  labels:
+    {{- include "krkn-operator.labels" . | nindent 4 }}
+    app.kubernetes.io/component: operator
+    control-plane: controller-manager
+spec:
+  replicas: {{ .Values.operator.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "krkn-operator.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: operator
+      control-plane: controller-manager
+  template:
+    metadata:
+      labels:
+        {{- include "krkn-operator.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: operator
+        control-plane: controller-manager
+    spec:
+      {{- with .Values.images.pullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "krkn-operator.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.operator.securityContext | nindent 8 }}
+      containers:
+      # Main operator container
+      - name: manager
+        image: {{ .Values.images.operator.image }}
+        imagePullPolicy: {{ .Values.images.operator.pullPolicy }}
+        command:
+        - /manager
+        args:
+        - --leader-elect
+        - --health-probe-bind-address=:8081
+        - --metrics-bind-address=:8443
+        - --metrics-secure=true
+        - --api-port={{ .Values.operator.service.port }}
+        - --grpc-server-address=localhost:{{ .Values.operator.service.grpcPort }}
+        ports:
+        - containerPort: {{ .Values.operator.service.port }}
+          name: http
+          protocol: TCP
+        - containerPort: 8443
+          name: https
+          protocol: TCP
+        - containerPort: 8081
+          name: health
+          protocol: TCP
+        env:
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: JWT_EXPIRY_HOURS
+          value: {{ .Values.auth.jwtExpiryHours | quote }}
+        {{- with .Values.operator.extraEnv }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+        resources:
+          {{- toYaml .Values.operator.resources | nindent 10 }}
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8081
+          initialDelaySeconds: 15
+          periodSeconds: 20
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: 8081
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+      # Data provider sidecar
+      - name: data-provider
+        image: {{ .Values.images.dataProvider.image }}
+        imagePullPolicy: {{ .Values.images.dataProvider.pullPolicy }}
+        ports:
+        - containerPort: {{ .Values.operator.service.grpcPort }}
+          name: grpc
+          protocol: TCP
+        resources:
+          {{- toYaml .Values.operator.dataProvider.resources | nindent 10 }}
+        livenessProbe:
+          tcpSocket:
+            port: grpc
+          initialDelaySeconds: 10
+          periodSeconds: 10
+        readinessProbe:
+          tcpSocket:
+            port: grpc
+          initialDelaySeconds: 5
+          periodSeconds: 5
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+      {{- with .Values.operator.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.operator.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.operator.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}
