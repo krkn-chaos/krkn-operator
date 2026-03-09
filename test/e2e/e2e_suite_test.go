@@ -39,7 +39,8 @@ var (
 
 	// projectImage is the name of the image which will be build and loaded
 	// with the code source changes to be tested.
-	projectImage = "example.com/krkn-operator:v0.0.1"
+	projectImage         = "localhost/krkn-operator:e2e-test"
+	dataProviderImage    = "localhost/krkn-operator-data-provider:e2e-test"
 )
 
 // TestE2E runs the end-to-end (e2e) test suite for the project. These tests execute in an isolated,
@@ -58,11 +59,20 @@ var _ = BeforeSuite(func() {
 	_, err := utils.Run(cmd)
 	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to build the manager(Operator) image")
 
+	By("building the data-provider image")
+	cmd = exec.Command("make", "docker-build-data-provider", fmt.Sprintf("IMG_DATA_PROVIDER=%s", dataProviderImage))
+	_, err = utils.Run(cmd)
+	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to build the data-provider image")
+
 	// TODO(user): If you want to change the e2e test vendor from Kind, ensure the image is
 	// built and available before running the tests. Also, remove the following block.
 	By("loading the manager(Operator) image on Kind")
 	err = utils.LoadImageToKindClusterWithName(projectImage)
 	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to load the manager(Operator) image into Kind")
+
+	By("loading the data-provider image on Kind")
+	err = utils.LoadImageToKindClusterWithName(dataProviderImage)
+	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to load the data-provider image into Kind")
 
 	// The tests-e2e are intended to run on a temporary cluster that is created and destroyed for testing.
 	// To prevent errors when tests run in environments with CertManager already installed,

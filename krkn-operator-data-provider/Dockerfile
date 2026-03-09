@@ -17,8 +17,15 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY server.py .
 COPY generated/ ./generated/
 
+# Create non-root user for security
+RUN useradd -r -u 1001 -m -s /sbin/nologin nonroot && \
+    chown -R nonroot:nonroot /app
+
 # Set environment variables
 ENV PYTHONUNBUFFERED=1
+
+# Switch to non-root user
+USER 1001
 
 # Expose gRPC port
 EXPOSE 50051
