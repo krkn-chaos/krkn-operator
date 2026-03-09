@@ -22,6 +22,7 @@ import (
 	"context"
 	"testing"
 
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -39,9 +40,13 @@ const (
 	testUUID              = "test-uuid-123"
 )
 
+// testNow returns a recent timestamp to prevent cleanup from deleting test objects
+var testNow = metav1.Now()
+
 func setupTestReconciler(objs ...client.Object) *KrknTargetRequestReconciler {
 	scheme := runtime.NewScheme()
 	_ = krknv1alpha1.AddToScheme(scheme)
+	_ = corev1.AddToScheme(scheme) // Required for Secret support
 
 	fakeClient := fake.NewClientBuilder().
 		WithScheme(scheme).
@@ -60,15 +65,27 @@ func setupTestReconciler(objs ...client.Object) *KrknTargetRequestReconciler {
 func TestReconcile_SetsUUIDLabel(t *testing.T) {
 	request := &krknv1alpha1.KrknTargetRequest{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      testRequestName,
-			Namespace: testOperatorNamespace,
+			Name:              testRequestName,
+			Namespace:         testOperatorNamespace,
+			CreationTimestamp: testNow,
 		},
 		Spec: krknv1alpha1.KrknTargetRequestSpec{
 			UUID: testUUID,
 		},
 	}
 
-	reconciler := setupTestReconciler(request)
+	provider := &krknv1alpha1.KrknOperatorTargetProvider{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      testOperatorName,
+			Namespace: testOperatorNamespace,
+		},
+		Spec: krknv1alpha1.KrknOperatorTargetProviderSpec{
+			OperatorName: testOperatorName,
+			Active:       true,
+		},
+	}
+
+	reconciler := setupTestReconciler(request, provider)
 	ctx := context.Background()
 
 	_, err := reconciler.Reconcile(ctx, ctrl.Request{
@@ -99,8 +116,9 @@ func TestReconcile_SetsUUIDLabel(t *testing.T) {
 func TestReconcile_InitializesStatus(t *testing.T) {
 	request := &krknv1alpha1.KrknTargetRequest{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      testRequestName,
-			Namespace: testOperatorNamespace,
+			Name:              testRequestName,
+			Namespace:         testOperatorNamespace,
+			CreationTimestamp: testNow,
 			Labels: map[string]string{
 				"krkn.krkn-chaos.dev/uuid": testUUID,
 			},
@@ -110,7 +128,18 @@ func TestReconcile_InitializesStatus(t *testing.T) {
 		},
 	}
 
-	reconciler := setupTestReconciler(request)
+	provider := &krknv1alpha1.KrknOperatorTargetProvider{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      testOperatorName,
+			Namespace: testOperatorNamespace,
+		},
+		Spec: krknv1alpha1.KrknOperatorTargetProviderSpec{
+			OperatorName: testOperatorName,
+			Active:       true,
+		},
+	}
+
+	reconciler := setupTestReconciler(request, provider)
 	ctx := context.Background()
 
 	_, err := reconciler.Reconcile(ctx, ctrl.Request{
@@ -124,7 +153,11 @@ func TestReconcile_InitializesStatus(t *testing.T) {
 		t.Fatalf("Reconcile failed: %v", err)
 	}
 
-	// Verify status was initialized
+	// Verify status was initialized and workflow completed
+	// Note: With one active provider and no targets, the reconciler will:
+	// 1. Initialize status to "pending"
+	// 2. Populate TargetData (empty array)
+	// 3. Mark as "Completed" since the provider contributed
 	var updated krknv1alpha1.KrknTargetRequest
 	if err := reconciler.Get(ctx, types.NamespacedName{
 		Name:      testRequestName,
@@ -133,8 +166,13 @@ func TestReconcile_InitializesStatus(t *testing.T) {
 		t.Fatalf("Failed to get request: %v", err)
 	}
 
-	if updated.Status.Status != "pending" {
-		t.Errorf("Expected status to be 'pending', got %s", updated.Status.Status)
+	// Status should be Completed (provider contributed with empty targets)
+	if updated.Status.Status != "Completed" {
+		t.Errorf("Expected status to be 'Completed', got %s", updated.Status.Status)
+	}
+
+	if updated.Status.Completed == nil {
+		t.Error("Expected Completed timestamp to be set")
 	}
 
 	// Note: CreationTimestamp is automatically set by Kubernetes when the object is created
@@ -146,8 +184,9 @@ func TestReconcile_InitializesStatus(t *testing.T) {
 func TestReconcile_PopulatesTargetData(t *testing.T) {
 	request := &krknv1alpha1.KrknTargetRequest{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      testRequestName,
-			Namespace: testOperatorNamespace,
+			Name:              testRequestName,
+			Namespace:         testOperatorNamespace,
+			CreationTimestamp: testNow,
 			Labels: map[string]string{
 				"krkn.krkn-chaos.dev/uuid": testUUID,
 			},
@@ -191,7 +230,18 @@ func TestReconcile_PopulatesTargetData(t *testing.T) {
 		},
 	}
 
-	reconciler := setupTestReconciler(request, target1, target2)
+	provider := &krknv1alpha1.KrknOperatorTargetProvider{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      testOperatorName,
+			Namespace: testOperatorNamespace,
+		},
+		Spec: krknv1alpha1.KrknOperatorTargetProviderSpec{
+			OperatorName: testOperatorName,
+			Active:       true,
+		},
+	}
+
+	reconciler := setupTestReconciler(request, target1, target2, provider)
 	ctx := context.Background()
 
 	_, err := reconciler.Reconcile(ctx, ctrl.Request{
@@ -244,8 +294,9 @@ func TestReconcile_PopulatesTargetData(t *testing.T) {
 func TestReconcile_MarksCompleted(t *testing.T) {
 	request := &krknv1alpha1.KrknTargetRequest{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      testRequestName,
-			Namespace: testOperatorNamespace,
+			Name:              testRequestName,
+			Namespace:         testOperatorNamespace,
+			CreationTimestamp: testNow,
 			Labels: map[string]string{
 				"krkn.krkn-chaos.dev/uuid": testUUID,
 			},
@@ -306,8 +357,9 @@ func TestReconcile_SkipsCompletedRequests(t *testing.T) {
 	now := metav1.Now()
 	request := &krknv1alpha1.KrknTargetRequest{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      testRequestName,
-			Namespace: testOperatorNamespace,
+			Name:              testRequestName,
+			Namespace:         testOperatorNamespace,
+			CreationTimestamp: testNow,
 			Labels: map[string]string{
 				"krkn.krkn-chaos.dev/uuid": testUUID,
 			},
@@ -353,8 +405,9 @@ func TestReconcile_SkipsCompletedRequests(t *testing.T) {
 func TestReconcile_HandlesEmptyTargetList(t *testing.T) {
 	request := &krknv1alpha1.KrknTargetRequest{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      testRequestName,
-			Namespace: testOperatorNamespace,
+			Name:              testRequestName,
+			Namespace:         testOperatorNamespace,
+			CreationTimestamp: testNow,
 			Labels: map[string]string{
 				"krkn.krkn-chaos.dev/uuid": testUUID,
 			},
@@ -419,8 +472,9 @@ func TestReconcile_HandlesEmptyTargetList(t *testing.T) {
 func TestReconcile_OnlyIncludesReadyTargets(t *testing.T) {
 	request := &krknv1alpha1.KrknTargetRequest{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      testRequestName,
-			Namespace: testOperatorNamespace,
+			Name:              testRequestName,
+			Namespace:         testOperatorNamespace,
+			CreationTimestamp: testNow,
 			Labels: map[string]string{
 				"krkn.krkn-chaos.dev/uuid": testUUID,
 			},
@@ -464,7 +518,18 @@ func TestReconcile_OnlyIncludesReadyTargets(t *testing.T) {
 		},
 	}
 
-	reconciler := setupTestReconciler(request, readyTarget, notReadyTarget)
+	provider := &krknv1alpha1.KrknOperatorTargetProvider{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      testOperatorName,
+			Namespace: testOperatorNamespace,
+		},
+		Spec: krknv1alpha1.KrknOperatorTargetProviderSpec{
+			OperatorName: testOperatorName,
+			Active:       true,
+		},
+	}
+
+	reconciler := setupTestReconciler(request, readyTarget, notReadyTarget, provider)
 	ctx := context.Background()
 
 	_, err := reconciler.Reconcile(ctx, ctrl.Request{

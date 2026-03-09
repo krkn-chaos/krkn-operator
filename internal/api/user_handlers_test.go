@@ -745,7 +745,7 @@ func TestUsersRouter_MethodRouting(t *testing.T) {
 		{"List users - GET", "GET", "/api/v1/users", http.StatusOK},
 		{"Create user - POST", "POST", "/api/v1/users", http.StatusBadRequest}, // Will fail validation but route works
 		{"Invalid method on root", "PUT", "/api/v1/users", http.StatusMethodNotAllowed},
-		{"Get user - GET", "GET", "/api/v1/users/test@test.local", http.StatusNotFound}, // User doesn't exist
+		{"Get user - GET", "GET", "/api/v1/users/test@test.local", http.StatusNotFound},          // User doesn't exist
 		{"Update user - PATCH", "PATCH", "/api/v1/users/test@test.local", http.StatusBadRequest}, // Validates body before checking existence
 		{"Delete user - DELETE", "DELETE", "/api/v1/users/test@test.local", http.StatusNotFound},
 		{"Change password - PATCH", "PATCH", "/api/v1/users/test@test.local/password", http.StatusBadRequest}, // Validates body before checking existence
