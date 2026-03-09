@@ -18,6 +18,9 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - name: Set up envtest binaries
+        run: make setup-envtest
+
       - name: Run tests with coverage
         run: |
           go mod tidy
