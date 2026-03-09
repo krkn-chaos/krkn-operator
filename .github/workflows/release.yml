@@ -1,0 +1,71 @@
+name: Release
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  build-and-push:
+    name: Build and Push Images
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Login to Quay.io
+        uses: docker/login-action@v3
+        with:
+          registry: quay.io
+          username: ${{ secrets.QUAY_USERNAME }}
+          password: ${{ secrets.QUAY_PASSWORD }}
+
+      - name: Set version from tag
+        run: |
+          echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
+          echo "Building version: ${GITHUB_REF#refs/tags/}"
+
+      - name: Build and push operator image
+        run: |
+          make docker-build IMG=quay.io/krkn-chaos/krkn-operator:$VERSION
+          docker tag quay.io/krkn-chaos/krkn-operator:$VERSION quay.io/krkn-chaos/krkn-operator:latest
+          docker push quay.io/krkn-chaos/krkn-operator:$VERSION
+          docker push quay.io/krkn-chaos/krkn-operator:latest
+
+      - name: Build and push data-provider image
+        run: |
+          make docker-build-data-provider IMG_DATA_PROVIDER=quay.io/krkn-chaos/krkn-operator-data-provider:$VERSION
+          docker tag quay.io/krkn-chaos/krkn-operator-data-provider:$VERSION quay.io/krkn-chaos/krkn-operator-data-provider:latest
+          docker push quay.io/krkn-chaos/krkn-operator-data-provider:$VERSION
+          docker push quay.io/krkn-chaos/krkn-operator-data-provider:latest
+
+      - name: Update release notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cat <<EOF > release-notes.md
+          ## Container Images
+
+          - \`quay.io/krkn-chaos/krkn-operator:$VERSION\`
+          - \`quay.io/krkn-chaos/krkn-operator:latest\`
+          - \`quay.io/krkn-chaos/krkn-operator-data-provider:$VERSION\`
+          - \`quay.io/krkn-chaos/krkn-operator-data-provider:latest\`
+
+          ## Installation
+
+          \`\`\`bash
+          # Using Helm (recommended)
+          helm install krkn-operator oci://quay.io/krkn-chaos/charts/krkn-operator --version $VERSION
+
+          # Using kubectl
+          make deploy IMG=quay.io/krkn-chaos/krkn-operator:$VERSION
+          \`\`\`
+          EOF
+
+          gh release edit $VERSION --notes-file release-notes.md

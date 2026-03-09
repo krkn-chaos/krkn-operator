@@ -1,23 +1,54 @@
-name: Tests
+name: Tests & Coverage
 
 on:
   push:
-  pull_request:
+    branches:
+      - main
 
 jobs:
   test:
-    name: Run on Ubuntu
-    runs-on: ubuntu-latest
+    name: Tests with Coverage
+    runs-on: ubuntu-24.04
     steps:
-      - name: Clone the code
+      - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup Go
+      - name: Set up Go
         uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
 
-      - name: Running Tests
+      - name: Run tests with coverage
         run: |
           go mod tidy
-          make test
+          go test -race -coverprofile=coverage.out ./...
+
+      - name: Generate coverage report
+        run: |
+          COVERAGE=$(go tool cover -func coverage.out | grep total | awk '{print $3}')
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "# TEST COVERAGE: $COVERAGE" >> $GITHUB_STEP_SUMMARY
+          echo "TOTAL_COVERAGE=$COVERAGE" >> $GITHUB_ENV
+
+      - name: Checkout docs repo
+        if: ${{ !github.event.pull_request.head.repo.fork }}
+        uses: actions/checkout@v4
+        with:
+          repository: krkn-chaos/krkn-lib-docs
+          path: krkn-lib-docs
+          ssh-key: ${{ secrets.KRKN_LIB_DOCS_PRIV_KEY }}
+
+      - name: Push updated coverage badge
+        if: ${{ !github.event.pull_request.head.repo.fork }}
+        env:
+          COLOR: yellow
+        run: |
+          [[ ${TOTAL_COVERAGE//\%/} -gt 40 ]] && COLOR=green
+          curl -s "https://img.shields.io/badge/coverage-${TOTAL_COVERAGE//\%/}%25-$COLOR" > ./krkn-lib-docs/coverage_badge_krkn-operator.svg
+          cd krkn-lib-docs
+          git add .
+          git config user.name "krkn-chaos"
+          git config user.email "<>"
+          git commit -m "[KRKN] Coverage Badge krkn-operator ${GITHUB_REF##*/}" || echo "no changes to commit"
+          git push

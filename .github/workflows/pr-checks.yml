@@ -1,0 +1,33 @@
+name: PR Checks
+
+on:
+  pull_request:
+
+jobs:
+  security-and-quality:
+    name: Security & Code Quality
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Run gosec security scanner
+        uses: securego/gosec@master
+        with:
+          args: --exclude G402 ./...
+
+      - name: Run staticcheck static analyzer
+        run: |
+          wget -q https://github.com/dominikh/go-tools/releases/latest/download/staticcheck_linux_amd64.tar.gz
+          tar xfz staticcheck_linux_amd64.tar.gz
+          ./staticcheck/staticcheck -checks all ./...
+
+      - name: Run tests
+        run: |
+          go mod tidy
+          make test
