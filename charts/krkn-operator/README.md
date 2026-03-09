@@ -1,0 +1,90 @@
+# krkn-operator Helm Chart
+
+Helm chart for deploying the krkn-operator chaos engineering ecosystem on Kubernetes/OpenShift.
+
+## Installation
+
+### Add Helm Repository
+
+```bash
+helm repo add krkn-operator https://krkn-chaos.github.io/charts
+helm repo update
+```
+
+### Install with defaults (Kind/Minikube)
+
+```bash
+helm install my-krkn krkn-operator/krkn-operator
+```
+
+### Install with OpenShift Route
+
+```bash
+helm install my-krkn krkn-operator/krkn-operator \
+  --set console.route.enabled=true \
+  --set console.route.hostname=krkn.apps.cluster.com
+```
+
+### Install with Kubernetes Ingress
+
+```bash
+helm install my-krkn krkn-operator/krkn-operator \
+  --set console.ingress.enabled=true \
+  --set console.ingress.hostname=krkn.example.com
+```
+
+### Install with ACM integration
+
+```bash
+helm install my-krkn krkn-operator/krkn-operator \
+  --set acm.enabled=true \
+  --set console.route.enabled=true
+```
+
+## Components
+
+- **krkn-operator** (core): Main operator with REST API and gRPC data provider sidecar
+- **krkn-operator-console** (UI): React-based web console
+- **krkn-operator-acm** (optional): ACM (Advanced Cluster Management) integration
+
+## Configuration
+
+See [values.yaml](values.yaml) for all available configuration options.
+
+### Key Configuration Options
+
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `console.enabled` | Enable web console | `true` |
+| `console.ingress.enabled` | Enable Kubernetes Ingress | `false` |
+| `console.route.enabled` | Enable OpenShift Route | `false` |
+| `acm.enabled` | Enable ACM integration | `false` |
+| `monitoring.enabled` | Enable Prometheus ServiceMonitor | `false` |
+
+## Console nginx Configuration
+
+The console uses nginx as a reverse proxy to the operator API. The Helm chart automatically configures the nginx proxy with the correct operator service URL based on the release name and namespace.
+
+**Compatibility:**
+- ✅ `kubectl apply` - Uses embedded nginx.conf from Docker image
+- ✅ `make deploy` (Kustomize) - Uses embedded nginx.conf from Docker image
+- ✅ `helm install` - Uses ConfigMap with dynamic service URL
+
+## Requirements
+
+- Kubernetes 1.19+ or OpenShift 4.x
+- Helm 3.0+
+
+## Uninstalling
+
+```bash
+helm uninstall my-krkn
+```
+
+**Note:** CRDs are kept by default to prevent data loss. To remove CRDs:
+
+```bash
+kubectl delete crd krknscenari oruns.krkn.krkn-chaos.dev
+kubectl delete crd krkntargetrequests.krkn.krkn-chaos.dev
+# ... etc
+```

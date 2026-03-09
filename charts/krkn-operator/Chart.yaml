@@ -1,0 +1,19 @@
+apiVersion: v2
+name: krkn-operator
+description: Chaos Engineering operator for Kubernetes/OpenShift
+type: application
+version: 0.1.0
+appVersion: "v1.0.0-beta"
+keywords:
+  - chaos-engineering
+  - krkn
+  - testing
+  - reliability
+home: https://github.com/krkn-chaos/krkn-operator
+sources:
+  - https://github.com/krkn-chaos/krkn-operator
+  - https://github.com/krkn-chaos/krkn-operator-acm
+  - https://github.com/krkn-chaos/krkn-operator-console
+maintainers:
+  - name: krkn-chaos
+    url: https://github.com/krkn-chaos

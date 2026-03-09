@@ -1,0 +1,74 @@
+# Default values for krkn-operator
+# This is a YAML-formatted file.
+
+## Global settings
+global:
+  # Namespace where to install (if empty, uses Release.Namespace)
+  namespaceOverride: ""
+
+## Images configuration
+images:
+  operator:
+    image: quay.io/krkn-chaos/krkn-operator:latest
+    pullPolicy: IfNotPresent
+  dataProvider:
+    image: quay.io/krkn-chaos/krkn-operator-data-provider:latest
+    pullPolicy: IfNotPresent
+  acm:
+    image: quay.io/krkn-chaos/krkn-operator-acm:latest
+    pullPolicy: IfNotPresent
+  console:
+    image: quay.io/krkn-chaos/krkn-operator-console:latest
+    pullPolicy: IfNotPresent
+  pullSecrets: []
+
+## Core Operator
+operator:
+  enabled: true
+  replicaCount: 1
+  service:
+    type: ClusterIP
+    port: 8080
+    grpcPort: 50051
+
+## Console (web UI)
+console:
+  enabled: true
+  replicaCount: 1
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+  service:
+    type: ClusterIP
+    port: 3000
+    nodePort: 30080
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    fsGroup: 1000
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  extraEnv: []
+
+## ACM Integration (optional)
+acm:
+  enabled: false
+
+## Common labels/annotations
+commonLabels: {}
+commonAnnotations: {}
+
+## Name overrides
+nameOverride: ""
+fullnameOverride: ""
+
+## ServiceAccount
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
