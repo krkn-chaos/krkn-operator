@@ -23,6 +23,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -45,9 +47,34 @@ const (
 	JWTSecretKey = "jwt-secret"
 	// JWTSecretName is the name of the secret containing the JWT signing key
 	JWTSecretName = "krkn-operator-jwt-secret"
-	// TokenDuration is how long JWT tokens remain valid
-	TokenDuration = 24 * time.Hour
 )
+
+var (
+	// TokenDuration is how long JWT tokens remain valid
+	// Can be configured via JWT_EXPIRY_HOURS environment variable (default: 24 hours)
+	TokenDuration = getTokenDuration()
+)
+
+// getTokenDuration reads JWT_EXPIRY_HOURS environment variable and returns the token duration
+// If not set or invalid, defaults to 24 hours
+func getTokenDuration() time.Duration {
+	defaultDuration := 24 * time.Hour
+
+	expiryHoursStr := os.Getenv("JWT_EXPIRY_HOURS")
+	if expiryHoursStr == "" {
+		return defaultDuration
+	}
+
+	expiryHours, err := strconv.Atoi(expiryHoursStr)
+	if err != nil || expiryHours <= 0 {
+		log.Log.Info("Invalid JWT_EXPIRY_HOURS, using default 24h", "value", expiryHoursStr, "error", err)
+		return defaultDuration
+	}
+
+	duration := time.Duration(expiryHours) * time.Hour
+	log.Log.Info("JWT token expiry configured", "hours", expiryHours, "duration", duration)
+	return duration
+}
 
 // IsRegistered handles GET /auth/is-registered
 // Returns whether at least one admin user is registered in the system

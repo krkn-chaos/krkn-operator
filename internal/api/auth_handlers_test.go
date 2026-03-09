@@ -536,3 +536,60 @@ func TestLogin_InactiveUser(t *testing.T) {
 		t.Errorf("Expected error about disabled account, got: %s", response.Message)
 	}
 }
+
+// TestGetTokenDuration tests the getTokenDuration function
+func TestGetTokenDuration(t *testing.T) {
+	tests := []struct {
+		name     string
+		envValue string
+		expected string // duration as string for comparison
+	}{
+		{
+			name:     "default 24h when env not set",
+			envValue: "",
+			expected: "24h0m0s",
+		},
+		{
+			name:     "custom value 48 hours",
+			envValue: "48",
+			expected: "48h0m0s",
+		},
+		{
+			name:     "custom value 1 hour",
+			envValue: "1",
+			expected: "1h0m0s",
+		},
+		{
+			name:     "invalid value - not a number",
+			envValue: "invalid",
+			expected: "24h0m0s", // fallback to default
+		},
+		{
+			name:     "invalid value - negative",
+			envValue: "-10",
+			expected: "24h0m0s", // fallback to default
+		},
+		{
+			name:     "invalid value - zero",
+			envValue: "0",
+			expected: "24h0m0s", // fallback to default
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Set environment variable
+			if tt.envValue != "" {
+				t.Setenv("JWT_EXPIRY_HOURS", tt.envValue)
+			}
+
+			// Call function
+			duration := getTokenDuration()
+
+			// Verify result
+			if duration.String() != tt.expected {
+				t.Errorf("Expected duration %s, got %s", tt.expected, duration.String())
+			}
+		})
+	}
+}
