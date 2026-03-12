@@ -54,7 +54,7 @@ rules:
   - krknoperatortargetproviders
   - krknoperatortargets
   - krkntargetrequests
-  - krknscenari oruns
+  - krknscenarioruns
   - krknusers
   verbs:
   - create
@@ -71,7 +71,7 @@ rules:
   - krknoperatortargetproviders/status
   - krknoperatortargets/status
   - krkntargetrequests/status
-  - krknscenari oruns/status
+  - krknscenarioruns/status
   - krknusers/status
   verbs:
   - get
@@ -119,8 +119,7 @@ rules:
   - krknoperatortargetproviders
   - krknoperatortargets
   - krkntargetrequests
-  - krknscenarios
-  - krknscenari oruns
+  - krknscenarioruns
   - krknusers
   verbs:
   - create
@@ -137,8 +136,7 @@ rules:
   - krknoperatortargetproviders/status
   - krknoperatortargets/status
   - krkntargetrequests/status
-  - krknscenarios/status
-  - krknscenari oruns/status
+  - krknscenarioruns/status
   - krknusers/status
   verbs:
   - get
@@ -151,8 +149,7 @@ rules:
   - krknoperatortargetproviders/finalizers
   - krknoperatortargets/finalizers
   - krkntargetrequests/finalizers
-  - krknscenarios/finalizers
-  - krknscenari oruns/finalizers
+  - krknscenarioruns/finalizers
   - krknusers/finalizers
   verbs:
   - update
