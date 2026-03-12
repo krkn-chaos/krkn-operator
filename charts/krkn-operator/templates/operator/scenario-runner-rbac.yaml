@@ -1,0 +1,64 @@
+{{- if .Values.rbac.create }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "krkn-operator.fullname" . }}-scenario-runner
+  labels:
+    {{- include "krkn-operator.labels" . | nindent 4 }}
+    app.kubernetes.io/component: scenario-runner
+rules:
+# Read access to cluster resources for scenario discovery
+- apiGroups:
+  - ""
+  resources:
+  - nodes
+  - pods
+  - services
+  - namespaces
+  verbs:
+  - get
+  - list
+  - watch
+# Chaos actions on pods (delete, kill, etc.)
+- apiGroups:
+  - ""
+  resources:
+  - pods
+  - pods/log
+  - pods/exec
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+# Chaos actions on nodes (drain, cordon, etc.)
+- apiGroups:
+  - ""
+  resources:
+  - nodes
+  verbs:
+  - get
+  - list
+  - patch
+  - update
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "krkn-operator.fullname" . }}-scenario-runner
+  labels:
+    {{- include "krkn-operator.labels" . | nindent 4 }}
+    app.kubernetes.io/component: scenario-runner
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "krkn-operator.fullname" . }}-scenario-runner
+subjects:
+- kind: ServiceAccount
+  name: {{ include "krkn-operator.fullname" . }}-krkn-scenario-runner
+  namespace: {{ include "krkn-operator.namespace" . }}
+{{- end }}
