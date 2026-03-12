@@ -60,13 +60,13 @@ jobs:
 
           ## Helm Chart
 
-          - \`oci://quay.io/krkn-chaos/charts/krkn-operator:${VERSION#v}\`
+          - \`oci://quay.io/krkn-chaos/krkn-operator-charts:${VERSION#v}\`
 
           ## Installation
 
           \`\`\`bash
           # Using Helm (recommended)
-          helm install krkn-operator oci://quay.io/krkn-chaos/charts/krkn-operator --version ${VERSION#v}
+          helm install krkn-operator oci://quay.io/krkn-chaos/krkn-operator-charts --version ${VERSION#v}
 
           # Using kubectl
           make deploy IMG=quay.io/krkn-chaos/krkn-operator:$VERSION
