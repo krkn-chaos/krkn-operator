@@ -4,23 +4,18 @@ Helm chart for deploying the krkn-operator chaos engineering ecosystem on Kubern
 
 ## Installation
 
-### Add Helm Repository
-
-```bash
-helm repo add krkn-operator https://krkn-chaos.github.io/charts
-helm repo update
-```
+The Helm chart is published as an OCI artifact to Quay.io.
 
 ### Install with defaults (Kind/Minikube)
 
 ```bash
-helm install my-krkn krkn-operator/krkn-operator
+helm install my-krkn oci://quay.io/krkn-chaos/charts/krkn-operator --version 0.1.0
 ```
 
 ### Install with OpenShift Route
 
 ```bash
-helm install my-krkn krkn-operator/krkn-operator \
+helm install my-krkn oci://quay.io/krkn-chaos/charts/krkn-operator --version 0.1.0 \
   --set console.route.enabled=true \
   --set console.route.hostname=krkn.apps.cluster.com
 ```
@@ -28,7 +23,7 @@ helm install my-krkn krkn-operator/krkn-operator \
 ### Install with Kubernetes Ingress
 
 ```bash
-helm install my-krkn krkn-operator/krkn-operator \
+helm install my-krkn oci://quay.io/krkn-chaos/charts/krkn-operator --version 0.1.0 \
   --set console.ingress.enabled=true \
   --set console.ingress.hostname=krkn.example.com
 ```
@@ -36,7 +31,7 @@ helm install my-krkn krkn-operator/krkn-operator \
 ### Install with ACM integration
 
 ```bash
-helm install my-krkn krkn-operator/krkn-operator \
+helm install my-krkn oci://quay.io/krkn-chaos/charts/krkn-operator --version 0.1.0 \
   --set acm.enabled=true \
   --set console.route.enabled=true
 ```

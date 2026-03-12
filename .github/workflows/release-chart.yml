@@ -1,0 +1,46 @@
+name: Release Helm Chart
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+env:
+  REGISTRY: quay.io
+  CHART_REPO: krkn-chaos/charts
+
+jobs:
+  release-chart:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+
+      - name: Login to Quay.io
+        run: |
+          echo "${{ secrets.QUAY_TOKEN }}" | helm registry login ${{ env.REGISTRY }} --username ${{ secrets.QUAY_USERNAME }} --password-stdin
+
+      - name: Package and Push Helm Chart
+        run: |
+          # Extract version from tag (remove 'v' prefix)
+          VERSION=${GITHUB_REF#refs/tags/v}
+
+          # Update chart version
+          sed -i "s/^version:.*/version: ${VERSION}/" charts/krkn-operator/Chart.yaml
+          sed -i "s/^appVersion:.*/appVersion: \"${GITHUB_REF#refs/tags/}\"/" charts/krkn-operator/Chart.yaml
+
+          # Package chart
+          helm package charts/krkn-operator
+
+          # Push to Quay.io OCI registry
+          helm push krkn-operator-${VERSION}.tgz oci://${{ env.REGISTRY }}/${{ env.CHART_REPO }}
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          generate_release_notes: true
+          files: |
+            krkn-operator-*.tgz
