@@ -11,10 +11,104 @@ The krkn-operator consists of two components running in a single pod:
 
 ## Prerequisites
 
-- Docker or Podman for building images
 - kubectl configured for your target cluster
-- Access to a container registry (for remote deployment)
-- make utility
+- Helm 3.0+ (for Helm installation method)
+- Docker or Podman (for manual build/deployment)
+- Access to a container registry (for custom builds)
+- make utility (for manual deployment)
+
+## Installation Methods
+
+### Option 1: Helm (Recommended)
+
+The krkn-operator is published as an OCI Helm chart to Quay.io. This is the recommended installation method.
+
+#### Install with defaults (console enabled, ACM disabled)
+
+```bash
+helm install krkn-operator oci://quay.io/krkn-chaos/charts/krkn-operator --version 0.1.0
+```
+
+#### Install on OpenShift with Route
+
+```bash
+helm install krkn-operator oci://quay.io/krkn-chaos/charts/krkn-operator --version 0.1.0 \
+  --set console.route.enabled=true \
+  --set console.route.hostname=krkn.apps.cluster.example.com
+```
+
+#### Install on Kubernetes with Ingress
+
+```bash
+helm install krkn-operator oci://quay.io/krkn-chaos/charts/krkn-operator --version 0.1.0 \
+  --set console.ingress.enabled=true \
+  --set console.ingress.hostname=krkn.example.com
+```
+
+#### Install with ACM integration
+
+```bash
+helm install krkn-operator oci://quay.io/krkn-chaos/charts/krkn-operator --version 0.1.0 \
+  --set acm.enabled=true \
+  --set console.route.enabled=true
+```
+
+#### Disable console (operator only)
+
+```bash
+helm install krkn-operator oci://quay.io/krkn-chaos/charts/krkn-operator --version 0.1.0 \
+  --set console.enabled=false
+```
+
+#### Custom namespace
+
+```bash
+helm install krkn-operator oci://quay.io/krkn-chaos/charts/krkn-operator --version 0.1.0 \
+  --namespace my-namespace --create-namespace
+```
+
+#### Upgrade existing installation
+
+```bash
+helm upgrade krkn-operator oci://quay.io/krkn-chaos/charts/krkn-operator --version 0.1.1
+```
+
+#### Uninstall
+
+```bash
+helm uninstall krkn-operator
+```
+
+**Note**: CRDs are kept by default to prevent data loss. To remove:
+```bash
+kubectl delete crd krknscenarios.krkn.krkn-chaos.dev
+kubectl delete crd krkntargetrequests.krkn.krkn-chaos.dev
+```
+
+#### Configuration Options
+
+Key configuration values (see [values.yaml](charts/krkn-operator/values.yaml) for all options):
+
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `console.enabled` | Enable web UI console | `true` |
+| `console.ingress.enabled` | Enable Kubernetes Ingress | `false` |
+| `console.ingress.hostname` | Ingress hostname | `krkn-operator.example.com` |
+| `console.route.enabled` | Enable OpenShift Route | `false` |
+| `console.route.hostname` | Route hostname | `krkn-operator.apps.cluster.example.com` |
+| `acm.enabled` | Enable ACM integration | `false` |
+| `acm.config.secretName` | ACM managed clusters secret | `application-manager` |
+| `auth.jwtSecret` | JWT secret (base64) | Auto-generated |
+| `auth.jwtExpiryHours` | JWT token expiry | `24` |
+| `monitoring.enabled` | Enable Prometheus metrics | `false` |
+| `operator.logging.level` | Log level (debug/info/warn/error) | `info` |
+| `operator.resources.limits.memory` | Operator memory limit | `512Mi` |
+
+**Note**: Helm charts are automatically published when new tags are pushed via GitHub Actions workflow.
+
+### Option 2: Manual Deployment (Makefile)
+
+For development or custom builds, use the Makefile-based deployment described below.
 
 ## Makefile Variables
 
@@ -192,18 +286,20 @@ make deploy
 ```bash
 # Tag release
 git tag v1.0.0
+git push --tags
 
-# Build (creates :latest and :v1.0.0)
+# GitHub Actions automatically:
+# - Builds and pushes Docker images (:latest and :v1.0.0)
+# - Publishes Helm chart to Quay.io OCI registry
+# - Creates GitHub release
+
+# Deploy with Helm (recommended)
+helm install krkn-operator oci://quay.io/krkn-chaos/charts/krkn-operator --version 1.0.0
+
+# Or manually build/deploy
 make docker-build-all
-
-# Push both tags to registry
 make docker-push-all
-
-# Deploy using :latest
 make deploy
-
-# Or deploy specific version (use full image URL)
-make deploy IMG=$(REGISTRY)/$(IMG_NAME):v1.0.0
 ```
 
 ### Custom Registry
