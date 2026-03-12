@@ -20,6 +20,12 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
       - name: Login to Quay.io
         uses: docker/login-action@v3
         with:
@@ -33,18 +39,24 @@ jobs:
           echo "Building version: ${GITHUB_REF#refs/tags/}"
 
       - name: Build and push operator image
-        run: |
-          make docker-build IMG=quay.io/krkn-chaos/krkn-operator:$VERSION
-          docker tag quay.io/krkn-chaos/krkn-operator:$VERSION quay.io/krkn-chaos/krkn-operator:latest
-          docker push quay.io/krkn-chaos/krkn-operator:$VERSION
-          docker push quay.io/krkn-chaos/krkn-operator:latest
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            quay.io/krkn-chaos/krkn-operator:${{ env.VERSION }}
+            quay.io/krkn-chaos/krkn-operator:latest
 
       - name: Build and push data-provider image
-        run: |
-          make docker-build-data-provider IMG_DATA_PROVIDER=quay.io/krkn-chaos/krkn-operator-data-provider:$VERSION
-          docker tag quay.io/krkn-chaos/krkn-operator-data-provider:$VERSION quay.io/krkn-chaos/krkn-operator-data-provider:latest
-          docker push quay.io/krkn-chaos/krkn-operator-data-provider:$VERSION
-          docker push quay.io/krkn-chaos/krkn-operator-data-provider:latest
+        uses: docker/build-push-action@v6
+        with:
+          context: ./krkn-operator-data-provider
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            quay.io/krkn-chaos/krkn-operator-data-provider:${{ env.VERSION }}
+            quay.io/krkn-chaos/krkn-operator-data-provider:latest
 
       - name: Create GitHub Release
         env:
@@ -52,6 +64,8 @@ jobs:
         run: |
           cat <<EOF > release-notes.md
           ## Container Images
+
+          Multi-architecture images (linux/amd64, linux/arm64):
 
           - \`quay.io/krkn-chaos/krkn-operator:$VERSION\`
           - \`quay.io/krkn-chaos/krkn-operator:latest\`
