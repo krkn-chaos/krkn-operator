@@ -52,16 +52,41 @@ docker run --rm --entrypoint /bin/sh quay.io/krkn-operator:latest -c "file /mana
 
 ## Common Issues & Solutions
 
-### Issue 1: Wrong Architecture Image
+### Issue 1: Wrong Architecture Image (MOST COMMON)
 
-**Symptom**: Pod crashes immediately, exec format error in logs
+**Symptom**:
+- Pod crashes with `fatal error: lfstack.push` or runtime panic
+- Goroutine dumps with GC worker errors
+- Crash during k8s scheme initialization
 
-**Solution**: Ensure you're using multi-arch image or ARM-specific tag
+**Root Cause**:
+Kind cached x86_64 image before multi-arch support was added. With `imagePullPolicy: IfNotPresent`, Kubernetes uses the cached wrong-architecture image and QEMU emulation causes Go runtime crashes.
+
+**Solution 1 - Force re-pull (Quick Fix)**:
 ```bash
-# Pull and verify architecture
-docker pull --platform linux/arm64 quay.io/krkn-chaos/krkn-operator:latest
-docker inspect quay.io/krkn-chaos/krkn-operator:latest | grep -i arch
+# Delete cached image from Kind node
+docker exec -it kind-control-plane crictl images | grep krkn-operator
+docker exec -it kind-control-plane crictl rmi quay.io/krkn-chaos/krkn-operator:latest
+
+# Reinstall with Always pull policy
+helm uninstall krkn-operator
+helm install krkn-operator oci://quay.io/krkn-chaos/charts/krkn-operator --version 0.1.0 \
+  --set images.operator.pullPolicy=Always \
+  --set images.dataProvider.pullPolicy=Always
 ```
+
+**Solution 2 - Verify architecture**:
+```bash
+# Check what architecture is running
+kubectl exec -n krkn-operator-system deployment/krkn-operator-controller-manager -c manager -- uname -m
+# Should output: aarch64 (for ARM) or x86_64
+
+# Verify pulled image architecture
+docker exec -it kind-control-plane crictl inspecti quay.io/krkn-chaos/krkn-operator:latest | grep -A5 architecture
+# Should show: "architecture": "arm64" on Apple Silicon
+```
+
+**Note**: Chart v0.1.1+ uses `imagePullPolicy: Always` by default for `:latest` tags to prevent this issue.
 
 ### Issue 2: Insufficient Resources
 

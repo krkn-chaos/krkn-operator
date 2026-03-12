@@ -10,16 +10,17 @@ global:
 images:
   operator:
     image: quay.io/krkn-chaos/krkn-operator:latest
-    pullPolicy: IfNotPresent
+    # Use Always for :latest to ensure multi-arch images are pulled correctly
+    pullPolicy: Always
   dataProvider:
     image: quay.io/krkn-chaos/krkn-operator-data-provider:latest
-    pullPolicy: IfNotPresent
+    pullPolicy: Always
   acm:
     image: quay.io/krkn-chaos/krkn-operator-acm:latest
-    pullPolicy: IfNotPresent
+    pullPolicy: Always
   console:
     image: quay.io/krkn-chaos/krkn-operator-console:latest
-    pullPolicy: IfNotPresent
+    pullPolicy: Always
   pullSecrets: []
   # - name: my-registry-secret
 

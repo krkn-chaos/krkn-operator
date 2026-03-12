@@ -65,6 +65,18 @@ The console uses nginx as a reverse proxy to the operator API. The Helm chart au
 - ✅ `make deploy` (Kustomize) - Uses embedded nginx.conf from Docker image
 - ✅ `helm install` - Uses ConfigMap with dynamic service URL
 
+## Multi-Architecture Support
+
+The chart uses multi-architecture images (linux/amd64, linux/arm64) automatically published to Quay.io. The container runtime automatically selects the correct architecture.
+
+**Note**: Default `imagePullPolicy: Always` for `:latest` tag ensures the correct architecture is pulled on Kind/Minikube clusters. For production with specific versions, you can override:
+
+```bash
+helm install krkn-operator oci://quay.io/krkn-chaos/charts/krkn-operator --version 0.1.0 \
+  --set images.operator.image=quay.io/krkn-chaos/krkn-operator:v1.0.0 \
+  --set images.operator.pullPolicy=IfNotPresent
+```
+
 ## Requirements
 
 - Kubernetes 1.19+ or OpenShift 4.x
