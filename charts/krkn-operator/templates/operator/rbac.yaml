@@ -23,6 +23,18 @@ rules:
   - update
   - watch
 - apiGroups:
+  - coordination.k8s.io
+  resources:
+  - leases
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
   - ""
   resources:
   - pods
@@ -78,6 +90,84 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
   name: {{ include "krkn-operator.fullname" . }}-operator
+subjects:
+- kind: ServiceAccount
+  name: {{ include "krkn-operator.serviceAccountName" . }}
+  namespace: {{ include "krkn-operator.namespace" . }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "krkn-operator.fullname" . }}-operator-cluster
+  labels:
+    {{- include "krkn-operator.labels" . | nindent 4 }}
+    app.kubernetes.io/component: operator
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - nodes
+  - namespaces
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - krkn.krkn-chaos.dev
+  resources:
+  - krknoperatortargetproviderconfigs
+  - krknoperatortargetproviders
+  - krknoperatortargets
+  - krkntargetrequests
+  - krknscenarios
+  - krknscenari oruns
+  - krknusers
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - krkn.krkn-chaos.dev
+  resources:
+  - krknoperatortargetproviderconfigs/status
+  - krknoperatortargetproviders/status
+  - krknoperatortargets/status
+  - krkntargetrequests/status
+  - krknscenarios/status
+  - krknscenari oruns/status
+  - krknusers/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - krkn.krkn-chaos.dev
+  resources:
+  - krknoperatortargetproviderconfigs/finalizers
+  - krknoperatortargetproviders/finalizers
+  - krknoperatortargets/finalizers
+  - krkntargetrequests/finalizers
+  - krknscenarios/finalizers
+  - krknscenari oruns/finalizers
+  - krknusers/finalizers
+  verbs:
+  - update
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "krkn-operator.fullname" . }}-operator-cluster
+  labels:
+    {{- include "krkn-operator.labels" . | nindent 4 }}
+    app.kubernetes.io/component: operator
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "krkn-operator.fullname" . }}-operator-cluster
 subjects:
 - kind: ServiceAccount
   name: {{ include "krkn-operator.serviceAccountName" . }}
