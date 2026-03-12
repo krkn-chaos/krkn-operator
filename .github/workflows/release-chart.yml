@@ -7,7 +7,7 @@ on:
 
 env:
   REGISTRY: quay.io
-  CHART_REPO: krkn-chaos/krkn-operator-charts
+  CHART_REPO: krkn-chaos/charts
 
 jobs:
   release-chart:
