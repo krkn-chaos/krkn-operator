@@ -21,7 +21,7 @@ jobs:
 
       - name: Login to Quay.io
         run: |
-          echo "${{ secrets.QUAY_TOKEN }}" | helm registry login ${{ env.REGISTRY }} --username ${{ secrets.QUAY_USERNAME }} --password-stdin
+          echo "${{ secrets.QUAY_PASSWORD }}" | helm registry login ${{ env.REGISTRY }} --username ${{ secrets.QUAY_USERNAME }} --password-stdin
 
       - name: Package and Push Helm Chart
         run: |
