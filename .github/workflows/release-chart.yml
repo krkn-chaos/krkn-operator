@@ -12,6 +12,8 @@ env:
 jobs:
   release-chart:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -27,6 +29,7 @@ jobs:
         run: |
           # Extract version from tag (remove 'v' prefix)
           VERSION=${GITHUB_REF#refs/tags/v}
+          echo "VERSION=${VERSION}" >> $GITHUB_ENV
 
           # Update chart version
           sed -i "s/^version:.*/version: ${VERSION}/" charts/krkn-operator/Chart.yaml
@@ -39,8 +42,22 @@ jobs:
           helm push krkn-operator-${VERSION}.tgz oci://${{ env.REGISTRY }}/${{ env.CHART_REPO }}
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v1
-        with:
-          generate_release_notes: true
-          files: |
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cat <<EOF > release-notes.md
+          ## Helm Chart
+
+          - \`oci://quay.io/krkn-chaos/charts/krkn-operator:$VERSION\`
+
+          ## Installation
+
+          \`\`\`bash
+          helm install krkn-operator oci://quay.io/krkn-chaos/charts/krkn-operator --version $VERSION
+          \`\`\`
+          EOF
+
+          gh release create ${GITHUB_REF#refs/tags/} \
+            --title "Release ${GITHUB_REF#refs/tags/}" \
+            --notes-file release-notes.md \
             krkn-operator-*.tgz
