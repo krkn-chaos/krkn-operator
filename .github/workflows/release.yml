@@ -58,11 +58,15 @@ jobs:
           - \`quay.io/krkn-chaos/krkn-operator-data-provider:$VERSION\`
           - \`quay.io/krkn-chaos/krkn-operator-data-provider:latest\`
 
+          ## Helm Chart
+
+          - \`oci://quay.io/krkn-chaos/charts/krkn-operator:${VERSION#v}\`
+
           ## Installation
 
           \`\`\`bash
           # Using Helm (recommended)
-          helm install krkn-operator oci://quay.io/krkn-chaos/charts/krkn-operator --version $VERSION
+          helm install krkn-operator oci://quay.io/krkn-chaos/charts/krkn-operator --version ${VERSION#v}
 
           # Using kubectl
           make deploy IMG=quay.io/krkn-chaos/krkn-operator:$VERSION
