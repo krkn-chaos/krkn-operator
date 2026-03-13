@@ -6,19 +6,50 @@ on:
       - 'v*'
 
 jobs:
-  build-and-push:
-    name: Build and Push Images
+  # ========================================
+  # BUILD JOBS - All run in parallel
+  # ========================================
+
+  build-operator-amd64:
+    name: Build operator (linux/amd64)
     runs-on: ubuntu-24.04
     permissions:
-      contents: write
+      contents: read
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up Go
-        uses: actions/setup-go@v5
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Quay.io
+        uses: docker/login-action@v3
         with:
-          go-version-file: go.mod
+          registry: quay.io
+          username: ${{ secrets.QUAY_USERNAME }}
+          password: ${{ secrets.QUAY_PASSWORD }}
+
+      - name: Set version from tag
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
+
+      - name: Build and push operator (amd64)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: quay.io/krkn-chaos/krkn-operator:${{ env.VERSION }}-amd64
+          cache-from: type=gha,scope=operator-amd64
+          cache-to: type=gha,mode=max,scope=operator-amd64
+
+  build-operator-arm64:
+    name: Build operator (linux/arm64)
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -34,29 +65,153 @@ jobs:
           password: ${{ secrets.QUAY_PASSWORD }}
 
       - name: Set version from tag
-        run: |
-          echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
-          echo "Building version: ${GITHUB_REF#refs/tags/}"
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
 
-      - name: Build and push operator image
+      - name: Build and push operator (arm64)
         uses: docker/build-push-action@v6
         with:
           context: .
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/arm64
           push: true
-          tags: |
-            quay.io/krkn-chaos/krkn-operator:${{ env.VERSION }}
-            quay.io/krkn-chaos/krkn-operator:latest
+          tags: quay.io/krkn-chaos/krkn-operator:${{ env.VERSION }}-arm64
+          cache-from: type=gha,scope=operator-arm64
+          cache-to: type=gha,mode=max,scope=operator-arm64
 
-      - name: Build and push data-provider image
+  build-data-provider-amd64:
+    name: Build data-provider (linux/amd64)
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Quay.io
+        uses: docker/login-action@v3
+        with:
+          registry: quay.io
+          username: ${{ secrets.QUAY_USERNAME }}
+          password: ${{ secrets.QUAY_PASSWORD }}
+
+      - name: Set version from tag
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
+
+      - name: Build and push data-provider (amd64)
         uses: docker/build-push-action@v6
         with:
           context: ./krkn-operator-data-provider
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64
           push: true
-          tags: |
-            quay.io/krkn-chaos/krkn-operator-data-provider:${{ env.VERSION }}
-            quay.io/krkn-chaos/krkn-operator-data-provider:latest
+          tags: quay.io/krkn-chaos/krkn-operator-data-provider:${{ env.VERSION }}-amd64
+          cache-from: type=gha,scope=data-provider-amd64
+          cache-to: type=gha,mode=max,scope=data-provider-amd64
+
+  build-data-provider-arm64:
+    name: Build data-provider (linux/arm64)
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Quay.io
+        uses: docker/login-action@v3
+        with:
+          registry: quay.io
+          username: ${{ secrets.QUAY_USERNAME }}
+          password: ${{ secrets.QUAY_PASSWORD }}
+
+      - name: Set version from tag
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
+
+      - name: Build and push data-provider (arm64)
+        uses: docker/build-push-action@v6
+        with:
+          context: ./krkn-operator-data-provider
+          platforms: linux/arm64
+          push: true
+          tags: quay.io/krkn-chaos/krkn-operator-data-provider:${{ env.VERSION }}-arm64
+          cache-from: type=gha,scope=data-provider-arm64
+          cache-to: type=gha,mode=max,scope=data-provider-arm64
+
+  # ========================================
+  # MANIFEST CREATION - After all builds
+  # ========================================
+
+  create-manifests:
+    name: Create Multi-Arch Manifests and Release
+    needs:
+      - build-operator-amd64
+      - build-operator-arm64
+      - build-data-provider-amd64
+      - build-data-provider-arm64
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Login to Quay.io
+        uses: docker/login-action@v3
+        with:
+          registry: quay.io
+          username: ${{ secrets.QUAY_USERNAME }}
+          password: ${{ secrets.QUAY_PASSWORD }}
+
+      - name: Set version from tag
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
+
+      - name: Create operator multi-arch manifest
+        run: |
+          echo "Creating operator manifest for version $VERSION..."
+
+          # Create versioned tag
+          docker buildx imagetools create -t quay.io/krkn-chaos/krkn-operator:$VERSION \
+            quay.io/krkn-chaos/krkn-operator:$VERSION-amd64 \
+            quay.io/krkn-chaos/krkn-operator:$VERSION-arm64
+
+          # Create latest tag
+          docker buildx imagetools create -t quay.io/krkn-chaos/krkn-operator:latest \
+            quay.io/krkn-chaos/krkn-operator:$VERSION-amd64 \
+            quay.io/krkn-chaos/krkn-operator:$VERSION-arm64
+
+          echo "Operator manifest created successfully"
+
+      - name: Create data-provider multi-arch manifest
+        run: |
+          echo "Creating data-provider manifest for version $VERSION..."
+
+          # Create versioned tag
+          docker buildx imagetools create -t quay.io/krkn-chaos/krkn-operator-data-provider:$VERSION \
+            quay.io/krkn-chaos/krkn-operator-data-provider:$VERSION-amd64 \
+            quay.io/krkn-chaos/krkn-operator-data-provider:$VERSION-arm64
+
+          # Create latest tag
+          docker buildx imagetools create -t quay.io/krkn-chaos/krkn-operator-data-provider:latest \
+            quay.io/krkn-chaos/krkn-operator-data-provider:$VERSION-amd64 \
+            quay.io/krkn-chaos/krkn-operator-data-provider:$VERSION-arm64
+
+          echo "Data-provider manifest created successfully"
+
+      - name: Verify multi-arch manifests
+        run: |
+          echo "Verifying operator manifest..."
+          docker buildx imagetools inspect quay.io/krkn-chaos/krkn-operator:$VERSION
+
+          echo ""
+          echo "Verifying data-provider manifest..."
+          docker buildx imagetools inspect quay.io/krkn-chaos/krkn-operator-data-provider:$VERSION
 
       - name: Create GitHub Release
         env:
