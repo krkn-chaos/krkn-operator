@@ -36,6 +36,7 @@ import (
 type KrknOperatorTargetProviderConfigReconciler struct {
 	client.Client
 	Scheme            *runtime.Scheme
+	OperatorName      string
 	OperatorNamespace string
 }
 
@@ -107,7 +108,66 @@ func (r *KrknOperatorTargetProviderConfigReconciler) Reconcile(ctx context.Conte
 		return ctrl.Result{}, err
 	}
 
-	// Refetch before completion check to avoid conflicts
+	// Refetch after status initialization
+	if err := r.Get(ctx, req.NamespacedName, &config); err != nil {
+		logger.Error(err, "Failed to refetch after status init")
+		return ctrl.Result{}, err
+	}
+
+	// 5.5. Check if this provider itself is active before contributing
+	isActive, _, err := checkProviderActive(ctx, r.Client, r.OperatorName)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	if !isActive {
+		logger.Info("krkn-operator provider is not active, skipping contribution")
+		// Still continue to completion check and cleanup
+		goto checkCompletion
+	}
+
+	// 5.6. Skip if already contributed
+	if config.Status.ConfigData != nil {
+		if _, exists := config.Status.ConfigData[r.OperatorName]; exists {
+			logger.Info("Already contributed, skipping", "uuid", config.Spec.UUID)
+			goto checkCompletion
+		}
+	}
+
+	// 5.7. Contribute krkn-operator's configuration (empty marker for now)
+	logger.Info("Contributing krkn-operator configuration", "uuid", config.Spec.UUID)
+
+	// Direct status update with empty ProviderConfigData (no ConfigMap/schema needed)
+	// We don't use provider.UpdateProviderConfig() because it requires non-empty configMapName
+	if config.Status.ConfigData == nil {
+		config.Status.ConfigData = make(map[string]krknv1alpha1.ProviderConfigData)
+	}
+
+	// Add empty contribution marker for krkn-operator
+	config.Status.ConfigData[r.OperatorName] = krknv1alpha1.ProviderConfigData{
+		ConfigMap:    "", // Empty - no config to expose yet
+		Namespace:    r.OperatorNamespace,
+		ConfigSchema: "", // Empty - no schema yet
+	}
+
+	if err := r.Status().Update(ctx, &config); err != nil {
+		if isConflictError(err) {
+			logger.Info("Conflict updating provider config, will retry")
+			return ctrl.Result{Requeue: true}, nil
+		}
+		logger.Error(err, "Failed to update provider config")
+		return ctrl.Result{}, err
+	}
+
+	logger.Info("✅ Successfully contributed krkn-operator configuration", "uuid", config.Spec.UUID)
+
+	// Refetch after contribution to get latest version
+	if err := r.Get(ctx, req.NamespacedName, &config); err != nil {
+		logger.Error(err, "Failed to refetch after contribution")
+		return ctrl.Result{}, err
+	}
+
+checkCompletion:
+	// Refetch before completion check to ensure we have latest version
 	if err := r.Get(ctx, req.NamespacedName, &config); err != nil {
 		logger.Error(err, "Failed to refetch KrknOperatorTargetProviderConfig before completion check")
 		return ctrl.Result{}, err
@@ -169,10 +229,7 @@ func (r *KrknOperatorTargetProviderConfigReconciler) initializeStatus(ctx contex
 		config.Status.Status = "pending"
 		now := metav1.NewTime(time.Now())
 		config.Status.Created = &now
-		// Initialize ConfigData map
-		if config.Status.ConfigData == nil {
-			config.Status.ConfigData = make(map[string]krknv1alpha1.ProviderConfigData)
-		}
+		// ConfigData map will be initialized when contributing
 		if err := r.Status().Update(ctx, config); err != nil {
 			return err
 		}
@@ -191,11 +248,11 @@ func (r *KrknOperatorTargetProviderConfigReconciler) checkCompletion(ctx context
 	activeProviders, activeProviderNames := countActiveProviders(providerList)
 
 	// Log active providers
-	for _, provider := range providerList.Items {
-		if provider.Spec.Active {
+	for _, p := range providerList.Items {
+		if p.Spec.Active {
 			logger.Info("Active provider found",
-				"name", provider.Spec.OperatorName,
-				"timestamp", provider.Status.Timestamp)
+				"name", p.Spec.OperatorName,
+				"timestamp", p.Status.Timestamp)
 		}
 	}
 

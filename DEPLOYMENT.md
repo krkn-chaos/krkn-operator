@@ -2,7 +2,7 @@
 
 This guide explains how to build, push, and deploy the krkn-operator using the standardized Makefile.
 
-## Architecture
+## Architecturpuoi ce
 
 The krkn-operator consists of two components running in a single pod:
 
