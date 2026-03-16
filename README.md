@@ -10,8 +10,6 @@ Kubernetes operator for chaos engineering built on the [krkn](https://github.com
 
 📖 **[Official Documentation](https://krkn-chaos.dev/docs/krkn-operator)**
 
-📦 **[Helm Chart](https://github.com/krkn-chaos/krkn-operator/tree/main/charts/krkn-operator)**
-
 ## License
 
 Copyright 2025 krkn-chaos
