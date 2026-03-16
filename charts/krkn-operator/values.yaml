@@ -132,7 +132,7 @@ console:
     # NodePort (only used if type: NodePort)
     nodePort: 30080
 
-  # Ingress configuration (Kubernetes)
+  # Ingress configuration (Kubernetes - legacy)
   ingress:
     enabled: false
     className: "nginx"
@@ -146,6 +146,33 @@ console:
     annotations: {}
     # cert-manager.io/cluster-issuer: letsencrypt-prod
     # kubernetes.io/ingress.class: alb
+
+  # Gateway API configuration (Kubernetes - recommended)
+  # Requires Gateway API CRDs installed in the cluster
+  # See: https://gateway-api.sigs.k8s.io/
+  gateway:
+    enabled: false
+
+    # Name of the existing Gateway resource to attach to
+    gatewayName: "krkn-gateway"
+
+    # Namespace of the Gateway (if different from release namespace)
+    # Leave empty to use the same namespace
+    gatewayNamespace: ""
+
+    # Optional: Listener/Section name on the Gateway to attach to
+    # Useful when Gateway has multiple listeners
+    sectionName: ""
+
+    # Hostname for the HTTPRoute
+    hostname: "krkn-operator.example.com"
+
+    # Path configuration
+    path: "/"
+    pathType: "PathPrefix"  # PathPrefix, Exact, or ImplementationSpecific
+
+    # Annotations for the HTTPRoute resource
+    annotations: {}
 
   # OpenShift Route configuration
   route:

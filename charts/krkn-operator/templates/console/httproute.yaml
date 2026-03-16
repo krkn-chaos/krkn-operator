@@ -1,0 +1,36 @@
+{{- if and .Values.console.enabled .Values.console.gateway.enabled }}
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ include "krkn-operator.console.fullname" . }}
+  namespace: {{ include "krkn-operator.namespace" . }}
+  labels:
+    {{- include "krkn-operator.labels" . | nindent 4 }}
+    app.kubernetes.io/component: console
+  {{- with .Values.console.gateway.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  parentRefs:
+  - name: {{ .Values.console.gateway.gatewayName }}
+    {{- if .Values.console.gateway.gatewayNamespace }}
+    namespace: {{ .Values.console.gateway.gatewayNamespace }}
+    {{- end }}
+    {{- if .Values.console.gateway.sectionName }}
+    sectionName: {{ .Values.console.gateway.sectionName }}
+    {{- end }}
+  {{- if .Values.console.gateway.hostname }}
+  hostnames:
+  - {{ .Values.console.gateway.hostname | quote }}
+  {{- end }}
+  rules:
+  - matches:
+    - path:
+        type: {{ .Values.console.gateway.pathType | default "PathPrefix" }}
+        value: {{ .Values.console.gateway.path | default "/" }}
+    backendRefs:
+    - name: {{ include "krkn-operator.console.fullname" . }}
+      port: {{ .Values.console.service.port }}
+      weight: 1
+{{- end }}

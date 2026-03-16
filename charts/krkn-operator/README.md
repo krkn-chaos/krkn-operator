@@ -20,12 +20,23 @@ helm install my-krkn oci://quay.io/krkn-chaos/charts/krkn-operator --version 0.1
   --set console.route.hostname=krkn.apps.cluster.com
 ```
 
-### Install with Kubernetes Ingress
+### Install with Kubernetes Ingress (legacy)
 
 ```bash
 helm install my-krkn oci://quay.io/krkn-chaos/charts/krkn-operator --version 0.1.0 \
   --set console.ingress.enabled=true \
   --set console.ingress.hostname=krkn.example.com
+```
+
+### Install with Gateway API (recommended for Kubernetes)
+
+Gateway API is the modern successor to Ingress. Requires Gateway API CRDs and an existing Gateway resource.
+
+```bash
+helm install my-krkn oci://quay.io/krkn-chaos/charts/krkn-operator --version 0.1.0 \
+  --set console.gateway.enabled=true \
+  --set console.gateway.gatewayName=krkn-gateway \
+  --set console.gateway.hostname=krkn.example.com
 ```
 
 ### Install with ACM integration
@@ -51,7 +62,8 @@ See [values.yaml](values.yaml) for all available configuration options.
 | Parameter | Description | Default |
 |-----------|-------------|---------|
 | `console.enabled` | Enable web console | `true` |
-| `console.ingress.enabled` | Enable Kubernetes Ingress | `false` |
+| `console.gateway.enabled` | Enable Gateway API (recommended) | `false` |
+| `console.ingress.enabled` | Enable Kubernetes Ingress (legacy) | `false` |
 | `console.route.enabled` | Enable OpenShift Route | `false` |
 | `acm.enabled` | Enable ACM integration | `false` |
 | `monitoring.enabled` | Enable Prometheus ServiceMonitor | `false` |
