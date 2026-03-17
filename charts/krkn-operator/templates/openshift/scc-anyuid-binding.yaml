@@ -1,0 +1,19 @@
+{{- if .Capabilities.APIVersions.Has "security.openshift.io/v1/SecurityContextConstraints" }}
+---
+# Equivalent to: oc adm policy add-scc-to-user anyuid -z krkn-operator-krkn-scenario-runner
+# Grants OpenShift's built-in anyuid SCC to scenario-runner ServiceAccount
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "krkn-operator.fullname" . }}-scenario-runner-anyuid
+  labels:
+    {{- include "krkn-operator.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:openshift:scc:anyuid
+subjects:
+- kind: ServiceAccount
+  name: {{ include "krkn-operator.fullname" . }}-krkn-scenario-runner
+  namespace: {{ include "krkn-operator.namespace" . }}
+{{- end }}

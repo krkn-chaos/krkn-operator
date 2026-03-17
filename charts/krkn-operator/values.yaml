@@ -69,8 +69,8 @@ operator:
 
   securityContext:
     runAsNonRoot: true
-    runAsUser: 1000
-    fsGroup: 1000
+    seccompProfile:
+      type: RuntimeDefault
 
   nodeSelector: {}
   tolerations: []
@@ -105,8 +105,8 @@ acm:
 
   securityContext:
     runAsNonRoot: true
-    runAsUser: 1000
-    fsGroup: 1000
+    seccompProfile:
+      type: RuntimeDefault
 
   nodeSelector: {}
   tolerations: []
@@ -192,8 +192,8 @@ console:
 
   securityContext:
     runAsNonRoot: true
-    runAsUser: 1000
-    fsGroup: 1000
+    seccompProfile:
+      type: RuntimeDefault
 
   nodeSelector: {}
   tolerations: []

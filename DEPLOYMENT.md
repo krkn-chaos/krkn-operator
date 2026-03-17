@@ -45,7 +45,7 @@ helm install krkn-operator oci://quay.io/krkn-chaos/charts/krkn-operator --versi
   --set console.ingress.hostname=krkn.example.com
 ```
 
-#### Install with ACM integration
+#### Install with ACM integration (OpenShift)
 
 ```bash
 helm install krkn-operator oci://quay.io/krkn-chaos/charts/krkn-operator --version 0.1.0 \

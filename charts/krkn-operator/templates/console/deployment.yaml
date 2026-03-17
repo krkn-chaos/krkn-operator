@@ -61,8 +61,6 @@ spec:
           capabilities:
             drop:
             - ALL
-          seccompProfile:
-            type: RuntimeDefault
         # Mount nginx.conf from ConfigMap to override embedded config
         volumeMounts:
         - name: nginx-config
