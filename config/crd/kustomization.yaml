@@ -5,3 +5,4 @@ resources:
 - bases/krkn.krkn-chaos.dev_krkntargetrequests.yaml
 - bases/krkn.krkn-chaos.dev_krknscenarioruns.yaml
 - bases/krkn.krkn-chaos.dev_krknusers.yaml
+- bases/krkn.krkn-chaos.dev_krknusergroups.yaml
