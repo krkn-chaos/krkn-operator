@@ -297,22 +297,22 @@ func (r *KrknScenarioRunReconciler) createClusterJob(
 
 	// Cleanup helper
 	cleanup := func() {
-		r.Delete(ctx, kubeconfigConfigMap)
+		_ = r.Delete(ctx, kubeconfigConfigMap) // Best-effort cleanup
 		for _, cm := range fileConfigMaps {
-			r.Delete(ctx, &corev1.ConfigMap{
+			_ = r.Delete(ctx, &corev1.ConfigMap{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      cm,
 					Namespace: r.Namespace,
 				},
-			})
+			}) // Best-effort cleanup
 		}
 		if imagePullSecretName != "" {
-			r.Delete(ctx, &corev1.Secret{
+			_ = r.Delete(ctx, &corev1.Secret{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      imagePullSecretName,
 					Namespace: r.Namespace,
 				},
-			})
+			}) // Best-effort cleanup
 		}
 	}
 

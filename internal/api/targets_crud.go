@@ -266,7 +266,7 @@ func (h *Handler) CreateTarget(w http.ResponseWriter, r *http.Request) {
 
 	if err := h.client.Create(ctx, target); err != nil {
 		// Cleanup secret on error
-		h.client.Delete(ctx, secret)
+		_ = h.client.Delete(ctx, secret) // Best-effort cleanup
 
 		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
 			Error:   "internal_error",
@@ -282,8 +282,8 @@ func (h *Handler) CreateTarget(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := h.client.Status().Update(ctx, target); err != nil {
 		// Cleanup on error
-		h.client.Delete(ctx, target)
-		h.client.Delete(ctx, secret)
+		_ = h.client.Delete(ctx, target) // Best-effort cleanup
+		_ = h.client.Delete(ctx, secret)  // Best-effort cleanup
 
 		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
 			Error:   "internal_error",

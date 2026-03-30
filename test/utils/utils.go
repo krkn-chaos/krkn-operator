@@ -245,8 +245,8 @@ func UncommentCode(filename, target, prefix string) error {
 	}
 
 	// false positive
-	// nolint:gosec
-	if err = os.WriteFile(filename, out.Bytes(), 0644); err != nil {
+	// nolint:gosec // G306: test file, world-readable is acceptable
+	if err = os.WriteFile(filename, out.Bytes(), 0600); err != nil {
 		return fmt.Errorf("failed to write file %q: %w", filename, err)
 	}
 

@@ -333,7 +333,7 @@ func convertInputFields(fields []typing.InputField) []InputFieldResponse {
 func writeJSON(w http.ResponseWriter, status int, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(data)
+	_ = json.NewEncoder(w).Encode(data) // If encoding fails, client gets partial response
 }
 
 // writeJSONError writes a JSON error response with the given status code
@@ -672,22 +672,22 @@ func (h *Handler) createScenarioJob(
 
 	// Cleanup helper
 	cleanup := func() {
-		h.client.Delete(ctx, kubeconfigConfigMap)
+		_ = h.client.Delete(ctx, kubeconfigConfigMap) // Best-effort cleanup
 		for _, cm := range fileConfigMaps {
-			h.client.Delete(ctx, &corev1.ConfigMap{
+			_ = h.client.Delete(ctx, &corev1.ConfigMap{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      cm,
 					Namespace: h.namespace,
 				},
-			})
+			}) // Best-effort cleanup
 		}
 		if imagePullSecretName != "" {
-			h.client.Delete(ctx, &corev1.Secret{
+			_ = h.client.Delete(ctx, &corev1.Secret{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      imagePullSecretName,
 					Namespace: h.namespace,
 				},
-			})
+			}) // Best-effort cleanup
 		}
 	}
 
@@ -1393,7 +1393,7 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 
 	if !strings.HasPrefix(path, prefix) {
 		logger.Error(nil, "Invalid logs endpoint path", "path", path)
-		conn.WriteMessage(websocket.TextMessage, []byte("ERROR: Invalid logs endpoint"))
+		_ = conn.WriteMessage(websocket.TextMessage, []byte("ERROR: Invalid logs endpoint")) // Best-effort error reporting
 		return
 	}
 
@@ -1404,7 +1404,7 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 	parts := strings.Split(remainder, "/jobs/")
 	if len(parts) != 2 {
 		logger.Error(nil, "Invalid logs endpoint path format", "path", path)
-		conn.WriteMessage(websocket.TextMessage, []byte("ERROR: Invalid path format. Expected: /api/v1/scenarios/run/{scenarioRunName}/jobs/{jobId}/logs"))
+		_ = conn.WriteMessage(websocket.TextMessage, []byte("ERROR: Invalid path format. Expected: /api/v1/scenarios/run/{scenarioRunName}/jobs/{jobId}/logs")) // Best-effort error reporting
 		return
 	}
 
@@ -1414,7 +1414,7 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 	// Extract jobId (remove "/logs" suffix)
 	if !strings.HasSuffix(jobIdAndLogs, "/logs") {
 		logger.Error(nil, "Invalid logs endpoint path format", "path", path)
-		conn.WriteMessage(websocket.TextMessage, []byte("ERROR: Invalid path format. Expected: /api/v1/scenarios/run/{scenarioRunName}/jobs/{jobId}/logs"))
+		_ = conn.WriteMessage(websocket.TextMessage, []byte("ERROR: Invalid path format. Expected: /api/v1/scenarios/run/{scenarioRunName}/jobs/{jobId}/logs")) // Best-effort error reporting
 		return
 	}
 
@@ -1422,7 +1422,7 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 
 	if scenarioRunName == "" || jobId == "" {
 		logger.Error(nil, "Empty scenarioRunName or jobId in request path", "path", path)
-		conn.WriteMessage(websocket.TextMessage, []byte("ERROR: scenarioRunName and jobId cannot be empty"))
+		_ = conn.WriteMessage(websocket.TextMessage, []byte("ERROR: scenarioRunName and jobId cannot be empty")) // Best-effort error reporting
 		return
 	}
 
@@ -1430,9 +1430,9 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 
 	// Set up ping/pong handlers to detect client disconnection
 	pongWait := 60 * time.Second
-	conn.SetReadDeadline(time.Now().Add(pongWait))
+	_ = conn.SetReadDeadline(time.Now().Add(pongWait)) // Best-effort timeout
 	conn.SetPongHandler(func(string) error {
-		conn.SetReadDeadline(time.Now().Add(pongWait))
+		_ = conn.SetReadDeadline(time.Now().Add(pongWait)) // Best-effort timeout
 		return nil
 	})
 
@@ -1469,13 +1469,13 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 		"krkn-job-id": jobId,
 	}); err != nil {
 		logger.Error(err, "Failed to list pods", "jobId", jobId)
-		conn.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("ERROR: Failed to list pods: %s", err.Error())))
+		_ = conn.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("ERROR: Failed to list pods: %s", err.Error()))) // Best-effort error reporting
 		return
 	}
 
 	if len(podList.Items) == 0 {
 		logger.Error(nil, "Job not found", "jobId", jobId)
-		conn.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("ERROR: Job with ID '%s' not found", jobId)))
+		_ = conn.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("ERROR: Job with ID '%s' not found", jobId))) // Best-effort error reporting
 		return
 	}
 
@@ -1518,7 +1518,7 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 			"jobId", jobId,
 			"podName", pod.Name,
 			"namespace", h.namespace)
-		conn.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("ERROR: Failed to open log stream: %s", err.Error())))
+		_ = conn.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("ERROR: Failed to open log stream: %s", err.Error()))) // Best-effort error reporting
 		return
 	}
 	defer stream.Close()
@@ -1558,7 +1558,7 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 			"jobId", jobId,
 			"podName", pod.Name,
 			"linesStreamed", lineCount)
-		conn.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("ERROR: Log stream error: %s", err.Error())))
+		_ = conn.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("ERROR: Log stream error: %s", err.Error()))) // Best-effort error reporting
 		return
 	}
 
@@ -1755,7 +1755,7 @@ func (h *Handler) DeleteScenarioRun(w http.ResponseWriter, r *http.Request) {
 		"krkn-job-id": jobId,
 	}); err == nil {
 		for _, cm := range configMapList.Items {
-			h.client.Delete(ctx, &cm)
+			_ = h.client.Delete(ctx, &cm) // Best-effort cleanup
 		}
 	}
 
@@ -1764,7 +1764,7 @@ func (h *Handler) DeleteScenarioRun(w http.ResponseWriter, r *http.Request) {
 		"krkn-job-id": jobId,
 	}); err == nil {
 		for _, secret := range secretList.Items {
-			h.client.Delete(ctx, &secret)
+			_ = h.client.Delete(ctx, &secret) // Best-effort cleanup
 		}
 	}
 
