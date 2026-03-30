@@ -132,7 +132,7 @@ var (
 
 func file_dataprovider_proto_rawDescGZIP() []byte {
 	file_dataprovider_proto_rawDescOnce.Do(func() {
-		file_dataprovider_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_dataprovider_proto_rawDesc), len(file_dataprovider_proto_rawDesc)))
+		file_dataprovider_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_dataprovider_proto_rawDesc), len(file_dataprovider_proto_rawDesc))) // #nosec G103 -- Required by protobuf compiler, cannot be avoided in generated code
 	})
 	return file_dataprovider_proto_rawDescData
 }
@@ -161,7 +161,7 @@ func file_dataprovider_proto_init() {
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: unsafe.Slice(unsafe.StringData(file_dataprovider_proto_rawDesc), len(file_dataprovider_proto_rawDesc)),
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_dataprovider_proto_rawDesc), len(file_dataprovider_proto_rawDesc)), // #nosec G103 -- Required by protobuf compiler, cannot be avoided in generated code
 			NumEnums:      0,
 			NumMessages:   2,
 			NumExtensions: 0,
