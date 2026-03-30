@@ -46,6 +46,7 @@ import (
 
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
 	"github.com/krkn-chaos/krkn-operator/pkg/auth"
+	"github.com/krkn-chaos/krkn-operator/pkg/groupauth"
 	pb "github.com/krkn-chaos/krkn-operator/proto/dataprovider"
 )
 
@@ -120,9 +121,33 @@ func (h *Handler) GetClusters(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Return the target data
+	// Filter clusters based on user permissions
+	// Admins see all clusters, regular users see only clusters they have 'view' permission for
+	ctx := r.Context()
+	targetData := targetRequest.Status.TargetData
+
+	claims := auth.GetClaimsFromContext(ctx)
+	if claims != nil && !auth.IsAdmin(ctx) {
+		// Regular user: filter by group permissions
+		filteredData, err := groupauth.FilterClustersByPermission(
+			ctx,
+			h.client,
+			claims.UserID,
+			h.namespace,
+			targetData,
+			groupauth.ActionView,
+		)
+		if err != nil {
+			log.FromContext(ctx).Error(err, "Failed to filter clusters by permission", "userID", claims.UserID)
+			// Continue with empty result rather than failing
+			filteredData = map[string][]krknv1alpha1.ClusterTarget{}
+		}
+		targetData = filteredData
+	}
+
+	// Return the target data (filtered for regular users, unfiltered for admins)
 	response := ClustersResponse{
-		TargetData: targetRequest.Status.TargetData,
+		TargetData: targetData,
 		Status:     targetRequest.Status.Status,
 	}
 
@@ -945,6 +970,59 @@ func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
 			}
 			seen[clusterName] = providerName
 		}
+	}
+
+	// Validate user permissions (group-based access control)
+	// Admins bypass validation, regular users must have 'run' permission on all target clusters
+	userClaims := auth.GetClaimsFromContext(ctx)
+	if userClaims != nil && !auth.IsAdmin(ctx) {
+		// Fetch KrknTargetRequest to get cluster API URLs
+		targetRequest := &krknv1alpha1.KrknTargetRequest{}
+		if err := h.client.Get(ctx, types.NamespacedName{
+			Name:      req.TargetRequestId,
+			Namespace: h.namespace,
+		}, targetRequest); err != nil {
+			logger.Error(err, "Failed to fetch target request for permission validation", "targetRequestId", req.TargetRequestId)
+			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+				Error:   "internal_error",
+				Message: "Failed to validate cluster permissions: target request not found",
+			})
+			return
+		}
+
+		// Check if target request is completed
+		if targetRequest.Status.Status != "Completed" {
+			writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+				Error:   "bad_request",
+				Message: "Target request is not completed yet",
+			})
+			return
+		}
+
+		// Validate user has 'run' permission on all target clusters
+		if err := groupauth.ValidateScenarioRunAccess(
+			ctx,
+			h.client,
+			userClaims.UserID,
+			h.namespace,
+			req.TargetClusters,
+			targetRequest,
+		); err != nil {
+			logger.Info("User lacks permission to run scenarios on requested clusters",
+				"userID", userClaims.UserID,
+				"error", err.Error(),
+			)
+			writeJSONError(w, http.StatusForbidden, ErrorResponse{
+				Error:   "forbidden",
+				Message: err.Error(),
+			})
+			return
+		}
+
+		logger.V(1).Info("User permission validated for scenario run",
+			"userID", userClaims.UserID,
+			"clusterCount", len(seen),
+		)
 	}
 
 	// Generate scenario run name

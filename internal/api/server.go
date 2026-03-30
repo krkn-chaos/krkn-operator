@@ -97,6 +97,10 @@ func NewServer(port int, client client.Client, clientset kubernetes.Interface, n
 	mux.Handle("/api/v1/users", authMw.RequireAuth(http.HandlerFunc(handler.UsersRouter)))
 	mux.Handle("/api/v1/users/", authMw.RequireAuth(http.HandlerFunc(handler.UsersRouter)))
 
+	// User group management endpoints - admin only
+	mux.Handle("/api/v1/groups", authMw.RequireAuth(http.HandlerFunc(handler.GroupsRouter)))
+	mux.Handle("/api/v1/groups/", authMw.RequireAuth(http.HandlerFunc(handler.GroupsRouter)))
+
 	// Provider config endpoints - admin only (POST), user and admin (GET)
 	// Note: handler.ProviderConfigHandler internally handles method-based authorization
 	mux.Handle("/api/v1/provider-config", authMw.RequireAuth(http.HandlerFunc(handler.ProviderConfigHandler)))

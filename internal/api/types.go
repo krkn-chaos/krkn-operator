@@ -588,3 +588,105 @@ type ChangePasswordResponse struct {
 	// Message contains a success message
 	Message string `json:"message"`
 }
+
+// UserGroup CRUD types
+
+// ClusterPermissionSet defines the actions allowed on a cluster
+type ClusterPermissionSet struct {
+	// Actions is the list of allowed actions: "view", "run", "cancel"
+	Actions []string `json:"actions"`
+}
+
+// UserGroupResponse represents a user group in API responses
+type UserGroupResponse struct {
+	// Name is the group name
+	Name string `json:"name"`
+	// Description is the group description (optional)
+	Description string `json:"description,omitempty"`
+	// ClusterPermissions is a map of clusterAPIURL to permitted actions
+	ClusterPermissions map[string]ClusterPermissionSet `json:"clusterPermissions"`
+	// MemberCount is the number of users in this group (calculated dynamically)
+	MemberCount int `json:"memberCount"`
+	// CreatedAt is when the group was created
+	CreatedAt *time.Time `json:"createdAt,omitempty"`
+}
+
+// ListUserGroupsResponse represents the response for GET /api/v1/groups
+type ListUserGroupsResponse struct {
+	// Groups is the array of user group objects
+	Groups []UserGroupResponse `json:"groups"`
+	// Total is the total number of groups
+	Total int `json:"total"`
+}
+
+// CreateUserGroupRequest represents the request body for POST /api/v1/groups
+type CreateUserGroupRequest struct {
+	// Name is the group name (required)
+	Name string `json:"name"`
+	// Description is the group description (optional)
+	Description string `json:"description,omitempty"`
+	// ClusterPermissions is a map of clusterAPIURL to permitted actions (required, min 1)
+	ClusterPermissions map[string]ClusterPermissionSet `json:"clusterPermissions"`
+}
+
+// CreateUserGroupResponse represents the response for POST /api/v1/groups
+type CreateUserGroupResponse struct {
+	// Message contains a success message
+	Message string `json:"message"`
+	// Name is the created group's name
+	Name string `json:"name"`
+}
+
+// UpdateUserGroupRequest represents the request body for PATCH /api/v1/groups/:groupName
+type UpdateUserGroupRequest struct {
+	// Description is the group description (optional)
+	Description *string `json:"description,omitempty"`
+	// ClusterPermissions is a map of clusterAPIURL to permitted actions (optional)
+	ClusterPermissions map[string]ClusterPermissionSet `json:"clusterPermissions,omitempty"`
+}
+
+// UpdateUserGroupResponse represents the response for PATCH /api/v1/groups/:groupName
+type UpdateUserGroupResponse struct {
+	// Message contains a success message
+	Message string `json:"message"`
+	// Group is the updated group object
+	Group UserGroupResponse `json:"group"`
+}
+
+// DeleteUserGroupResponse represents the response for DELETE /api/v1/groups/:groupName
+type DeleteUserGroupResponse struct {
+	// Message contains a success message
+	Message string `json:"message"`
+}
+
+// AddGroupMemberRequest represents the request body for POST /api/v1/groups/:groupName/members
+type AddGroupMemberRequest struct {
+	// UserID is the email address of the user to add (required)
+	UserID string `json:"userId"`
+}
+
+// AddGroupMemberResponse represents the response for POST /api/v1/groups/:groupName/members
+type AddGroupMemberResponse struct {
+	// Message contains a success message
+	Message string `json:"message"`
+	// UserID is the added user's email
+	UserID string `json:"userId"`
+	// GroupName is the group name
+	GroupName string `json:"groupName"`
+}
+
+// RemoveGroupMemberResponse represents the response for DELETE /api/v1/groups/:groupName/members/:userId
+type RemoveGroupMemberResponse struct {
+	// Message contains a success message
+	Message string `json:"message"`
+}
+
+// ListGroupMembersResponse represents the response for GET /api/v1/groups/:groupName/members
+type ListGroupMembersResponse struct {
+	// Members is the array of user objects in this group
+	Members []UserResponse `json:"members"`
+	// Total is the total number of members
+	Total int `json:"total"`
+	// GroupName is the group name
+	GroupName string `json:"groupName"`
+}
