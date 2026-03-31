@@ -25,6 +25,12 @@ spec:
       {{- end }}
       securityContext:
         {{- toYaml .Values.console.securityContext | nindent 8 }}
+        {{- if not (.Capabilities.APIVersions.Has "security.openshift.io/v1/SecurityContextConstraints") }}
+        # On vanilla Kubernetes, set explicit UID for nginx user
+        # OpenShift auto-assigns UID via SCC, so skip this
+        runAsUser: 101
+        fsGroup: 101
+        {{- end }}
       containers:
       - name: console
         image: {{ .Values.images.console.image }}
@@ -57,7 +63,6 @@ spec:
           failureThreshold: 3
         securityContext:
           allowPrivilegeEscalation: false
-          runAsNonRoot: true
           capabilities:
             drop:
             - ALL
