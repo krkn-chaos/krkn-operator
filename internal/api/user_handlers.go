@@ -227,7 +227,7 @@ func (h *Handler) GetUser(w http.ResponseWriter, r *http.Request) {
 	logger := log.FromContext(ctx).WithName("get-user")
 
 	// Extract userID from path
-	userID, err := extractPathSuffix(r.URL.Path, "/api/v1/users/")
+	userID, err := extractPathSuffix(r.URL.Path, UsersPath+"/")
 	if err != nil {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
 			Error:   "bad_request",
@@ -464,7 +464,7 @@ func (h *Handler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 	logger := log.FromContext(ctx).WithName("update-user")
 
 	// Extract userID from path
-	userID, err := extractPathSuffix(r.URL.Path, "/api/v1/users/")
+	userID, err := extractPathSuffix(r.URL.Path, UsersPath+"/")
 	if err != nil {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
 			Error:   "bad_request",
@@ -616,7 +616,7 @@ func (h *Handler) DeleteUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Extract userID from path
-	userID, err := extractPathSuffix(r.URL.Path, "/api/v1/users/")
+	userID, err := extractPathSuffix(r.URL.Path, UsersPath+"/")
 	if err != nil {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
 			Error:   "bad_request",
@@ -726,7 +726,7 @@ func (h *Handler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 	logger := log.FromContext(ctx).WithName("change-password")
 
 	// Extract userID from path
-	userID, err := extractPathSuffix(r.URL.Path, "/api/v1/users/")
+	userID, err := extractPathSuffix(r.URL.Path, UsersPath+"/")
 	if err != nil {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
 			Error:   "bad_request",
@@ -878,7 +878,7 @@ func (h *Handler) UsersRouter(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path
 
 	// Root endpoint: /api/v1/users
-	if path == "/api/v1/users" {
+	if path == UsersPath {
 		if r.Method == http.MethodGet {
 			h.ListUsers(w, r)
 			return
@@ -891,13 +891,13 @@ func (h *Handler) UsersRouter(w http.ResponseWriter, r *http.Request) {
 
 		writeJSONError(w, http.StatusMethodNotAllowed, ErrorResponse{
 			Error:   "method_not_allowed",
-			Message: "Only GET and POST are allowed on /api/v1/users",
+			Message: "Only GET and POST are allowed on " + UsersPath,
 		})
 		return
 	}
 
 	// User-specific endpoint: /api/v1/users/:userID
-	if strings.HasPrefix(path, "/api/v1/users/") {
+	if strings.HasPrefix(path, UsersPath+"/") {
 		// Check for password change endpoint
 		if strings.HasSuffix(path, "/password") {
 			if r.Method == http.MethodPatch {

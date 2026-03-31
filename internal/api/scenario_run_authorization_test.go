@@ -313,7 +313,7 @@ func TestPostScenarioRunSetsOwner(t *testing.T) {
 	}
 
 	bodyBytes, _ := json.Marshal(requestBody)
-	req := httptest.NewRequest("POST", "/api/v1/scenarios/run", bytes.NewReader(bodyBytes))
+	req := httptest.NewRequest("POST", ScenariosRunPath, bytes.NewReader(bodyBytes))
 	ctx := context.WithValue(req.Context(), auth.UserClaimsKey, adminClaims)
 	req = req.WithContext(ctx)
 
@@ -419,7 +419,7 @@ func TestListScenarioRunsFiltersByOwnership(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			req := httptest.NewRequest("GET", "/api/v1/scenarios/run", nil)
+			req := httptest.NewRequest("GET", ScenariosRunPath, nil)
 			ctx := context.WithValue(req.Context(), auth.UserClaimsKey, tt.claims)
 			req = req.WithContext(ctx)
 

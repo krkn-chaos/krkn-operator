@@ -92,7 +92,7 @@ func (h *Handler) GetUserGroup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Extract groupName from path
-	groupName, err := extractPathSuffix(r.URL.Path, "/api/v1/groups/")
+	groupName, err := extractPathSuffix(r.URL.Path, GroupsPath+"/")
 	if err != nil {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
 			Error:   "bad_request",
@@ -238,7 +238,7 @@ func (h *Handler) UpdateUserGroup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Extract groupName from path
-	groupName, err := extractPathSuffix(r.URL.Path, "/api/v1/groups/")
+	groupName, err := extractPathSuffix(r.URL.Path, GroupsPath+"/")
 	if err != nil {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
 			Error:   "bad_request",
@@ -347,7 +347,7 @@ func (h *Handler) DeleteUserGroup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Extract groupName from path
-	groupName, err := extractPathSuffix(r.URL.Path, "/api/v1/groups/")
+	groupName, err := extractPathSuffix(r.URL.Path, GroupsPath+"/")
 	if err != nil {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
 			Error:   "bad_request",
@@ -681,7 +681,7 @@ func (h *Handler) GroupsRouter(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path
 
 	// Root endpoint: /api/v1/groups
-	if path == "/api/v1/groups" {
+	if path == GroupsPath {
 		if r.Method == http.MethodGet {
 			h.ListUserGroups(w, r)
 			return
@@ -694,13 +694,13 @@ func (h *Handler) GroupsRouter(w http.ResponseWriter, r *http.Request) {
 
 		writeJSONError(w, http.StatusMethodNotAllowed, ErrorResponse{
 			Error:   "method_not_allowed",
-			Message: "Only GET and POST are allowed on /api/v1/groups",
+			Message: "Only GET and POST are allowed on " + GroupsPath,
 		})
 		return
 	}
 
 	// Group-specific endpoints: /api/v1/groups/:groupName
-	if strings.HasPrefix(path, "/api/v1/groups/") {
+	if strings.HasPrefix(path, GroupsPath+"/") {
 		// Members endpoints: /api/v1/groups/:groupName/members
 		if strings.Contains(path, "/members") {
 			// DELETE /api/v1/groups/:groupName/members/:userId
@@ -808,7 +808,7 @@ func validateClusterPermissions(permissions map[string]ClusterPermissionSet) err
 // extractGroupNameFromMembersPath extracts group name from /api/v1/groups/:groupName/members
 func extractGroupNameFromMembersPath(path string) (string, error) {
 	// Remove prefix and suffix
-	trimmed := strings.TrimPrefix(path, "/api/v1/groups/")
+	trimmed := strings.TrimPrefix(path, GroupsPath+"/")
 	trimmed = strings.TrimSuffix(trimmed, "/members")
 
 	if trimmed == "" || strings.Contains(trimmed, "/") {
@@ -821,10 +821,10 @@ func extractGroupNameFromMembersPath(path string) (string, error) {
 // extractGroupNameAndUserIDFromPath extracts group name and userID from /api/v1/groups/:groupName/members/:userId
 func extractGroupNameAndUserIDFromPath(path string) (string, string, error) {
 	// Expected format: /api/v1/groups/:groupName/members/:userId
-	parts := strings.Split(strings.TrimPrefix(path, "/api/v1/groups/"), "/")
+	parts := strings.Split(strings.TrimPrefix(path, GroupsPath+"/"), "/")
 
 	if len(parts) != 3 || parts[1] != "members" {
-		return "", "", fmt.Errorf("invalid path format. Expected: /api/v1/groups/:groupName/members/:userId")
+		return "", "", fmt.Errorf("invalid path format. Expected: " + GroupsPath + "/:groupName/members/:userId")
 	}
 
 	groupName := parts[0]

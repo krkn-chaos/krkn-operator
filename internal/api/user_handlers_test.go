@@ -126,7 +126,7 @@ func TestListUsers_AdminOnly_Success(t *testing.T) {
 
 	handler := setupUserTestHandler(user1, secret1, user2, secret2)
 
-	req := httptest.NewRequest("GET", "/api/v1/users", nil)
+	req := httptest.NewRequest("GET", UsersPath, nil)
 	req = req.WithContext(createAdminContext())
 	w := httptest.NewRecorder()
 
@@ -155,7 +155,7 @@ func TestListUsers_NotAdmin_Forbidden(t *testing.T) {
 	user1, secret1 := createTestUser("user1@test.local", "Test", "User", "user", true)
 	handler := setupUserTestHandler(user1, secret1)
 
-	req := httptest.NewRequest("GET", "/api/v1/users", nil)
+	req := httptest.NewRequest("GET", UsersPath, nil)
 	req = req.WithContext(createUserContext("user1@test.local"))
 	w := httptest.NewRecorder()
 
@@ -173,7 +173,7 @@ func TestListUsers_WithFilters(t *testing.T) {
 
 	handler := setupUserTestHandler(user1, secret1, user2, secret2)
 
-	req := httptest.NewRequest("GET", "/api/v1/users?role=admin", nil)
+	req := httptest.NewRequest("GET", UsersPath+"?role=admin", nil)
 	req = req.WithContext(createAdminContext())
 	w := httptest.NewRecorder()
 
@@ -205,7 +205,7 @@ func TestListUsers_WithPagination(t *testing.T) {
 
 	handler := setupUserTestHandler(user1, secret1, user2, secret2, user3, secret3)
 
-	req := httptest.NewRequest("GET", "/api/v1/users?page=1&limit=2", nil)
+	req := httptest.NewRequest("GET", UsersPath+"?page=1&limit=2", nil)
 	req = req.WithContext(createAdminContext())
 	w := httptest.NewRecorder()
 
@@ -228,7 +228,7 @@ func TestGetUser_AdminCanViewAny(t *testing.T) {
 	user1, secret1 := createTestUser("user1@test.local", "Test", "User", "user", true)
 	handler := setupUserTestHandler(user1, secret1)
 
-	req := httptest.NewRequest("GET", "/api/v1/users/user1@test.local", nil)
+	req := httptest.NewRequest("GET", UsersPath+"/user1@test.local", nil)
 	req = req.WithContext(createAdminContext())
 	w := httptest.NewRecorder()
 
@@ -253,7 +253,7 @@ func TestGetUser_UserCanViewSelf(t *testing.T) {
 	user1, secret1 := createTestUser("user1@test.local", "Test", "User", "user", true)
 	handler := setupUserTestHandler(user1, secret1)
 
-	req := httptest.NewRequest("GET", "/api/v1/users/user1@test.local", nil)
+	req := httptest.NewRequest("GET", UsersPath+"/user1@test.local", nil)
 	req = req.WithContext(createUserContext("user1@test.local"))
 	w := httptest.NewRecorder()
 
@@ -270,7 +270,7 @@ func TestGetUser_UserCannotViewOthers(t *testing.T) {
 	handler := setupUserTestHandler(user1, secret1)
 
 	// User2 trying to view user1's profile (should be forbidden)
-	req := httptest.NewRequest("GET", "/api/v1/users/user1@test.local", nil)
+	req := httptest.NewRequest("GET", UsersPath+"/user1@test.local", nil)
 	req = req.WithContext(createUserContext("user2@test.local"))
 	w := httptest.NewRecorder()
 
@@ -285,7 +285,7 @@ func TestGetUser_UserCannotViewOthers(t *testing.T) {
 func TestGetUser_NotFound(t *testing.T) {
 	handler := setupUserTestHandler()
 
-	req := httptest.NewRequest("GET", "/api/v1/users/user1@test.local", nil)
+	req := httptest.NewRequest("GET", UsersPath+"/user1@test.local", nil)
 	req = req.WithContext(createAdminContext())
 	w := httptest.NewRecorder()
 
@@ -308,7 +308,7 @@ func TestCreateUser_AdminOnly_Success(t *testing.T) {
 		"role": "user"
 	}`
 
-	req := httptest.NewRequest("POST", "/api/v1/users", strings.NewReader(reqBody))
+	req := httptest.NewRequest("POST", UsersPath, strings.NewReader(reqBody))
 	req = req.WithContext(createAdminContext())
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -341,7 +341,7 @@ func TestCreateUser_NotAdmin_Forbidden(t *testing.T) {
 		"role": "user"
 	}`
 
-	req := httptest.NewRequest("POST", "/api/v1/users", strings.NewReader(reqBody))
+	req := httptest.NewRequest("POST", UsersPath, strings.NewReader(reqBody))
 	req = req.WithContext(createUserContext("user1@test.local"))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -386,7 +386,7 @@ func TestCreateUser_Validation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			req := httptest.NewRequest("POST", "/api/v1/users", strings.NewReader(tt.body))
+			req := httptest.NewRequest("POST", UsersPath, strings.NewReader(tt.body))
 			req = req.WithContext(createAdminContext())
 			req.Header.Set("Content-Type", "application/json")
 			w := httptest.NewRecorder()
@@ -417,7 +417,7 @@ func TestCreateUser_DuplicateUser_Conflict(t *testing.T) {
 		"role": "user"
 	}`
 
-	req := httptest.NewRequest("POST", "/api/v1/users", strings.NewReader(reqBody))
+	req := httptest.NewRequest("POST", UsersPath, strings.NewReader(reqBody))
 	req = req.WithContext(createAdminContext())
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -440,7 +440,7 @@ func TestUpdateUser_AdminCanUpdateAll(t *testing.T) {
 		"role": "` + newRole + `"
 	}`
 
-	req := httptest.NewRequest("PATCH", "/api/v1/users/user1@test.local", strings.NewReader(reqBody))
+	req := httptest.NewRequest("PATCH", UsersPath+"/user1@test.local", strings.NewReader(reqBody))
 	req = req.WithContext(createAdminContext())
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -472,7 +472,7 @@ func TestUpdateUser_UserCanUpdateSelf(t *testing.T) {
 
 	reqBody := `{"name": "Updated Name"}`
 
-	req := httptest.NewRequest("PATCH", "/api/v1/users/user1@test.local", strings.NewReader(reqBody))
+	req := httptest.NewRequest("PATCH", UsersPath+"/user1@test.local", strings.NewReader(reqBody))
 	req = req.WithContext(createUserContext("user1@test.local"))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -491,7 +491,7 @@ func TestUpdateUser_UserCannotChangeRole(t *testing.T) {
 
 	reqBody := `{"role": "admin"}`
 
-	req := httptest.NewRequest("PATCH", "/api/v1/users/user1@test.local", strings.NewReader(reqBody))
+	req := httptest.NewRequest("PATCH", UsersPath+"/user1@test.local", strings.NewReader(reqBody))
 	req = req.WithContext(createUserContext("user1@test.local"))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -515,7 +515,7 @@ func TestUpdateUser_Validation(t *testing.T) {
 	// Test invalid role
 	reqBody := `{"role": "invalid"}`
 
-	req := httptest.NewRequest("PATCH", "/api/v1/users/user1@test.local", strings.NewReader(reqBody))
+	req := httptest.NewRequest("PATCH", UsersPath+"/user1@test.local", strings.NewReader(reqBody))
 	req = req.WithContext(createAdminContext())
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -539,7 +539,7 @@ func TestUpdateUser_CannotDisableSelf(t *testing.T) {
 	// Try to disable own account
 	reqBody := `{"active": false}`
 
-	req := httptest.NewRequest("PATCH", "/api/v1/users/selfadmin@domain20.test", strings.NewReader(reqBody))
+	req := httptest.NewRequest("PATCH", UsersPath+"/selfadmin@domain20.test", strings.NewReader(reqBody))
 	// Create context with same email as user
 	ctx := context.WithValue(context.Background(), auth.UserClaimsKey, &auth.Claims{
 		UserID: "selfadmin@domain20.test",
@@ -566,7 +566,7 @@ func TestDeleteUser_Success(t *testing.T) {
 	user1, secret1 := createTestUser("user1@test.local", "Test", "User", "user", true)
 	handler := setupUserTestHandler(admin, adminSecret, user1, secret1)
 
-	req := httptest.NewRequest("DELETE", "/api/v1/users/user1@test.local", nil)
+	req := httptest.NewRequest("DELETE", UsersPath+"/user1@test.local", nil)
 	// Create context with the actual admin email and admin role
 	ctx := context.WithValue(context.Background(), auth.UserClaimsKey, &auth.Claims{
 		UserID: "admin@test.local",
@@ -587,7 +587,7 @@ func TestDeleteUser_CannotDeleteSelf(t *testing.T) {
 	admin, adminSecret := createTestUser("user1@test.local", "Admin", "User", "admin", true)
 	handler := setupUserTestHandler(admin, adminSecret)
 
-	req := httptest.NewRequest("DELETE", "/api/v1/users/user1@test.local", nil)
+	req := httptest.NewRequest("DELETE", UsersPath+"/user1@test.local", nil)
 	req = req.WithContext(createAdminContext())
 	w := httptest.NewRecorder()
 
@@ -610,7 +610,7 @@ func TestDeleteUser_CannotDeleteLastAdmin(t *testing.T) {
 	handler := setupUserTestHandler(admin1, admin1Secret, admin2, admin2Secret)
 
 	// Admin2 (inactive) tries to delete admin1 (the last active admin)
-	req := httptest.NewRequest("DELETE", "/api/v1/users/admin1@test.local", nil)
+	req := httptest.NewRequest("DELETE", UsersPath+"/admin1@test.local", nil)
 	ctx := context.WithValue(context.Background(), auth.UserClaimsKey, &auth.Claims{
 		UserID: "admin2@test.local",
 		Role:   "admin",
@@ -634,7 +634,7 @@ func TestDeleteUser_NotAdmin_Forbidden(t *testing.T) {
 	user1, secret1 := createTestUser("user1@test.local", "Test", "User", "user", true)
 	handler := setupUserTestHandler(user1, secret1)
 
-	req := httptest.NewRequest("DELETE", "/api/v1/users/user1@test.local", nil)
+	req := httptest.NewRequest("DELETE", UsersPath+"/user1@test.local", nil)
 	req = req.WithContext(createUserContext("user1@test.local"))
 	w := httptest.NewRecorder()
 
@@ -652,7 +652,7 @@ func TestChangePassword_SelfChange_RequiresCurrentPassword(t *testing.T) {
 
 	// Without current password
 	reqBody := `{"newPassword": "NewPass456"}`
-	req := httptest.NewRequest("PATCH", "/api/v1/users/user1@test.local/password", strings.NewReader(reqBody))
+	req := httptest.NewRequest("PATCH", UsersPath+"/user1@test.local/password", strings.NewReader(reqBody))
 	req = req.WithContext(createUserContext("user1@test.local"))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -674,7 +674,7 @@ func TestChangePassword_AdminChange_NoCurrentPassword(t *testing.T) {
 	handler := setupUserTestHandler(user1, secret1)
 
 	reqBody := `{"newPassword": "NewPass456"}`
-	req := httptest.NewRequest("PATCH", "/api/v1/users/user1@test.local/password", strings.NewReader(reqBody))
+	req := httptest.NewRequest("PATCH", UsersPath+"/user1@test.local/password", strings.NewReader(reqBody))
 	req = req.WithContext(createAdminContext())
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -693,7 +693,7 @@ func TestChangePassword_Validation(t *testing.T) {
 
 	// Weak password
 	reqBody := `{"currentPassword": "TestPass123", "newPassword": "weak"}`
-	req := httptest.NewRequest("PATCH", "/api/v1/users/user1@test.local/password", strings.NewReader(reqBody))
+	req := httptest.NewRequest("PATCH", UsersPath+"/user1@test.local/password", strings.NewReader(reqBody))
 	req = req.WithContext(createUserContext("user1@test.local"))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -716,7 +716,7 @@ func TestChangePassword_SamePassword_Rejected(t *testing.T) {
 
 	// Use same password as current (TestPass123)
 	reqBody := `{"currentPassword": "TestPass123", "newPassword": "TestPass123"}`
-	req := httptest.NewRequest("PATCH", "/api/v1/users/user1@test.local/password", strings.NewReader(reqBody))
+	req := httptest.NewRequest("PATCH", UsersPath+"/user1@test.local/password", strings.NewReader(reqBody))
 	req = req.WithContext(createUserContext("user1@test.local"))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -742,15 +742,15 @@ func TestUsersRouter_MethodRouting(t *testing.T) {
 		path           string
 		expectedStatus int
 	}{
-		{"List users - GET", "GET", "/api/v1/users", http.StatusOK},
-		{"Create user - POST", "POST", "/api/v1/users", http.StatusBadRequest}, // Will fail validation but route works
-		{"Invalid method on root", "PUT", "/api/v1/users", http.StatusMethodNotAllowed},
-		{"Get user - GET", "GET", "/api/v1/users/test@test.local", http.StatusNotFound},          // User doesn't exist
-		{"Update user - PATCH", "PATCH", "/api/v1/users/test@test.local", http.StatusBadRequest}, // Validates body before checking existence
-		{"Delete user - DELETE", "DELETE", "/api/v1/users/test@test.local", http.StatusNotFound},
-		{"Change password - PATCH", "PATCH", "/api/v1/users/test@test.local/password", http.StatusBadRequest}, // Validates body before checking existence
-		{"Invalid method on user", "POST", "/api/v1/users/test@test.local", http.StatusMethodNotAllowed},
-		{"Invalid method on password", "GET", "/api/v1/users/test@test.local/password", http.StatusMethodNotAllowed},
+		{"List users - GET", "GET", UsersPath, http.StatusOK},
+		{"Create user - POST", "POST", UsersPath, http.StatusBadRequest}, // Will fail validation but route works
+		{"Invalid method on root", "PUT", UsersPath, http.StatusMethodNotAllowed},
+		{"Get user - GET", "GET", UsersPath + "/test@test.local", http.StatusNotFound},          // User doesn't exist
+		{"Update user - PATCH", "PATCH", UsersPath + "/test@test.local", http.StatusBadRequest}, // Validates body before checking existence
+		{"Delete user - DELETE", "DELETE", UsersPath + "/test@test.local", http.StatusNotFound},
+		{"Change password - PATCH", "PATCH", UsersPath + "/test@test.local/password", http.StatusBadRequest}, // Validates body before checking existence
+		{"Invalid method on user", "POST", UsersPath + "/test@test.local", http.StatusMethodNotAllowed},
+		{"Invalid method on password", "GET", UsersPath + "/test@test.local/password", http.StatusMethodNotAllowed},
 	}
 
 	for _, tt := range tests {

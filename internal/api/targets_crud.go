@@ -334,7 +334,7 @@ func (h *Handler) ListTargets(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) GetTarget(w http.ResponseWriter, r *http.Request) {
 	ctx := context.Background()
 
-	targetUUID, err := extractPathSuffix(r.URL.Path, "/api/v1/operator/targets/")
+	targetUUID, err := extractPathSuffix(r.URL.Path, OperatorTargetsPath+"/")
 	if err != nil {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
 			Error:   "bad_request",
@@ -358,7 +358,7 @@ func (h *Handler) GetTarget(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) UpdateTarget(w http.ResponseWriter, r *http.Request) {
 	ctx := context.Background()
 
-	targetUUID, err := extractPathSuffix(r.URL.Path, "/api/v1/operator/targets/")
+	targetUUID, err := extractPathSuffix(r.URL.Path, OperatorTargetsPath+"/")
 	if err != nil {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
 			Error:   "bad_request",
@@ -454,7 +454,7 @@ func (h *Handler) UpdateTarget(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) DeleteTarget(w http.ResponseWriter, r *http.Request) {
 	ctx := context.Background()
 
-	targetUUID, err := extractPathSuffix(r.URL.Path, "/api/v1/operator/targets/")
+	targetUUID, err := extractPathSuffix(r.URL.Path, OperatorTargetsPath+"/")
 	if err != nil {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
 			Error:   "bad_request",
@@ -505,19 +505,19 @@ func (h *Handler) TargetsCRUDRouter(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// POST /api/v1/operator/targets - create new target (admin only)
-	if path == "/api/v1/operator/targets" && r.Method == http.MethodPost {
+	if path == OperatorTargetsPath && r.Method == http.MethodPost {
 		h.CreateTarget(w, r)
 		return
 	}
 
 	// GET /api/v1/operator/targets - list all targets (user and admin)
-	if path == "/api/v1/operator/targets" && r.Method == http.MethodGet {
+	if path == OperatorTargetsPath && r.Method == http.MethodGet {
 		h.ListTargets(w, r)
 		return
 	}
 
 	// Path with UUID: /api/v1/operator/targets/{uuid}
-	if strings.HasPrefix(path, "/api/v1/operator/targets/") {
+	if strings.HasPrefix(path, OperatorTargetsPath+"/") {
 		// GET /api/v1/operator/targets/{uuid} - get single target (user and admin)
 		if r.Method == http.MethodGet {
 			h.GetTarget(w, r)

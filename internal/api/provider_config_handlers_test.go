@@ -79,7 +79,7 @@ func TestUpdateProviderConfigValues_CreatesNativeKeyValueFormat(t *testing.T) {
 	}
 	bodyBytes, _ := json.Marshal(reqBody)
 
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/provider-config/test-uuid", bytes.NewReader(bodyBytes))
+	req := httptest.NewRequest(http.MethodPost, ProviderConfigPath+"/test-uuid", bytes.NewReader(bodyBytes))
 	w := httptest.NewRecorder()
 
 	handler.UpdateProviderConfigValues(w, req)
@@ -169,7 +169,7 @@ func TestUpdateProviderConfigValues_UpdatesExistingConfigMap(t *testing.T) {
 	}
 	bodyBytes, _ := json.Marshal(reqBody)
 
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/provider-config/test-uuid", bytes.NewReader(bodyBytes))
+	req := httptest.NewRequest(http.MethodPost, ProviderConfigPath+"/test-uuid", bytes.NewReader(bodyBytes))
 	w := httptest.NewRecorder()
 
 	handler.UpdateProviderConfigValues(w, req)

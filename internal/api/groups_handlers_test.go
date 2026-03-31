@@ -79,7 +79,7 @@ func TestListUserGroups_Success(t *testing.T) {
 	fakeClientset := fake.NewSimpleClientset()
 	handler := NewHandler(fakeClient, fakeClientset, "default", "localhost:50051")
 
-	req := httptest.NewRequest("GET", "/api/v1/groups", nil)
+	req := httptest.NewRequest("GET", GroupsPath, nil)
 	req = req.WithContext(createAdminContext())
 	w := httptest.NewRecorder()
 
@@ -111,7 +111,7 @@ func TestListUserGroups_Forbidden(t *testing.T) {
 	fakeClientset := fake.NewSimpleClientset()
 	handler := NewHandler(fakeClient, fakeClientset, "default", "localhost:50051")
 
-	req := httptest.NewRequest("GET", "/api/v1/groups", nil)
+	req := httptest.NewRequest("GET", GroupsPath, nil)
 	req = req.WithContext(createUserContext("user@example.com")) // Non-admin user
 	w := httptest.NewRecorder()
 
@@ -151,7 +151,7 @@ func TestGetUserGroup_Success(t *testing.T) {
 	fakeClientset := fake.NewSimpleClientset()
 	handler := NewHandler(fakeClient, fakeClientset, "default", "localhost:50051")
 
-	req := httptest.NewRequest("GET", "/api/v1/groups/dev-team", nil)
+	req := httptest.NewRequest("GET", GroupsPath+"/dev-team", nil)
 	req = req.WithContext(createAdminContext())
 	w := httptest.NewRecorder()
 
@@ -179,7 +179,7 @@ func TestGetUserGroup_NotFound(t *testing.T) {
 	fakeClientset := fake.NewSimpleClientset()
 	handler := NewHandler(fakeClient, fakeClientset, "default", "localhost:50051")
 
-	req := httptest.NewRequest("GET", "/api/v1/groups/nonexistent", nil)
+	req := httptest.NewRequest("GET", GroupsPath+"/nonexistent", nil)
 	req = req.WithContext(createAdminContext())
 	w := httptest.NewRecorder()
 
@@ -209,7 +209,7 @@ func TestCreateUserGroup_Success(t *testing.T) {
 	}
 
 	body, _ := json.Marshal(createReq)
-	req := httptest.NewRequest("POST", "/api/v1/groups", bytes.NewReader(body))
+	req := httptest.NewRequest("POST", GroupsPath, bytes.NewReader(body))
 	req = req.WithContext(createAdminContext())
 	w := httptest.NewRecorder()
 
@@ -275,7 +275,7 @@ func TestCreateUserGroup_ValidationError(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			body, _ := json.Marshal(tt.request)
-			req := httptest.NewRequest("POST", "/api/v1/groups", bytes.NewReader(body))
+			req := httptest.NewRequest("POST", GroupsPath, bytes.NewReader(body))
 			req = req.WithContext(createAdminContext())
 			w := httptest.NewRecorder()
 
@@ -326,7 +326,7 @@ func TestUpdateUserGroup_Success(t *testing.T) {
 	}
 
 	body, _ := json.Marshal(updateReq)
-	req := httptest.NewRequest("PATCH", "/api/v1/groups/dev-team", bytes.NewReader(body))
+	req := httptest.NewRequest("PATCH", GroupsPath+"/dev-team", bytes.NewReader(body))
 	req = req.WithContext(createAdminContext())
 	w := httptest.NewRecorder()
 
@@ -385,7 +385,7 @@ func TestDeleteUserGroup_Success(t *testing.T) {
 	fakeClientset := fake.NewSimpleClientset()
 	handler := NewHandler(fakeClient, fakeClientset, "default", "localhost:50051")
 
-	req := httptest.NewRequest("DELETE", "/api/v1/groups/dev-team", nil)
+	req := httptest.NewRequest("DELETE", GroupsPath+"/dev-team", nil)
 	req = req.WithContext(createAdminContext())
 	w := httptest.NewRecorder()
 
@@ -451,7 +451,7 @@ func TestListGroupMembers_Success(t *testing.T) {
 	fakeClientset := fake.NewSimpleClientset()
 	handler := NewHandler(fakeClient, fakeClientset, "default", "localhost:50051")
 
-	req := httptest.NewRequest("GET", "/api/v1/groups/dev-team/members", nil)
+	req := httptest.NewRequest("GET", GroupsPath+"/dev-team/members", nil)
 	req = req.WithContext(createAdminContext())
 	w := httptest.NewRecorder()
 
@@ -513,7 +513,7 @@ func TestAddGroupMember_Success(t *testing.T) {
 	}
 
 	body, _ := json.Marshal(addReq)
-	req := httptest.NewRequest("POST", "/api/v1/groups/dev-team/members", bytes.NewReader(body))
+	req := httptest.NewRequest("POST", GroupsPath+"/dev-team/members", bytes.NewReader(body))
 	req = req.WithContext(createAdminContext())
 	w := httptest.NewRecorder()
 
@@ -563,7 +563,7 @@ func TestRemoveGroupMember_Success(t *testing.T) {
 	fakeClientset := fake.NewSimpleClientset()
 	handler := NewHandler(fakeClient, fakeClientset, "default", "localhost:50051")
 
-	req := httptest.NewRequest("DELETE", "/api/v1/groups/dev-team/members/user@example.com", nil)
+	req := httptest.NewRequest("DELETE", GroupsPath+"/dev-team/members/user@example.com", nil)
 	req = req.WithContext(createAdminContext())
 	w := httptest.NewRecorder()
 

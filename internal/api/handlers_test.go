@@ -67,7 +67,7 @@ func TestGetClusters_Success(t *testing.T) {
 	fakeClientset := fake.NewSimpleClientset()
 	handler := NewHandler(fakeClient, fakeClientset, "default", "localhost:50051")
 
-	req := httptest.NewRequest("GET", "/api/v1/clusters?id=test-request", nil)
+	req := httptest.NewRequest("GET", ClustersPath+"?id=test-request", nil)
 	w := httptest.NewRecorder()
 	handler.GetClusters(w, req)
 
@@ -102,7 +102,7 @@ func TestGetClusters_NotFound(t *testing.T) {
 	fakeClientset := fake.NewSimpleClientset()
 	handler := NewHandler(fakeClient, fakeClientset, "default", "localhost:50051")
 
-	req := httptest.NewRequest("GET", "/api/v1/clusters?id=non-existent", nil)
+	req := httptest.NewRequest("GET", ClustersPath+"?id=non-existent", nil)
 	w := httptest.NewRecorder()
 	handler.GetClusters(w, req)
 
@@ -129,7 +129,7 @@ func TestHealthCheck(t *testing.T) {
 	fakeClientset := fake.NewSimpleClientset()
 	handler := NewHandler(fakeClient, fakeClientset, "default", "localhost:50051")
 
-	req := httptest.NewRequest("GET", "/api/v1/health", nil)
+	req := httptest.NewRequest("GET", HealthPath, nil)
 	w := httptest.NewRecorder()
 	handler.HealthCheck(w, req)
 
@@ -156,7 +156,7 @@ func TestPostTarget_LegacyEndpoint(t *testing.T) {
 	fakeClientset := fake.NewSimpleClientset()
 	handler := NewHandler(fakeClient, fakeClientset, "default", "localhost:50051")
 
-	req := httptest.NewRequest("POST", "/api/v1/targets", nil)
+	req := httptest.NewRequest("POST", TargetsPath, nil)
 	w := httptest.NewRecorder()
 	handler.PostTarget(w, req)
 
@@ -211,7 +211,7 @@ func TestGetTargetByUUID_NotCompleted(t *testing.T) {
 	fakeClientset := fake.NewSimpleClientset()
 	handler := NewHandler(fakeClient, fakeClientset, "default", "localhost:50051")
 
-	req := httptest.NewRequest("GET", "/api/v1/targets/test-uuid", nil)
+	req := httptest.NewRequest("GET", TargetsPath+"/test-uuid", nil)
 	w := httptest.NewRecorder()
 	handler.GetTargetByUUID(w, req)
 
@@ -242,7 +242,7 @@ func TestGetTargetByUUID_Completed(t *testing.T) {
 	fakeClientset := fake.NewSimpleClientset()
 	handler := NewHandler(fakeClient, fakeClientset, "default", "localhost:50051")
 
-	req := httptest.NewRequest("GET", "/api/v1/targets/test-uuid", nil)
+	req := httptest.NewRequest("GET", TargetsPath+"/test-uuid", nil)
 	w := httptest.NewRecorder()
 	handler.GetTargetByUUID(w, req)
 
@@ -260,7 +260,7 @@ func TestGetTargetByUUID_NotFound(t *testing.T) {
 	fakeClientset := fake.NewSimpleClientset()
 	handler := NewHandler(fakeClient, fakeClientset, "default", "localhost:50051")
 
-	req := httptest.NewRequest("GET", "/api/v1/targets/non-existent-uuid", nil)
+	req := httptest.NewRequest("GET", TargetsPath+"/non-existent-uuid", nil)
 	w := httptest.NewRecorder()
 	handler.GetTargetByUUID(w, req)
 
@@ -321,7 +321,7 @@ func TestPostScenarioRun_SingleTarget_Success(t *testing.T) {
 		"scenarioName": "pod-delete"
 	}`
 
-	req := httptest.NewRequest("POST", "/api/v1/scenarios/run", strings.NewReader(reqBody))
+	req := httptest.NewRequest("POST", ScenariosRunPath, strings.NewReader(reqBody))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	handler.PostScenarioRun(w, req)
@@ -382,7 +382,7 @@ func TestPostScenarioRun_MissingTargetUUIDs(t *testing.T) {
 		"scenarioName": "pod-delete"
 	}`
 
-	req := httptest.NewRequest("POST", "/api/v1/scenarios/run", strings.NewReader(reqBody))
+	req := httptest.NewRequest("POST", ScenariosRunPath, strings.NewReader(reqBody))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	handler.PostScenarioRun(w, req)
@@ -420,7 +420,7 @@ func TestPostScenarioRun_MultipleTargets_AllSuccess(t *testing.T) {
 		"scenarioName": "pod-delete"
 	}`
 
-	req := httptest.NewRequest("POST", "/api/v1/scenarios/run", strings.NewReader(reqBody))
+	req := httptest.NewRequest("POST", ScenariosRunPath, strings.NewReader(reqBody))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	handler.PostScenarioRun(w, req)
@@ -471,7 +471,7 @@ func TestPostScenarioRun_MultipleTargets_PartialFailure(t *testing.T) {
 		"scenarioName": "pod-delete"
 	}`
 
-	req := httptest.NewRequest("POST", "/api/v1/scenarios/run", strings.NewReader(reqBody))
+	req := httptest.NewRequest("POST", ScenariosRunPath, strings.NewReader(reqBody))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	handler.PostScenarioRun(w, req)
@@ -522,7 +522,7 @@ func TestPostScenarioRun_MultipleTargets_AllFailure(t *testing.T) {
 		"scenarioName": "pod-delete"
 	}`
 
-	req := httptest.NewRequest("POST", "/api/v1/scenarios/run", strings.NewReader(reqBody))
+	req := httptest.NewRequest("POST", ScenariosRunPath, strings.NewReader(reqBody))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	handler.PostScenarioRun(w, req)
@@ -573,7 +573,7 @@ func TestPostScenarioRun_Validation_ClusterNames(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			handler := setupScenarioRunTestHandler("test-id", map[string]string{})
 
-			req := httptest.NewRequest("POST", "/api/v1/scenarios/run", strings.NewReader(tt.reqBody))
+			req := httptest.NewRequest("POST", ScenariosRunPath, strings.NewReader(tt.reqBody))
 			req.Header.Set("Content-Type", "application/json")
 			w := httptest.NewRecorder()
 			handler.PostScenarioRun(w, req)
@@ -657,7 +657,7 @@ func TestListScenarioRuns_Success(t *testing.T) {
 	fakeClientset := fake.NewSimpleClientset()
 	handler := NewHandler(fakeClient, fakeClientset, "default", "localhost:50051")
 
-	req := httptest.NewRequest("GET", "/api/v1/scenarios/run", nil)
+	req := httptest.NewRequest("GET", ScenariosRunPath, nil)
 	w := httptest.NewRecorder()
 	handler.ListScenarioRuns(w, req)
 
@@ -728,7 +728,7 @@ func TestListScenarioRuns_FilterByScenarioName(t *testing.T) {
 	fakeClientset := fake.NewSimpleClientset()
 	handler := NewHandler(fakeClient, fakeClientset, "default", "localhost:50051")
 
-	req := httptest.NewRequest("GET", "/api/v1/scenarios/run?scenarioName=pod-delete", nil)
+	req := httptest.NewRequest("GET", ScenariosRunPath+"?scenarioName=pod-delete", nil)
 	w := httptest.NewRecorder()
 	handler.ListScenarioRuns(w, req)
 

@@ -221,7 +221,7 @@ func (h *Handler) HealthCheck(w http.ResponseWriter, r *http.Request) {
 // GetTargetByUUID handles GET /api/v1/targets/{uuid} endpoint (legacy - checks KrknTargetRequest status)
 // This endpoint checks the status of a KrknTargetRequest CR created by krkn-operator-acm
 func (h *Handler) GetTargetByUUID(w http.ResponseWriter, r *http.Request) {
-	uuid, err := extractPathSuffix(r.URL.Path, "/api/v1/targets/")
+	uuid, err := extractPathSuffix(r.URL.Path, TargetsPath+"/")
 	if err != nil {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
 			Error:   "bad_request",
@@ -496,7 +496,7 @@ func extractPathSuffix(path string, prefix string) (string, error) {
 // PostScenarioDetail handles POST /api/v1/scenarios/detail/{scenario_name} endpoint
 // It returns detailed information about a specific scenario including input fields
 func (h *Handler) PostScenarioDetail(w http.ResponseWriter, r *http.Request) {
-	scenarioName, err := extractPathSuffix(r.URL.Path, "/api/v1/scenarios/detail/")
+	scenarioName, err := extractPathSuffix(r.URL.Path, ScenariosDetailPath+"/")
 	if err != nil {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
 			Error:   "bad_request",
@@ -557,7 +557,7 @@ func (h *Handler) PostScenarioDetail(w http.ResponseWriter, r *http.Request) {
 // PostScenarioGlobals handles POST /api/v1/scenarios/globals/{scenario_name} endpoint
 // It returns global environment fields for a specific scenario
 func (h *Handler) PostScenarioGlobals(w http.ResponseWriter, r *http.Request) {
-	scenarioName, err := extractPathSuffix(r.URL.Path, "/api/v1/scenarios/globals/")
+	scenarioName, err := extractPathSuffix(r.URL.Path, ScenariosGlobalsPath+"/")
 	if err != nil {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
 			Error:   "bad_request",
@@ -867,7 +867,7 @@ func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
 // GetScenarioRunStatus handles GET /api/v1/scenarios/run/{scenarioRunName} endpoint
 // It returns the current status of a scenario run
 func (h *Handler) GetScenarioRunStatus(w http.ResponseWriter, r *http.Request) {
-	scenarioRunName, err := extractPathSuffix(r.URL.Path, "/api/v1/scenarios/run/")
+	scenarioRunName, err := extractPathSuffix(r.URL.Path, ScenariosRunPath+"/")
 	if err != nil {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
 			Error:   "bad_request",
@@ -1116,7 +1116,7 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 	// Extract scenarioRunName and jobID from path
 	// Path format: /api/v1/scenarios/run/{scenarioRunName}/jobs/{jobID}/logs
 	path := r.URL.Path
-	prefix := "/api/v1/scenarios/run/"
+	prefix := ScenariosRunPath + "/"
 
 	if !strings.HasPrefix(path, prefix) {
 		logger.Error(nil, "Invalid logs endpoint path", "path", path)
@@ -1131,7 +1131,7 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 	parts := strings.Split(remainder, "/jobs/")
 	if len(parts) != 2 {
 		logger.Error(nil, "Invalid logs endpoint path format", "path", path)
-		_ = conn.WriteMessage(websocket.TextMessage, []byte("ERROR: Invalid path format. Expected: /api/v1/scenarios/run/{scenarioRunName}/jobs/{jobID}/logs")) // Best-effort error reporting
+		_ = conn.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("ERROR: Invalid path format. Expected: %s/{scenarioRunName}/jobs/{jobID}/logs", ScenariosRunPath))) // Best-effort error reporting
 		return
 	}
 
@@ -1141,7 +1141,7 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 	// Extract jobID (remove "/logs" suffix)
 	if !strings.HasSuffix(jobIDAndLogs, "/logs") {
 		logger.Error(nil, "Invalid logs endpoint path format", "path", path)
-		_ = conn.WriteMessage(websocket.TextMessage, []byte("ERROR: Invalid path format. Expected: /api/v1/scenarios/run/{scenarioRunName}/jobs/{jobID}/logs")) // Best-effort error reporting
+		_ = conn.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("ERROR: Invalid path format. Expected: %s/{scenarioRunName}/jobs/{jobID}/logs", ScenariosRunPath))) // Best-effort error reporting
 		return
 	}
 
@@ -1416,7 +1416,7 @@ func (h *Handler) GetActiveRunsOverview(w http.ResponseWriter, r *http.Request) 
 // DeleteScenarioRun handles DELETE /api/v1/scenarios/run/{jobID} endpoint
 // It stops and deletes a running job
 func (h *Handler) DeleteScenarioRun(w http.ResponseWriter, r *http.Request) {
-	jobID, err := extractPathSuffix(r.URL.Path, "/api/v1/scenarios/run/")
+	jobID, err := extractPathSuffix(r.URL.Path, ScenariosRunPath+"/")
 	if err != nil {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
 			Error:   "bad_request",
@@ -1507,7 +1507,7 @@ func (h *Handler) DeleteScenarioRun(w http.ResponseWriter, r *http.Request) {
 // DeleteScenarioRunComplete handles DELETE /api/v1/scenarios/run/{scenarioRunName}
 // It deletes the entire KrknScenarioRun CR (all jobs)
 func (h *Handler) DeleteScenarioRunComplete(w http.ResponseWriter, r *http.Request) {
-	scenarioRunName, err := extractPathSuffix(r.URL.Path, "/api/v1/scenarios/run/")
+	scenarioRunName, err := extractPathSuffix(r.URL.Path, ScenariosRunPath+"/")
 	if err != nil {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
 			Error:   "bad_request",
@@ -1567,7 +1567,7 @@ func (h *Handler) DeleteScenarioRunComplete(w http.ResponseWriter, r *http.Reque
 // It cancels a single job by setting CancelRequested flag and deleting the pod
 func (h *Handler) DeleteSingleJob(w http.ResponseWriter, r *http.Request) {
 	// Parse path: /api/v1/scenarios/run/jobs/{jobID}
-	jobID, err := extractPathSuffix(r.URL.Path, "/api/v1/scenarios/run/jobs/")
+	jobID, err := extractPathSuffix(r.URL.Path, ScenariosRunJobsPath+"/")
 	if err != nil {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
 			Error:   "bad_request",
@@ -1669,7 +1669,7 @@ func (h *Handler) DeleteSingleJob(w http.ResponseWriter, r *http.Request) {
 // It returns the status of a single job by jobID (jobID is unique across all scenario runs)
 func (h *Handler) GetSingleJob(w http.ResponseWriter, r *http.Request) {
 	// Parse path: /api/v1/scenarios/run/jobs/{jobID}
-	jobID, err := extractPathSuffix(r.URL.Path, "/api/v1/scenarios/run/jobs/")
+	jobID, err := extractPathSuffix(r.URL.Path, ScenariosRunJobsPath+"/")
 	if err != nil {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
 			Error:   "bad_request",
@@ -1744,7 +1744,7 @@ func (h *Handler) ScenariosRunRouter(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path
 
 	// Root endpoint: /api/v1/scenarios/run
-	if path == "/api/v1/scenarios/run" {
+	if path == ScenariosRunPath {
 		switch r.Method {
 		case http.MethodPost:
 			h.PostScenarioRun(w, r)
@@ -1757,12 +1757,12 @@ func (h *Handler) ScenariosRunRouter(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Nested endpoints
-	if strings.HasPrefix(path, "/api/v1/scenarios/run/") {
+	if strings.HasPrefix(path, ScenariosRunPath+"/") {
 		// Note: WebSocket logs endpoint (/jobs/{jobID}/logs) is handled in server.go
 		// before reaching this router, so no need to check for it here
 
 		// Check for /jobs/{jobID} pattern (GET or DELETE single job)
-		if strings.HasPrefix(path, "/api/v1/scenarios/run/jobs/") {
+		if strings.HasPrefix(path, ScenariosRunJobsPath+"/") {
 			switch r.Method {
 			case http.MethodGet:
 				h.GetSingleJob(w, r)
