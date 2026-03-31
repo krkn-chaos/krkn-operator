@@ -967,11 +967,11 @@ func (r *KrknScenarioRunReconciler) calculateOverallStatus(scenarioRun *krknv1al
 }
 
 // getKubeconfigFromProvider retrieves kubeconfig from a provider-specific Secret
-func (r *KrknScenarioRunReconciler) getKubeconfigFromProvider(ctx context.Context, targetId string, providerName string, clusterName string) (string, error) {
+func (r *KrknScenarioRunReconciler) getKubeconfigFromProvider(ctx context.Context, targetID string, providerName string, clusterName string) (string, error) {
 	// Fetch the secret with the same name as the KrknTargetRequest ID
 	var secret corev1.Secret
 	err := r.Get(ctx, types.NamespacedName{
-		Name:      targetId,
+		Name:      targetID,
 		Namespace: r.Namespace,
 	}, &secret)
 
