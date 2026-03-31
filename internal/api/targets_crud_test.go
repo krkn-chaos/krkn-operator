@@ -20,6 +20,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -346,7 +347,7 @@ func TestCreateTarget_DuplicateClusterName(t *testing.T) {
 		},
 	}
 
-	if err := handler.client.Create(nil, existingTarget); err != nil {
+	if err := handler.client.Create(context.TODO(), existingTarget); err != nil {
 		t.Fatalf("Failed to create existing target: %v", err)
 	}
 
@@ -413,7 +414,7 @@ func TestListTargets(t *testing.T) {
 	}
 
 	for _, target := range targets {
-		if err := handler.client.Create(nil, &target); err != nil {
+		if err := handler.client.Create(context.TODO(), &target); err != nil {
 			t.Fatalf("Failed to create test target: %v", err)
 		}
 	}
@@ -475,7 +476,7 @@ func TestGetTarget(t *testing.T) {
 		},
 	}
 
-	if err := handler.client.Create(nil, target); err != nil {
+	if err := handler.client.Create(context.TODO(), target); err != nil {
 		t.Fatalf("Failed to create test target: %v", err)
 	}
 
@@ -546,11 +547,11 @@ func TestDeleteTarget(t *testing.T) {
 		},
 	}
 
-	if err := handler.client.Create(nil, secret); err != nil {
+	if err := handler.client.Create(context.TODO(), secret); err != nil {
 		t.Fatalf("Failed to create secret: %v", err)
 	}
 
-	if err := handler.client.Create(nil, target); err != nil {
+	if err := handler.client.Create(context.TODO(), target); err != nil {
 		t.Fatalf("Failed to create target: %v", err)
 	}
 
@@ -565,7 +566,7 @@ func TestDeleteTarget(t *testing.T) {
 
 	// Verify target was deleted
 	var deletedTarget krknv1alpha1.KrknOperatorTarget
-	err := handler.client.Get(nil, client.ObjectKey{
+	err := handler.client.Get(context.TODO(), client.ObjectKey{
 		Name:      targetUUID,
 		Namespace: handler.namespace,
 	}, &deletedTarget)
@@ -576,7 +577,7 @@ func TestDeleteTarget(t *testing.T) {
 
 	// Verify secret was deleted
 	var deletedSecret corev1.Secret
-	err = handler.client.Get(nil, client.ObjectKey{
+	err = handler.client.Get(context.TODO(), client.ObjectKey{
 		Name:      secretUUID,
 		Namespace: handler.namespace,
 	}, &deletedSecret)
@@ -618,11 +619,11 @@ func TestUpdateTarget(t *testing.T) {
 		},
 	}
 
-	if err := handler.client.Create(nil, secret); err != nil {
+	if err := handler.client.Create(context.TODO(), secret); err != nil {
 		t.Fatalf("Failed to create secret: %v", err)
 	}
 
-	if err := handler.client.Create(nil, target); err != nil {
+	if err := handler.client.Create(context.TODO(), target); err != nil {
 		t.Fatalf("Failed to create target: %v", err)
 	}
 
@@ -648,7 +649,7 @@ func TestUpdateTarget(t *testing.T) {
 
 	// Verify target was updated
 	var updatedTarget krknv1alpha1.KrknOperatorTarget
-	err := handler.client.Get(nil, client.ObjectKey{
+	err := handler.client.Get(context.TODO(), client.ObjectKey{
 		Name:      targetUUID,
 		Namespace: handler.namespace,
 	}, &updatedTarget)
@@ -671,7 +672,7 @@ func TestUpdateTarget(t *testing.T) {
 
 	// Verify secret was updated
 	var updatedSecret corev1.Secret
-	err = handler.client.Get(nil, client.ObjectKey{
+	err = handler.client.Get(context.TODO(), client.ObjectKey{
 		Name:      secretUUID,
 		Namespace: handler.namespace,
 	}, &updatedSecret)

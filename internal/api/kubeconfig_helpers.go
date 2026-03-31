@@ -69,11 +69,11 @@ func (h *Handler) getKubeconfigFromOperatorTarget(ctx context.Context, targetUUI
 // getKubeconfigFromTargetRequest retrieves kubeconfig from KrknTargetRequest (legacy)
 // This is for backward compatibility with the old krkn-operator-acm flow
 // Returns base64-encoded kubeconfig string
-func (h *Handler) getKubeconfigFromTargetRequest(ctx context.Context, targetId string, clusterName string) (string, error) {
+func (h *Handler) getKubeconfigFromTargetRequest(ctx context.Context, targetID string, clusterName string) (string, error) {
 	// Fetch the secret with the same name as the KrknTargetRequest ID
 	var secret corev1.Secret
 	err := h.client.Get(ctx, types.NamespacedName{
-		Name:      targetId,
+		Name:      targetID,
 		Namespace: h.namespace,
 	}, &secret)
 
@@ -114,10 +114,10 @@ func (h *Handler) getKubeconfigFromTargetRequest(ctx context.Context, targetId s
 
 // getKubeconfig is a unified function that tries to get kubeconfig from either:
 // 1. KrknOperatorTarget (new system) - if only targetUUID is provided
-// 2. KrknTargetRequest (legacy) - if targetId and clusterName are provided
+// 2. KrknTargetRequest (legacy) - if targetID and clusterName are provided
 //
 // Returns base64-encoded kubeconfig string
-func (h *Handler) getKubeconfig(ctx context.Context, targetUUID string, targetId string, clusterName string) (string, error) {
+func (h *Handler) getKubeconfig(ctx context.Context, targetUUID string, targetID string, clusterName string) (string, error) {
 	// Try new system first (KrknOperatorTarget)
 	if targetUUID != "" {
 		kubeconfigBase64, err := h.getKubeconfigFromOperatorTarget(ctx, targetUUID)
@@ -125,15 +125,15 @@ func (h *Handler) getKubeconfig(ctx context.Context, targetUUID string, targetId
 			return kubeconfigBase64, nil
 		}
 		// If KrknOperatorTarget not found but we have legacy params, try legacy
-		if targetId == "" || clusterName == "" {
+		if targetID == "" || clusterName == "" {
 			return "", err
 		}
 	}
 
 	// Fall back to legacy system (KrknTargetRequest)
-	if targetId != "" && clusterName != "" {
-		return h.getKubeconfigFromTargetRequest(ctx, targetId, clusterName)
+	if targetID != "" && clusterName != "" {
+		return h.getKubeconfigFromTargetRequest(ctx, targetID, clusterName)
 	}
 
-	return "", fmt.Errorf("insufficient parameters: provide either targetUUID (new) or targetId+clusterName (legacy)")
+	return "", fmt.Errorf("insufficient parameters: provide either targetUUID (new) or targetID+clusterName (legacy)")
 }

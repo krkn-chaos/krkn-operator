@@ -476,9 +476,8 @@ func (h *Handler) DeleteTarget(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 
-	if err := h.client.Delete(ctx, secret); err != nil && client.IgnoreNotFound(err) != nil {
-		// Log error but continue with target deletion
-	}
+	// Best-effort cleanup of secret (ignore if not found)
+	_ = h.client.Delete(ctx, secret)
 
 	if err := h.client.Delete(ctx, target); err != nil {
 		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{

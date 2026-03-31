@@ -14,6 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+// Package utils provides testing utilities for e2e tests, including kind cluster setup and resource management.
 package utils
 
 import (
@@ -25,7 +26,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	. "github.com/onsi/ginkgo/v2" // nolint:revive,staticcheck
+	"github.com/onsi/ginkgo/v2"
 )
 
 const (
@@ -38,7 +39,7 @@ const (
 )
 
 func warnError(err error) {
-	_, _ = fmt.Fprintf(GinkgoWriter, "warning: %v\n", err)
+	_, _ = fmt.Fprintf(ginkgo.GinkgoWriter, "warning: %v\n", err)
 }
 
 // Run executes the provided command within this context
@@ -47,12 +48,12 @@ func Run(cmd *exec.Cmd) (string, error) {
 	cmd.Dir = dir
 
 	if err := os.Chdir(cmd.Dir); err != nil {
-		_, _ = fmt.Fprintf(GinkgoWriter, "chdir dir: %q\n", err)
+		_, _ = fmt.Fprintf(ginkgo.GinkgoWriter, "chdir dir: %q\n", err)
 	}
 
 	cmd.Env = append(os.Environ(), "GO111MODULE=on")
 	command := strings.Join(cmd.Args, " ")
-	_, _ = fmt.Fprintf(GinkgoWriter, "running: %q\n", command)
+	_, _ = fmt.Fprintf(ginkgo.GinkgoWriter, "running: %q\n", command)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return string(output), fmt.Errorf("%q failed with error %q: %w", command, string(output), err)

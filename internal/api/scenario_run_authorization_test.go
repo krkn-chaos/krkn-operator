@@ -293,7 +293,7 @@ func TestPostScenarioRunSetsOwner(t *testing.T) {
 	userClaims, _ := tg.ValidateToken(userToken)
 
 	requestBody := ScenarioRunRequest{
-		TargetRequestId: "test-target-request",
+		TargetRequestID: "test-target-request",
 		TargetClusters: map[string][]string{
 			"provider1": {"cluster1"},
 		},

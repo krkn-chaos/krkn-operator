@@ -16,6 +16,8 @@ limitations under the License.
 Assisted-by: Claude Sonnet 4.5 (claude-sonnet-4-5@20250929)
 */
 
+// Package groupauth provides group-based authorization and permission management for cluster access control.
+// It supports label-based group membership and permission aggregation across multiple user groups.
 package groupauth
 
 // Action represents a permission action that can be performed on a cluster

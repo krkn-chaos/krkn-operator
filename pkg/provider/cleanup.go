@@ -187,7 +187,7 @@ func extractItemsFromList(list client.ObjectList) ([]interface{}, error) {
 
 	// Check if Items is a slice
 	if itemsField.Kind() != reflect.Slice {
-		return nil, fmt.Errorf("Items field is not a slice: %T", list)
+		return nil, fmt.Errorf("items field is not a slice: %T", list)
 	}
 
 	// Extract items into []interface{}

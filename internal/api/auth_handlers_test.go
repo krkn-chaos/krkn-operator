@@ -19,6 +19,7 @@ Assisted-by: Claude Sonnet 4.5 (claude-sonnet-4-5@20250929)
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -165,7 +166,7 @@ func TestRegister_FirstAdmin_Success(t *testing.T) {
 
 	// Verify the KrknUser was created with Active=true
 	users := &krknv1alpha1.KrknUserList{}
-	if err := handler.client.List(nil, users); err != nil {
+	if err := handler.client.List(context.TODO(), users); err != nil {
 		t.Fatalf("Failed to list users: %v", err)
 	}
 

@@ -52,8 +52,8 @@ func setupUserTestHandler(objects ...runtime.Object) *Handler {
 }
 
 // createTestUser creates a test user with password secret
-func createTestUser(userId, name, surname, role string, active bool) (*krknv1alpha1.KrknUser, *corev1.Secret) {
-	userName := sanitizeUsername(userId)
+func createTestUser(userID, name, surname, role string, active bool) (*krknv1alpha1.KrknUser, *corev1.Secret) {
+	userName := sanitizeUsername(userID)
 	secretName := userName + "-password"
 
 	// Hash password "TestPass123"
@@ -69,7 +69,7 @@ func createTestUser(userId, name, surname, role string, active bool) (*krknv1alp
 			},
 		},
 		Spec: krknv1alpha1.KrknUserSpec{
-			UserID:            userId,
+			UserID:            userID,
 			Name:              name,
 			Surname:           surname,
 			Organization:      "Test Org",
@@ -108,9 +108,9 @@ func createAdminContext() context.Context {
 }
 
 // createUserContext creates a context with user claims
-func createUserContext(userId string) context.Context {
+func createUserContext(userID string) context.Context {
 	claims := &auth.Claims{
-		UserID:       userId,
+		UserID:       userID,
 		Role:         "user",
 		Name:         "Test",
 		Surname:      "User",
@@ -244,7 +244,7 @@ func TestGetUser_AdminCanViewAny(t *testing.T) {
 	}
 
 	if response.UserID != "user1@test.local" {
-		t.Errorf("Expected userId test@test.local, got %s", response.UserID)
+		t.Errorf("Expected userID test@test.local, got %s", response.UserID)
 	}
 }
 
@@ -301,7 +301,7 @@ func TestCreateUser_AdminOnly_Success(t *testing.T) {
 	handler := setupUserTestHandler()
 
 	reqBody := `{
-		"userId": "user1@test.local",
+		"userID": "user1@test.local",
 		"password": "NewPass123",
 		"name": "New",
 		"surname": "User",
@@ -325,7 +325,7 @@ func TestCreateUser_AdminOnly_Success(t *testing.T) {
 	}
 
 	if response.UserID != "user1@test.local" {
-		t.Errorf("Expected userId user1@test.local, got %s", response.UserID)
+		t.Errorf("Expected userID user1@test.local, got %s", response.UserID)
 	}
 }
 
@@ -334,7 +334,7 @@ func TestCreateUser_NotAdmin_Forbidden(t *testing.T) {
 	handler := setupUserTestHandler()
 
 	reqBody := `{
-		"userId": "user1@test.local",
+		"userID": "user1@test.local",
 		"password": "NewPass123",
 		"name": "New",
 		"surname": "User",
@@ -363,23 +363,23 @@ func TestCreateUser_Validation(t *testing.T) {
 		contains string
 	}{
 		{
-			name:     "Missing userId",
+			name:     "Missing userID",
 			body:     `{"password":"Pass123","name":"Test","surname":"User","role":"user"}`,
 			contains: "UserID",
 		},
 		{
 			name:     "Missing password",
-			body:     `{"userId":"user1@test.local","name":"Test","surname":"User","role":"user"}`,
+			body:     `{"userID":"user1@test.local","name":"Test","surname":"User","role":"user"}`,
 			contains: "password",
 		},
 		{
 			name:     "Invalid role",
-			body:     `{"userId":"user1@test.local","password":"Pass123","name":"Test","surname":"User","role":"invalid"}`,
+			body:     `{"userID":"user1@test.local","password":"Pass123","name":"Test","surname":"User","role":"invalid"}`,
 			contains: "Role must be either",
 		},
 		{
 			name:     "Weak password",
-			body:     `{"userId":"user1@test.local","password":"weak","name":"Test","surname":"User","role":"user"}`,
+			body:     `{"userID":"user1@test.local","password":"weak","name":"Test","surname":"User","role":"user"}`,
 			contains: "Password validation failed",
 		},
 	}
@@ -410,7 +410,7 @@ func TestCreateUser_DuplicateUser_Conflict(t *testing.T) {
 	handler := setupUserTestHandler(user1, secret1)
 
 	reqBody := `{
-		"userId": "user1@test.local",
+		"userID": "user1@test.local",
 		"password": "NewPass123",
 		"name": "Duplicate",
 		"surname": "User",

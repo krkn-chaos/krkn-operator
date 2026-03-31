@@ -56,7 +56,7 @@ func TestUpdateClusterJobStatuses_ProviderNameEmpty(t *testing.T) {
 		},
 		Spec: krknv1alpha1.KrknScenarioRunSpec{
 			ScenarioName:    "test-scenario",
-			TargetRequestId: "test-uuid",
+			TargetRequestID: "test-uuid",
 			MaxRetries:      3,
 		},
 		Status: krknv1alpha1.KrknScenarioRunStatus{
@@ -64,7 +64,7 @@ func TestUpdateClusterJobStatuses_ProviderNameEmpty(t *testing.T) {
 				{
 					ProviderName:  "", // Empty ProviderName - should be caught
 					ClusterName:   "cluster1",
-					JobId:         "job-123",
+					JobID:         "job-123",
 					PodName:       "pod-123",
 					Phase:         "Running", // Start as Running so it transitions to Failed
 					StartTime:     &now,
@@ -139,7 +139,7 @@ func TestUpdateClusterJobStatuses_ClusterNameEmpty(t *testing.T) {
 		},
 		Spec: krknv1alpha1.KrknScenarioRunSpec{
 			ScenarioName:    "test-scenario",
-			TargetRequestId: "test-uuid",
+			TargetRequestID: "test-uuid",
 			MaxRetries:      3,
 		},
 		Status: krknv1alpha1.KrknScenarioRunStatus{
@@ -147,7 +147,7 @@ func TestUpdateClusterJobStatuses_ClusterNameEmpty(t *testing.T) {
 				{
 					ProviderName:  "krkn-operator",
 					ClusterName:   "", // Empty ClusterName - should be caught
-					JobId:         "job-456",
+					JobID:         "job-456",
 					PodName:       "pod-456",
 					Phase:         "Running", // Start as Running so it transitions to Failed
 					StartTime:     &now,

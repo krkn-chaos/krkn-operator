@@ -16,6 +16,8 @@ limitations under the License.
 Assisted-by: Claude Sonnet 4.5 (claude-sonnet-4-5@20250929)
 */
 
+// Package controller implements Kubernetes controllers for krkn-operator custom resources.
+// It reconciles KrknScenarioRun, KrknTargetRequest, and KrknOperatorTargetProviderConfig resources.
 package controller
 
 import (
@@ -234,7 +236,7 @@ func (r *KrknScenarioRunReconciler) createClusterJob(
 	}
 
 	// Generate unique job ID
-	jobId := uuid.New().String()
+	jobID := uuid.New().String()
 
 	// Set default kubeconfig path if not provided
 	kubeconfigPath := scenarioRun.Spec.KubeconfigPath
@@ -245,10 +247,10 @@ func (r *KrknScenarioRunReconciler) createClusterJob(
 	logger.Info("getting kubeconfig for cluster",
 		"provider", providerName,
 		"cluster", clusterName,
-		"targetRequestId", scenarioRun.Spec.TargetRequestId)
+		"targetRequestId", scenarioRun.Spec.TargetRequestID)
 
 	// Get kubeconfig from managed-clusters Secret (works for ALL providers)
-	kubeconfigBase64, err := r.getKubeconfigFromProvider(ctx, scenarioRun.Spec.TargetRequestId, providerName, clusterName)
+	kubeconfigBase64, err := r.getKubeconfigFromProvider(ctx, scenarioRun.Spec.TargetRequestID, providerName, clusterName)
 	if err != nil {
 		return fmt.Errorf("failed to get kubeconfig from provider %s: %w", providerName, err)
 	}
@@ -260,13 +262,13 @@ func (r *KrknScenarioRunReconciler) createClusterJob(
 	}
 
 	// Create ConfigMap for kubeconfig
-	kubeconfigConfigMapName := fmt.Sprintf("krkn-job-%s-kubeconfig", jobId)
+	kubeconfigConfigMapName := fmt.Sprintf("krkn-job-%s-kubeconfig", jobID)
 	kubeconfigLabels := map[string]string{
-		"krkn-job-id":         jobId,
+		"krkn-job-id":         jobID,
 		"krkn-scenario-run":   scenarioRun.Name,
 		"krkn-scenario-name":  scenarioRun.Spec.ScenarioName,
 		"krkn-cluster-name":   clusterName,
-		"krkn-target-request": scenarioRun.Spec.TargetRequestId,
+		"krkn-target-request": scenarioRun.Spec.TargetRequestID,
 	}
 	if ownerLabel := getOwnerLabel(scenarioRun); ownerLabel != "" {
 		kubeconfigLabels["krkn.krkn-chaos.dev/owner-user"] = ownerLabel
@@ -321,7 +323,7 @@ func (r *KrknScenarioRunReconciler) createClusterJob(
 		// Sanitize filename for ConfigMap name
 		sanitizedName := strings.ReplaceAll(file.Name, "/", "-")
 		sanitizedName = strings.ReplaceAll(sanitizedName, ".", "-")
-		configMapName := fmt.Sprintf("krkn-job-%s-file-%s", jobId, sanitizedName)
+		configMapName := fmt.Sprintf("krkn-job-%s-file-%s", jobID, sanitizedName)
 
 		// Decode base64 content
 		fileContent, err := base64.StdEncoding.DecodeString(file.Content)
@@ -331,11 +333,11 @@ func (r *KrknScenarioRunReconciler) createClusterJob(
 		}
 
 		fileLabels := map[string]string{
-			"krkn-job-id":         jobId,
+			"krkn-job-id":         jobID,
 			"krkn-scenario-run":   scenarioRun.Name,
 			"krkn-scenario-name":  scenarioRun.Spec.ScenarioName,
 			"krkn-cluster-name":   clusterName,
-			"krkn-target-request": scenarioRun.Spec.TargetRequestId,
+			"krkn-target-request": scenarioRun.Spec.TargetRequestID,
 		}
 		if ownerLabel := getOwnerLabel(scenarioRun); ownerLabel != "" {
 			fileLabels["krkn.krkn-chaos.dev/owner-user"] = ownerLabel
@@ -368,7 +370,7 @@ func (r *KrknScenarioRunReconciler) createClusterJob(
 	// Handle private registry authentication
 	var imagePullSecrets []corev1.LocalObjectReference
 	if scenarioRun.Spec.RegistryURL != "" && scenarioRun.Spec.ScenarioRepository != "" {
-		imagePullSecretName = fmt.Sprintf("krkn-job-%s-registry", jobId)
+		imagePullSecretName = fmt.Sprintf("krkn-job-%s-registry", jobID)
 
 		// Build docker config JSON
 		authStr := ""
@@ -389,11 +391,11 @@ func (r *KrknScenarioRunReconciler) createClusterJob(
 		dockerConfigJSON, _ := json.Marshal(dockerConfig)
 
 		secretLabels := map[string]string{
-			"krkn-job-id":         jobId,
+			"krkn-job-id":         jobID,
 			"krkn-scenario-run":   scenarioRun.Name,
 			"krkn-scenario-name":  scenarioRun.Spec.ScenarioName,
 			"krkn-cluster-name":   clusterName,
-			"krkn-target-request": scenarioRun.Spec.TargetRequestId,
+			"krkn-target-request": scenarioRun.Spec.TargetRequestID,
 		}
 		if ownerLabel := getOwnerLabel(scenarioRun); ownerLabel != "" {
 			secretLabels["krkn.krkn-chaos.dev/owner-user"] = ownerLabel
@@ -498,14 +500,14 @@ func (r *KrknScenarioRunReconciler) createClusterJob(
 	var fsGroup int64 = 1001
 
 	// Create the pod
-	podName := fmt.Sprintf("krkn-job-%s", jobId)
+	podName := fmt.Sprintf("krkn-job-%s", jobID)
 	podLabels := map[string]string{
 		"app":                 "krkn-scenario",
-		"krkn-job-id":         jobId,
+		"krkn-job-id":         jobID,
 		"krkn-scenario-run":   scenarioRun.Name,
 		"krkn-scenario-name":  scenarioRun.Spec.ScenarioName,
 		"krkn-cluster-name":   clusterName,
-		"krkn-target-request": scenarioRun.Spec.TargetRequestId,
+		"krkn-target-request": scenarioRun.Spec.TargetRequestID,
 	}
 	if ownerLabel := getOwnerLabel(scenarioRun); ownerLabel != "" {
 		podLabels["krkn.krkn-chaos.dev/owner-user"] = ownerLabel
@@ -553,7 +555,7 @@ func (r *KrknScenarioRunReconciler) createClusterJob(
 	now := metav1.Now()
 	if existingJobIndex >= 0 {
 		// Update existing entry (retry case)
-		scenarioRun.Status.ClusterJobs[existingJobIndex].JobId = jobId
+		scenarioRun.Status.ClusterJobs[existingJobIndex].JobID = jobID
 		scenarioRun.Status.ClusterJobs[existingJobIndex].PodName = podName
 		scenarioRun.Status.ClusterJobs[existingJobIndex].Phase = "Pending"
 		scenarioRun.Status.ClusterJobs[existingJobIndex].StartTime = &now
@@ -562,14 +564,14 @@ func (r *KrknScenarioRunReconciler) createClusterJob(
 
 		logger.Info("updated retry job in status",
 			"cluster", clusterName,
-			"newJobId", jobId,
+			"newJobId", jobID,
 			"retryAttempt", scenarioRun.Status.ClusterJobs[existingJobIndex].RetryCount)
 	} else {
 		// New job (first attempt)
 		jobStatus := krknv1alpha1.ClusterJobStatus{
 			ProviderName: providerName,
 			ClusterName:  clusterName,
-			JobId:        jobId,
+			JobID:        jobID,
 			PodName:      podName,
 			Phase:        "Pending",
 			StartTime:    &now,
@@ -580,7 +582,7 @@ func (r *KrknScenarioRunReconciler) createClusterJob(
 
 		logger.Info("created new cluster job",
 			"cluster", clusterName,
-			"jobId", jobId,
+			"jobID", jobID,
 			"pod", podName)
 	}
 
@@ -599,7 +601,7 @@ func (r *KrknScenarioRunReconciler) updateClusterJobStatuses(
 
 		logger.V(1).Info("checking job status",
 			"cluster", job.ClusterName,
-			"jobId", job.JobId,
+			"jobID", job.JobID,
 			"currentPhase", job.Phase,
 			"podName", job.PodName)
 
@@ -607,7 +609,7 @@ func (r *KrknScenarioRunReconciler) updateClusterJobStatuses(
 		if job.Phase == "Succeeded" || job.Phase == "Cancelled" || job.Phase == "MaxRetriesExceeded" {
 			logger.V(1).Info("skipping terminal job",
 				"cluster", job.ClusterName,
-				"jobId", job.JobId,
+				"jobID", job.JobID,
 				"phase", job.Phase)
 			continue
 		}
@@ -616,7 +618,7 @@ func (r *KrknScenarioRunReconciler) updateClusterJobStatuses(
 		if job.Phase == "Failed" && job.RetryCount >= job.MaxRetries && !job.CancelRequested {
 			logger.V(1).Info("skipping failed job that exceeded retries",
 				"cluster", job.ClusterName,
-				"jobId", job.JobId,
+				"jobID", job.JobID,
 				"retryCount", job.RetryCount,
 				"maxRetries", job.MaxRetries)
 			continue
@@ -641,7 +643,7 @@ func (r *KrknScenarioRunReconciler) updateClusterJobStatuses(
 							// Pod not found but job is recent - this is normal, keep waiting
 							logger.V(1).Info("pod not found but job is recent, keeping Pending status",
 								"cluster", job.ClusterName,
-								"jobId", job.JobId,
+								"jobID", job.JobID,
 								"podName", job.PodName,
 								"timeSinceStart", timeSinceStart.String())
 							continue
@@ -652,7 +654,7 @@ func (r *KrknScenarioRunReconciler) updateClusterJobStatuses(
 				// Pod genuinely not found - this is an error
 				logger.Info("pod not found for job",
 					"cluster", job.ClusterName,
-					"jobId", job.JobId,
+					"jobID", job.JobID,
 					"podName", job.PodName,
 					"currentPhase", job.Phase)
 
@@ -664,7 +666,7 @@ func (r *KrknScenarioRunReconciler) updateClusterJobStatuses(
 			} else {
 				logger.Error(err, "error fetching pod",
 					"cluster", job.ClusterName,
-					"jobId", job.JobId,
+					"jobID", job.JobID,
 					"podName", job.PodName)
 			}
 			continue
@@ -672,7 +674,7 @@ func (r *KrknScenarioRunReconciler) updateClusterJobStatuses(
 
 		logger.V(1).Info("pod found",
 			"cluster", job.ClusterName,
-			"jobId", job.JobId,
+			"jobID", job.JobID,
 			"podName", job.PodName,
 			"podPhase", pod.Status.Phase)
 
@@ -684,7 +686,7 @@ func (r *KrknScenarioRunReconciler) updateClusterJobStatuses(
 			if previousPhase != "Pending" {
 				logger.Info("job phase transition",
 					"cluster", job.ClusterName,
-					"jobId", job.JobId,
+					"jobID", job.JobID,
 					"from", previousPhase,
 					"to", "Pending")
 			}
@@ -693,7 +695,7 @@ func (r *KrknScenarioRunReconciler) updateClusterJobStatuses(
 			if previousPhase != "Running" {
 				logger.Info("job phase transition",
 					"cluster", job.ClusterName,
-					"jobId", job.JobId,
+					"jobID", job.JobID,
 					"from", previousPhase,
 					"to", "Running")
 			}
@@ -702,7 +704,7 @@ func (r *KrknScenarioRunReconciler) updateClusterJobStatuses(
 			r.setCompletionTime(job)
 			logger.Info("job succeeded",
 				"cluster", job.ClusterName,
-				"jobId", job.JobId,
+				"jobID", job.JobID,
 				"duration", job.CompletionTime.Sub(job.StartTime.Time).String())
 		case corev1.PodFailed:
 			job.Phase = "Failed"
@@ -713,7 +715,7 @@ func (r *KrknScenarioRunReconciler) updateClusterJobStatuses(
 			// Retry logic
 			logger.Info("pod failed, checking retry eligibility",
 				"cluster", job.ClusterName,
-				"jobId", job.JobId,
+				"jobID", job.JobID,
 				"retryCount", job.RetryCount,
 				"maxRetries", job.MaxRetries,
 				"cancelRequested", job.CancelRequested,
@@ -741,7 +743,7 @@ func (r *KrknScenarioRunReconciler) updateClusterJobStatuses(
 					if elapsed < delay {
 						logger.Info("waiting for retry backoff",
 							"cluster", job.ClusterName,
-							"jobId", job.JobId,
+							"jobID", job.JobID,
 							"elapsed", elapsed.String(),
 							"requiredDelay", delay.String())
 						// Don't retry yet, will check again on next reconcile
@@ -756,7 +758,7 @@ func (r *KrknScenarioRunReconciler) updateClusterJobStatuses(
 
 				logger.Info("retrying failed job",
 					"cluster", job.ClusterName,
-					"previousJobId", job.JobId,
+					"previousJobId", job.JobID,
 					"retryAttempt", job.RetryCount,
 					"maxRetries", maxRetries)
 
@@ -764,7 +766,7 @@ func (r *KrknScenarioRunReconciler) updateClusterJobStatuses(
 				if job.ProviderName == "" {
 					logger.Error(nil, "cannot retry job: ProviderName is empty",
 						"cluster", job.ClusterName,
-						"jobId", job.JobId)
+						"jobID", job.JobID)
 					job.Phase = "Failed"
 					job.Message = "Retry failed: ProviderName is empty"
 					job.FailureReason = "InvalidJobState"
@@ -774,7 +776,7 @@ func (r *KrknScenarioRunReconciler) updateClusterJobStatuses(
 
 				if job.ClusterName == "" {
 					logger.Error(nil, "cannot retry job: ClusterName is empty",
-						"jobId", job.JobId)
+						"jobID", job.JobID)
 					job.Phase = "Failed"
 					job.Message = "Retry failed: ClusterName is empty"
 					job.FailureReason = "InvalidJobState"
@@ -782,7 +784,7 @@ func (r *KrknScenarioRunReconciler) updateClusterJobStatuses(
 					continue
 				}
 
-				// Create new pod (will get new jobId)
+				// Create new pod (will get new jobID)
 				if err := r.createClusterJob(ctx, scenarioRun, job.ProviderName, job.ClusterName); err != nil {
 					logger.Error(err, "failed to create retry job",
 						"cluster", job.ClusterName,
@@ -795,12 +797,12 @@ func (r *KrknScenarioRunReconciler) updateClusterJobStatuses(
 				job.Phase = "Cancelled"
 				logger.Info("job marked as cancelled, no retry",
 					"cluster", job.ClusterName,
-					"jobId", job.JobId)
+					"jobID", job.JobID)
 			} else {
 				job.Phase = "MaxRetriesExceeded"
 				logger.Info("job exceeded max retries",
 					"cluster", job.ClusterName,
-					"jobId", job.JobId,
+					"jobID", job.JobID,
 					"retryCount", job.RetryCount,
 					"maxRetries", maxRetries)
 			}
@@ -811,7 +813,7 @@ func (r *KrknScenarioRunReconciler) updateClusterJobStatuses(
 			r.setCompletionTime(job)
 			logger.Info("pod in unknown state",
 				"cluster", job.ClusterName,
-				"jobId", job.JobId,
+				"jobID", job.JobID,
 				"podName", job.PodName)
 		}
 	}
@@ -1051,7 +1053,7 @@ func (r *KrknScenarioRunReconciler) statusEqual(old, new *krknv1alpha1.KrknScena
 func (r *KrknScenarioRunReconciler) jobStatusEqual(old, new *krknv1alpha1.ClusterJobStatus) bool {
 	// Compare scalar fields
 	if old.ClusterName != new.ClusterName ||
-		old.JobId != new.JobId ||
+		old.JobID != new.JobID ||
 		old.PodName != new.PodName ||
 		old.Phase != new.Phase ||
 		old.Message != new.Message ||

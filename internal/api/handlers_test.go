@@ -269,7 +269,7 @@ func TestGetTargetByUUID_NotFound(t *testing.T) {
 	}
 }
 
-func setupScenarioRunTestHandler(targetRequestId string, clusters map[string]string) *Handler {
+func setupScenarioRunTestHandler(targetRequestID string, clusters map[string]string) *Handler {
 	scheme := runtime.NewScheme()
 	krknv1alpha1.AddToScheme(scheme)
 	corev1.AddToScheme(scheme)
@@ -289,7 +289,7 @@ func setupScenarioRunTestHandler(targetRequestId string, clusters map[string]str
 
 	secret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      targetRequestId,
+			Name:      targetRequestID,
 			Namespace: "default",
 		},
 		Data: map[string][]byte{
@@ -303,17 +303,17 @@ func setupScenarioRunTestHandler(targetRequestId string, clusters map[string]str
 }
 
 func TestPostScenarioRun_SingleTarget_Success(t *testing.T) {
-	targetRequestId := "test-request-id"
+	targetRequestID := "test-request-id"
 	clusterName := "test-cluster"
 	kubeconfig := "YXBpVmVyc2lvbjogdjEKa2luZDogQ29uZmlnCmNsdXN0ZXJzOiBbXQpjb250ZXh0czogW10KdXNlcnM6IFtd"
 
-	handler := setupScenarioRunTestHandler(targetRequestId, map[string]string{
+	handler := setupScenarioRunTestHandler(targetRequestID, map[string]string{
 		clusterName: kubeconfig,
 	})
 
 	// Test
 	reqBody := `{
-		"targetRequestId": "test-request-id",
+		"targetRequestID": "test-request-id",
 		"targetClusters": {
 			"krkn-operator": ["test-cluster"]
 		},
@@ -412,7 +412,7 @@ func TestPostScenarioRun_MultipleTargets_AllSuccess(t *testing.T) {
 
 	// Test
 	reqBody := `{
-		"targetRequestId": "test-request-id",
+		"targetRequestID": "test-request-id",
 		"targetClusters": {
 			"krkn-operator": ["cluster-1", "cluster-2", "cluster-3"]
 		},
@@ -463,7 +463,7 @@ func TestPostScenarioRun_MultipleTargets_PartialFailure(t *testing.T) {
 	})
 
 	reqBody := `{
-		"targetRequestId": "test-request-id",
+		"targetRequestID": "test-request-id",
 		"targetClusters": {
 			"krkn-operator": ["cluster-1", "invalid", "cluster-2"]
 		},
@@ -514,7 +514,7 @@ func TestPostScenarioRun_MultipleTargets_AllFailure(t *testing.T) {
 
 	// Test
 	reqBody := `{
-		"targetRequestId": "test-request-id",
+		"targetRequestID": "test-request-id",
 		"targetClusters": {
 			"krkn-operator": ["invalid-1", "invalid-2"]
 		},
@@ -554,17 +554,17 @@ func TestPostScenarioRun_Validation_ClusterNames(t *testing.T) {
 	}{
 		{
 			name:        "Empty array",
-			reqBody:     `{"targetRequestId": "test-id", "targetClusters": {"krkn-operator": []}, "scenarioImage": "img", "scenarioName": "test"}`,
+			reqBody:     `{"targetRequestID": "test-id", "targetClusters": {"krkn-operator": []}, "scenarioImage": "img", "scenarioName": "test"}`,
 			expectedErr: "provider 'krkn-operator' must have at least one cluster",
 		},
 		{
 			name:        "Duplicates",
-			reqBody:     `{"targetRequestId": "test-id", "targetClusters": {"krkn-operator": ["cluster1", "cluster1"]}, "scenarioImage": "img", "scenarioName": "test"}`,
+			reqBody:     `{"targetRequestID": "test-id", "targetClusters": {"krkn-operator": ["cluster1", "cluster1"]}, "scenarioImage": "img", "scenarioName": "test"}`,
 			expectedErr: "cluster 'cluster1' appears in multiple providers",
 		},
 		{
 			name:        "Empty string",
-			reqBody:     `{"targetRequestId": "test-id", "targetClusters": {"krkn-operator": ["cluster1", ""]}, "scenarioImage": "img", "scenarioName": "test"}`,
+			reqBody:     `{"targetRequestID": "test-id", "targetClusters": {"krkn-operator": ["cluster1", ""]}, "scenarioImage": "img", "scenarioName": "test"}`,
 			expectedErr: "cluster names cannot be empty",
 		},
 	}

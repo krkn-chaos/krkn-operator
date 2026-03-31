@@ -138,8 +138,8 @@ type FileMount struct {
 
 // ScenarioRunRequest represents the request body for POST /scenarios/run
 type ScenarioRunRequest struct {
-	// TargetRequestId is the UUID of the KrknTargetRequest (required)
-	TargetRequestId string `json:"targetRequestId"`
+	// TargetRequestID is the UUID of the KrknTargetRequest (required)
+	TargetRequestID string `json:"targetRequestId"`
 	// TargetClusters is a map of provider-name to list of cluster names
 	// Example: {"krkn-operator": ["cluster1", "cluster2"], "krkn-operator-acm": ["cluster3"]}
 	TargetClusters map[string][]string `json:"targetClusters"`
@@ -162,8 +162,8 @@ type ScenarioRunRequest struct {
 type TargetJobResult struct {
 	// ClusterName is the name of the target cluster
 	ClusterName string `json:"clusterName"`
-	// JobId is the unique job identifier
-	JobId string `json:"jobId"`
+	// JobID is the unique job identifier
+	JobID string `json:"jobId"`
 	// Status is the initial job status (usually "Pending" or "Failed")
 	Status string `json:"status"`
 	// PodName is the Kubernetes pod name
@@ -188,8 +188,8 @@ type ScenarioRunResponse struct {
 
 // JobStatusResponse represents the response for GET /scenarios/run/{jobId}
 type JobStatusResponse struct {
-	// JobId is the unique job identifier
-	JobId string `json:"jobId"`
+	// JobID is the unique job identifier
+	JobID string `json:"jobId"`
 	// ClusterName is the target cluster name
 	ClusterName string `json:"clusterName"`
 	// ScenarioName is the scenario name
@@ -320,8 +320,8 @@ type ClusterJobStatusResponse struct {
 	ProviderName string `json:"providerName"`
 	// ClusterName is the name of the target cluster
 	ClusterName string `json:"clusterName"`
-	// JobId is the unique identifier for this job
-	JobId string `json:"jobId"`
+	// JobID is the unique identifier for this job
+	JobID string `json:"jobId"`
 	// PodName is the name of the pod running the scenario
 	PodName string `json:"podName,omitempty"`
 	// Phase is the current phase of the job

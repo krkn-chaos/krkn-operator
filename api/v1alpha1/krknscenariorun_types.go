@@ -38,8 +38,8 @@ type ClusterJobStatus struct {
 	ProviderName string `json:"providerName"`
 	// ClusterName is the name of the target cluster
 	ClusterName string `json:"clusterName"`
-	// JobId is the unique identifier for this job
-	JobId string `json:"jobId"`
+	// JobID is the unique identifier for this job
+	JobID string `json:"jobId"`
 	// PodName is the name of the pod running the scenario
 	PodName string `json:"podName,omitempty"`
 	// Phase is the current phase of the job (Pending, Running, Succeeded, Failed, Retrying, Cancelled, MaxRetriesExceeded)
@@ -71,8 +71,8 @@ type ClusterJobStatus struct {
 
 // KrknScenarioRunSpec defines the desired state of KrknScenarioRun
 type KrknScenarioRunSpec struct {
-	// TargetRequestId is the reference to the KrknTargetRequest CR
-	TargetRequestId string `json:"targetRequestId"`
+	// TargetRequestID is the reference to the KrknTargetRequest CR
+	TargetRequestID string `json:"targetRequestId"`
 
 	// OwnerUserID is the email address of the user who created this scenario run
 	// +optional

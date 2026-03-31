@@ -14,6 +14,8 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+// Package api provides HTTP API handlers and server implementation for the krkn-operator.
+// It includes endpoints for authentication, target management, scenario execution, and user management.
 package api
 
 import (

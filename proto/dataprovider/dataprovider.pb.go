@@ -4,6 +4,7 @@
 // 	protoc        v5.29.3
 // source: dataprovider.proto
 
+// Package dataprovider provides gRPC service definitions for cluster data provider operations.
 package dataprovider
 
 import (
