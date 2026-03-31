@@ -272,12 +272,23 @@ func TestPostScenarioRunSetsOwner(t *testing.T) {
 		Spec: krknv1alpha1.KrknTargetRequestSpec{
 			UUID: "test-uuid-123",
 		},
+		Status: krknv1alpha1.KrknTargetRequestStatus{
+			Status: "Completed",
+			TargetData: map[string][]krknv1alpha1.ClusterTarget{
+				"provider1": {
+					{
+						ClusterName:   "cluster1",
+						ClusterAPIURL: "https://api.cluster1.example.com",
+					},
+				},
+			},
+		},
 	}
 
 	fakeClient := fakeclient.NewClientBuilder().
 		WithScheme(scheme).
 		WithRuntimeObjects(targetRequest).
-		WithStatusSubresource(&krknv1alpha1.KrknScenarioRun{}).
+		WithStatusSubresource(&krknv1alpha1.KrknScenarioRun{}, &krknv1alpha1.KrknTargetRequest{}).
 		Build()
 
 	fakeClientset := fake.NewSimpleClientset()
@@ -289,8 +300,8 @@ func TestPostScenarioRunSetsOwner(t *testing.T) {
 		"krkn-operator",
 	)
 
-	userToken, _ := tg.GenerateToken("user@example.com", "user", "Test", "User", "Org")
-	userClaims, _ := tg.ValidateToken(userToken)
+	adminToken, _ := tg.GenerateToken("admin@example.com", "admin", "Test", "Admin", "Org")
+	adminClaims, _ := tg.ValidateToken(adminToken)
 
 	requestBody := ScenarioRunRequest{
 		TargetRequestID: "test-target-request",
@@ -303,7 +314,7 @@ func TestPostScenarioRunSetsOwner(t *testing.T) {
 
 	bodyBytes, _ := json.Marshal(requestBody)
 	req := httptest.NewRequest("POST", "/api/v1/scenarios/run", bytes.NewReader(bodyBytes))
-	ctx := context.WithValue(req.Context(), auth.UserClaimsKey, userClaims)
+	ctx := context.WithValue(req.Context(), auth.UserClaimsKey, adminClaims)
 	req = req.WithContext(ctx)
 
 	w := httptest.NewRecorder()
@@ -325,11 +336,11 @@ func TestPostScenarioRunSetsOwner(t *testing.T) {
 
 	scenarioRun := scenarioRunList.Items[0]
 
-	if scenarioRun.Spec.OwnerUserID != "user@example.com" {
-		t.Errorf("Expected OwnerUserID 'user@example.com', got '%s'", scenarioRun.Spec.OwnerUserID)
+	if scenarioRun.Spec.OwnerUserID != "admin@example.com" {
+		t.Errorf("Expected OwnerUserID 'admin@example.com', got '%s'", scenarioRun.Spec.OwnerUserID)
 	}
 
-	expectedLabel := "user-example-com"
+	expectedLabel := "admin-example-com"
 	if scenarioRun.Labels["krkn.krkn-chaos.dev/owner-user"] != expectedLabel {
 		t.Errorf("Expected owner label '%s', got '%s'",
 			expectedLabel, scenarioRun.Labels["krkn.krkn-chaos.dev/owner-user"])
