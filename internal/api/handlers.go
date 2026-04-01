@@ -158,7 +158,7 @@ func (h *Handler) GetClusters(w http.ResponseWriter, r *http.Request) {
 // - New: ?targetUUID=<uuid>
 // - Legacy: ?id=<targetRequestId>&cluster-name=<clusterName>
 func (h *Handler) GetNodes(w http.ResponseWriter, r *http.Request) {
-	ctx := context.Background()
+	ctx := r.Context()
 
 	// New parameter (KrknOperatorTarget)
 	targetUUID := r.URL.Query().Get("targetUUID")
@@ -174,6 +174,52 @@ func (h *Handler) GetNodes(w http.ResponseWriter, r *http.Request) {
 			Message: "Either targetUUID (new) or id+cluster-name (legacy) parameters are required",
 		})
 		return
+	}
+
+	// Check user permissions (group-based access control)
+	// Admins bypass validation, regular users must have 'view' permission on the cluster
+	claims := auth.GetClaimsFromContext(ctx)
+	if claims != nil && !auth.IsAdmin(ctx) {
+		// Get cluster API URL for permission check
+		clusterAPIURL, err := h.getClusterAPIURL(ctx, targetUUID, id, clusterName)
+		if err != nil {
+			log.FromContext(ctx).Error(err, "Failed to get cluster API URL for permission check")
+			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+				Error:   "internal_error",
+				Message: "Failed to validate cluster permissions",
+			})
+			return
+		}
+
+		// Check if user has 'view' permission on this cluster
+		hasPermission, err := groupauth.HasClusterPermission(
+			ctx,
+			h.client,
+			claims.UserID,
+			h.namespace,
+			clusterAPIURL,
+			groupauth.ActionView,
+		)
+		if err != nil {
+			log.FromContext(ctx).Error(err, "Failed to check cluster permissions", "userID", claims.UserID)
+			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+				Error:   "internal_error",
+				Message: "Failed to validate access permissions",
+			})
+			return
+		}
+
+		if !hasPermission {
+			log.FromContext(ctx).Info("User lacks permission to view nodes on cluster",
+				"userID", claims.UserID,
+				"clusterAPIURL", clusterAPIURL,
+			)
+			writeJSONError(w, http.StatusForbidden, ErrorResponse{
+				Error:   "forbidden",
+				Message: "You do not have permission to view nodes on this cluster",
+			})
+			return
+		}
 	}
 
 	// Get kubeconfig using unified helper function

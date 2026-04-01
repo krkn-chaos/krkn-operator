@@ -134,6 +134,41 @@ func CanPerformAction(userGroups []krknv1alpha1.KrknUserGroup, clusterAPIURL str
 	return false
 }
 
+// HasClusterPermission checks if a user has a specific permission on a cluster.
+// This is a convenience wrapper that combines GetUserGroups and CanPerformAction.
+//
+// Parameters:
+//   - ctx: Context for the request
+//   - k8sClient: Kubernetes client
+//   - userID: Email address of the user
+//   - namespace: Namespace where user and group CRs are located
+//   - clusterAPIURL: The cluster API URL to check permission for
+//   - action: The action to check (e.g., ActionView, ActionRun, ActionCancel)
+//
+// Returns true if the user has the permission, false otherwise.
+func HasClusterPermission(
+	ctx context.Context,
+	k8sClient client.Client,
+	userID string,
+	namespace string,
+	clusterAPIURL string,
+	action Action,
+) (bool, error) {
+	// Fetch user groups
+	userGroups, err := GetUserGroups(ctx, k8sClient, userID, namespace)
+	if err != nil {
+		return false, fmt.Errorf("failed to get user groups: %w", err)
+	}
+
+	// No groups = no permissions
+	if len(userGroups) == 0 {
+		return false, nil
+	}
+
+	// Check if user can perform the action
+	return CanPerformAction(userGroups, clusterAPIURL, action), nil
+}
+
 // CountGroupMembers counts the number of KrknUsers that belong to a group.
 // Used for populating group metadata/stats.
 //
