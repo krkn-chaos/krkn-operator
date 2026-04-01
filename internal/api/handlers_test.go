@@ -297,7 +297,32 @@ func setupScenarioRunTestHandler(targetRequestID string, clusters map[string]str
 		},
 	}
 
-	fakeClient := fakeclient.NewClientBuilder().WithScheme(scheme).WithObjects(secret).Build()
+	// Create KrknTargetRequest with completed status and cluster API URLs
+	clusterTargets := make([]krknv1alpha1.ClusterTarget, 0, len(clusters))
+	for clusterName := range clusters {
+		clusterTargets = append(clusterTargets, krknv1alpha1.ClusterTarget{
+			ClusterName:   clusterName,
+			ClusterAPIURL: "https://" + clusterName + ".example.com:6443",
+		})
+	}
+
+	targetRequest := &krknv1alpha1.KrknTargetRequest{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      targetRequestID,
+			Namespace: "default",
+		},
+		Spec: krknv1alpha1.KrknTargetRequestSpec{
+			UUID: "test-uuid",
+		},
+		Status: krknv1alpha1.KrknTargetRequestStatus{
+			Status: "Completed",
+			TargetData: map[string][]krknv1alpha1.ClusterTarget{
+				"krkn-operator": clusterTargets,
+			},
+		},
+	}
+
+	fakeClient := fakeclient.NewClientBuilder().WithScheme(scheme).WithObjects(secret, targetRequest).Build()
 	fakeClientset := fake.NewSimpleClientset()
 	return NewHandler(fakeClient, fakeClientset, "default", "localhost:50051")
 }

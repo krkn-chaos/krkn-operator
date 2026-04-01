@@ -57,6 +57,14 @@ spec:
           spec:
             description: KrknScenarioRunSpec defines the desired state of KrknScenarioRun
             properties:
+              clusterApiUrls:
+                additionalProperties:
+                  type: string
+                description: |-
+                  ClusterAPIURLs maps cluster names to their API URLs for group-based permission checks.
+                  This is populated at creation time from the KrknTargetRequest.
+                  Key: cluster name, Value: cluster API URL
+                type: object
               environment:
                 additionalProperties:
                   type: string
@@ -138,7 +146,7 @@ spec:
                 minProperties: 1
                 type: object
               targetRequestId:
-                description: TargetRequestId is the reference to the KrknTargetRequest
+                description: TargetRequestID is the reference to the KrknTargetRequest
                   CR
                 type: string
               token:
@@ -178,7 +186,7 @@ spec:
                         (OOMKilled, ContainerError, etc.)
                       type: string
                     jobId:
-                      description: JobId is the unique identifier for this job
+                      description: JobID is the unique identifier for this job
                       type: string
                     lastRetryTime:
                       description: LastRetryTime is when the last retry was initiated

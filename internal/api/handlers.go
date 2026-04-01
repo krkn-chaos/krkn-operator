@@ -699,33 +699,41 @@ func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Fetch KrknTargetRequest to build cluster API URL mapping and validate permissions
+	targetRequest := &krknv1alpha1.KrknTargetRequest{}
+	if err := h.client.Get(ctx, types.NamespacedName{
+		Name:      req.TargetRequestID,
+		Namespace: h.namespace,
+	}, targetRequest); err != nil {
+		logger.Error(err, "Failed to fetch target request", "targetRequestId", req.TargetRequestID)
+		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+			Error:   "internal_error",
+			Message: "Failed to fetch target request: " + err.Error(),
+		})
+		return
+	}
+
+	// Check if target request is completed
+	if targetRequest.Status.Status != "Completed" {
+		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+			Error:   "bad_request",
+			Message: "Target request is not completed yet",
+		})
+		return
+	}
+
+	// Build cluster API URL mapping from target request for group-based authorization
+	clusterAPIURLs := make(map[string]string)
+	for _, targets := range targetRequest.Status.TargetData {
+		for _, cluster := range targets {
+			clusterAPIURLs[cluster.ClusterName] = cluster.ClusterAPIURL
+		}
+	}
+
 	// Validate user permissions (group-based access control)
 	// Admins bypass validation, regular users must have 'run' permission on all target clusters
 	userClaims := auth.GetClaimsFromContext(ctx)
 	if userClaims != nil && !auth.IsAdmin(ctx) {
-		// Fetch KrknTargetRequest to get cluster API URLs
-		targetRequest := &krknv1alpha1.KrknTargetRequest{}
-		if err := h.client.Get(ctx, types.NamespacedName{
-			Name:      req.TargetRequestID,
-			Namespace: h.namespace,
-		}, targetRequest); err != nil {
-			logger.Error(err, "Failed to fetch target request for permission validation", "targetRequestId", req.TargetRequestID)
-			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
-				Error:   "internal_error",
-				Message: "Failed to validate cluster permissions: target request not found",
-			})
-			return
-		}
-
-		// Check if target request is completed
-		if targetRequest.Status.Status != "Completed" {
-			writeJSONError(w, http.StatusBadRequest, ErrorResponse{
-				Error:   "bad_request",
-				Message: "Target request is not completed yet",
-			})
-			return
-		}
-
 		// Validate user has 'run' permission on all target clusters
 		if err := groupauth.ValidateScenarioRunAccess(
 			ctx,
@@ -776,6 +784,7 @@ func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
 			TargetRequestID:    req.TargetRequestID,
 			OwnerUserID:        ownerUserID,
 			TargetClusters:     req.TargetClusters,
+			ClusterAPIURLs:     clusterAPIURLs,
 			ScenarioName:       req.ScenarioName,
 			ScenarioImage:      req.ScenarioImage,
 			KubeconfigPath:     req.KubeconfigPath,
@@ -820,32 +829,22 @@ func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
 	// Set owner reference: ScenarioRun owns KrknTargetRequest
 	// This ensures KrknTargetRequest (and its Secret) are cleaned up when ScenarioRun is deleted
 	// and remain available for job retries while ScenarioRun exists
-	targetRequest := &krknv1alpha1.KrknTargetRequest{}
-	if err := h.client.Get(ctx, types.NamespacedName{
-		Name:      req.TargetRequestID,
-		Namespace: h.namespace,
-	}, targetRequest); err == nil {
-		// Set ScenarioRun as owner of KrknTargetRequest
-		if err := ctrl.SetControllerReference(scenarioRun, targetRequest, h.client.Scheme()); err != nil {
-			logger.Error(err, "failed to set owner reference on KrknTargetRequest",
+	// targetRequest already fetched above for permission validation and cluster API URL mapping
+	if err := ctrl.SetControllerReference(scenarioRun, targetRequest, h.client.Scheme()); err != nil {
+		logger.Error(err, "failed to set owner reference on KrknTargetRequest",
+			"scenarioRun", scenarioRun.Name,
+			"targetRequestId", req.TargetRequestID)
+		// Continue - not critical for scenario run creation
+	} else {
+		if err := h.client.Update(ctx, targetRequest); err != nil {
+			logger.Error(err, "failed to update KrknTargetRequest with owner reference",
+				"targetRequestId", req.TargetRequestID)
+			// Continue - not critical
+		} else {
+			logger.Info("set owner reference on KrknTargetRequest",
 				"scenarioRun", scenarioRun.Name,
 				"targetRequestId", req.TargetRequestID)
-			// Continue - not critical for scenario run creation
-		} else {
-			if err := h.client.Update(ctx, targetRequest); err != nil {
-				logger.Error(err, "failed to update KrknTargetRequest with owner reference",
-					"targetRequestId", req.TargetRequestID)
-				// Continue - not critical
-			} else {
-				logger.Info("set owner reference on KrknTargetRequest",
-					"scenarioRun", scenarioRun.Name,
-					"targetRequestId", req.TargetRequestID)
-			}
 		}
-	} else {
-		logger.Error(err, "failed to get KrknTargetRequest for setting owner reference",
-			"targetRequestId", req.TargetRequestID)
-		// Continue - KrknTargetRequest might have been deleted manually
 	}
 
 	// Calculate total targets from all providers
@@ -901,7 +900,7 @@ func (h *Handler) GetScenarioRunStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Check access permissions
-	if !checkScenarioRunAccess(w, r, &scenarioRun) {
+	if !h.checkScenarioRunAccess(w, r, &scenarioRun) {
 		return
 	}
 
@@ -1325,8 +1324,8 @@ func (h *Handler) ListScenarioRuns(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Filter by ownership (admins see all, users see only their own)
-	scenarioRunList.Items = filterScenarioRunsByOwnership(scenarioRunList.Items, ctx)
+	// Filter by group permissions (admins see all, users see runs with group view permission)
+	scenarioRunList.Items = h.filterScenarioRunsByGroupPermission(scenarioRunList.Items, ctx)
 
 	// Convert to response format with optional filtering
 	runs := make([]ScenarioRunListItem, 0)
@@ -1457,7 +1456,7 @@ func (h *Handler) DeleteScenarioRun(w http.ResponseWriter, r *http.Request) {
 			Namespace: h.namespace,
 		}, &scenarioRun); err == nil {
 			// Check access permissions on parent ScenarioRun
-			if !checkScenarioRunAccess(w, r, &scenarioRun) {
+			if !h.checkScenarioRunAccess(w, r, &scenarioRun) {
 				return
 			}
 		}
@@ -1539,7 +1538,7 @@ func (h *Handler) DeleteScenarioRunComplete(w http.ResponseWriter, r *http.Reque
 	}
 
 	// Check access permissions
-	if !checkScenarioRunAccess(w, r, &scenarioRun) {
+	if !h.checkScenarioRunAccess(w, r, &scenarioRun) {
 		return
 	}
 
@@ -1717,7 +1716,7 @@ func (h *Handler) GetSingleJob(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Check access permissions on parent ScenarioRun
-	if !checkScenarioRunAccess(w, r, foundScenarioRun) {
+	if !h.checkScenarioRunAccess(w, r, foundScenarioRun) {
 		return
 	}
 

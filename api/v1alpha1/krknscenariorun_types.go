@@ -83,6 +83,12 @@ type KrknScenarioRunSpec struct {
 	// +kubebuilder:validation:MinProperties=1
 	TargetClusters map[string][]string `json:"targetClusters"`
 
+	// ClusterAPIURLs maps cluster names to their API URLs for group-based permission checks.
+	// This is populated at creation time from the KrknTargetRequest.
+	// Key: cluster name, Value: cluster API URL
+	// +optional
+	ClusterAPIURLs map[string]string `json:"clusterApiUrls,omitempty"`
+
 	// ScenarioName is the name of the scenario to run
 	ScenarioName string `json:"scenarioName"`
 

@@ -25,6 +25,8 @@ import (
 
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
 	"github.com/krkn-chaos/krkn-operator/pkg/auth"
+	"github.com/krkn-chaos/krkn-operator/pkg/groupauth"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 // requireAdminForMethods checks if the user is admin for specific HTTP methods
@@ -67,12 +69,12 @@ func sanitizeUserID(email string) string {
 }
 
 // checkScenarioRunAccess verifies if the authenticated user has permission to access
-// the given scenario run. Returns true if access is allowed, false otherwise.
+// the given scenario run using group-based permissions.
 //
 // Access rules:
-// - Admins can access all scenario runs (that have an owner)
-// - Regular users can only access runs where OwnerUserID matches their UserID
-// - Scenario runs without OwnerUserID are rejected (should not exist)
+// - Admins can access all scenario runs
+// - Regular users must have 'view' permission on ANY cluster in the run via their groups
+// - Scenario runs without ClusterAPIURLs are rejected (defensive check)
 //
 // If access is denied, this function writes a 403 Forbidden response to the writer
 // and returns false. The caller should return immediately without further processing.
@@ -83,7 +85,7 @@ func sanitizeUserID(email string) string {
 //   - scenarioRun: The scenario run to check access for
 //
 // Returns true if access is allowed, false if denied (with error written to response)
-func checkScenarioRunAccess(w http.ResponseWriter, r *http.Request, scenarioRun *krknv1alpha1.KrknScenarioRun) bool {
+func (h *Handler) checkScenarioRunAccess(w http.ResponseWriter, r *http.Request, scenarioRun *krknv1alpha1.KrknScenarioRun) bool {
 	ctx := r.Context()
 	claims := auth.GetClaimsFromContext(ctx)
 
@@ -93,40 +95,84 @@ func checkScenarioRunAccess(w http.ResponseWriter, r *http.Request, scenarioRun 
 		return false
 	}
 
-	// Reject runs without owner (should not exist)
-	if scenarioRun.Spec.OwnerUserID == "" {
-		http.Error(w, `{"error":"forbidden","message":"Access denied. This scenario run has no owner"}`, http.StatusForbidden)
-		return false
-	}
-
-	// Admins can access all runs
+	// Admins bypass all checks
 	if auth.IsAdmin(ctx) {
 		return true
 	}
 
-	// Regular users can only access their own runs
-	if scenarioRun.Spec.OwnerUserID != claims.UserID {
-		http.Error(w, `{"error":"forbidden","message":"Access denied. You can only access your own scenario runs"}`, http.StatusForbidden)
+	// Reject runs without cluster API URLs (defensive - should not happen for new runs)
+	if len(scenarioRun.Spec.ClusterAPIURLs) == 0 {
+		http.Error(w, `{"error":"forbidden","message":"Access denied. This scenario run has no cluster API URLs"}`, http.StatusForbidden)
+		return false
+	}
+
+	// Check if user has 'view' permission on ANY cluster in this run
+	hasAccess, err := h.checkScenarioRunGroupAccess(
+		ctx,
+		claims.UserID,
+		scenarioRun,
+		groupauth.ActionView,
+	)
+
+	if err != nil {
+		log.FromContext(ctx).Error(err, "Failed to check scenario run access", "userID", claims.UserID)
+		http.Error(w, `{"error":"internal_error","message":"Failed to validate access"}`, http.StatusInternalServerError)
+		return false
+	}
+
+	if !hasAccess {
+		http.Error(w, `{"error":"forbidden","message":"Access denied. You do not have permission to view this scenario run"}`, http.StatusForbidden)
 		return false
 	}
 
 	return true
 }
 
-// filterScenarioRunsByOwnership filters a list of scenario runs based on user permissions.
+// checkScenarioRunGroupAccess checks if user has the specified permission on ANY cluster in the scenario run.
+// Returns true if user has permission on at least one cluster, false otherwise.
+func (h *Handler) checkScenarioRunGroupAccess(
+	ctx context.Context,
+	userID string,
+	scenarioRun *krknv1alpha1.KrknScenarioRun,
+	requiredAction groupauth.Action,
+) (bool, error) {
+	// Fetch user groups
+	userGroups, err := groupauth.GetUserGroups(ctx, h.client, userID, h.namespace)
+	if err != nil {
+		return false, err
+	}
+
+	if len(userGroups) == 0 {
+		return false, nil // No groups = no access
+	}
+
+	// Check if user has permission on ANY cluster in the run
+	for _, clusterAPIURL := range scenarioRun.Spec.ClusterAPIURLs {
+		if groupauth.CanPerformAction(userGroups, clusterAPIURL, requiredAction) {
+			return true, nil // User has access to at least one cluster
+		}
+	}
+
+	return false, nil // No permission on any cluster
+}
+
+// filterScenarioRunsByGroupPermission filters scenario runs based on group permissions.
 //
 // Filtering rules:
-// - If no claims in context (e.g., tests), return all runs (no filtering)
-// - Runs without OwnerUserID are always excluded (should not exist)
-// - Admins see all runs (that have an owner)
-// - Regular users see only runs where OwnerUserID matches their UserID
+// - If no claims in context (e.g., tests), return all runs
+// - Admins see all runs
+// - Regular users see only runs where they have 'view' permission on ANY cluster
+// - Runs without ClusterAPIURLs are excluded for regular users
 //
 // Parameters:
 //   - runs: The list of scenario runs to filter
 //   - ctx: The request context containing user claims
 //
 // Returns a filtered list of scenario runs the user is authorized to see
-func filterScenarioRunsByOwnership(runs []krknv1alpha1.KrknScenarioRun, ctx context.Context) []krknv1alpha1.KrknScenarioRun {
+func (h *Handler) filterScenarioRunsByGroupPermission(
+	runs []krknv1alpha1.KrknScenarioRun,
+	ctx context.Context,
+) []krknv1alpha1.KrknScenarioRun {
 	claims := auth.GetClaimsFromContext(ctx)
 
 	// Defensive check - if no claims (e.g., in tests), return all runs unfiltered
@@ -134,21 +180,39 @@ func filterScenarioRunsByOwnership(runs []krknv1alpha1.KrknScenarioRun, ctx cont
 		return runs
 	}
 
-	filtered := make([]krknv1alpha1.KrknScenarioRun, 0)
-
-	// Admins see all runs (excluding those without owner)
+	// Admins see all runs
 	if claims.Role == string(auth.RoleAdmin) {
-		for _, run := range runs {
-			if run.Spec.OwnerUserID != "" {
-				filtered = append(filtered, run)
-			}
-		}
-		return filtered
+		return runs
 	}
 
-	// Regular users see only their own runs
+	// Regular users: filter by group permissions
+	filtered := make([]krknv1alpha1.KrknScenarioRun, 0)
+
 	for _, run := range runs {
-		if run.Spec.OwnerUserID == claims.UserID {
+		// Skip runs without cluster API URLs (defensive)
+		if len(run.Spec.ClusterAPIURLs) == 0 {
+			continue
+		}
+
+		// Check if user has 'view' permission on ANY cluster in this run
+		hasAccess, err := h.checkScenarioRunGroupAccess(
+			ctx,
+			claims.UserID,
+			&run,
+			groupauth.ActionView,
+		)
+
+		if err != nil {
+			// Log error but continue processing other runs
+			log.FromContext(ctx).V(1).Info("Failed to check access for run, excluding",
+				"runName", run.Name,
+				"userID", claims.UserID,
+				"error", err.Error(),
+			)
+			continue
+		}
+
+		if hasAccess {
 			filtered = append(filtered, run)
 		}
 	}
