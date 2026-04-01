@@ -768,11 +768,34 @@ func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Build cluster API URL mapping from target request for group-based authorization
+	// Build cluster API URL mapping ONLY for requested clusters (not all clusters in TargetData)
+	// This ensures scenario run only stores clusters it actually targets
+	// Note: If a requested cluster is not found in TargetData, it's skipped (controller will handle the error)
 	clusterAPIURLs := make(map[string]string)
-	for _, targets := range targetRequest.Status.TargetData {
-		for _, cluster := range targets {
-			clusterAPIURLs[cluster.ClusterName] = cluster.ClusterAPIURL
+	for providerName, requestedClusters := range req.TargetClusters {
+		// Get clusters for this provider from TargetData
+		providerTargets, exists := targetRequest.Status.TargetData[providerName]
+		if !exists {
+			logger.V(1).Info("Provider not found in TargetData, skipping",
+				"providerName", providerName)
+			continue
+		}
+
+		// Build map of available clusters for quick lookup
+		availableClusters := make(map[string]string) // clusterName -> clusterAPIURL
+		for _, cluster := range providerTargets {
+			availableClusters[cluster.ClusterName] = cluster.ClusterAPIURL
+		}
+
+		// Add only requested clusters that exist to ClusterAPIURLs
+		for _, clusterName := range requestedClusters {
+			if apiURL, exists := availableClusters[clusterName]; exists {
+				clusterAPIURLs[clusterName] = apiURL
+			} else {
+				logger.V(1).Info("Requested cluster not found in TargetData, skipping",
+					"clusterName", clusterName,
+					"providerName", providerName)
+			}
 		}
 	}
 
