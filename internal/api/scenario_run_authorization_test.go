@@ -121,11 +121,11 @@ func TestCheckScenarioRunAccess(t *testing.T) {
 			},
 		},
 		Spec: krknv1alpha1.KrknUserSpec{
-			UserID:             "user@example.com",
-			Name:               "Test",
-			Surname:            "User",
-			Role:               "user",
-			PasswordSecretRef:  "user-password",
+			UserID:            "user@example.com",
+			Name:              "Test",
+			Surname:           "User",
+			Role:              "user",
+			PasswordSecretRef: "user-password",
 		},
 	}
 
@@ -273,11 +273,11 @@ func TestFilterScenarioRunsByGroupPermission(t *testing.T) {
 			},
 		},
 		Spec: krknv1alpha1.KrknUserSpec{
-			UserID:             "user@example.com",
-			Name:               "Test",
-			Surname:            "User",
-			Role:               "user",
-			PasswordSecretRef:  "user-password",
+			UserID:            "user@example.com",
+			Name:              "Test",
+			Surname:           "User",
+			Role:              "user",
+			PasswordSecretRef: "user-password",
 		},
 	}
 

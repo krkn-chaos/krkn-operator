@@ -346,46 +346,46 @@ func TestCanPerformAction(t *testing.T) {
 	}
 
 	tests := []struct {
-		name           string
-		clusterAPIURL  string
-		action         Action
-		want           bool
+		name          string
+		clusterAPIURL string
+		action        Action
+		want          bool
 	}{
 		{
-			name:           "allowed view on cluster1",
-			clusterAPIURL:  "https://api.cluster1.com",
-			action:         ActionView,
-			want:           true,
+			name:          "allowed view on cluster1",
+			clusterAPIURL: "https://api.cluster1.com",
+			action:        ActionView,
+			want:          true,
 		},
 		{
-			name:           "allowed run on cluster1",
-			clusterAPIURL:  "https://api.cluster1.com",
-			action:         ActionRun,
-			want:           true,
+			name:          "allowed run on cluster1",
+			clusterAPIURL: "https://api.cluster1.com",
+			action:        ActionRun,
+			want:          true,
 		},
 		{
-			name:           "denied cancel on cluster1",
-			clusterAPIURL:  "https://api.cluster1.com",
-			action:         ActionCancel,
-			want:           false,
+			name:          "denied cancel on cluster1",
+			clusterAPIURL: "https://api.cluster1.com",
+			action:        ActionCancel,
+			want:          false,
 		},
 		{
-			name:           "allowed view on cluster2",
-			clusterAPIURL:  "https://api.cluster2.com",
-			action:         ActionView,
-			want:           true,
+			name:          "allowed view on cluster2",
+			clusterAPIURL: "https://api.cluster2.com",
+			action:        ActionView,
+			want:          true,
 		},
 		{
-			name:           "denied run on cluster2",
-			clusterAPIURL:  "https://api.cluster2.com",
-			action:         ActionRun,
-			want:           false,
+			name:          "denied run on cluster2",
+			clusterAPIURL: "https://api.cluster2.com",
+			action:        ActionRun,
+			want:          false,
 		},
 		{
-			name:           "denied on unknown cluster",
-			clusterAPIURL:  "https://api.cluster3.com",
-			action:         ActionView,
-			want:           false,
+			name:          "denied on unknown cluster",
+			clusterAPIURL: "https://api.cluster3.com",
+			action:        ActionView,
+			want:          false,
 		},
 	}
 
@@ -499,9 +499,9 @@ func TestCountGroupMembers(t *testing.T) {
 
 func TestSanitizeUserID(t *testing.T) {
 	tests := []struct {
-		name   string
-		email  string
-		want   string
+		name  string
+		email string
+		want  string
 	}{
 		{
 			name:  "standard email",

@@ -662,7 +662,6 @@ func (h *Handler) PostScenarioGlobals(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, response)
 }
 
-
 func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	logger := log.FromContext(ctx)
@@ -1201,6 +1200,65 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 
 	logger.Info("WebSocket connection established", "scenarioRunName", scenarioRunName, "jobID", jobID, "client_ip", r.RemoteAddr)
 
+	// Create context with claims for permission checks
+	ctx := context.WithValue(context.Background(), auth.UserClaimsKey, claims)
+
+	// Fetch the scenario run to check permissions
+	var scenarioRun krknv1alpha1.KrknScenarioRun
+	if err := h.client.Get(ctx, client.ObjectKey{
+		Name:      scenarioRunName,
+		Namespace: h.namespace,
+	}, &scenarioRun); err != nil {
+		logger.Error(err, "Failed to fetch scenario run", "scenarioRunName", scenarioRunName)
+		_ = conn.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("ERROR: Scenario run '%s' not found", scenarioRunName)))
+		return
+	}
+
+	// Check if user has 'view' permission on ANY cluster in this scenario run
+	// Admins bypass this check, regular users must have view permission
+	if !auth.IsAdmin(ctx) {
+		// Reject runs without cluster API URLs (defensive)
+		if len(scenarioRun.Spec.ClusterAPIURLs) == 0 {
+			logger.Error(nil, "Access denied: scenario run has no cluster API URLs",
+				"scenarioRunName", scenarioRunName,
+				"userID", claims.UserID)
+			_ = conn.WriteMessage(websocket.TextMessage, []byte("ERROR: Access denied. This scenario run has no cluster API URLs"))
+			return
+		}
+
+		// Check group-based permissions
+		hasAccess, err := h.checkScenarioRunGroupAccess(
+			ctx,
+			claims.UserID,
+			&scenarioRun,
+			groupauth.ActionView,
+		)
+
+		if err != nil {
+			logger.Error(err, "Failed to check scenario run access for logs",
+				"scenarioRunName", scenarioRunName,
+				"userID", claims.UserID,
+				"jobID", jobID)
+			_ = conn.WriteMessage(websocket.TextMessage, []byte("ERROR: Failed to validate access permissions"))
+			return
+		}
+
+		if !hasAccess {
+			logger.Info("Access denied: user does not have view permission on scenario run",
+				"scenarioRunName", scenarioRunName,
+				"userID", claims.UserID,
+				"jobID", jobID)
+			_ = conn.WriteMessage(websocket.TextMessage, []byte("ERROR: Access denied. You do not have permission to view logs for this scenario run"))
+			return
+		}
+	}
+
+	logger.Info("Permission check passed for log access",
+		"scenarioRunName", scenarioRunName,
+		"jobID", jobID,
+		"userID", claims.UserID,
+		"isAdmin", auth.IsAdmin(ctx))
+
 	// Set up ping/pong handlers to detect client disconnection
 	pongWait := 60 * time.Second
 	_ = conn.SetReadDeadline(time.Now().Add(pongWait)) // Best-effort timeout
@@ -1233,8 +1291,6 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}()
-
-	ctx := context.Background()
 
 	// Find pod by jobID label (no need to fetch the CR)
 	var podList corev1.PodList

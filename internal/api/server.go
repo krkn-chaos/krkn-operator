@@ -122,9 +122,9 @@ func NewServer(port int, client client.Client, clientset kubernetes.Interface, n
 	server := &http.Server{
 		Addr:              fmt.Sprintf(":%d", port),
 		Handler:           loggingMiddleware(mux),
-		ReadHeaderTimeout: 30 * time.Second, // Prevent Slowloris attacks
-		ReadTimeout:       60 * time.Second, // Total request read timeout
-		WriteTimeout:      60 * time.Second, // Response write timeout
+		ReadHeaderTimeout: 30 * time.Second,  // Prevent Slowloris attacks
+		ReadTimeout:       60 * time.Second,  // Total request read timeout
+		WriteTimeout:      60 * time.Second,  // Response write timeout
 		IdleTimeout:       120 * time.Second, // Keep-alive timeout
 	}
 

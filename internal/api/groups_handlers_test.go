@@ -420,10 +420,10 @@ func TestListGroupMembers_Success(t *testing.T) {
 			},
 		},
 		Spec: krknv1alpha1.KrknUserSpec{
-			UserID: "user1@example.com",
-			Name:   "User",
+			UserID:  "user1@example.com",
+			Name:    "User",
 			Surname: "One",
-			Role:   "user",
+			Role:    "user",
 		},
 	}
 
@@ -436,10 +436,10 @@ func TestListGroupMembers_Success(t *testing.T) {
 			},
 		},
 		Spec: krknv1alpha1.KrknUserSpec{
-			UserID: "user2@example.com",
-			Name:   "User",
+			UserID:  "user2@example.com",
+			Name:    "User",
 			Surname: "Two",
-			Role:   "user",
+			Role:    "user",
 		},
 	}
 
@@ -493,10 +493,10 @@ func TestAddGroupMember_Success(t *testing.T) {
 			Labels:    map[string]string{}, // No group labels initially
 		},
 		Spec: krknv1alpha1.KrknUserSpec{
-			UserID: "user@example.com",
-			Name:   "Test",
+			UserID:  "user@example.com",
+			Name:    "Test",
 			Surname: "User",
-			Role:   "user",
+			Role:    "user",
 		},
 	}
 
@@ -548,10 +548,10 @@ func TestRemoveGroupMember_Success(t *testing.T) {
 			},
 		},
 		Spec: krknv1alpha1.KrknUserSpec{
-			UserID: "user@example.com",
-			Name:   "Test",
+			UserID:  "user@example.com",
+			Name:    "Test",
 			Surname: "User",
-			Role:   "user",
+			Role:    "user",
 		},
 	}
 

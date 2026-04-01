@@ -30,19 +30,19 @@ const (
 
 // Authentication endpoints
 const (
-	AuthBasePath       = APIBasePath + "/auth"
-	AuthIsRegistered   = AuthBasePath + "/is-registered"
-	AuthRegister       = AuthBasePath + "/register"
-	AuthLogin          = AuthBasePath + "/login"
-	AuthRefresh        = AuthBasePath + "/refresh"
-	AuthLogout         = AuthBasePath + "/logout"
+	AuthBasePath     = APIBasePath + "/auth"
+	AuthIsRegistered = AuthBasePath + "/is-registered"
+	AuthRegister     = AuthBasePath + "/register"
+	AuthLogin        = AuthBasePath + "/login"
+	AuthRefresh      = AuthBasePath + "/refresh"
+	AuthLogout       = AuthBasePath + "/logout"
 )
 
 // Core resource endpoints
 const (
-	HealthPath    = APIBasePath + "/health"
-	ClustersPath  = APIBasePath + "/clusters"
-	NodesPath     = APIBasePath + "/nodes"
+	HealthPath   = APIBasePath + "/health"
+	ClustersPath = APIBasePath + "/clusters"
+	NodesPath    = APIBasePath + "/nodes"
 )
 
 // Legacy targets endpoints (deprecated, use OperatorTargetsPath)
