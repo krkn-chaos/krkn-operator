@@ -1584,8 +1584,8 @@ func (h *Handler) DeleteScenarioRunComplete(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// Check access permissions
-	if !h.checkScenarioRunAccess(w, r, &scenarioRun) {
+	// Check access permissions (requires 'cancel' permission)
+	if !h.checkScenarioRunAccessWithAction(w, r, &scenarioRun, groupauth.ActionCancel, "cancel") {
 		return
 	}
 
@@ -1657,6 +1657,11 @@ func (h *Handler) DeleteSingleJob(w http.ResponseWriter, r *http.Request) {
 			Error:   "not_found",
 			Message: "Job '" + jobID + "' not found",
 		})
+		return
+	}
+
+	// Check access permissions (requires 'cancel' permission)
+	if !h.checkScenarioRunAccessWithAction(w, r, foundScenarioRun, groupauth.ActionCancel, "cancel") {
 		return
 	}
 

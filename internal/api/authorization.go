@@ -20,6 +20,7 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -70,6 +71,9 @@ func sanitizeUserID(email string) string {
 
 // checkScenarioRunAccess verifies if the authenticated user has permission to access
 // the given scenario run using group-based permissions.
+// This is a convenience wrapper that checks for 'view' permission.
+//
+// For other permissions (e.g., 'cancel'), use checkScenarioRunAccessWithAction.
 //
 // Access rules:
 // - Admins can access all scenario runs
@@ -86,6 +90,35 @@ func sanitizeUserID(email string) string {
 //
 // Returns true if access is allowed, false if denied (with error written to response)
 func (h *Handler) checkScenarioRunAccess(w http.ResponseWriter, r *http.Request, scenarioRun *krknv1alpha1.KrknScenarioRun) bool {
+	return h.checkScenarioRunAccessWithAction(w, r, scenarioRun, groupauth.ActionView, "view")
+}
+
+// checkScenarioRunAccessWithAction verifies if the authenticated user has a specific permission
+// on the given scenario run using group-based permissions.
+//
+// Access rules:
+// - Admins can perform all actions on all scenario runs
+// - Regular users must have the required permission on ANY cluster in the run via their groups
+// - Scenario runs without ClusterAPIURLs are rejected (defensive check)
+//
+// If access is denied, this function writes a 403 Forbidden response to the writer
+// and returns false. The caller should return immediately without further processing.
+//
+// Parameters:
+//   - w: The HTTP response writer
+//   - r: The HTTP request containing user claims in context
+//   - scenarioRun: The scenario run to check access for
+//   - requiredAction: The action to check (e.g., ActionView, ActionCancel)
+//   - actionName: Human-readable action name for error messages
+//
+// Returns true if access is allowed, false if denied (with error written to response)
+func (h *Handler) checkScenarioRunAccessWithAction(
+	w http.ResponseWriter,
+	r *http.Request,
+	scenarioRun *krknv1alpha1.KrknScenarioRun,
+	requiredAction groupauth.Action,
+	actionName string,
+) bool {
 	ctx := r.Context()
 	claims := auth.GetClaimsFromContext(ctx)
 
@@ -106,22 +139,25 @@ func (h *Handler) checkScenarioRunAccess(w http.ResponseWriter, r *http.Request,
 		return false
 	}
 
-	// Check if user has 'view' permission on ANY cluster in this run
+	// Check if user has required permission on ANY cluster in this run
 	hasAccess, err := h.checkScenarioRunGroupAccess(
 		ctx,
 		claims.UserID,
 		scenarioRun,
-		groupauth.ActionView,
+		requiredAction,
 	)
 
 	if err != nil {
-		log.FromContext(ctx).Error(err, "Failed to check scenario run access", "userID", claims.UserID)
+		log.FromContext(ctx).Error(err, "Failed to check scenario run access",
+			"userID", claims.UserID,
+			"action", requiredAction)
 		http.Error(w, `{"error":"internal_error","message":"Failed to validate access"}`, http.StatusInternalServerError)
 		return false
 	}
 
 	if !hasAccess {
-		http.Error(w, `{"error":"forbidden","message":"Access denied. You do not have permission to view this scenario run"}`, http.StatusForbidden)
+		errorMsg := fmt.Sprintf(`{"error":"forbidden","message":"Access denied. You do not have permission to %s this scenario run"}`, actionName)
+		http.Error(w, errorMsg, http.StatusForbidden)
 		return false
 	}
 
