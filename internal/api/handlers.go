@@ -121,20 +121,21 @@ func (h *Handler) GetClusters(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Filter clusters based on user permissions
-	// Admins see all clusters, regular users see only clusters they have 'view' permission for
+	// Admins see all clusters, regular users see only clusters they have 'run' permission for
+	// (this endpoint is used to select clusters for running scenarios)
 	ctx := r.Context()
 	targetData := targetRequest.Status.TargetData
 
 	claims := auth.GetClaimsFromContext(ctx)
 	if claims != nil && !auth.IsAdmin(ctx) {
-		// Regular user: filter by group permissions
+		// Regular user: filter by group permissions (requires 'run' permission)
 		filteredData, err := groupauth.FilterClustersByPermission(
 			ctx,
 			h.client,
 			claims.UserID,
 			h.namespace,
 			targetData,
-			groupauth.ActionView,
+			groupauth.ActionRun,
 		)
 		if err != nil {
 			log.FromContext(ctx).Error(err, "Failed to filter clusters by permission", "userID", claims.UserID)
