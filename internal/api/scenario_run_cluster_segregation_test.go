@@ -280,6 +280,223 @@ func TestClusterSegregationMultipleUsers(t *testing.T) {
 	}
 }
 
+// TestScenarioRunCancelPermissions verifies the cancel/delete permission logic
+func TestScenarioRunCancelPermissions(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = krknv1alpha1.AddToScheme(scheme)
+	_ = corev1.AddToScheme(scheme)
+
+	tg := auth.NewTokenGenerator(
+		[]byte("test-secret-key-at-least-32-bytes-long"),
+		TokenDuration,
+		"krkn-operator",
+	)
+
+	// Create admin
+	adminToken, _ := tg.GenerateToken("admin@example.com", "admin", "Admin", "User", "Org")
+	adminClaims, _ := tg.ValidateToken(adminToken)
+
+	// Create User A with cancel permission on cluster1 only
+	userAToken, _ := tg.GenerateToken("usera@example.com", "user", "User", "A", "Org")
+	userAClaims, _ := tg.ValidateToken(userAToken)
+
+	// Create User B with cancel permission on both cluster1 and cluster2
+	userBToken, _ := tg.GenerateToken("userb@example.com", "user", "User", "B", "Org")
+	userBClaims, _ := tg.ValidateToken(userBToken)
+
+	// Group A with cancel permission on cluster1 only
+	groupA := &krknv1alpha1.KrknUserGroup{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "group-a",
+			Namespace: "krkn-operator-system",
+		},
+		Spec: krknv1alpha1.KrknUserGroupSpec{
+			Name:        "group-a",
+			Description: "Group A with cancel on cluster1",
+			ClusterPermissions: map[string]krknv1alpha1.ClusterPermissionSet{
+				"https://cluster1.example.com:6443": {
+					Actions: []string{"view", "cancel"},
+				},
+			},
+		},
+	}
+
+	// Group B with cancel permission on both clusters
+	groupB := &krknv1alpha1.KrknUserGroup{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "group-b",
+			Namespace: "krkn-operator-system",
+		},
+		Spec: krknv1alpha1.KrknUserGroupSpec{
+			Name:        "group-b",
+			Description: "Group B with cancel on both clusters",
+			ClusterPermissions: map[string]krknv1alpha1.ClusterPermissionSet{
+				"https://cluster1.example.com:6443": {
+					Actions: []string{"view", "cancel"},
+				},
+				"https://cluster2.example.com:6443": {
+					Actions: []string{"view", "cancel"},
+				},
+			},
+		},
+	}
+
+	userA := &krknv1alpha1.KrknUser{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "krknuser-usera-example-com",
+			Namespace: "krkn-operator-system",
+			Labels: map[string]string{
+				"group.krkn.krkn-chaos.dev/group-a": "true",
+			},
+		},
+		Spec: krknv1alpha1.KrknUserSpec{
+			UserID:            "usera@example.com",
+			Name:              "User",
+			Surname:           "A",
+			Role:              "user",
+			PasswordSecretRef: "usera-password",
+		},
+	}
+
+	userB := &krknv1alpha1.KrknUser{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "krknuser-userb-example-com",
+			Namespace: "krkn-operator-system",
+			Labels: map[string]string{
+				"group.krkn.krkn-chaos.dev/group-b": "true",
+			},
+		},
+		Spec: krknv1alpha1.KrknUserSpec{
+			UserID:            "userb@example.com",
+			Name:              "User",
+			Surname:           "B",
+			Role:              "user",
+			PasswordSecretRef: "userb-password",
+		},
+	}
+
+	// Multi-cluster run with jobs on both cluster1 and cluster2
+	multiClusterRun := &krknv1alpha1.KrknScenarioRun{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "multi-cluster-run",
+			Namespace: "krkn-operator-system",
+		},
+		Status: krknv1alpha1.KrknScenarioRunStatus{
+			ClusterJobs: []krknv1alpha1.ClusterJobStatus{
+				{
+					ClusterName:   "cluster1",
+					ClusterAPIURL: "https://cluster1.example.com:6443",
+					JobID:         "job-1-cluster1",
+				},
+				{
+					ClusterName:   "cluster2",
+					ClusterAPIURL: "https://cluster2.example.com:6443",
+					JobID:         "job-2-cluster2",
+				},
+			},
+		},
+	}
+
+	// Single cluster run with job only on cluster1
+	singleClusterRun := &krknv1alpha1.KrknScenarioRun{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "single-cluster-run",
+			Namespace: "krkn-operator-system",
+		},
+		Status: krknv1alpha1.KrknScenarioRunStatus{
+			ClusterJobs: []krknv1alpha1.ClusterJobStatus{
+				{
+					ClusterName:   "cluster1",
+					ClusterAPIURL: "https://cluster1.example.com:6443",
+					JobID:         "job-3-cluster1",
+				},
+			},
+		},
+	}
+
+	tests := []struct {
+		name         string
+		claims       *auth.Claims
+		scenarioRun  *krknv1alpha1.KrknScenarioRun
+		expectCancel bool
+		testName     string
+	}{
+		{
+			name:         "admin can cancel multi-cluster run",
+			claims:       adminClaims,
+			scenarioRun:  multiClusterRun,
+			expectCancel: true,
+			testName:     "admin-multi",
+		},
+		{
+			name:         "admin can cancel single-cluster run",
+			claims:       adminClaims,
+			scenarioRun:  singleClusterRun,
+			expectCancel: true,
+			testName:     "admin-single",
+		},
+		{
+			name:         "user A cannot cancel multi-cluster run (missing cancel on cluster2)",
+			claims:       userAClaims,
+			scenarioRun:  multiClusterRun,
+			expectCancel: false,
+			testName:     "userA-multi",
+		},
+		{
+			name:         "user A can cancel single-cluster run (has cancel on cluster1)",
+			claims:       userAClaims,
+			scenarioRun:  singleClusterRun,
+			expectCancel: true,
+			testName:     "userA-single",
+		},
+		{
+			name:         "user B can cancel multi-cluster run (has cancel on all clusters)",
+			claims:       userBClaims,
+			scenarioRun:  multiClusterRun,
+			expectCancel: true,
+			testName:     "userB-multi",
+		},
+		{
+			name:         "user B can cancel single-cluster run",
+			claims:       userBClaims,
+			scenarioRun:  singleClusterRun,
+			expectCancel: true,
+			testName:     "userB-single",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fakeClient := fakeclient.NewClientBuilder().
+				WithScheme(scheme).
+				WithObjects(groupA, groupB, userA, userB).
+				Build()
+
+			handler := &Handler{
+				client:    fakeClient,
+				clientset: fake.NewSimpleClientset(),
+				namespace: "krkn-operator-system",
+			}
+
+			ctx := context.WithValue(context.Background(), auth.UserClaimsKey, tt.claims)
+
+			hasAccess, err := handler.checkScenarioRunCancelAccess(
+				ctx,
+				tt.claims.UserID,
+				tt.scenarioRun,
+			)
+
+			if err != nil {
+				t.Fatalf("Unexpected error: %v", err)
+			}
+
+			if hasAccess != tt.expectCancel {
+				t.Errorf("Expected cancel permission=%v, got %v", tt.expectCancel, hasAccess)
+			}
+		})
+	}
+}
+
 // TestClusterSegregationWithNoGroups verifies that users with no group memberships
 // cannot see any runs
 func TestClusterSegregationWithNoGroups(t *testing.T) {

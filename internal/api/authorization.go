@@ -196,6 +196,43 @@ func (h *Handler) checkScenarioRunGroupAccess(
 	return false, nil // No permission on any job
 }
 
+// checkScenarioRunCancelAccess checks if user can cancel the entire scenario run.
+// Admin users can cancel anything.
+// Regular users must have 'cancel' permission on ALL jobs in the run.
+func (h *Handler) checkScenarioRunCancelAccess(
+	ctx context.Context,
+	userID string,
+	scenarioRun *krknv1alpha1.KrknScenarioRun,
+) (bool, error) {
+	// Admin can cancel anything
+	if auth.IsAdmin(ctx) {
+		return true, nil
+	}
+
+	// Fetch user groups
+	userGroups, err := groupauth.GetUserGroups(ctx, h.client, userID, h.namespace)
+	if err != nil {
+		return false, err
+	}
+
+	if len(userGroups) == 0 {
+		return false, nil // No groups = no access
+	}
+
+	// User must have 'cancel' permission on ALL jobs
+	for _, job := range scenarioRun.Status.ClusterJobs {
+		if job.ClusterAPIURL == "" {
+			continue // Skip jobs without ClusterAPIURL (defensive)
+		}
+
+		if !groupauth.CanPerformAction(userGroups, job.ClusterAPIURL, groupauth.ActionCancel) {
+			return false, nil // Missing permission on at least one job
+		}
+	}
+
+	return true, nil // Has permission on all jobs
+}
+
 // filterScenarioRunsByGroupPermission filters scenario runs based on group permissions.
 //
 // Filtering rules:

@@ -1678,8 +1678,8 @@ func (h *Handler) DeleteScenarioRunComplete(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// Check if user has 'cancel' permission on AT LEAST ONE job in the run
-	// (admins bypass this check in checkScenarioRunGroupAccess)
+	// Check if user can cancel the entire scenario run
+	// Admin can cancel anything, regular users must have 'cancel' permission on ALL jobs
 	claims := auth.GetClaimsFromContext(ctx)
 	if claims == nil {
 		writeJSONError(w, http.StatusUnauthorized, ErrorResponse{
@@ -1689,17 +1689,24 @@ func (h *Handler) DeleteScenarioRunComplete(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	hasAccess, err := h.checkScenarioRunGroupAccess(
+	hasAccess, err := h.checkScenarioRunCancelAccess(
 		ctx,
 		claims.UserID,
 		&scenarioRun,
-		groupauth.ActionCancel,
 	)
 
-	if err != nil || !hasAccess {
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+			Error:   "internal_error",
+			Message: "Failed to validate cancel permissions: " + err.Error(),
+		})
+		return
+	}
+
+	if !hasAccess {
 		writeJSONError(w, http.StatusForbidden, ErrorResponse{
 			Error:   "forbidden",
-			Message: "Access denied. You do not have permission to cancel jobs in this scenario run",
+			Message: "Access denied. You must have cancel permission on all jobs in this run to delete it",
 		})
 		return
 	}
@@ -1737,7 +1744,7 @@ func (h *Handler) DeleteSingleJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx := context.Background()
+	ctx := r.Context()
 
 	// Find KrknScenarioRun containing this jobID
 	var scenarioRunList krknv1alpha1.KrknScenarioRunList
