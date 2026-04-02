@@ -20,10 +20,6 @@ spec:
     - jsonPath: .spec.description
       name: Description
       type: string
-    - jsonPath: .spec.clusterPermissions
-      name: Clusters
-      priority: 1
-      type: integer
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date

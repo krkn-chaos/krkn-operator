@@ -53,7 +53,6 @@ type KrknUserGroupSpec struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:printcolumn:name="Description",type=string,JSONPath=`.spec.description`
-// +kubebuilder:printcolumn:name="Clusters",type=integer,JSONPath=`.spec.clusterPermissions`,priority=1
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 // +kubebuilder:resource:shortName=kug
 
