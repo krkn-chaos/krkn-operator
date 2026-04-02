@@ -80,6 +80,7 @@ func (h *Handler) getTokenGenerator(ctx context.Context) (*auth.TokenGenerator, 
 // GetClusters handles GET /api/v1/clusters endpoint
 // It fetches the KrknTargetRequest CR by the provided ID and returns the target data
 func (h *Handler) GetClusters(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
 	id := r.URL.Query().Get("id")
 	if id == "" {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
@@ -91,7 +92,7 @@ func (h *Handler) GetClusters(w http.ResponseWriter, r *http.Request) {
 
 	// Fetch the KrknTargetRequest CR
 	var targetRequest krknv1alpha1.KrknTargetRequest
-	err := h.client.Get(context.Background(), types.NamespacedName{
+	err := h.client.Get(ctx, types.NamespacedName{
 		Name:      id,
 		Namespace: h.namespace,
 	}, &targetRequest)
@@ -103,9 +104,10 @@ func (h *Handler) GetClusters(w http.ResponseWriter, r *http.Request) {
 				Message: "KrknTargetRequest with id '" + id + "' not found",
 			})
 		} else {
+			log.FromContext(ctx).Error(err, "Failed to fetch KrknTargetRequest", "id", id)
 			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
 				Error:   "internal_error",
-				Message: "Failed to fetch KrknTargetRequest: " + err.Error(),
+				Message: "Failed to fetch KrknTargetRequest",
 			})
 		}
 		return
@@ -123,7 +125,6 @@ func (h *Handler) GetClusters(w http.ResponseWriter, r *http.Request) {
 	// Filter clusters based on user permissions
 	// Admins see all clusters, regular users see only clusters they have 'run' permission for
 	// (this endpoint is used to select clusters for running scenarios)
-	ctx := r.Context()
 	targetData := targetRequest.Status.TargetData
 
 	claims := auth.GetClaimsFromContext(ctx)
@@ -243,9 +244,10 @@ func (h *Handler) GetNodes(w http.ResponseWriter, r *http.Request) {
 	// Call gRPC service to get nodes
 	nodes, err := h.callGetNodesGRPC(kubeconfigBase64)
 	if err != nil {
+		log.FromContext(ctx).Error(err, "Failed to get nodes from gRPC service")
 		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
 			Error:   "internal_error",
-			Message: "Failed to get nodes from gRPC service: " + err.Error(),
+			Message: "Failed to get nodes from gRPC service",
 		})
 		return
 	}
@@ -268,6 +270,7 @@ func (h *Handler) HealthCheck(w http.ResponseWriter, r *http.Request) {
 // GetTargetByUUID handles GET /api/v1/targets/{uuid} endpoint (legacy - checks KrknTargetRequest status)
 // This endpoint checks the status of a KrknTargetRequest CR created by krkn-operator-acm
 func (h *Handler) GetTargetByUUID(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
 	uuid, err := extractPathSuffix(r.URL.Path, TargetsPath+"/")
 	if err != nil {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
@@ -278,16 +281,17 @@ func (h *Handler) GetTargetByUUID(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var targetRequest krknv1alpha1.KrknTargetRequest
-	if err := h.client.Get(context.Background(), types.NamespacedName{
+	if err := h.client.Get(ctx, types.NamespacedName{
 		Name:      uuid,
 		Namespace: h.namespace,
 	}, &targetRequest); err != nil {
 		if client.IgnoreNotFound(err) == nil {
 			w.WriteHeader(http.StatusNotFound)
 		} else {
+			log.FromContext(ctx).Error(err, "Failed to fetch KrknTargetRequest", "uuid", uuid)
 			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
 				Error:   "internal_error",
-				Message: "Failed to fetch KrknTargetRequest: " + err.Error(),
+				Message: "Failed to fetch KrknTargetRequest",
 			})
 		}
 		return
@@ -303,6 +307,7 @@ func (h *Handler) GetTargetByUUID(w http.ResponseWriter, r *http.Request) {
 // PostTarget handles POST /api/v1/targets endpoint (legacy - creates KrknTargetRequest)
 // This endpoint triggers the krkn-operator-acm to discover and return target clusters
 func (h *Handler) PostTarget(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
 	// Generate a new UUID
 	newUUID := uuid.New().String()
 
@@ -318,11 +323,12 @@ func (h *Handler) PostTarget(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Create the CR in the cluster
-	err := h.client.Create(context.Background(), targetRequest)
+	err := h.client.Create(ctx, targetRequest)
 	if err != nil {
+		log.FromContext(ctx).Error(err, "Failed to create KrknTargetRequest", "uuid", newUUID)
 		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
 			Error:   "internal_error",
-			Message: "Failed to create KrknTargetRequest: " + err.Error(),
+			Message: "Failed to create KrknTargetRequest",
 		})
 		return
 	}
@@ -477,6 +483,7 @@ func createScenarioProvider(mode provider.Mode) (provider.ScenarioDataProvider, 
 // PostScenarios handles POST /api/v1/scenarios endpoint
 // It returns the list of available krkn scenarios from quay.io or a private registry
 func (h *Handler) PostScenarios(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
 	registry, mode, err := parseRegistryRequest(r)
 	if err != nil {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
@@ -498,9 +505,10 @@ func (h *Handler) PostScenarios(w http.ResponseWriter, r *http.Request) {
 	// Get registry images (scenario list)
 	scenarioTags, err := scenarioProvider.GetRegistryImages(registry)
 	if err != nil {
+		log.FromContext(ctx).Error(err, "Failed to get scenarios from registry", "registry", registry)
 		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
 			Error:   "internal_error",
-			Message: "Failed to get scenarios from registry: " + err.Error(),
+			Message: "Failed to get scenarios from registry",
 		})
 		return
 	}
@@ -543,6 +551,7 @@ func extractPathSuffix(path string, prefix string) (string, error) {
 // PostScenarioDetail handles POST /api/v1/scenarios/detail/{scenario_name} endpoint
 // It returns detailed information about a specific scenario including input fields
 func (h *Handler) PostScenarioDetail(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
 	scenarioName, err := extractPathSuffix(r.URL.Path, ScenariosDetailPath+"/")
 	if err != nil {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
@@ -573,9 +582,10 @@ func (h *Handler) PostScenarioDetail(w http.ResponseWriter, r *http.Request) {
 	// Get scenario detail
 	scenarioDetail, err := scenarioProvider.GetScenarioDetail(scenarioName, registry)
 	if err != nil {
+		log.FromContext(ctx).Error(err, "Failed to get scenario detail", "scenarioName", scenarioName, "registry", registry)
 		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
 			Error:   "internal_error",
-			Message: "Failed to get scenario detail: " + err.Error(),
+			Message: "Failed to get scenario detail",
 		})
 		return
 	}
@@ -604,6 +614,7 @@ func (h *Handler) PostScenarioDetail(w http.ResponseWriter, r *http.Request) {
 // PostScenarioGlobals handles POST /api/v1/scenarios/globals/{scenario_name} endpoint
 // It returns global environment fields for a specific scenario
 func (h *Handler) PostScenarioGlobals(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
 	scenarioName, err := extractPathSuffix(r.URL.Path, ScenariosGlobalsPath+"/")
 	if err != nil {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
@@ -634,9 +645,10 @@ func (h *Handler) PostScenarioGlobals(w http.ResponseWriter, r *http.Request) {
 	// Get global environment
 	globalDetail, err := scenarioProvider.GetGlobalEnvironment(registry, scenarioName)
 	if err != nil {
+		log.FromContext(ctx).Error(err, "Failed to get global environment", "registry", registry, "scenarioName", scenarioName)
 		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
 			Error:   "internal_error",
-			Message: "Failed to get global environment: " + err.Error(),
+			Message: "Failed to get global environment",
 		})
 		return
 	}
@@ -754,7 +766,7 @@ func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
 		logger.Error(err, "Failed to fetch target request", "targetRequestId", req.TargetRequestID)
 		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
 			Error:   "internal_error",
-			Message: "Failed to fetch target request: " + err.Error(),
+			Message: "Failed to fetch target request",
 		})
 		return
 	}
@@ -856,9 +868,10 @@ func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
 
 	// Create the CR
 	if err := h.client.Create(ctx, scenarioRun); err != nil {
+		logger.Error(err, "Failed to create scenario run", "scenarioRunName", scenarioRunName)
 		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
 			Error:   "internal_error",
-			Message: "Failed to create scenario run: " + err.Error(),
+			Message: "Failed to create scenario run",
 		})
 		return
 	}
@@ -944,9 +957,10 @@ func (h *Handler) GetScenarioRunStatus(w http.ResponseWriter, r *http.Request) {
 		// Fetch user groups
 		userGroups, err := groupauth.GetUserGroups(ctx, h.client, claims.UserID, h.namespace)
 		if err != nil {
+			log.FromContext(ctx).Error(err, "Failed to fetch user groups", "userID", claims.UserID)
 			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
 				Error:   "internal_error",
-				Message: "Failed to fetch user groups: " + err.Error(),
+				Message: "Failed to fetch user groups",
 			})
 			return
 		}
@@ -1485,9 +1499,10 @@ func (h *Handler) ListScenarioRuns(w http.ResponseWriter, r *http.Request) {
 	// List all KrknScenarioRun CRs in the namespace
 	var scenarioRunList krknv1alpha1.KrknScenarioRunList
 	if err := h.client.List(ctx, &scenarioRunList, client.InNamespace(h.namespace)); err != nil {
+		log.FromContext(ctx).Error(err, "Failed to list scenario runs")
 		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
 			Error:   "internal_error",
-			Message: "Failed to list scenario runs: " + err.Error(),
+			Message: "Failed to list scenario runs",
 		})
 		return
 	}
@@ -1537,9 +1552,10 @@ func (h *Handler) GetActiveRunsOverview(w http.ResponseWriter, r *http.Request) 
 	// List all KrknScenarioRun CRs in the namespace
 	var scenarioRunList krknv1alpha1.KrknScenarioRunList
 	if err := h.client.List(ctx, &scenarioRunList, client.InNamespace(h.namespace)); err != nil {
+		log.FromContext(ctx).Error(err, "Failed to list scenario runs")
 		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
 			Error:   "internal_error",
-			Message: "Failed to list scenario runs: " + err.Error(),
+			Message: "Failed to list scenario runs",
 		})
 		return
 	}
@@ -1598,9 +1614,10 @@ func (h *Handler) DeleteScenarioRun(w http.ResponseWriter, r *http.Request) {
 	if err := h.client.List(ctx, &podList, client.InNamespace(h.namespace), client.MatchingLabels{
 		"krkn-job-id": jobID,
 	}); err != nil {
+		log.FromContext(ctx).Error(err, "Failed to list pods", "jobID", jobID)
 		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
 			Error:   "internal_error",
-			Message: "Failed to list pods: " + err.Error(),
+			Message: "Failed to list pods",
 		})
 		return
 	}
@@ -1637,9 +1654,10 @@ func (h *Handler) DeleteScenarioRun(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.client.Delete(ctx, &pod, &deleteOptions); err != nil {
+		log.FromContext(ctx).Error(err, "Failed to delete pod", "podName", pod.Name, "jobID", jobID)
 		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
 			Error:   "internal_error",
-			Message: "Failed to delete pod: " + err.Error(),
+			Message: "Failed to delete pod",
 		})
 		return
 	}
@@ -1723,9 +1741,10 @@ func (h *Handler) DeleteScenarioRunComplete(w http.ResponseWriter, r *http.Reque
 	)
 
 	if err != nil {
+		log.FromContext(ctx).Error(err, "Failed to validate cancel permissions", "scenarioRunName", scenarioRunName, "userID", claims.UserID)
 		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
 			Error:   "internal_error",
-			Message: "Failed to validate cancel permissions: " + err.Error(),
+			Message: "Failed to validate cancel permissions",
 		})
 		return
 	}
@@ -1745,9 +1764,10 @@ func (h *Handler) DeleteScenarioRunComplete(w http.ResponseWriter, r *http.Reque
 
 	// Delete the CR - owner references will cascade delete all pods/configmaps/secrets
 	if err := h.client.Delete(ctx, &scenarioRun); err != nil {
+		log.FromContext(ctx).Error(err, "Failed to delete scenario run", "scenarioRunName", scenarioRunName)
 		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
 			Error:   "internal_error",
-			Message: "Failed to delete scenario run: " + err.Error(),
+			Message: "Failed to delete scenario run",
 		})
 		return
 	}
@@ -1827,9 +1847,10 @@ func (h *Handler) DeleteSingleJob(w http.ResponseWriter, r *http.Request) {
 
 	// Update CR status
 	if err := h.client.Status().Update(ctx, foundScenarioRun); err != nil {
+		log.FromContext(ctx).Error(err, "Failed to update scenario run status", "scenarioRunName", foundScenarioRun.Name, "jobID", jobID)
 		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
 			Error:   "internal_error",
-			Message: "Failed to update scenario run status: " + err.Error(),
+			Message: "Failed to update scenario run status",
 		})
 		return
 	}

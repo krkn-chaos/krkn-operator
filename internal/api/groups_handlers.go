@@ -57,7 +57,7 @@ func (h *Handler) ListUserGroups(w http.ResponseWriter, r *http.Request) {
 		logger.Error(err, "Failed to list user groups")
 		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
 			Error:   "internal_error",
-			Message: "Failed to list user groups: " + err.Error(),
+			Message: "Failed to list user groups",
 		})
 		return
 	}
