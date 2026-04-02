@@ -132,36 +132,6 @@ To enable monitoring:
 Documentation: https://krkn-chaos.dev/docs/krkn-operator/
 Issues:        https://github.com/krkn-chaos/krkn-operator/issues
 
-Quick CRD Examples:
-
-  # Create a local target provider
-  kubectl apply -f - <<EOF
-  apiVersion: krkn.krkn-chaos.dev/v1alpha1
-  kind: KrknOperatorTargetProvider
-  metadata:
-    name: local-cluster
-    namespace: {{ include "krkn-operator.namespace" . }}
-  spec:
-    type: local
-    displayName: "Local Cluster"
-  EOF
-
-  # Create a pod chaos scenario
-  kubectl apply -f - <<EOF
-  apiVersion: krkn.krkn-chaos.dev/v1alpha1
-  kind: KrknScenarioRun
-  metadata:
-    name: my-first-chaos
-    namespace: {{ include "krkn-operator.namespace" . }}
-  spec:
-    scenarioType: "pod-scenarios"
-    config:
-      namespace: default
-      label_selector: "app=nginx"
-    targetProviderRef:
-      name: local-cluster
-  EOF
-
 =============================================================================
 
 Happy Chaos Engineering! 🎯
