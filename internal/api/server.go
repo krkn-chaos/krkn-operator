@@ -14,6 +14,8 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+// Package api provides HTTP API handlers and server implementation for the krkn-operator.
+// It includes endpoints for authentication, target management, scenario execution, and user management.
 package api
 
 import (
@@ -58,64 +60,72 @@ func NewServer(port int, client client.Client, clientset kubernetes.Interface, n
 	mux := http.NewServeMux()
 
 	// Public authentication endpoints (no auth required)
-	mux.HandleFunc("/api/v1/auth/is-registered", handler.IsRegistered)
-	mux.HandleFunc("/api/v1/auth/register", handler.Register)
-	mux.HandleFunc("/api/v1/auth/login", handler.Login)
+	mux.HandleFunc(AuthIsRegistered, handler.IsRegistered)
+	mux.HandleFunc(AuthRegister, handler.Register)
+	mux.HandleFunc(AuthLogin, handler.Login)
 
 	// Authenticated endpoints - user and admin access
-	mux.Handle("/api/v1/health", authMw.RequireAuth(http.HandlerFunc(handler.HealthCheck)))
-	mux.Handle("/api/v1/clusters", authMw.RequireAuth(http.HandlerFunc(handler.GetClusters)))
-	mux.Handle("/api/v1/nodes", authMw.RequireAuth(http.HandlerFunc(handler.GetNodes)))
-	mux.Handle("/api/v1/targets", authMw.RequireAuth(http.HandlerFunc(handler.TargetsHandler)))
-	mux.Handle("/api/v1/targets/", authMw.RequireAuth(http.HandlerFunc(handler.TargetsHandler)))
+	mux.Handle(HealthPath, authMw.RequireAuth(http.HandlerFunc(handler.HealthCheck)))
+	mux.Handle(ClustersPath, authMw.RequireAuth(http.HandlerFunc(handler.GetClusters)))
+	mux.Handle(NodesPath, authMw.RequireAuth(http.HandlerFunc(handler.GetNodes)))
+	mux.Handle(TargetsPath, authMw.RequireAuth(http.HandlerFunc(handler.TargetsHandler)))
+	mux.Handle(TargetsPath+"/", authMw.RequireAuth(http.HandlerFunc(handler.TargetsHandler)))
 
 	// Scenario endpoints - user and admin access
-	mux.Handle("/api/v1/scenarios", authMw.RequireAuth(http.HandlerFunc(handler.PostScenarios)))
-	mux.Handle("/api/v1/scenarios/detail/", authMw.RequireAuth(http.HandlerFunc(handler.PostScenarioDetail)))
-	mux.Handle("/api/v1/scenarios/globals/", authMw.RequireAuth(http.HandlerFunc(handler.PostScenarioGlobals)))
+	mux.Handle(ScenariosPath, authMw.RequireAuth(http.HandlerFunc(handler.PostScenarios)))
+	mux.Handle(ScenariosDetailPath+"/", authMw.RequireAuth(http.HandlerFunc(handler.PostScenarioDetail)))
+	mux.Handle(ScenariosGlobalsPath+"/", authMw.RequireAuth(http.HandlerFunc(handler.PostScenarioGlobals)))
 
 	// WebSocket endpoint for log streaming - handles JWT auth internally via Sec-WebSocket-Protocol
-	// MUST be registered BEFORE the catch-all /api/v1/scenarios/run/ to match first
-	mux.HandleFunc("/api/v1/scenarios/run/", func(w http.ResponseWriter, r *http.Request) {
+	// MUST be registered BEFORE the catch-all ScenariosRunPath to match first
+	mux.HandleFunc(ScenariosRunPath+"/", func(w http.ResponseWriter, r *http.Request) {
 		// Check if this is a WebSocket logs request
 		if strings.Contains(r.URL.Path, "/jobs/") && strings.HasSuffix(r.URL.Path, "/logs") {
 			// WebSocket endpoint - auth handled internally via subprotocol
 			handler.GetScenarioRunLogs(w, r)
 			return
 		}
-		// All other /api/v1/scenarios/run/* endpoints require HTTP JWT auth
+		// All other ScenariosRunPath endpoints require HTTP JWT auth
 		authMw.RequireAuth(http.HandlerFunc(handler.ScenariosRunRouter)).ServeHTTP(w, r)
 	})
 
 	// Scenario run endpoints - user and admin access
-	mux.Handle("/api/v1/scenarios/run", authMw.RequireAuth(http.HandlerFunc(handler.ScenariosRunRouter)))
+	mux.Handle(ScenariosRunPath, authMw.RequireAuth(http.HandlerFunc(handler.ScenariosRunRouter)))
 
 	// Dashboard endpoints - user and admin access
-	mux.Handle("/api/v1/dashboard/active-runs", authMw.RequireAuth(http.HandlerFunc(handler.GetActiveRunsOverview)))
+	mux.Handle(DashboardActiveRunsPath, authMw.RequireAuth(http.HandlerFunc(handler.GetActiveRunsOverview)))
 
 	// User management endpoints - authenticated users
-	mux.Handle("/api/v1/users", authMw.RequireAuth(http.HandlerFunc(handler.UsersRouter)))
-	mux.Handle("/api/v1/users/", authMw.RequireAuth(http.HandlerFunc(handler.UsersRouter)))
+	mux.Handle(UsersPath, authMw.RequireAuth(http.HandlerFunc(handler.UsersRouter)))
+	mux.Handle(UsersPath+"/", authMw.RequireAuth(http.HandlerFunc(handler.UsersRouter)))
+
+	// User group management endpoints - admin only
+	mux.Handle(GroupsPath, authMw.RequireAuth(http.HandlerFunc(handler.GroupsRouter)))
+	mux.Handle(GroupsPath+"/", authMw.RequireAuth(http.HandlerFunc(handler.GroupsRouter)))
 
 	// Provider config endpoints - admin only (POST), user and admin (GET)
 	// Note: handler.ProviderConfigHandler internally handles method-based authorization
-	mux.Handle("/api/v1/provider-config", authMw.RequireAuth(http.HandlerFunc(handler.ProviderConfigHandler)))
-	mux.Handle("/api/v1/provider-config/", authMw.RequireAuth(http.HandlerFunc(handler.ProviderConfigHandler)))
+	mux.Handle(ProviderConfigPath, authMw.RequireAuth(http.HandlerFunc(handler.ProviderConfigHandler)))
+	mux.Handle(ProviderConfigPath+"/", authMw.RequireAuth(http.HandlerFunc(handler.ProviderConfigHandler)))
 
 	// Provider endpoints - GET: user and admin, PATCH: admin only
 	// Note: handler.ProvidersRouter internally handles method-based authorization
-	mux.Handle("/api/v1/providers", authMw.RequireAuth(http.HandlerFunc(handler.ProvidersRouter)))
-	mux.Handle("/api/v1/providers/", authMw.RequireAuth(http.HandlerFunc(handler.ProvidersRouter)))
+	mux.Handle(ProvidersPath, authMw.RequireAuth(http.HandlerFunc(handler.ProvidersRouter)))
+	mux.Handle(ProvidersPath+"/", authMw.RequireAuth(http.HandlerFunc(handler.ProvidersRouter)))
 
 	// Target CRUD endpoints - GET: user and admin, POST/PUT/DELETE: admin only
 	// Note: handler.TargetsCRUDRouter internally handles method-based authorization
-	mux.Handle("/api/v1/operator/targets", authMw.RequireAuth(http.HandlerFunc(handler.TargetsCRUDRouter)))
-	mux.Handle("/api/v1/operator/targets/", authMw.RequireAuth(http.HandlerFunc(handler.TargetsCRUDRouter)))
+	mux.Handle(OperatorTargetsPath, authMw.RequireAuth(http.HandlerFunc(handler.TargetsCRUDRouter)))
+	mux.Handle(OperatorTargetsPath+"/", authMw.RequireAuth(http.HandlerFunc(handler.TargetsCRUDRouter)))
 
 	// Wrap mux with logging middleware
 	server := &http.Server{
-		Addr:    fmt.Sprintf(":%d", port),
-		Handler: loggingMiddleware(mux),
+		Addr:              fmt.Sprintf(":%d", port),
+		Handler:           loggingMiddleware(mux),
+		ReadHeaderTimeout: 30 * time.Second,  // Prevent Slowloris attacks
+		ReadTimeout:       60 * time.Second,  // Total request read timeout
+		WriteTimeout:      60 * time.Second,  // Response write timeout
+		IdleTimeout:       120 * time.Second, // Keep-alive timeout
 	}
 
 	return &Server{

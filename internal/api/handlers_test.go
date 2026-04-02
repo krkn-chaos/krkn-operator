@@ -67,7 +67,7 @@ func TestGetClusters_Success(t *testing.T) {
 	fakeClientset := fake.NewSimpleClientset()
 	handler := NewHandler(fakeClient, fakeClientset, "default", "localhost:50051")
 
-	req := httptest.NewRequest("GET", "/api/v1/clusters?id=test-request", nil)
+	req := httptest.NewRequest("GET", ClustersPath+"?id=test-request", nil)
 	w := httptest.NewRecorder()
 	handler.GetClusters(w, req)
 
@@ -102,7 +102,7 @@ func TestGetClusters_NotFound(t *testing.T) {
 	fakeClientset := fake.NewSimpleClientset()
 	handler := NewHandler(fakeClient, fakeClientset, "default", "localhost:50051")
 
-	req := httptest.NewRequest("GET", "/api/v1/clusters?id=non-existent", nil)
+	req := httptest.NewRequest("GET", ClustersPath+"?id=non-existent", nil)
 	w := httptest.NewRecorder()
 	handler.GetClusters(w, req)
 
@@ -129,7 +129,7 @@ func TestHealthCheck(t *testing.T) {
 	fakeClientset := fake.NewSimpleClientset()
 	handler := NewHandler(fakeClient, fakeClientset, "default", "localhost:50051")
 
-	req := httptest.NewRequest("GET", "/api/v1/health", nil)
+	req := httptest.NewRequest("GET", HealthPath, nil)
 	w := httptest.NewRecorder()
 	handler.HealthCheck(w, req)
 
@@ -156,7 +156,7 @@ func TestPostTarget_LegacyEndpoint(t *testing.T) {
 	fakeClientset := fake.NewSimpleClientset()
 	handler := NewHandler(fakeClient, fakeClientset, "default", "localhost:50051")
 
-	req := httptest.NewRequest("POST", "/api/v1/targets", nil)
+	req := httptest.NewRequest("POST", TargetsPath, nil)
 	w := httptest.NewRecorder()
 	handler.PostTarget(w, req)
 
@@ -211,7 +211,7 @@ func TestGetTargetByUUID_NotCompleted(t *testing.T) {
 	fakeClientset := fake.NewSimpleClientset()
 	handler := NewHandler(fakeClient, fakeClientset, "default", "localhost:50051")
 
-	req := httptest.NewRequest("GET", "/api/v1/targets/test-uuid", nil)
+	req := httptest.NewRequest("GET", TargetsPath+"/test-uuid", nil)
 	w := httptest.NewRecorder()
 	handler.GetTargetByUUID(w, req)
 
@@ -242,7 +242,7 @@ func TestGetTargetByUUID_Completed(t *testing.T) {
 	fakeClientset := fake.NewSimpleClientset()
 	handler := NewHandler(fakeClient, fakeClientset, "default", "localhost:50051")
 
-	req := httptest.NewRequest("GET", "/api/v1/targets/test-uuid", nil)
+	req := httptest.NewRequest("GET", TargetsPath+"/test-uuid", nil)
 	w := httptest.NewRecorder()
 	handler.GetTargetByUUID(w, req)
 
@@ -260,7 +260,7 @@ func TestGetTargetByUUID_NotFound(t *testing.T) {
 	fakeClientset := fake.NewSimpleClientset()
 	handler := NewHandler(fakeClient, fakeClientset, "default", "localhost:50051")
 
-	req := httptest.NewRequest("GET", "/api/v1/targets/non-existent-uuid", nil)
+	req := httptest.NewRequest("GET", TargetsPath+"/non-existent-uuid", nil)
 	w := httptest.NewRecorder()
 	handler.GetTargetByUUID(w, req)
 
@@ -269,7 +269,7 @@ func TestGetTargetByUUID_NotFound(t *testing.T) {
 	}
 }
 
-func setupScenarioRunTestHandler(targetRequestId string, clusters map[string]string) *Handler {
+func setupScenarioRunTestHandler(targetRequestID string, clusters map[string]string) *Handler {
 	scheme := runtime.NewScheme()
 	krknv1alpha1.AddToScheme(scheme)
 	corev1.AddToScheme(scheme)
@@ -289,7 +289,7 @@ func setupScenarioRunTestHandler(targetRequestId string, clusters map[string]str
 
 	secret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      targetRequestId,
+			Name:      targetRequestID,
 			Namespace: "default",
 		},
 		Data: map[string][]byte{
@@ -297,23 +297,48 @@ func setupScenarioRunTestHandler(targetRequestId string, clusters map[string]str
 		},
 	}
 
-	fakeClient := fakeclient.NewClientBuilder().WithScheme(scheme).WithObjects(secret).Build()
+	// Create KrknTargetRequest with completed status and cluster API URLs
+	clusterTargets := make([]krknv1alpha1.ClusterTarget, 0, len(clusters))
+	for clusterName := range clusters {
+		clusterTargets = append(clusterTargets, krknv1alpha1.ClusterTarget{
+			ClusterName:   clusterName,
+			ClusterAPIURL: "https://" + clusterName + ".example.com:6443",
+		})
+	}
+
+	targetRequest := &krknv1alpha1.KrknTargetRequest{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      targetRequestID,
+			Namespace: "default",
+		},
+		Spec: krknv1alpha1.KrknTargetRequestSpec{
+			UUID: "test-uuid",
+		},
+		Status: krknv1alpha1.KrknTargetRequestStatus{
+			Status: "Completed",
+			TargetData: map[string][]krknv1alpha1.ClusterTarget{
+				"krkn-operator": clusterTargets,
+			},
+		},
+	}
+
+	fakeClient := fakeclient.NewClientBuilder().WithScheme(scheme).WithObjects(secret, targetRequest).Build()
 	fakeClientset := fake.NewSimpleClientset()
 	return NewHandler(fakeClient, fakeClientset, "default", "localhost:50051")
 }
 
 func TestPostScenarioRun_SingleTarget_Success(t *testing.T) {
-	targetRequestId := "test-request-id"
+	targetRequestID := "test-request-id"
 	clusterName := "test-cluster"
 	kubeconfig := "YXBpVmVyc2lvbjogdjEKa2luZDogQ29uZmlnCmNsdXN0ZXJzOiBbXQpjb250ZXh0czogW10KdXNlcnM6IFtd"
 
-	handler := setupScenarioRunTestHandler(targetRequestId, map[string]string{
+	handler := setupScenarioRunTestHandler(targetRequestID, map[string]string{
 		clusterName: kubeconfig,
 	})
 
 	// Test
 	reqBody := `{
-		"targetRequestId": "test-request-id",
+		"targetRequestID": "test-request-id",
 		"targetClusters": {
 			"krkn-operator": ["test-cluster"]
 		},
@@ -321,7 +346,7 @@ func TestPostScenarioRun_SingleTarget_Success(t *testing.T) {
 		"scenarioName": "pod-delete"
 	}`
 
-	req := httptest.NewRequest("POST", "/api/v1/scenarios/run", strings.NewReader(reqBody))
+	req := httptest.NewRequest("POST", ScenariosRunPath, strings.NewReader(reqBody))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	handler.PostScenarioRun(w, req)
@@ -382,7 +407,7 @@ func TestPostScenarioRun_MissingTargetUUIDs(t *testing.T) {
 		"scenarioName": "pod-delete"
 	}`
 
-	req := httptest.NewRequest("POST", "/api/v1/scenarios/run", strings.NewReader(reqBody))
+	req := httptest.NewRequest("POST", ScenariosRunPath, strings.NewReader(reqBody))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	handler.PostScenarioRun(w, req)
@@ -412,7 +437,7 @@ func TestPostScenarioRun_MultipleTargets_AllSuccess(t *testing.T) {
 
 	// Test
 	reqBody := `{
-		"targetRequestId": "test-request-id",
+		"targetRequestID": "test-request-id",
 		"targetClusters": {
 			"krkn-operator": ["cluster-1", "cluster-2", "cluster-3"]
 		},
@@ -420,7 +445,7 @@ func TestPostScenarioRun_MultipleTargets_AllSuccess(t *testing.T) {
 		"scenarioName": "pod-delete"
 	}`
 
-	req := httptest.NewRequest("POST", "/api/v1/scenarios/run", strings.NewReader(reqBody))
+	req := httptest.NewRequest("POST", ScenariosRunPath, strings.NewReader(reqBody))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	handler.PostScenarioRun(w, req)
@@ -463,7 +488,7 @@ func TestPostScenarioRun_MultipleTargets_PartialFailure(t *testing.T) {
 	})
 
 	reqBody := `{
-		"targetRequestId": "test-request-id",
+		"targetRequestID": "test-request-id",
 		"targetClusters": {
 			"krkn-operator": ["cluster-1", "invalid", "cluster-2"]
 		},
@@ -471,7 +496,7 @@ func TestPostScenarioRun_MultipleTargets_PartialFailure(t *testing.T) {
 		"scenarioName": "pod-delete"
 	}`
 
-	req := httptest.NewRequest("POST", "/api/v1/scenarios/run", strings.NewReader(reqBody))
+	req := httptest.NewRequest("POST", ScenariosRunPath, strings.NewReader(reqBody))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	handler.PostScenarioRun(w, req)
@@ -514,7 +539,7 @@ func TestPostScenarioRun_MultipleTargets_AllFailure(t *testing.T) {
 
 	// Test
 	reqBody := `{
-		"targetRequestId": "test-request-id",
+		"targetRequestID": "test-request-id",
 		"targetClusters": {
 			"krkn-operator": ["invalid-1", "invalid-2"]
 		},
@@ -522,7 +547,7 @@ func TestPostScenarioRun_MultipleTargets_AllFailure(t *testing.T) {
 		"scenarioName": "pod-delete"
 	}`
 
-	req := httptest.NewRequest("POST", "/api/v1/scenarios/run", strings.NewReader(reqBody))
+	req := httptest.NewRequest("POST", ScenariosRunPath, strings.NewReader(reqBody))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	handler.PostScenarioRun(w, req)
@@ -554,17 +579,17 @@ func TestPostScenarioRun_Validation_ClusterNames(t *testing.T) {
 	}{
 		{
 			name:        "Empty array",
-			reqBody:     `{"targetRequestId": "test-id", "targetClusters": {"krkn-operator": []}, "scenarioImage": "img", "scenarioName": "test"}`,
+			reqBody:     `{"targetRequestID": "test-id", "targetClusters": {"krkn-operator": []}, "scenarioImage": "img", "scenarioName": "test"}`,
 			expectedErr: "provider 'krkn-operator' must have at least one cluster",
 		},
 		{
 			name:        "Duplicates",
-			reqBody:     `{"targetRequestId": "test-id", "targetClusters": {"krkn-operator": ["cluster1", "cluster1"]}, "scenarioImage": "img", "scenarioName": "test"}`,
+			reqBody:     `{"targetRequestID": "test-id", "targetClusters": {"krkn-operator": ["cluster1", "cluster1"]}, "scenarioImage": "img", "scenarioName": "test"}`,
 			expectedErr: "cluster 'cluster1' appears in multiple providers",
 		},
 		{
 			name:        "Empty string",
-			reqBody:     `{"targetRequestId": "test-id", "targetClusters": {"krkn-operator": ["cluster1", ""]}, "scenarioImage": "img", "scenarioName": "test"}`,
+			reqBody:     `{"targetRequestID": "test-id", "targetClusters": {"krkn-operator": ["cluster1", ""]}, "scenarioImage": "img", "scenarioName": "test"}`,
 			expectedErr: "cluster names cannot be empty",
 		},
 	}
@@ -573,7 +598,7 @@ func TestPostScenarioRun_Validation_ClusterNames(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			handler := setupScenarioRunTestHandler("test-id", map[string]string{})
 
-			req := httptest.NewRequest("POST", "/api/v1/scenarios/run", strings.NewReader(tt.reqBody))
+			req := httptest.NewRequest("POST", ScenariosRunPath, strings.NewReader(tt.reqBody))
 			req.Header.Set("Content-Type", "application/json")
 			w := httptest.NewRecorder()
 			handler.PostScenarioRun(w, req)
@@ -657,7 +682,7 @@ func TestListScenarioRuns_Success(t *testing.T) {
 	fakeClientset := fake.NewSimpleClientset()
 	handler := NewHandler(fakeClient, fakeClientset, "default", "localhost:50051")
 
-	req := httptest.NewRequest("GET", "/api/v1/scenarios/run", nil)
+	req := httptest.NewRequest("GET", ScenariosRunPath, nil)
 	w := httptest.NewRecorder()
 	handler.ListScenarioRuns(w, req)
 
@@ -728,7 +753,7 @@ func TestListScenarioRuns_FilterByScenarioName(t *testing.T) {
 	fakeClientset := fake.NewSimpleClientset()
 	handler := NewHandler(fakeClient, fakeClientset, "default", "localhost:50051")
 
-	req := httptest.NewRequest("GET", "/api/v1/scenarios/run?scenarioName=pod-delete", nil)
+	req := httptest.NewRequest("GET", ScenariosRunPath+"?scenarioName=pod-delete", nil)
 	w := httptest.NewRecorder()
 	handler.ListScenarioRuns(w, req)
 

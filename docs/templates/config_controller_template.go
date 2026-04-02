@@ -77,6 +77,7 @@ working example.
 ================================================================================
 */
 
+// Package controller provides template code for implementing provider configuration controllers.
 package controller
 
 import (

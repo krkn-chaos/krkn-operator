@@ -138,8 +138,8 @@ type FileMount struct {
 
 // ScenarioRunRequest represents the request body for POST /scenarios/run
 type ScenarioRunRequest struct {
-	// TargetRequestId is the UUID of the KrknTargetRequest (required)
-	TargetRequestId string `json:"targetRequestId"`
+	// TargetRequestID is the UUID of the KrknTargetRequest (required)
+	TargetRequestID string `json:"targetRequestId"`
 	// TargetClusters is a map of provider-name to list of cluster names
 	// Example: {"krkn-operator": ["cluster1", "cluster2"], "krkn-operator-acm": ["cluster3"]}
 	TargetClusters map[string][]string `json:"targetClusters"`
@@ -162,8 +162,8 @@ type ScenarioRunRequest struct {
 type TargetJobResult struct {
 	// ClusterName is the name of the target cluster
 	ClusterName string `json:"clusterName"`
-	// JobId is the unique job identifier
-	JobId string `json:"jobId"`
+	// JobID is the unique job identifier
+	JobID string `json:"jobId"`
 	// Status is the initial job status (usually "Pending" or "Failed")
 	Status string `json:"status"`
 	// PodName is the Kubernetes pod name
@@ -188,8 +188,8 @@ type ScenarioRunResponse struct {
 
 // JobStatusResponse represents the response for GET /scenarios/run/{jobId}
 type JobStatusResponse struct {
-	// JobId is the unique job identifier
-	JobId string `json:"jobId"`
+	// JobID is the unique job identifier
+	JobID string `json:"jobId"`
 	// ClusterName is the target cluster name
 	ClusterName string `json:"clusterName"`
 	// ScenarioName is the scenario name
@@ -320,8 +320,8 @@ type ClusterJobStatusResponse struct {
 	ProviderName string `json:"providerName"`
 	// ClusterName is the name of the target cluster
 	ClusterName string `json:"clusterName"`
-	// JobId is the unique identifier for this job
-	JobId string `json:"jobId"`
+	// JobID is the unique identifier for this job
+	JobID string `json:"jobId"`
 	// PodName is the name of the pod running the scenario
 	PodName string `json:"podName,omitempty"`
 	// Phase is the current phase of the job
@@ -587,4 +587,106 @@ type ChangePasswordRequest struct {
 type ChangePasswordResponse struct {
 	// Message contains a success message
 	Message string `json:"message"`
+}
+
+// UserGroup CRUD types
+
+// ClusterPermissionSet defines the actions allowed on a cluster
+type ClusterPermissionSet struct {
+	// Actions is the list of allowed actions: "view", "run", "cancel"
+	Actions []string `json:"actions"`
+}
+
+// UserGroupResponse represents a user group in API responses
+type UserGroupResponse struct {
+	// Name is the group name
+	Name string `json:"name"`
+	// Description is the group description (optional)
+	Description string `json:"description,omitempty"`
+	// ClusterPermissions is a map of clusterAPIURL to permitted actions
+	ClusterPermissions map[string]ClusterPermissionSet `json:"clusterPermissions"`
+	// MemberCount is the number of users in this group (calculated dynamically)
+	MemberCount int `json:"memberCount"`
+	// CreatedAt is when the group was created
+	CreatedAt *time.Time `json:"createdAt,omitempty"`
+}
+
+// ListUserGroupsResponse represents the response for GET /api/v1/groups
+type ListUserGroupsResponse struct {
+	// Groups is the array of user group objects
+	Groups []UserGroupResponse `json:"groups"`
+	// Total is the total number of groups
+	Total int `json:"total"`
+}
+
+// CreateUserGroupRequest represents the request body for POST /api/v1/groups
+type CreateUserGroupRequest struct {
+	// Name is the group name (required)
+	Name string `json:"name"`
+	// Description is the group description (optional)
+	Description string `json:"description,omitempty"`
+	// ClusterPermissions is a map of clusterAPIURL to permitted actions (required, min 1)
+	ClusterPermissions map[string]ClusterPermissionSet `json:"clusterPermissions"`
+}
+
+// CreateUserGroupResponse represents the response for POST /api/v1/groups
+type CreateUserGroupResponse struct {
+	// Message contains a success message
+	Message string `json:"message"`
+	// Name is the created group's name
+	Name string `json:"name"`
+}
+
+// UpdateUserGroupRequest represents the request body for PATCH /api/v1/groups/:groupName
+type UpdateUserGroupRequest struct {
+	// Description is the group description (optional)
+	Description *string `json:"description,omitempty"`
+	// ClusterPermissions is a map of clusterAPIURL to permitted actions (optional)
+	ClusterPermissions map[string]ClusterPermissionSet `json:"clusterPermissions,omitempty"`
+}
+
+// UpdateUserGroupResponse represents the response for PATCH /api/v1/groups/:groupName
+type UpdateUserGroupResponse struct {
+	// Message contains a success message
+	Message string `json:"message"`
+	// Group is the updated group object
+	Group UserGroupResponse `json:"group"`
+}
+
+// DeleteUserGroupResponse represents the response for DELETE /api/v1/groups/:groupName
+type DeleteUserGroupResponse struct {
+	// Message contains a success message
+	Message string `json:"message"`
+}
+
+// AddGroupMemberRequest represents the request body for POST /api/v1/groups/:groupName/members
+type AddGroupMemberRequest struct {
+	// UserID is the email address of the user to add (required)
+	UserID string `json:"userId"`
+}
+
+// AddGroupMemberResponse represents the response for POST /api/v1/groups/:groupName/members
+type AddGroupMemberResponse struct {
+	// Message contains a success message
+	Message string `json:"message"`
+	// UserID is the added user's email
+	UserID string `json:"userId"`
+	// GroupName is the group name
+	GroupName string `json:"groupName"`
+}
+
+// RemoveGroupMemberResponse represents the response for DELETE /api/v1/groups/:groupName/members/:userId
+type RemoveGroupMemberResponse struct {
+	// Message contains a success message
+	Message string `json:"message"`
+}
+
+// ListGroupMembersResponse represents the response for GET /api/v1/groups/:groupName/members
+type ListGroupMembersResponse struct {
+	// Members is the array of user objects in this group
+	Members []UserResponse `json:"members"`
+	// Total is the total number of members
+	Total int `json:"total"`
+	// GroupName is the group name
+	GroupName string `json:"groupName"`
 }

@@ -220,27 +220,27 @@ func (h *Handler) ListUsers(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// GetUser handles GET /api/v1/users/:userId
+// GetUser handles GET /api/v1/users/:userID
 // Returns a single user by email (admin or self)
 func (h *Handler) GetUser(w http.ResponseWriter, r *http.Request) {
 	ctx := context.Background()
 	logger := log.FromContext(ctx).WithName("get-user")
 
-	// Extract userId from path
-	userId, err := extractPathSuffix(r.URL.Path, "/api/v1/users/")
+	// Extract userID from path
+	userID, err := extractPathSuffix(r.URL.Path, UsersPath+"/")
 	if err != nil {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
 			Error:   "bad_request",
-			Message: "Invalid userId in path",
+			Message: "Invalid userID in path",
 		})
 		return
 	}
 
 	// Remove /password suffix if present
-	userId = strings.TrimSuffix(userId, "/password")
+	userID = strings.TrimSuffix(userID, "/password")
 
 	// Fetch user by email
-	user, err := h.fetchUserByEmail(ctx, userId)
+	user, err := h.fetchUserByEmail(ctx, userID)
 	if err != nil {
 		if strings.Contains(err.Error(), "not found") {
 			writeJSONError(w, http.StatusNotFound, ErrorResponse{
@@ -248,7 +248,7 @@ func (h *Handler) GetUser(w http.ResponseWriter, r *http.Request) {
 				Message: err.Error(),
 			})
 		} else {
-			logger.Error(err, "Failed to fetch user", "userId", userId)
+			logger.Error(err, "Failed to fetch user", "userID", userID)
 			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
 				Error:   "internal_error",
 				Message: err.Error(),
@@ -259,7 +259,7 @@ func (h *Handler) GetUser(w http.ResponseWriter, r *http.Request) {
 
 	// Check permissions (admin or self)
 	claims := auth.GetClaimsFromContext(r.Context())
-	if !auth.IsAdmin(r.Context()) && (claims == nil || claims.UserID != userId) {
+	if !auth.IsAdmin(r.Context()) && (claims == nil || claims.UserID != userID) {
 		writeJSONError(w, http.StatusForbidden, ErrorResponse{
 			Error:   "forbidden",
 			Message: "You can only view your own profile",
@@ -267,7 +267,7 @@ func (h *Handler) GetUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	logger.Info("Retrieved user", "userId", userId)
+	logger.Info("Retrieved user", "userID", userID)
 
 	// Return user (without password)
 	response := buildUserResponse(user)
@@ -430,7 +430,7 @@ func (h *Handler) CreateUser(w http.ResponseWriter, r *http.Request) {
 	if err := h.client.Create(ctx, user); err != nil {
 		// Clean up secret
 		_ = h.client.Delete(ctx, secret)
-		logger.Error(err, "Failed to create user", "userId", req.UserID)
+		logger.Error(err, "Failed to create user", "userID", req.UserID)
 		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
 			Error:   "internal_error",
 			Message: "Failed to create user",
@@ -448,7 +448,7 @@ func (h *Handler) CreateUser(w http.ResponseWriter, r *http.Request) {
 		// Don't fail - status update is non-critical
 	}
 
-	logger.Info("User created successfully", "userId", req.UserID, "role", req.Role)
+	logger.Info("User created successfully", "userID", req.UserID, "role", req.Role)
 
 	writeJSON(w, http.StatusCreated, CreateUserResponse{
 		Message: "User created successfully",
@@ -457,24 +457,24 @@ func (h *Handler) CreateUser(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// UpdateUser handles PATCH /api/v1/users/:userId
+// UpdateUser handles PATCH /api/v1/users/:userID
 // Updates user profile (admin can update all fields, users can only update own profile)
 func (h *Handler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 	ctx := context.Background()
 	logger := log.FromContext(ctx).WithName("update-user")
 
-	// Extract userId from path
-	userId, err := extractPathSuffix(r.URL.Path, "/api/v1/users/")
+	// Extract userID from path
+	userID, err := extractPathSuffix(r.URL.Path, UsersPath+"/")
 	if err != nil {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
 			Error:   "bad_request",
-			Message: "Invalid userId in path",
+			Message: "Invalid userID in path",
 		})
 		return
 	}
 
 	// Remove /password suffix if present
-	userId = strings.TrimSuffix(userId, "/password")
+	userID = strings.TrimSuffix(userID, "/password")
 
 	// Parse request
 	var req UpdateUserRequest
@@ -496,7 +496,7 @@ func (h *Handler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Fetch existing user
-	user, err := h.fetchUserByEmail(ctx, userId)
+	user, err := h.fetchUserByEmail(ctx, userID)
 	if err != nil {
 		if strings.Contains(err.Error(), "not found") {
 			writeJSONError(w, http.StatusNotFound, ErrorResponse{
@@ -504,7 +504,7 @@ func (h *Handler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 				Message: err.Error(),
 			})
 		} else {
-			logger.Error(err, "Failed to fetch user", "userId", userId)
+			logger.Error(err, "Failed to fetch user", "userID", userID)
 			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
 				Error:   "internal_error",
 				Message: err.Error(),
@@ -516,7 +516,7 @@ func (h *Handler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 	// Check permissions
 	claims := auth.GetClaimsFromContext(r.Context())
 	isAdmin := auth.IsAdmin(r.Context())
-	isSelf := claims != nil && claims.UserID == userId
+	isSelf := claims != nil && claims.UserID == userID
 
 	if !isAdmin && !isSelf {
 		writeJSONError(w, http.StatusForbidden, ErrorResponse{
@@ -573,7 +573,7 @@ func (h *Handler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.client.Update(ctx, user); err != nil {
-		logger.Error(err, "Failed to update user", "userId", userId)
+		logger.Error(err, "Failed to update user", "userID", userID)
 		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
 			Error:   "internal_error",
 			Message: "Failed to update user: " + err.Error(),
@@ -585,12 +585,12 @@ func (h *Handler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 	if req.Active != nil {
 		user.Status.Active = *req.Active
 		if err := h.client.Status().Update(ctx, user); err != nil {
-			logger.Error(err, "Failed to update user status", "userId", userId)
+			logger.Error(err, "Failed to update user status", "userID", userID)
 			// Non-critical, continue
 		}
 	}
 
-	logger.Info("User updated successfully", "userId", userId)
+	logger.Info("User updated successfully", "userID", userID)
 
 	// Return updated user
 	response := buildUserResponse(user)
@@ -600,7 +600,7 @@ func (h *Handler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// DeleteUser handles DELETE /api/v1/users/:userId
+// DeleteUser handles DELETE /api/v1/users/:userID
 // Deletes a user (admin only, cannot delete self, cannot delete last admin)
 func (h *Handler) DeleteUser(w http.ResponseWriter, r *http.Request) {
 	ctx := context.Background()
@@ -615,22 +615,22 @@ func (h *Handler) DeleteUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Extract userId from path
-	userId, err := extractPathSuffix(r.URL.Path, "/api/v1/users/")
+	// Extract userID from path
+	userID, err := extractPathSuffix(r.URL.Path, UsersPath+"/")
 	if err != nil {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
 			Error:   "bad_request",
-			Message: "Invalid userId in path",
+			Message: "Invalid userID in path",
 		})
 		return
 	}
 
 	// Remove /password suffix if present
-	userId = strings.TrimSuffix(userId, "/password")
+	userID = strings.TrimSuffix(userID, "/password")
 
 	// Check not deleting self
 	claims := auth.GetClaimsFromContext(r.Context())
-	if claims != nil && claims.UserID == userId {
+	if claims != nil && claims.UserID == userID {
 		writeJSONError(w, http.StatusForbidden, ErrorResponse{
 			Error:   "forbidden",
 			Message: "You cannot delete your own account",
@@ -639,7 +639,7 @@ func (h *Handler) DeleteUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Fetch user to delete
-	user, err := h.fetchUserByEmail(ctx, userId)
+	user, err := h.fetchUserByEmail(ctx, userID)
 	if err != nil {
 		if strings.Contains(err.Error(), "not found") {
 			writeJSONError(w, http.StatusNotFound, ErrorResponse{
@@ -647,7 +647,7 @@ func (h *Handler) DeleteUser(w http.ResponseWriter, r *http.Request) {
 				Message: err.Error(),
 			})
 		} else {
-			logger.Error(err, "Failed to fetch user", "userId", userId)
+			logger.Error(err, "Failed to fetch user", "userID", userID)
 			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
 				Error:   "internal_error",
 				Message: err.Error(),
@@ -704,7 +704,7 @@ func (h *Handler) DeleteUser(w http.ResponseWriter, r *http.Request) {
 
 	// Delete user
 	if err := h.client.Delete(ctx, user); err != nil {
-		logger.Error(err, "Failed to delete user", "userId", userId)
+		logger.Error(err, "Failed to delete user", "userID", userID)
 		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
 			Error:   "internal_error",
 			Message: "Failed to delete user: " + err.Error(),
@@ -712,31 +712,31 @@ func (h *Handler) DeleteUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	logger.Info("User deleted successfully", "userId", userId)
+	logger.Info("User deleted successfully", "userID", userID)
 
 	writeJSON(w, http.StatusOK, DeleteUserResponse{
 		Message: "User deleted successfully",
 	})
 }
 
-// ChangePassword handles PATCH /api/v1/users/:userId/password
+// ChangePassword handles PATCH /api/v1/users/:userID/password
 // Changes user password (admin can change any password, users can change own password)
 func (h *Handler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 	ctx := context.Background()
 	logger := log.FromContext(ctx).WithName("change-password")
 
-	// Extract userId from path
-	userId, err := extractPathSuffix(r.URL.Path, "/api/v1/users/")
+	// Extract userID from path
+	userID, err := extractPathSuffix(r.URL.Path, UsersPath+"/")
 	if err != nil {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
 			Error:   "bad_request",
-			Message: "Invalid userId in path",
+			Message: "Invalid userID in path",
 		})
 		return
 	}
 
 	// Remove "/password" suffix
-	userId = strings.TrimSuffix(userId, "/password")
+	userID = strings.TrimSuffix(userID, "/password")
 
 	// Parse request
 	var req ChangePasswordRequest
@@ -760,7 +760,7 @@ func (h *Handler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 	// Check permissions
 	claims := auth.GetClaimsFromContext(r.Context())
 	isAdmin := auth.IsAdmin(r.Context())
-	isSelf := claims != nil && claims.UserID == userId
+	isSelf := claims != nil && claims.UserID == userID
 
 	if !isAdmin && !isSelf {
 		writeJSONError(w, http.StatusForbidden, ErrorResponse{
@@ -771,7 +771,7 @@ func (h *Handler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Fetch user
-	user, err := h.fetchUserByEmail(ctx, userId)
+	user, err := h.fetchUserByEmail(ctx, userID)
 	if err != nil {
 		if strings.Contains(err.Error(), "not found") {
 			writeJSONError(w, http.StatusNotFound, ErrorResponse{
@@ -779,7 +779,7 @@ func (h *Handler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 				Message: err.Error(),
 			})
 		} else {
-			logger.Error(err, "Failed to fetch user", "userId", userId)
+			logger.Error(err, "Failed to fetch user", "userID", userID)
 			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
 				Error:   "internal_error",
 				Message: err.Error(),
@@ -858,7 +858,7 @@ func (h *Handler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 	secret.Data["passwordHash"] = []byte(newPasswordHash)
 
 	if err := h.client.Update(ctx, secret); err != nil {
-		logger.Error(err, "Failed to update password", "userId", userId)
+		logger.Error(err, "Failed to update password", "userID", userID)
 		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
 			Error:   "internal_error",
 			Message: "Failed to update password",
@@ -866,7 +866,7 @@ func (h *Handler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	logger.Info("Password updated successfully", "userId", userId)
+	logger.Info("Password updated successfully", "userID", userID)
 
 	writeJSON(w, http.StatusOK, ChangePasswordResponse{
 		Message: "Password updated successfully",
@@ -878,7 +878,7 @@ func (h *Handler) UsersRouter(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path
 
 	// Root endpoint: /api/v1/users
-	if path == "/api/v1/users" {
+	if path == UsersPath {
 		if r.Method == http.MethodGet {
 			h.ListUsers(w, r)
 			return
@@ -891,13 +891,13 @@ func (h *Handler) UsersRouter(w http.ResponseWriter, r *http.Request) {
 
 		writeJSONError(w, http.StatusMethodNotAllowed, ErrorResponse{
 			Error:   "method_not_allowed",
-			Message: "Only GET and POST are allowed on /api/v1/users",
+			Message: "Only GET and POST are allowed on " + UsersPath,
 		})
 		return
 	}
 
-	// User-specific endpoint: /api/v1/users/:userId
-	if strings.HasPrefix(path, "/api/v1/users/") {
+	// User-specific endpoint: /api/v1/users/:userID
+	if strings.HasPrefix(path, UsersPath+"/") {
 		// Check for password change endpoint
 		if strings.HasSuffix(path, "/password") {
 			if r.Method == http.MethodPatch {

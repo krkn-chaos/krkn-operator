@@ -75,19 +75,58 @@ func TestSanitizeUserID(t *testing.T) {
 	}
 }
 
-// TestCheckScenarioRunAccess tests access control for scenario runs
+// TestCheckScenarioRunAccess tests group-based access control for scenario runs
 func TestCheckScenarioRunAccess(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = krknv1alpha1.AddToScheme(scheme)
+	_ = corev1.AddToScheme(scheme)
+
 	tg := auth.NewTokenGenerator(
 		[]byte("test-secret-key-at-least-32-bytes-long"),
 		TokenDuration,
 		"krkn-operator",
 	)
 
-	adminToken, _ := tg.GenerateToken("user@example.com", "admin", "Admin", "User", "Org")
+	adminToken, _ := tg.GenerateToken("admin@example.com", "admin", "Admin", "User", "Org")
 	adminClaims, _ := tg.ValidateToken(adminToken)
 
 	userToken, _ := tg.GenerateToken("user@example.com", "user", "Regular", "User", "Org")
 	userClaims, _ := tg.ValidateToken(userToken)
+
+	// Create test group with permission on cluster1
+	testGroup := &krknv1alpha1.KrknUserGroup{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-group",
+			Namespace: "krkn-operator-system",
+		},
+		Spec: krknv1alpha1.KrknUserGroupSpec{
+			Name:        "test-group",
+			Description: "Test group",
+			ClusterPermissions: map[string]krknv1alpha1.ClusterPermissionSet{
+				"https://cluster1.example.com:6443": {
+					Actions: []string{"view", "run", "cancel"},
+				},
+			},
+		},
+	}
+
+	// Create test user with group membership
+	testUser := &krknv1alpha1.KrknUser{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "krknuser-user-example-com",
+			Namespace: "krkn-operator-system",
+			Labels: map[string]string{
+				"group.krkn.krkn-chaos.dev/test-group": "true",
+			},
+		},
+		Spec: krknv1alpha1.KrknUserSpec{
+			UserID:            "user@example.com",
+			Name:              "Test",
+			Surname:           "User",
+			Role:              "user",
+			PasswordSecretRef: "user-password",
+		},
+	}
 
 	tests := []struct {
 		name           string
@@ -100,50 +139,67 @@ func TestCheckScenarioRunAccess(t *testing.T) {
 			name:   "admin can access any scenario run",
 			claims: adminClaims,
 			scenarioRun: &krknv1alpha1.KrknScenarioRun{
-				Spec: krknv1alpha1.KrknScenarioRunSpec{
-					OwnerUserID: "user@example.com",
+				Status: krknv1alpha1.KrknScenarioRunStatus{
+					ClusterJobs: []krknv1alpha1.ClusterJobStatus{
+						{
+							ClusterName:   "cluster1",
+							ClusterAPIURL: "https://cluster1.example.com:6443",
+							JobID:         "job-1",
+						},
+					},
 				},
 			},
 			expectAllow: true,
 		},
 		{
-			name:   "run without owner is rejected (admin)",
+			name:   "run without jobs is rejected (admin bypasses)",
 			claims: adminClaims,
 			scenarioRun: &krknv1alpha1.KrknScenarioRun{
-				Spec: krknv1alpha1.KrknScenarioRunSpec{
-					OwnerUserID: "",
+				Status: krknv1alpha1.KrknScenarioRunStatus{
+					ClusterJobs: []krknv1alpha1.ClusterJobStatus{},
 				},
 			},
-			expectAllow:    false,
-			expectedStatus: http.StatusForbidden,
+			expectAllow: true, // Admin bypasses this check
 		},
 		{
-			name:   "user can access own scenario run",
+			name:   "user with group permission can access run",
 			claims: userClaims,
 			scenarioRun: &krknv1alpha1.KrknScenarioRun{
-				Spec: krknv1alpha1.KrknScenarioRunSpec{
-					OwnerUserID: "user@example.com",
+				Status: krknv1alpha1.KrknScenarioRunStatus{
+					ClusterJobs: []krknv1alpha1.ClusterJobStatus{
+						{
+							ClusterName:   "cluster1",
+							ClusterAPIURL: "https://cluster1.example.com:6443",
+							JobID:         "job-1",
+						},
+					},
 				},
 			},
 			expectAllow: true,
 		},
 		{
-			name:   "user cannot access other user's scenario run",
+			name:   "user without permission cannot access run",
 			claims: userClaims,
 			scenarioRun: &krknv1alpha1.KrknScenarioRun{
-				Spec: krknv1alpha1.KrknScenarioRunSpec{
-					OwnerUserID: "other@example.com",
+				Status: krknv1alpha1.KrknScenarioRunStatus{
+					ClusterJobs: []krknv1alpha1.ClusterJobStatus{
+						{
+							ClusterName:   "cluster2",
+							ClusterAPIURL: "https://cluster2.example.com:6443",
+							JobID:         "job-2",
+						},
+					},
 				},
 			},
 			expectAllow:    false,
 			expectedStatus: http.StatusForbidden,
 		},
 		{
-			name:   "run without owner is rejected (user)",
+			name:   "run without jobs is rejected (user)",
 			claims: userClaims,
 			scenarioRun: &krknv1alpha1.KrknScenarioRun{
-				Spec: krknv1alpha1.KrknScenarioRunSpec{
-					OwnerUserID: "",
+				Status: krknv1alpha1.KrknScenarioRunStatus{
+					ClusterJobs: []krknv1alpha1.ClusterJobStatus{},
 				},
 			},
 			expectAllow:    false,
@@ -153,62 +209,135 @@ func TestCheckScenarioRunAccess(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			fakeClient := fakeclient.NewClientBuilder().
+				WithScheme(scheme).
+				WithObjects(testGroup, testUser).
+				Build()
+
+			handler := &Handler{
+				client:    fakeClient,
+				clientset: fake.NewSimpleClientset(),
+				namespace: "krkn-operator-system",
+			}
+
 			req := httptest.NewRequest("GET", "/test", nil)
 			ctx := context.WithValue(req.Context(), auth.UserClaimsKey, tt.claims)
 			req = req.WithContext(ctx)
 
 			w := httptest.NewRecorder()
 
-			result := checkScenarioRunAccess(w, req, tt.scenarioRun)
+			result := handler.checkScenarioRunAccess(w, req, tt.scenarioRun)
 
 			if result != tt.expectAllow {
-				t.Errorf("Expected allow=%v, got %v", tt.expectAllow, result)
+				t.Errorf("Expected allow=%v, got %v. Response: %s", tt.expectAllow, result, w.Body.String())
 			}
 
-			if !tt.expectAllow && w.Code != tt.expectedStatus {
+			if !tt.expectAllow && tt.expectedStatus != 0 && w.Code != tt.expectedStatus {
 				t.Errorf("Expected status %d, got %d", tt.expectedStatus, w.Code)
 			}
 		})
 	}
 }
 
-// TestFilterScenarioRunsByOwnership tests filtering of scenario runs by ownership
-func TestFilterScenarioRunsByOwnership(t *testing.T) {
+// TestFilterScenarioRunsByGroupPermission tests filtering of scenario runs by group permissions
+func TestFilterScenarioRunsByGroupPermission(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = krknv1alpha1.AddToScheme(scheme)
+	_ = corev1.AddToScheme(scheme)
+
 	tg := auth.NewTokenGenerator(
 		[]byte("test-secret-key-at-least-32-bytes-long"),
 		TokenDuration,
 		"krkn-operator",
 	)
 
-	adminToken, _ := tg.GenerateToken("user@example.com", "admin", "Admin", "User", "Org")
+	adminToken, _ := tg.GenerateToken("admin@example.com", "admin", "Admin", "User", "Org")
 	adminClaims, _ := tg.ValidateToken(adminToken)
 
 	userToken, _ := tg.GenerateToken("user@example.com", "user", "Regular", "User", "Org")
 	userClaims, _ := tg.ValidateToken(userToken)
 
+	// Create test group with permission on cluster1
+	testGroup := &krknv1alpha1.KrknUserGroup{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-group",
+			Namespace: "krkn-operator-system",
+		},
+		Spec: krknv1alpha1.KrknUserGroupSpec{
+			Name:        "test-group",
+			Description: "Test group",
+			ClusterPermissions: map[string]krknv1alpha1.ClusterPermissionSet{
+				"https://cluster1.example.com:6443": {
+					Actions: []string{"view", "run", "cancel"},
+				},
+			},
+		},
+	}
+
+	// Create test user with group membership
+	testUser := &krknv1alpha1.KrknUser{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "krknuser-user-example-com",
+			Namespace: "krkn-operator-system",
+			Labels: map[string]string{
+				"group.krkn.krkn-chaos.dev/test-group": "true",
+			},
+		},
+		Spec: krknv1alpha1.KrknUserSpec{
+			UserID:            "user@example.com",
+			Name:              "Test",
+			Surname:           "User",
+			Role:              "user",
+			PasswordSecretRef: "user-password",
+		},
+	}
+
 	runs := []krknv1alpha1.KrknScenarioRun{
 		{
-			ObjectMeta: metav1.ObjectMeta{Name: "run1"},
-			Spec: krknv1alpha1.KrknScenarioRunSpec{
-				OwnerUserID: "user@example.com",
+			ObjectMeta: metav1.ObjectMeta{Name: "run1-cluster1"},
+			Status: krknv1alpha1.KrknScenarioRunStatus{
+				ClusterJobs: []krknv1alpha1.ClusterJobStatus{
+					{
+						ClusterName:   "cluster1",
+						ClusterAPIURL: "https://cluster1.example.com:6443",
+						JobID:         "job-1",
+					},
+				},
 			},
 		},
 		{
-			ObjectMeta: metav1.ObjectMeta{Name: "run2"},
-			Spec: krknv1alpha1.KrknScenarioRunSpec{
-				OwnerUserID: "other@example.com",
+			ObjectMeta: metav1.ObjectMeta{Name: "run2-cluster2"},
+			Status: krknv1alpha1.KrknScenarioRunStatus{
+				ClusterJobs: []krknv1alpha1.ClusterJobStatus{
+					{
+						ClusterName:   "cluster2",
+						ClusterAPIURL: "https://cluster2.example.com:6443",
+						JobID:         "job-2",
+					},
+				},
 			},
 		},
 		{
-			ObjectMeta: metav1.ObjectMeta{Name: "run3-legacy"},
-			Spec: krknv1alpha1.KrknScenarioRunSpec{
-				OwnerUserID: "",
+			ObjectMeta: metav1.ObjectMeta{Name: "run3-legacy-no-jobs"},
+			Status: krknv1alpha1.KrknScenarioRunStatus{
+				ClusterJobs: []krknv1alpha1.ClusterJobStatus{},
 			},
 		},
 		{
-			ObjectMeta: metav1.ObjectMeta{Name: "run4"},
-			Spec: krknv1alpha1.KrknScenarioRunSpec{
-				OwnerUserID: "another@example.com",
+			ObjectMeta: metav1.ObjectMeta{Name: "run4-both-clusters"},
+			Status: krknv1alpha1.KrknScenarioRunStatus{
+				ClusterJobs: []krknv1alpha1.ClusterJobStatus{
+					{
+						ClusterName:   "cluster1",
+						ClusterAPIURL: "https://cluster1.example.com:6443",
+						JobID:         "job-3",
+					},
+					{
+						ClusterName:   "cluster2",
+						ClusterAPIURL: "https://cluster2.example.com:6443",
+						JobID:         "job-4",
+					},
+				},
 			},
 		},
 	}
@@ -220,26 +349,40 @@ func TestFilterScenarioRunsByOwnership(t *testing.T) {
 		expectedNames []string
 	}{
 		{
-			name:          "admin sees all runs (excluding legacy)",
+			name:          "admin sees all runs",
 			claims:        adminClaims,
-			expectedCount: 3,
-			expectedNames: []string{"run1", "run2", "run4"},
+			expectedCount: 4,
+			expectedNames: []string{"run1-cluster1", "run2-cluster2", "run3-legacy-no-jobs", "run4-both-clusters"},
 		},
 		{
-			name:          "user sees only own runs",
+			name:          "user sees only runs with group permission on at least one cluster",
 			claims:        userClaims,
-			expectedCount: 1,
-			expectedNames: []string{"run1"},
+			expectedCount: 2,
+			expectedNames: []string{"run1-cluster1", "run4-both-clusters"},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			fakeClient := fakeclient.NewClientBuilder().
+				WithScheme(scheme).
+				WithObjects(testGroup, testUser).
+				Build()
+
+			handler := &Handler{
+				client:    fakeClient,
+				clientset: fake.NewSimpleClientset(),
+				namespace: "krkn-operator-system",
+			}
+
 			ctx := context.WithValue(context.Background(), auth.UserClaimsKey, tt.claims)
-			filtered := filterScenarioRunsByOwnership(runs, ctx)
+			filtered := handler.filterScenarioRunsByGroupPermission(runs, ctx)
 
 			if len(filtered) != tt.expectedCount {
 				t.Errorf("Expected %d runs, got %d", tt.expectedCount, len(filtered))
+				for _, run := range filtered {
+					t.Logf("  - %s", run.Name)
+				}
 			}
 
 			// Verify expected names are present
@@ -250,14 +393,14 @@ func TestFilterScenarioRunsByOwnership(t *testing.T) {
 
 			for _, expectedName := range tt.expectedNames {
 				if !nameMap[expectedName] {
-					t.Errorf("Expected run '%s' not found in filtered results", expectedName)
+					t.Errorf("Expected run %s not found in filtered results", expectedName)
 				}
 			}
 		})
 	}
 }
 
-// TestPostScenarioRunSetsOwner tests that POST endpoint sets owner correctly
+// TestPostScenarioRunSetsOwner verifies that PostScenarioRun sets the owner user ID
 func TestPostScenarioRunSetsOwner(t *testing.T) {
 	scheme := runtime.NewScheme()
 	krknv1alpha1.AddToScheme(scheme)
@@ -267,166 +410,107 @@ func TestPostScenarioRunSetsOwner(t *testing.T) {
 	targetRequest := &krknv1alpha1.KrknTargetRequest{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-target-request",
-			Namespace: "default",
+			Namespace: "krkn-operator-system",
 		},
 		Spec: krknv1alpha1.KrknTargetRequestSpec{
-			UUID: "test-uuid-123",
+			UUID: "test-uuid",
+		},
+		Status: krknv1alpha1.KrknTargetRequestStatus{
+			Status: "Completed",
+			TargetData: map[string][]krknv1alpha1.ClusterTarget{
+				"krkn-operator": {
+					{
+						ClusterName:   "cluster-1",
+						ClusterAPIURL: "https://cluster1.example.com:6443",
+					},
+				},
+			},
+		},
+	}
+
+	// Create test group and user
+	testGroup := &krknv1alpha1.KrknUserGroup{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-group",
+			Namespace: "krkn-operator-system",
+		},
+		Spec: krknv1alpha1.KrknUserGroupSpec{
+			Name:        "test-group",
+			Description: "Test group",
+			ClusterPermissions: map[string]krknv1alpha1.ClusterPermissionSet{
+				"https://cluster1.example.com:6443": {
+					Actions: []string{"view", "run", "cancel"},
+				},
+			},
+		},
+	}
+
+	testUser := &krknv1alpha1.KrknUser{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "krknuser-user-test-com",
+			Namespace: "krkn-operator-system",
+			Labels: map[string]string{
+				"group.krkn.krkn-chaos.dev/test-group": "true",
+			},
+		},
+		Spec: krknv1alpha1.KrknUserSpec{
+			UserID:            "user@test.com",
+			Name:              "Test",
+			Surname:           "User",
+			Role:              "user",
+			PasswordSecretRef: "user-password",
 		},
 	}
 
 	fakeClient := fakeclient.NewClientBuilder().
 		WithScheme(scheme).
-		WithRuntimeObjects(targetRequest).
-		WithStatusSubresource(&krknv1alpha1.KrknScenarioRun{}).
+		WithObjects(targetRequest, testGroup, testUser).
 		Build()
 
-	fakeClientset := fake.NewSimpleClientset()
-	handler := NewHandler(fakeClient, fakeClientset, "default", "localhost:50051")
+	handler := &Handler{
+		client:    fakeClient,
+		clientset: fake.NewSimpleClientset(),
+		namespace: "krkn-operator-system",
+	}
 
 	tg := auth.NewTokenGenerator(
 		[]byte("test-secret-key-at-least-32-bytes-long"),
 		TokenDuration,
 		"krkn-operator",
 	)
+	token, _ := tg.GenerateToken("user@test.com", "user", "Test", "User", "Org")
+	claims, _ := tg.ValidateToken(token)
 
-	userToken, _ := tg.GenerateToken("user@example.com", "user", "Test", "User", "Org")
-	userClaims, _ := tg.ValidateToken(userToken)
+	reqBody := `{
+		"targetRequestId": "test-target-request",
+		"scenarioImage": "quay.io/krkn/pod-scenarios:latest",
+		"scenarioName": "pod-scenario",
+		"targetClusters": {
+			"krkn-operator": ["cluster-1"]
+		}
+	}`
 
-	requestBody := ScenarioRunRequest{
-		TargetRequestId: "test-target-request",
-		TargetClusters: map[string][]string{
-			"provider1": {"cluster1"},
-		},
-		ScenarioName:  "test-scenario",
-		ScenarioImage: "test-image:latest",
-	}
-
-	bodyBytes, _ := json.Marshal(requestBody)
-	req := httptest.NewRequest("POST", "/api/v1/scenarios/run", bytes.NewReader(bodyBytes))
-	ctx := context.WithValue(req.Context(), auth.UserClaimsKey, userClaims)
+	req := httptest.NewRequest("POST", "/api/v1/scenarios/run", bytes.NewBufferString(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+	ctx := context.WithValue(req.Context(), auth.UserClaimsKey, claims)
 	req = req.WithContext(ctx)
 
 	w := httptest.NewRecorder()
 	handler.PostScenarioRun(w, req)
 
 	if w.Code != http.StatusCreated {
-		t.Errorf("Expected status %d, got %d. Body: %s", http.StatusCreated, w.Code, w.Body.String())
+		t.Fatalf("Expected status 201, got %d. Body: %s", w.Code, w.Body.String())
 	}
 
-	// Verify the scenario run was created with correct owner
-	var scenarioRunList krknv1alpha1.KrknScenarioRunList
-	if err := fakeClient.List(context.Background(), &scenarioRunList); err != nil {
-		t.Fatalf("Failed to list scenario runs: %v", err)
+	var response ScenarioRunCreateResponse
+	if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
+		t.Fatalf("Failed to decode response: %v", err)
 	}
 
-	if len(scenarioRunList.Items) != 1 {
-		t.Fatalf("Expected 1 scenario run, got %d", len(scenarioRunList.Items))
+	if response.OwnerUserID != "user@test.com" {
+		t.Errorf("Expected OwnerUserID to be 'user@test.com', got '%s'", response.OwnerUserID)
 	}
 
-	scenarioRun := scenarioRunList.Items[0]
-
-	if scenarioRun.Spec.OwnerUserID != "user@example.com" {
-		t.Errorf("Expected OwnerUserID 'user@example.com', got '%s'", scenarioRun.Spec.OwnerUserID)
-	}
-
-	expectedLabel := "user-example-com"
-	if scenarioRun.Labels["krkn.krkn-chaos.dev/owner-user"] != expectedLabel {
-		t.Errorf("Expected owner label '%s', got '%s'",
-			expectedLabel, scenarioRun.Labels["krkn.krkn-chaos.dev/owner-user"])
-	}
-}
-
-// TestListScenarioRunsFiltersBy Ownership tests that LIST endpoint filters by ownership
-func TestListScenarioRunsFiltersByOwnership(t *testing.T) {
-	scheme := runtime.NewScheme()
-	krknv1alpha1.AddToScheme(scheme)
-	corev1.AddToScheme(scheme)
-
-	runs := []runtime.Object{
-		&krknv1alpha1.KrknScenarioRun{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "run1",
-				Namespace: "default",
-			},
-			Spec: krknv1alpha1.KrknScenarioRunSpec{
-				OwnerUserID: "user@example.com",
-			},
-			Status: krknv1alpha1.KrknScenarioRunStatus{
-				Phase: "Running",
-			},
-		},
-		&krknv1alpha1.KrknScenarioRun{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "run2",
-				Namespace: "default",
-			},
-			Spec: krknv1alpha1.KrknScenarioRunSpec{
-				OwnerUserID: "other@example.com",
-			},
-			Status: krknv1alpha1.KrknScenarioRunStatus{
-				Phase: "Succeeded",
-			},
-		},
-	}
-
-	fakeClient := fakeclient.NewClientBuilder().
-		WithScheme(scheme).
-		WithRuntimeObjects(runs...).
-		Build()
-
-	fakeClientset := fake.NewSimpleClientset()
-	handler := NewHandler(fakeClient, fakeClientset, "default", "localhost:50051")
-
-	tg := auth.NewTokenGenerator(
-		[]byte("test-secret-key-at-least-32-bytes-long"),
-		TokenDuration,
-		"krkn-operator",
-	)
-
-	userToken, _ := tg.GenerateToken("user@example.com", "user", "User", "One", "Org")
-	userClaims, _ := tg.ValidateToken(userToken)
-
-	adminToken, _ := tg.GenerateToken("user@example.com", "admin", "Admin", "User", "Org")
-	adminClaims, _ := tg.ValidateToken(adminToken)
-
-	tests := []struct {
-		name          string
-		claims        *auth.Claims
-		expectedCount int
-	}{
-		{
-			name:          "user sees only own runs",
-			claims:        userClaims,
-			expectedCount: 1,
-		},
-		{
-			name:          "admin sees all runs",
-			claims:        adminClaims,
-			expectedCount: 2,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			req := httptest.NewRequest("GET", "/api/v1/scenarios/run", nil)
-			ctx := context.WithValue(req.Context(), auth.UserClaimsKey, tt.claims)
-			req = req.WithContext(ctx)
-
-			w := httptest.NewRecorder()
-			handler.ListScenarioRuns(w, req)
-
-			if w.Code != http.StatusOK {
-				t.Fatalf("Expected status %d, got %d", http.StatusOK, w.Code)
-			}
-
-			var response ScenarioRunListResponse
-			if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
-				t.Fatalf("Failed to unmarshal response: %v", err)
-			}
-
-			if len(response.ScenarioRuns) != tt.expectedCount {
-				t.Errorf("Expected %d runs, got %d", tt.expectedCount, len(response.ScenarioRuns))
-			}
-		})
-	}
+	// Note: ClusterAPIURL is now populated by the controller in job status,
+	// not by the API handler in spec, so we don't verify it here
 }

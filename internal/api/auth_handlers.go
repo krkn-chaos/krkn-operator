@@ -45,9 +45,18 @@ const (
 	UserAccountLabel = "krkn.krkn-chaos.dev/user-account"
 	// JWTSecretKey is the key in the JWT secret
 	JWTSecretKey = "jwt-secret"
-	// JWTSecretName is the name of the secret containing the JWT signing key
-	JWTSecretName = "krkn-operator-jwt-secret"
+	// DefaultJWTSecretName is the default name of the secret containing the JWT signing key
+	// Can be overridden via JWT_SECRET_NAME environment variable
+	DefaultJWTSecretName = "krkn-operator-jwt-secret" // #nosec G101 -- This is a default name, not credentials; actual secret is stored in Kubernetes Secret with random generated value
 )
+
+// GetJWTSecretName returns the JWT secret name from environment or default
+func GetJWTSecretName() string {
+	if name := os.Getenv("JWT_SECRET_NAME"); name != "" {
+		return name
+	}
+	return DefaultJWTSecretName
+}
 
 var (
 	// TokenDuration is how long JWT tokens remain valid
@@ -491,7 +500,7 @@ func (h *Handler) getOrCreateJWTSecret(ctx context.Context) ([]byte, error) {
 	secret := &corev1.Secret{}
 	secretKey := client.ObjectKey{
 		Namespace: h.namespace,
-		Name:      JWTSecretName,
+		Name:      GetJWTSecretName(),
 	}
 
 	err := h.client.Get(ctx, secretKey, secret)
@@ -514,7 +523,7 @@ func (h *Handler) getOrCreateJWTSecret(ctx context.Context) ([]byte, error) {
 
 	newSecret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      JWTSecretName,
+			Name:      GetJWTSecretName(),
 			Namespace: h.namespace,
 			Labels: map[string]string{
 				"app.kubernetes.io/name":      "krkn-operator",

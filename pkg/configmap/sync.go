@@ -16,6 +16,7 @@ limitations under the License.
 Assisted-by: Claude Sonnet 4.5 (claude-sonnet-4-5@20250929)
 */
 
+// Package configmap provides utilities for synchronizing ConfigMap data with local storage.
 package configmap
 
 import (

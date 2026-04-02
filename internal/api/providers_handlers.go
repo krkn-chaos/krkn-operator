@@ -75,8 +75,8 @@ func (h *Handler) UpdateProviderStatus(w http.ResponseWriter, r *http.Request) {
 	logger := log.FromContext(ctx)
 
 	// Extract provider name from path
-	providerName := strings.TrimPrefix(r.URL.Path, "/api/v1/providers/")
-	if providerName == "" || providerName == "/api/v1/providers/" {
+	providerName := strings.TrimPrefix(r.URL.Path, ProvidersPath+"/")
+	if providerName == "" || providerName == ProvidersPath+"/" {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
 			Error:   "bad_request",
 			Message: "Provider name is required",
@@ -151,7 +151,7 @@ func (h *Handler) ProvidersRouter(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path
 
 	// Root endpoint: GET to list all providers
-	if path == "/api/v1/providers" {
+	if path == ProvidersPath {
 		if r.Method != http.MethodGet {
 			writeJSONError(w, http.StatusMethodNotAllowed, ErrorResponse{
 				Error:   "method_not_allowed",
@@ -164,7 +164,7 @@ func (h *Handler) ProvidersRouter(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Provider-specific endpoint: PATCH to update status (admin only)
-	if strings.HasPrefix(path, "/api/v1/providers/") {
+	if strings.HasPrefix(path, ProvidersPath+"/") {
 		if r.Method != http.MethodPatch {
 			writeJSONError(w, http.StatusMethodNotAllowed, ErrorResponse{
 				Error:   "method_not_allowed",

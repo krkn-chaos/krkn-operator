@@ -1,3 +1,4 @@
+// Package kvstore provides a thread-safe in-memory key-value store for configuration data.
 package kvstore
 
 import "sync"

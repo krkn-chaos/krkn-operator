@@ -117,7 +117,7 @@ func TestGetActiveRunsOverview_AllUsersSeesAll(t *testing.T) {
 		Role:   "admin",
 	})
 
-	req := httptest.NewRequest("GET", "/api/v1/dashboard/active-runs", nil)
+	req := httptest.NewRequest("GET", DashboardActiveRunsPath, nil)
 	req = req.WithContext(ctx)
 	w := httptest.NewRecorder()
 
@@ -217,7 +217,7 @@ func TestGetActiveRunsOverview_UserSeesAll(t *testing.T) {
 		Role:   "user",
 	})
 
-	req := httptest.NewRequest("GET", "/api/v1/dashboard/active-runs", nil)
+	req := httptest.NewRequest("GET", DashboardActiveRunsPath, nil)
 	req = req.WithContext(ctx)
 	w := httptest.NewRecorder()
 
@@ -294,7 +294,7 @@ func TestGetActiveRunsOverview_NoActiveRuns(t *testing.T) {
 		Role:   "admin",
 	})
 
-	req := httptest.NewRequest("GET", "/api/v1/dashboard/active-runs", nil)
+	req := httptest.NewRequest("GET", DashboardActiveRunsPath, nil)
 	req = req.WithContext(ctx)
 	w := httptest.NewRecorder()
 
@@ -370,7 +370,7 @@ func TestGetActiveRunsOverview_MixedJobStates(t *testing.T) {
 		Role:   "user",
 	})
 
-	req := httptest.NewRequest("GET", "/api/v1/dashboard/active-runs", nil)
+	req := httptest.NewRequest("GET", DashboardActiveRunsPath, nil)
 	req = req.WithContext(ctx)
 	w := httptest.NewRecorder()
 

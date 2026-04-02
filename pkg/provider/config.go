@@ -16,6 +16,8 @@ limitations under the License.
 Assisted-by: Claude Sonnet 4.5 (claude-sonnet-4-5@20250929)
 */
 
+// Package provider manages external target providers for cluster discovery and configuration.
+// It supports provider registration, configuration updates, and resource cleanup.
 package provider
 
 import (

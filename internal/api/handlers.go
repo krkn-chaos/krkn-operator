@@ -19,7 +19,6 @@ package api
 import (
 	"bufio"
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -46,6 +45,7 @@ import (
 
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
 	"github.com/krkn-chaos/krkn-operator/pkg/auth"
+	"github.com/krkn-chaos/krkn-operator/pkg/groupauth"
 	pb "github.com/krkn-chaos/krkn-operator/proto/dataprovider"
 )
 
@@ -80,6 +80,7 @@ func (h *Handler) getTokenGenerator(ctx context.Context) (*auth.TokenGenerator, 
 // GetClusters handles GET /api/v1/clusters endpoint
 // It fetches the KrknTargetRequest CR by the provided ID and returns the target data
 func (h *Handler) GetClusters(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
 	id := r.URL.Query().Get("id")
 	if id == "" {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
@@ -91,7 +92,7 @@ func (h *Handler) GetClusters(w http.ResponseWriter, r *http.Request) {
 
 	// Fetch the KrknTargetRequest CR
 	var targetRequest krknv1alpha1.KrknTargetRequest
-	err := h.client.Get(context.Background(), types.NamespacedName{
+	err := h.client.Get(ctx, types.NamespacedName{
 		Name:      id,
 		Namespace: h.namespace,
 	}, &targetRequest)
@@ -103,9 +104,10 @@ func (h *Handler) GetClusters(w http.ResponseWriter, r *http.Request) {
 				Message: "KrknTargetRequest with id '" + id + "' not found",
 			})
 		} else {
+			log.FromContext(ctx).Error(err, "Failed to fetch KrknTargetRequest", "id", id)
 			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
 				Error:   "internal_error",
-				Message: "Failed to fetch KrknTargetRequest: " + err.Error(),
+				Message: "Failed to fetch KrknTargetRequest",
 			})
 		}
 		return
@@ -120,9 +122,33 @@ func (h *Handler) GetClusters(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Return the target data
+	// Filter clusters based on user permissions
+	// Admins see all clusters, regular users see only clusters they have 'run' permission for
+	// (this endpoint is used to select clusters for running scenarios)
+	targetData := targetRequest.Status.TargetData
+
+	claims := auth.GetClaimsFromContext(ctx)
+	if claims != nil && !auth.IsAdmin(ctx) {
+		// Regular user: filter by group permissions (requires 'run' permission)
+		filteredData, err := groupauth.FilterClustersByPermission(
+			ctx,
+			h.client,
+			claims.UserID,
+			h.namespace,
+			targetData,
+			groupauth.ActionRun,
+		)
+		if err != nil {
+			log.FromContext(ctx).Error(err, "Failed to filter clusters by permission", "userID", claims.UserID)
+			// Continue with empty result rather than failing
+			filteredData = map[string][]krknv1alpha1.ClusterTarget{}
+		}
+		targetData = filteredData
+	}
+
+	// Return the target data (filtered for regular users, unfiltered for admins)
 	response := ClustersResponse{
-		TargetData: targetRequest.Status.TargetData,
+		TargetData: targetData,
 		Status:     targetRequest.Status.Status,
 	}
 
@@ -134,7 +160,7 @@ func (h *Handler) GetClusters(w http.ResponseWriter, r *http.Request) {
 // - New: ?targetUUID=<uuid>
 // - Legacy: ?id=<targetRequestId>&cluster-name=<clusterName>
 func (h *Handler) GetNodes(w http.ResponseWriter, r *http.Request) {
-	ctx := context.Background()
+	ctx := r.Context()
 
 	// New parameter (KrknOperatorTarget)
 	targetUUID := r.URL.Query().Get("targetUUID")
@@ -150,6 +176,52 @@ func (h *Handler) GetNodes(w http.ResponseWriter, r *http.Request) {
 			Message: "Either targetUUID (new) or id+cluster-name (legacy) parameters are required",
 		})
 		return
+	}
+
+	// Check user permissions (group-based access control)
+	// Admins bypass validation, regular users must have 'view' permission on the cluster
+	claims := auth.GetClaimsFromContext(ctx)
+	if claims != nil && !auth.IsAdmin(ctx) {
+		// Get cluster API URL for permission check
+		clusterAPIURL, err := h.getClusterAPIURL(ctx, targetUUID, id, clusterName)
+		if err != nil {
+			log.FromContext(ctx).Error(err, "Failed to get cluster API URL for permission check")
+			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+				Error:   "internal_error",
+				Message: "Failed to validate cluster permissions",
+			})
+			return
+		}
+
+		// Check if user has 'view' permission on this cluster
+		hasPermission, err := groupauth.HasClusterPermission(
+			ctx,
+			h.client,
+			claims.UserID,
+			h.namespace,
+			clusterAPIURL,
+			groupauth.ActionView,
+		)
+		if err != nil {
+			log.FromContext(ctx).Error(err, "Failed to check cluster permissions", "userID", claims.UserID)
+			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+				Error:   "internal_error",
+				Message: "Failed to validate access permissions",
+			})
+			return
+		}
+
+		if !hasPermission {
+			log.FromContext(ctx).Info("User lacks permission to view nodes on cluster",
+				"userID", claims.UserID,
+				"clusterAPIURL", clusterAPIURL,
+			)
+			writeJSONError(w, http.StatusForbidden, ErrorResponse{
+				Error:   "forbidden",
+				Message: "You do not have permission to view nodes on this cluster",
+			})
+			return
+		}
 	}
 
 	// Get kubeconfig using unified helper function
@@ -172,9 +244,10 @@ func (h *Handler) GetNodes(w http.ResponseWriter, r *http.Request) {
 	// Call gRPC service to get nodes
 	nodes, err := h.callGetNodesGRPC(kubeconfigBase64)
 	if err != nil {
+		log.FromContext(ctx).Error(err, "Failed to get nodes from gRPC service")
 		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
 			Error:   "internal_error",
-			Message: "Failed to get nodes from gRPC service: " + err.Error(),
+			Message: "Failed to get nodes from gRPC service",
 		})
 		return
 	}
@@ -197,7 +270,8 @@ func (h *Handler) HealthCheck(w http.ResponseWriter, r *http.Request) {
 // GetTargetByUUID handles GET /api/v1/targets/{uuid} endpoint (legacy - checks KrknTargetRequest status)
 // This endpoint checks the status of a KrknTargetRequest CR created by krkn-operator-acm
 func (h *Handler) GetTargetByUUID(w http.ResponseWriter, r *http.Request) {
-	uuid, err := extractPathSuffix(r.URL.Path, "/api/v1/targets/")
+	ctx := r.Context()
+	uuid, err := extractPathSuffix(r.URL.Path, TargetsPath+"/")
 	if err != nil {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
 			Error:   "bad_request",
@@ -207,16 +281,17 @@ func (h *Handler) GetTargetByUUID(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var targetRequest krknv1alpha1.KrknTargetRequest
-	if err := h.client.Get(context.Background(), types.NamespacedName{
+	if err := h.client.Get(ctx, types.NamespacedName{
 		Name:      uuid,
 		Namespace: h.namespace,
 	}, &targetRequest); err != nil {
 		if client.IgnoreNotFound(err) == nil {
 			w.WriteHeader(http.StatusNotFound)
 		} else {
+			log.FromContext(ctx).Error(err, "Failed to fetch KrknTargetRequest", "uuid", uuid)
 			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
 				Error:   "internal_error",
-				Message: "Failed to fetch KrknTargetRequest: " + err.Error(),
+				Message: "Failed to fetch KrknTargetRequest",
 			})
 		}
 		return
@@ -232,6 +307,7 @@ func (h *Handler) GetTargetByUUID(w http.ResponseWriter, r *http.Request) {
 // PostTarget handles POST /api/v1/targets endpoint (legacy - creates KrknTargetRequest)
 // This endpoint triggers the krkn-operator-acm to discover and return target clusters
 func (h *Handler) PostTarget(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
 	// Generate a new UUID
 	newUUID := uuid.New().String()
 
@@ -247,11 +323,12 @@ func (h *Handler) PostTarget(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Create the CR in the cluster
-	err := h.client.Create(context.Background(), targetRequest)
+	err := h.client.Create(ctx, targetRequest)
 	if err != nil {
+		log.FromContext(ctx).Error(err, "Failed to create KrknTargetRequest", "uuid", newUUID)
 		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
 			Error:   "internal_error",
-			Message: "Failed to create KrknTargetRequest: " + err.Error(),
+			Message: "Failed to create KrknTargetRequest",
 		})
 		return
 	}
@@ -308,7 +385,7 @@ func convertInputFields(fields []typing.InputField) []InputFieldResponse {
 func writeJSON(w http.ResponseWriter, status int, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(data)
+	_ = json.NewEncoder(w).Encode(data) // If encoding fails, client gets partial response
 }
 
 // writeJSONError writes a JSON error response with the given status code
@@ -323,20 +400,19 @@ func writeJSONError(w http.ResponseWriter, status int, err ErrorResponse) {
 
 // callGetNodesGRPC calls the data provider gRPC service to get nodes
 func (h *Handler) callGetNodesGRPC(kubeconfigBase64 string) ([]string, error) {
-	// Create gRPC connection with timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	conn, err := grpc.DialContext(
-		ctx,
+	// Create gRPC connection
+	conn, err := grpc.NewClient(
 		h.grpcServerAddr,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithBlock(),
 	)
 	if err != nil {
 		return nil, err
 	}
 	defer conn.Close()
+
+	// Create context with timeout for RPC call
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 
 	// Create client
 	grpcClient := pb.NewDataProviderServiceClient(conn)
@@ -407,6 +483,7 @@ func createScenarioProvider(mode provider.Mode) (provider.ScenarioDataProvider, 
 // PostScenarios handles POST /api/v1/scenarios endpoint
 // It returns the list of available krkn scenarios from quay.io or a private registry
 func (h *Handler) PostScenarios(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
 	registry, mode, err := parseRegistryRequest(r)
 	if err != nil {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
@@ -428,9 +505,10 @@ func (h *Handler) PostScenarios(w http.ResponseWriter, r *http.Request) {
 	// Get registry images (scenario list)
 	scenarioTags, err := scenarioProvider.GetRegistryImages(registry)
 	if err != nil {
+		log.FromContext(ctx).Error(err, "Failed to get scenarios from registry", "registry", registry)
 		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
 			Error:   "internal_error",
-			Message: "Failed to get scenarios from registry: " + err.Error(),
+			Message: "Failed to get scenarios from registry",
 		})
 		return
 	}
@@ -473,7 +551,8 @@ func extractPathSuffix(path string, prefix string) (string, error) {
 // PostScenarioDetail handles POST /api/v1/scenarios/detail/{scenario_name} endpoint
 // It returns detailed information about a specific scenario including input fields
 func (h *Handler) PostScenarioDetail(w http.ResponseWriter, r *http.Request) {
-	scenarioName, err := extractPathSuffix(r.URL.Path, "/api/v1/scenarios/detail/")
+	ctx := r.Context()
+	scenarioName, err := extractPathSuffix(r.URL.Path, ScenariosDetailPath+"/")
 	if err != nil {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
 			Error:   "bad_request",
@@ -503,9 +582,10 @@ func (h *Handler) PostScenarioDetail(w http.ResponseWriter, r *http.Request) {
 	// Get scenario detail
 	scenarioDetail, err := scenarioProvider.GetScenarioDetail(scenarioName, registry)
 	if err != nil {
+		log.FromContext(ctx).Error(err, "Failed to get scenario detail", "scenarioName", scenarioName, "registry", registry)
 		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
 			Error:   "internal_error",
-			Message: "Failed to get scenario detail: " + err.Error(),
+			Message: "Failed to get scenario detail",
 		})
 		return
 	}
@@ -534,7 +614,8 @@ func (h *Handler) PostScenarioDetail(w http.ResponseWriter, r *http.Request) {
 // PostScenarioGlobals handles POST /api/v1/scenarios/globals/{scenario_name} endpoint
 // It returns global environment fields for a specific scenario
 func (h *Handler) PostScenarioGlobals(w http.ResponseWriter, r *http.Request) {
-	scenarioName, err := extractPathSuffix(r.URL.Path, "/api/v1/scenarios/globals/")
+	ctx := r.Context()
+	scenarioName, err := extractPathSuffix(r.URL.Path, ScenariosGlobalsPath+"/")
 	if err != nil {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
 			Error:   "bad_request",
@@ -564,9 +645,10 @@ func (h *Handler) PostScenarioGlobals(w http.ResponseWriter, r *http.Request) {
 	// Get global environment
 	globalDetail, err := scenarioProvider.GetGlobalEnvironment(registry, scenarioName)
 	if err != nil {
+		log.FromContext(ctx).Error(err, "Failed to get global environment", "registry", registry, "scenarioName", scenarioName)
 		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
 			Error:   "internal_error",
-			Message: "Failed to get global environment: " + err.Error(),
+			Message: "Failed to get global environment",
 		})
 		return
 	}
@@ -592,278 +674,6 @@ func (h *Handler) PostScenarioGlobals(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, response)
 }
 
-// PostScenarioRun handles POST /api/v1/scenarios/run endpoint
-// It creates and starts a new scenario job as a Kubernetes pod
-// createScenarioJob creates a krkn scenario job for a single cluster
-// Returns jobId, podName, and error
-func (h *Handler) createScenarioJob(
-	ctx context.Context,
-	req ScenarioRunRequest,
-	clusterName string,
-) (jobId string, podName string, err error) {
-	// Generate unique job ID
-	jobId = uuid.New().String()
-
-	// Set default kubeconfig path if not provided
-	kubeconfigPath := req.KubeconfigPath
-	if kubeconfigPath == "" {
-		kubeconfigPath = "/home/krkn/.kube/config"
-	}
-
-	// Get kubeconfig using targetRequestId and clusterName
-	kubeconfigBase64, err := h.getKubeconfig(ctx, "", req.TargetRequestId, clusterName)
-	if err != nil {
-		return "", "", fmt.Errorf("failed to get kubeconfig: %w", err)
-	}
-
-	// Decode kubeconfig for ConfigMap
-	kubeconfigDecoded, err := base64.StdEncoding.DecodeString(kubeconfigBase64)
-	if err != nil {
-		return "", "", fmt.Errorf("failed to decode kubeconfig: %w", err)
-	}
-
-	// Create ConfigMap for kubeconfig
-	kubeconfigConfigMapName := fmt.Sprintf("krkn-job-%s-kubeconfig", jobId)
-	kubeconfigConfigMap := &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      kubeconfigConfigMapName,
-			Namespace: h.namespace,
-			Labels: map[string]string{
-				"krkn-job-id": jobId,
-			},
-		},
-		Data: map[string]string{
-			"config": string(kubeconfigDecoded),
-		},
-	}
-
-	if err := h.client.Create(ctx, kubeconfigConfigMap); err != nil {
-		return "", "", fmt.Errorf("failed to create kubeconfig ConfigMap: %w", err)
-	}
-
-	// Track created resources for cleanup on error
-	var fileConfigMaps []string
-	var imagePullSecretName string
-
-	// Cleanup helper
-	cleanup := func() {
-		h.client.Delete(ctx, kubeconfigConfigMap)
-		for _, cm := range fileConfigMaps {
-			h.client.Delete(ctx, &corev1.ConfigMap{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      cm,
-					Namespace: h.namespace,
-				},
-			})
-		}
-		if imagePullSecretName != "" {
-			h.client.Delete(ctx, &corev1.Secret{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      imagePullSecretName,
-					Namespace: h.namespace,
-				},
-			})
-		}
-	}
-
-	// Create ConfigMaps for user-provided files
-	for _, file := range req.Files {
-		// Sanitize filename for ConfigMap name
-		sanitizedName := strings.ReplaceAll(file.Name, "/", "-")
-		sanitizedName = strings.ReplaceAll(sanitizedName, ".", "-")
-		configMapName := fmt.Sprintf("krkn-job-%s-file-%s", jobId, sanitizedName)
-
-		// Decode base64 content
-		fileContent, err := base64.StdEncoding.DecodeString(file.Content)
-		if err != nil {
-			cleanup()
-			return "", "", fmt.Errorf("failed to decode file content for '%s': %w", file.Name, err)
-		}
-
-		fileConfigMap := &corev1.ConfigMap{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      configMapName,
-				Namespace: h.namespace,
-				Labels: map[string]string{
-					"krkn-job-id": jobId,
-				},
-			},
-			Data: map[string]string{
-				file.Name: string(fileContent),
-			},
-		}
-
-		if err := h.client.Create(ctx, fileConfigMap); err != nil {
-			cleanup()
-			return "", "", fmt.Errorf("failed to create file ConfigMap: %w", err)
-		}
-
-		fileConfigMaps = append(fileConfigMaps, configMapName)
-	}
-
-	// Handle private registry authentication
-	var imagePullSecrets []corev1.LocalObjectReference
-	if req.RegistryURL != "" && req.ScenarioRepository != "" {
-		imagePullSecretName = fmt.Sprintf("krkn-job-%s-registry", jobId)
-
-		// Build docker config JSON
-		authStr := ""
-		if req.Token != nil && *req.Token != "" {
-			authStr = base64.StdEncoding.EncodeToString([]byte(*req.Token))
-		} else if req.Username != nil && req.Password != nil {
-			authStr = base64.StdEncoding.EncodeToString([]byte(*req.Username + ":" + *req.Password))
-		}
-
-		dockerConfig := map[string]interface{}{
-			"auths": map[string]interface{}{
-				req.RegistryURL: map[string]string{
-					"auth": authStr,
-				},
-			},
-		}
-
-		dockerConfigJSON, _ := json.Marshal(dockerConfig)
-
-		imagePullSecret := &corev1.Secret{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      imagePullSecretName,
-				Namespace: h.namespace,
-				Labels: map[string]string{
-					"krkn-job-id": jobId,
-				},
-			},
-			Type: corev1.SecretTypeDockerConfigJson,
-			Data: map[string][]byte{
-				".dockerconfigjson": dockerConfigJSON,
-			},
-		}
-
-		if err := h.client.Create(ctx, imagePullSecret); err != nil {
-			cleanup()
-			return "", "", fmt.Errorf("failed to create ImagePullSecret: %w", err)
-		}
-
-		imagePullSecrets = append(imagePullSecrets, corev1.LocalObjectReference{
-			Name: imagePullSecretName,
-		})
-	}
-
-	// Build volumes and volume mounts
-	volumes := []corev1.Volume{
-		{
-			Name: "kubeconfig",
-			VolumeSource: corev1.VolumeSource{
-				ConfigMap: &corev1.ConfigMapVolumeSource{
-					LocalObjectReference: corev1.LocalObjectReference{
-						Name: kubeconfigConfigMapName,
-					},
-				},
-			},
-		},
-	}
-
-	volumeMounts := []corev1.VolumeMount{
-		{
-			Name:      "kubeconfig",
-			MountPath: kubeconfigPath,
-			SubPath:   "config",
-		},
-	}
-
-	// Add file mounts
-	for i, file := range req.Files {
-		sanitizedName := strings.ReplaceAll(file.Name, "/", "-")
-		sanitizedName = strings.ReplaceAll(sanitizedName, ".", "-")
-		volumeName := fmt.Sprintf("file-%d", i)
-
-		volumes = append(volumes, corev1.Volume{
-			Name: volumeName,
-			VolumeSource: corev1.VolumeSource{
-				ConfigMap: &corev1.ConfigMapVolumeSource{
-					LocalObjectReference: corev1.LocalObjectReference{
-						Name: fileConfigMaps[i],
-					},
-				},
-			},
-		})
-
-		volumeMounts = append(volumeMounts, corev1.VolumeMount{
-			Name:      volumeName,
-			MountPath: file.MountPath,
-			SubPath:   file.Name,
-		})
-	}
-
-	// Add writable tmp volume
-	volumes = append(volumes, corev1.Volume{
-		Name: "tmp",
-		VolumeSource: corev1.VolumeSource{
-			EmptyDir: &corev1.EmptyDirVolumeSource{},
-		},
-	})
-
-	volumeMounts = append(volumeMounts, corev1.VolumeMount{
-		Name:      "tmp",
-		MountPath: "/tmp",
-	})
-
-	envVars := make([]corev1.EnvVar, 0, len(req.Environment))
-	for key, value := range req.Environment {
-		envVars = append(envVars, corev1.EnvVar{
-			Name:  key,
-			Value: value,
-		})
-	}
-
-	// SecurityContext for running as krkn user (UID 1001)
-	var runAsUser int64 = 1001
-	var runAsGroup int64 = 1001
-	var fsGroup int64 = 1001
-
-	// Create the pod
-	podName = fmt.Sprintf("krkn-job-%s", jobId)
-	pod := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      podName,
-			Namespace: h.namespace,
-			Labels: map[string]string{
-				"app":                 "krkn-scenario",
-				"krkn-job-id":         jobId,
-				"krkn-scenario-name":  req.ScenarioName,
-				"krkn-cluster-name":   clusterName,
-				"krkn-target-request": req.TargetRequestId,
-			},
-		},
-		Spec: corev1.PodSpec{
-			ServiceAccountName: "krkn-operator-krkn-scenario-runner",
-			RestartPolicy:      corev1.RestartPolicyNever,
-			ImagePullSecrets:   imagePullSecrets,
-			SecurityContext: &corev1.PodSecurityContext{
-				RunAsUser:  &runAsUser,
-				RunAsGroup: &runAsGroup,
-				FSGroup:    &fsGroup,
-			},
-			Containers: []corev1.Container{
-				{
-					Name:            "scenario",
-					Image:           req.ScenarioImage,
-					Env:             envVars,
-					VolumeMounts:    volumeMounts,
-					ImagePullPolicy: corev1.PullAlways,
-				},
-			},
-			Volumes: volumes,
-		},
-	}
-
-	if err := h.client.Create(ctx, pod); err != nil {
-		cleanup()
-		return "", "", fmt.Errorf("failed to create pod: %w", err)
-	}
-
-	return jobId, podName, nil
-}
-
 func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	logger := log.FromContext(ctx)
@@ -879,7 +689,7 @@ func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Validate required fields
-	if req.TargetRequestId == "" {
+	if req.TargetRequestID == "" {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
 			Error:   "bad_request",
 			Message: "targetRequestId is required",
@@ -947,6 +757,59 @@ func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Fetch KrknTargetRequest to build cluster API URL mapping and validate permissions
+	targetRequest := &krknv1alpha1.KrknTargetRequest{}
+	if err := h.client.Get(ctx, types.NamespacedName{
+		Name:      req.TargetRequestID,
+		Namespace: h.namespace,
+	}, targetRequest); err != nil {
+		logger.Error(err, "Failed to fetch target request", "targetRequestId", req.TargetRequestID)
+		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+			Error:   "internal_error",
+			Message: "Failed to fetch target request",
+		})
+		return
+	}
+
+	// Check if target request is completed
+	if targetRequest.Status.Status != "Completed" {
+		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+			Error:   "bad_request",
+			Message: "Target request is not completed yet",
+		})
+		return
+	}
+
+	// Validate user permissions (group-based access control)
+	// Admins bypass validation, regular users must have 'run' permission on all target clusters
+	userClaims := auth.GetClaimsFromContext(ctx)
+	if userClaims != nil && !auth.IsAdmin(ctx) {
+		// Validate user has 'run' permission on all target clusters
+		if err := groupauth.ValidateScenarioRunAccess(
+			ctx,
+			h.client,
+			userClaims.UserID,
+			h.namespace,
+			req.TargetClusters,
+			targetRequest,
+		); err != nil {
+			logger.Info("User lacks permission to run scenarios on requested clusters",
+				"userID", userClaims.UserID,
+				"error", err.Error(),
+			)
+			writeJSONError(w, http.StatusForbidden, ErrorResponse{
+				Error:   "forbidden",
+				Message: err.Error(),
+			})
+			return
+		}
+
+		logger.V(1).Info("User permission validated for scenario run",
+			"userID", userClaims.UserID,
+			"clusterCount", len(seen),
+		)
+	}
+
 	// Generate scenario run name
 	scenarioRunName := fmt.Sprintf("%s-%s", req.ScenarioName, uuid.New().String()[:8])
 
@@ -968,7 +831,7 @@ func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
 			Labels:    labels,
 		},
 		Spec: krknv1alpha1.KrknScenarioRunSpec{
-			TargetRequestId:    req.TargetRequestId,
+			TargetRequestID:    req.TargetRequestID,
 			OwnerUserID:        ownerUserID,
 			TargetClusters:     req.TargetClusters,
 			ScenarioName:       req.ScenarioName,
@@ -1005,9 +868,10 @@ func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
 
 	// Create the CR
 	if err := h.client.Create(ctx, scenarioRun); err != nil {
+		logger.Error(err, "Failed to create scenario run", "scenarioRunName", scenarioRunName)
 		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
 			Error:   "internal_error",
-			Message: "Failed to create scenario run: " + err.Error(),
+			Message: "Failed to create scenario run",
 		})
 		return
 	}
@@ -1015,32 +879,22 @@ func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
 	// Set owner reference: ScenarioRun owns KrknTargetRequest
 	// This ensures KrknTargetRequest (and its Secret) are cleaned up when ScenarioRun is deleted
 	// and remain available for job retries while ScenarioRun exists
-	targetRequest := &krknv1alpha1.KrknTargetRequest{}
-	if err := h.client.Get(ctx, types.NamespacedName{
-		Name:      req.TargetRequestId,
-		Namespace: h.namespace,
-	}, targetRequest); err == nil {
-		// Set ScenarioRun as owner of KrknTargetRequest
-		if err := ctrl.SetControllerReference(scenarioRun, targetRequest, h.client.Scheme()); err != nil {
-			logger.Error(err, "failed to set owner reference on KrknTargetRequest",
-				"scenarioRun", scenarioRun.Name,
-				"targetRequestId", req.TargetRequestId)
-			// Continue - not critical for scenario run creation
-		} else {
-			if err := h.client.Update(ctx, targetRequest); err != nil {
-				logger.Error(err, "failed to update KrknTargetRequest with owner reference",
-					"targetRequestId", req.TargetRequestId)
-				// Continue - not critical
-			} else {
-				logger.Info("set owner reference on KrknTargetRequest",
-					"scenarioRun", scenarioRun.Name,
-					"targetRequestId", req.TargetRequestId)
-			}
-		}
+	// targetRequest already fetched above for permission validation and cluster API URL mapping
+	if err := ctrl.SetControllerReference(scenarioRun, targetRequest, h.client.Scheme()); err != nil {
+		logger.Error(err, "failed to set owner reference on KrknTargetRequest",
+			"scenarioRun", scenarioRun.Name,
+			"targetRequestId", req.TargetRequestID)
+		// Continue - not critical for scenario run creation
 	} else {
-		logger.Error(err, "failed to get KrknTargetRequest for setting owner reference",
-			"targetRequestId", req.TargetRequestId)
-		// Continue - KrknTargetRequest might have been deleted manually
+		if err := h.client.Update(ctx, targetRequest); err != nil {
+			logger.Error(err, "failed to update KrknTargetRequest with owner reference",
+				"targetRequestId", req.TargetRequestID)
+			// Continue - not critical
+		} else {
+			logger.Info("set owner reference on KrknTargetRequest",
+				"scenarioRun", scenarioRun.Name,
+				"targetRequestId", req.TargetRequestID)
+		}
 	}
 
 	// Calculate total targets from all providers
@@ -1062,7 +916,7 @@ func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
 // GetScenarioRunStatus handles GET /api/v1/scenarios/run/{scenarioRunName} endpoint
 // It returns the current status of a scenario run
 func (h *Handler) GetScenarioRunStatus(w http.ResponseWriter, r *http.Request) {
-	scenarioRunName, err := extractPathSuffix(r.URL.Path, "/api/v1/scenarios/run/")
+	scenarioRunName, err := extractPathSuffix(r.URL.Path, ScenariosRunPath+"/")
 	if err != nil {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
 			Error:   "bad_request",
@@ -1095,18 +949,74 @@ func (h *Handler) GetScenarioRunStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check access permissions
-	if !checkScenarioRunAccess(w, r, &scenarioRun) {
-		return
+	claims := auth.GetClaimsFromContext(ctx)
+
+	// Filter jobs based on permissions (admins see all, users see only authorized jobs)
+	filteredJobs := scenarioRun.Status.ClusterJobs
+	if claims != nil && !auth.IsAdmin(ctx) {
+		// Fetch user groups
+		userGroups, err := groupauth.GetUserGroups(ctx, h.client, claims.UserID, h.namespace)
+		if err != nil {
+			log.FromContext(ctx).Error(err, "Failed to fetch user groups", "userID", claims.UserID)
+			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+				Error:   "internal_error",
+				Message: "Failed to fetch user groups",
+			})
+			return
+		}
+
+		// Count jobs with ClusterAPIURL populated (to detect newly created runs)
+		jobsWithClusterURL := 0
+		for _, job := range scenarioRun.Status.ClusterJobs {
+			if job.ClusterAPIURL != "" {
+				jobsWithClusterURL++
+			}
+		}
+
+		// Filter jobs to only those user has view permission for
+		filteredJobs = h.filterJobsByPermission(
+			scenarioRun.Status.ClusterJobs,
+			ctx,
+			userGroups,
+			groupauth.ActionView,
+		)
+
+		// Explicit authorization checks based on job state:
+		if len(filteredJobs) == 0 {
+			if jobsWithClusterURL == 0 {
+				// Case 1: No jobs have ClusterAPIURL (run just created, controller hasn't processed yet)
+				// Allow access and return 201 Created with empty jobs array
+				response := ScenarioRunStatusResponse{
+					ScenarioRunName: scenarioRunName,
+					Phase:           scenarioRun.Status.Phase,
+					TotalTargets:    scenarioRun.Status.TotalTargets,
+					SuccessfulJobs:  scenarioRun.Status.SuccessfulJobs,
+					FailedJobs:      scenarioRun.Status.FailedJobs,
+					RunningJobs:     scenarioRun.Status.RunningJobs,
+					ClusterJobs:     []ClusterJobStatusResponse{},
+					OwnerUserID:     scenarioRun.Spec.OwnerUserID,
+				}
+				writeJSON(w, http.StatusCreated, response)
+				return
+			} else {
+				// Case 2: Jobs have ClusterAPIURL but user has no permission on any
+				// Deny access with 403 Forbidden
+				writeJSONError(w, http.StatusForbidden, ErrorResponse{
+					Error:   "forbidden",
+					Message: "Access denied. You do not have permission to view jobs in this scenario run",
+				})
+				return
+			}
+		}
 	}
 
-	// Convert ClusterJobStatus to response type
-	clusterJobs := make([]ClusterJobStatusResponse, len(scenarioRun.Status.ClusterJobs))
-	for i, job := range scenarioRun.Status.ClusterJobs {
+	// Convert filtered ClusterJobStatus to response type
+	clusterJobs := make([]ClusterJobStatusResponse, len(filteredJobs))
+	for i, job := range filteredJobs {
 		clusterJobs[i] = ClusterJobStatusResponse{
 			ProviderName:    job.ProviderName,
 			ClusterName:     job.ClusterName,
-			JobId:           job.JobId,
+			JobID:           job.JobID,
 			PodName:         job.PodName,
 			Phase:           job.Phase,
 			Message:         job.Message,
@@ -1176,7 +1086,7 @@ func isWebSocketDisconnectError(err error) bool {
 	return false
 }
 
-// GetScenarioRunLogs handles GET /api/v1/scenarios/run/{scenarioRunName}/jobs/{jobId}/logs endpoint
+// GetScenarioRunLogs handles GET /api/v1/scenarios/run/{scenarioRunName}/jobs/{jobID}/logs endpoint
 // It streams the stdout/stderr logs of a running or completed job via WebSocket
 func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 	logger := log.Log.WithName("websocket-logs")
@@ -1308,14 +1218,14 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 		"userId", claims.UserID,
 		"client_ip", r.RemoteAddr)
 
-	// Extract scenarioRunName and jobId from path
-	// Path format: /api/v1/scenarios/run/{scenarioRunName}/jobs/{jobId}/logs
+	// Extract scenarioRunName and jobID from path
+	// Path format: /api/v1/scenarios/run/{scenarioRunName}/jobs/{jobID}/logs
 	path := r.URL.Path
-	prefix := "/api/v1/scenarios/run/"
+	prefix := ScenariosRunPath + "/"
 
 	if !strings.HasPrefix(path, prefix) {
 		logger.Error(nil, "Invalid logs endpoint path", "path", path)
-		conn.WriteMessage(websocket.TextMessage, []byte("ERROR: Invalid logs endpoint"))
+		_ = conn.WriteMessage(websocket.TextMessage, []byte("ERROR: Invalid logs endpoint")) // Best-effort error reporting
 		return
 	}
 
@@ -1326,35 +1236,113 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 	parts := strings.Split(remainder, "/jobs/")
 	if len(parts) != 2 {
 		logger.Error(nil, "Invalid logs endpoint path format", "path", path)
-		conn.WriteMessage(websocket.TextMessage, []byte("ERROR: Invalid path format. Expected: /api/v1/scenarios/run/{scenarioRunName}/jobs/{jobId}/logs"))
+		_ = conn.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("ERROR: Invalid path format. Expected: %s/{scenarioRunName}/jobs/{jobID}/logs", ScenariosRunPath))) // Best-effort error reporting
 		return
 	}
 
 	scenarioRunName := parts[0]
-	jobIdAndLogs := parts[1]
+	jobIDAndLogs := parts[1]
 
-	// Extract jobId (remove "/logs" suffix)
-	if !strings.HasSuffix(jobIdAndLogs, "/logs") {
+	// Extract jobID (remove "/logs" suffix)
+	if !strings.HasSuffix(jobIDAndLogs, "/logs") {
 		logger.Error(nil, "Invalid logs endpoint path format", "path", path)
-		conn.WriteMessage(websocket.TextMessage, []byte("ERROR: Invalid path format. Expected: /api/v1/scenarios/run/{scenarioRunName}/jobs/{jobId}/logs"))
+		_ = conn.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("ERROR: Invalid path format. Expected: %s/{scenarioRunName}/jobs/{jobID}/logs", ScenariosRunPath))) // Best-effort error reporting
 		return
 	}
 
-	jobId := strings.TrimSuffix(jobIdAndLogs, "/logs")
+	jobID := strings.TrimSuffix(jobIDAndLogs, "/logs")
 
-	if scenarioRunName == "" || jobId == "" {
-		logger.Error(nil, "Empty scenarioRunName or jobId in request path", "path", path)
-		conn.WriteMessage(websocket.TextMessage, []byte("ERROR: scenarioRunName and jobId cannot be empty"))
+	if scenarioRunName == "" || jobID == "" {
+		logger.Error(nil, "Empty scenarioRunName or jobID in request path", "path", path)
+		_ = conn.WriteMessage(websocket.TextMessage, []byte("ERROR: scenarioRunName and jobID cannot be empty")) // Best-effort error reporting
 		return
 	}
 
-	logger.Info("WebSocket connection established", "scenarioRunName", scenarioRunName, "jobId", jobId, "client_ip", r.RemoteAddr)
+	logger.Info("WebSocket connection established", "scenarioRunName", scenarioRunName, "jobID", jobID, "client_ip", r.RemoteAddr)
+
+	// Create context with claims for permission checks
+	ctx := context.WithValue(context.Background(), auth.UserClaimsKey, claims)
+
+	// Fetch the scenario run to check permissions
+	var scenarioRun krknv1alpha1.KrknScenarioRun
+	if err := h.client.Get(ctx, client.ObjectKey{
+		Name:      scenarioRunName,
+		Namespace: h.namespace,
+	}, &scenarioRun); err != nil {
+		logger.Error(err, "Failed to fetch scenario run", "scenarioRunName", scenarioRunName)
+		_ = conn.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("ERROR: Scenario run '%s' not found", scenarioRunName)))
+		return
+	}
+
+	// Find the specific job for this jobID
+	var targetJob *krknv1alpha1.ClusterJobStatus
+	for i := range scenarioRun.Status.ClusterJobs {
+		if scenarioRun.Status.ClusterJobs[i].JobID == jobID {
+			targetJob = &scenarioRun.Status.ClusterJobs[i]
+			break
+		}
+	}
+
+	if targetJob == nil {
+		logger.Error(nil, "Job not found in scenario run",
+			"scenarioRunName", scenarioRunName,
+			"jobID", jobID)
+		_ = conn.WriteMessage(websocket.TextMessage, []byte("ERROR: Job not found in scenario run"))
+		return
+	}
+
+	// Check if user has 'view' permission on this specific job's cluster
+	if !auth.IsAdmin(ctx) {
+		if targetJob.ClusterAPIURL == "" {
+			logger.Error(nil, "Access denied: job has no cluster API URL",
+				"scenarioRunName", scenarioRunName,
+				"jobID", jobID,
+				"userID", claims.UserID)
+			_ = conn.WriteMessage(websocket.TextMessage, []byte("ERROR: Access denied. Job has no cluster API URL"))
+			return
+		}
+
+		hasAccess, err := groupauth.HasClusterPermission(
+			ctx,
+			h.client,
+			claims.UserID,
+			h.namespace,
+			targetJob.ClusterAPIURL,
+			groupauth.ActionView,
+		)
+
+		if err != nil {
+			logger.Error(err, "Failed to check job access for logs",
+				"scenarioRunName", scenarioRunName,
+				"jobID", jobID,
+				"userID", claims.UserID)
+			_ = conn.WriteMessage(websocket.TextMessage, []byte("ERROR: Failed to validate access permissions"))
+			return
+		}
+
+		if !hasAccess {
+			logger.Info("Access denied: user does not have view permission on job",
+				"scenarioRunName", scenarioRunName,
+				"jobID", jobID,
+				"userID", claims.UserID,
+				"clusterAPIURL", targetJob.ClusterAPIURL)
+			_ = conn.WriteMessage(websocket.TextMessage, []byte("ERROR: Access denied. You do not have permission to view logs for this job"))
+			return
+		}
+	}
+
+	logger.Info("Permission check passed for log access",
+		"scenarioRunName", scenarioRunName,
+		"jobID", jobID,
+		"userID", claims.UserID,
+		"clusterAPIURL", targetJob.ClusterAPIURL,
+		"isAdmin", auth.IsAdmin(ctx))
 
 	// Set up ping/pong handlers to detect client disconnection
 	pongWait := 60 * time.Second
-	conn.SetReadDeadline(time.Now().Add(pongWait))
+	_ = conn.SetReadDeadline(time.Now().Add(pongWait)) // Best-effort timeout
 	conn.SetPongHandler(func(string) error {
-		conn.SetReadDeadline(time.Now().Add(pongWait))
+		_ = conn.SetReadDeadline(time.Now().Add(pongWait)) // Best-effort timeout
 		return nil
 	})
 
@@ -1374,7 +1362,7 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 				if err := conn.WriteMessage(websocket.PingMessage, nil); err != nil {
 					logger.V(1).Info("Failed to send ping, client disconnected",
 						"scenarioRunName", scenarioRunName,
-						"jobId", jobId)
+						"jobID", jobID)
 					return
 				}
 			case <-done:
@@ -1383,26 +1371,24 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	ctx := context.Background()
-
-	// Find pod by jobId label (no need to fetch the CR)
+	// Find pod by jobID label (no need to fetch the CR)
 	var podList corev1.PodList
 	if err := h.client.List(ctx, &podList, client.InNamespace(h.namespace), client.MatchingLabels{
-		"krkn-job-id": jobId,
+		"krkn-job-id": jobID,
 	}); err != nil {
-		logger.Error(err, "Failed to list pods", "jobId", jobId)
-		conn.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("ERROR: Failed to list pods: %s", err.Error())))
+		logger.Error(err, "Failed to list pods", "jobID", jobID)
+		_ = conn.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("ERROR: Failed to list pods: %s", err.Error()))) // Best-effort error reporting
 		return
 	}
 
 	if len(podList.Items) == 0 {
-		logger.Error(nil, "Job not found", "jobId", jobId)
-		conn.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("ERROR: Job with ID '%s' not found", jobId)))
+		logger.Error(nil, "Job not found", "jobID", jobID)
+		_ = conn.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("ERROR: Job with ID '%s' not found", jobID))) // Best-effort error reporting
 		return
 	}
 
 	pod := podList.Items[0]
-	logger.Info("Found pod for job", "scenarioRunName", scenarioRunName, "jobId", jobId, "podName", pod.Name, "podPhase", pod.Status.Phase)
+	logger.Info("Found pod for job", "scenarioRunName", scenarioRunName, "jobID", jobID, "podName", pod.Name, "podPhase", pod.Status.Phase)
 
 	// Parse query parameters
 	follow := r.URL.Query().Get("follow") == "true"
@@ -1426,7 +1412,7 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 
 	logger.Info("Opening log stream",
 		"scenarioRunName", scenarioRunName,
-		"jobId", jobId,
+		"jobID", jobID,
 		"podName", pod.Name,
 		"follow", follow,
 		"timestamps", timestamps)
@@ -1437,15 +1423,15 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		logger.Error(err, "Failed to open log stream",
 			"scenarioRunName", scenarioRunName,
-			"jobId", jobId,
+			"jobID", jobID,
 			"podName", pod.Name,
 			"namespace", h.namespace)
-		conn.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("ERROR: Failed to open log stream: %s", err.Error())))
+		_ = conn.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("ERROR: Failed to open log stream: %s", err.Error()))) // Best-effort error reporting
 		return
 	}
 	defer stream.Close()
 
-	logger.Info("Streaming logs started", "scenarioRunName", scenarioRunName, "jobId", jobId, "podName", pod.Name)
+	logger.Info("Streaming logs started", "scenarioRunName", scenarioRunName, "jobID", jobID, "podName", pod.Name)
 
 	// Read logs line by line and send via WebSocket
 	scanner := bufio.NewScanner(stream)
@@ -1458,13 +1444,13 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 			if isWebSocketDisconnectError(err) {
 				logger.Info("WebSocket client disconnected",
 					"scenarioRunName", scenarioRunName,
-					"jobId", jobId,
+					"jobID", jobID,
 					"podName", pod.Name,
 					"linesStreamed", lineCount)
 			} else {
 				logger.Error(err, "Unexpected WebSocket write error",
 					"scenarioRunName", scenarioRunName,
-					"jobId", jobId,
+					"jobID", jobID,
 					"podName", pod.Name,
 					"linesStreamed", lineCount)
 			}
@@ -1477,16 +1463,16 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 	if err := scanner.Err(); err != nil {
 		logger.Error(err, "Log stream scanner error",
 			"scenarioRunName", scenarioRunName,
-			"jobId", jobId,
+			"jobID", jobID,
 			"podName", pod.Name,
 			"linesStreamed", lineCount)
-		conn.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("ERROR: Log stream error: %s", err.Error())))
+		_ = conn.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("ERROR: Log stream error: %s", err.Error()))) // Best-effort error reporting
 		return
 	}
 
 	logger.Info("Log streaming completed",
 		"scenarioRunName", scenarioRunName,
-		"jobId", jobId,
+		"jobID", jobID,
 		"podName", pod.Name,
 		"totalLines", lineCount)
 
@@ -1495,7 +1481,7 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 		if !isWebSocketDisconnectError(err) {
 			logger.V(1).Info("Failed to send close message, client may have already disconnected",
 				"scenarioRunName", scenarioRunName,
-				"jobId", jobId,
+				"jobID", jobID,
 				"error", err.Error())
 		}
 	}
@@ -1513,15 +1499,16 @@ func (h *Handler) ListScenarioRuns(w http.ResponseWriter, r *http.Request) {
 	// List all KrknScenarioRun CRs in the namespace
 	var scenarioRunList krknv1alpha1.KrknScenarioRunList
 	if err := h.client.List(ctx, &scenarioRunList, client.InNamespace(h.namespace)); err != nil {
+		log.FromContext(ctx).Error(err, "Failed to list scenario runs")
 		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
 			Error:   "internal_error",
-			Message: "Failed to list scenario runs: " + err.Error(),
+			Message: "Failed to list scenario runs",
 		})
 		return
 	}
 
-	// Filter by ownership (admins see all, users see only their own)
-	scenarioRunList.Items = filterScenarioRunsByOwnership(scenarioRunList.Items, ctx)
+	// Filter by group permissions (admins see all, users see runs with group view permission)
+	scenarioRunList.Items = h.filterScenarioRunsByGroupPermission(scenarioRunList.Items, ctx)
 
 	// Convert to response format with optional filtering
 	runs := make([]ScenarioRunListItem, 0)
@@ -1565,9 +1552,10 @@ func (h *Handler) GetActiveRunsOverview(w http.ResponseWriter, r *http.Request) 
 	// List all KrknScenarioRun CRs in the namespace
 	var scenarioRunList krknv1alpha1.KrknScenarioRunList
 	if err := h.client.List(ctx, &scenarioRunList, client.InNamespace(h.namespace)); err != nil {
+		log.FromContext(ctx).Error(err, "Failed to list scenario runs")
 		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
 			Error:   "internal_error",
-			Message: "Failed to list scenario runs: " + err.Error(),
+			Message: "Failed to list scenario runs",
 		})
 		return
 	}
@@ -1608,14 +1596,14 @@ func (h *Handler) GetActiveRunsOverview(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, response)
 }
 
-// DeleteScenarioRun handles DELETE /api/v1/scenarios/run/{jobId} endpoint
+// DeleteScenarioRun handles DELETE /api/v1/scenarios/run/{jobID} endpoint
 // It stops and deletes a running job
 func (h *Handler) DeleteScenarioRun(w http.ResponseWriter, r *http.Request) {
-	jobId, err := extractPathSuffix(r.URL.Path, "/api/v1/scenarios/run/")
+	jobID, err := extractPathSuffix(r.URL.Path, ScenariosRunPath+"/")
 	if err != nil {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
 			Error:   "bad_request",
-			Message: "jobId " + err.Error(),
+			Message: "jobID " + err.Error(),
 		})
 		return
 	}
@@ -1624,11 +1612,12 @@ func (h *Handler) DeleteScenarioRun(w http.ResponseWriter, r *http.Request) {
 
 	var podList corev1.PodList
 	if err := h.client.List(ctx, &podList, client.InNamespace(h.namespace), client.MatchingLabels{
-		"krkn-job-id": jobId,
+		"krkn-job-id": jobID,
 	}); err != nil {
+		log.FromContext(ctx).Error(err, "Failed to list pods", "jobID", jobID)
 		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
 			Error:   "internal_error",
-			Message: "Failed to list pods: " + err.Error(),
+			Message: "Failed to list pods",
 		})
 		return
 	}
@@ -1636,7 +1625,7 @@ func (h *Handler) DeleteScenarioRun(w http.ResponseWriter, r *http.Request) {
 	if len(podList.Items) == 0 {
 		writeJSONError(w, http.StatusNotFound, ErrorResponse{
 			Error:   "not_found",
-			Message: "Job with ID '" + jobId + "' not found",
+			Message: "Job with ID '" + jobID + "' not found",
 		})
 		return
 	}
@@ -1652,7 +1641,7 @@ func (h *Handler) DeleteScenarioRun(w http.ResponseWriter, r *http.Request) {
 			Namespace: h.namespace,
 		}, &scenarioRun); err == nil {
 			// Check access permissions on parent ScenarioRun
-			if !checkScenarioRunAccess(w, r, &scenarioRun) {
+			if !h.checkScenarioRunAccess(w, r, &scenarioRun) {
 				return
 			}
 		}
@@ -1665,33 +1654,34 @@ func (h *Handler) DeleteScenarioRun(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.client.Delete(ctx, &pod, &deleteOptions); err != nil {
+		log.FromContext(ctx).Error(err, "Failed to delete pod", "podName", pod.Name, "jobID", jobID)
 		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
 			Error:   "internal_error",
-			Message: "Failed to delete pod: " + err.Error(),
+			Message: "Failed to delete pod",
 		})
 		return
 	}
 
 	var configMapList corev1.ConfigMapList
 	if err := h.client.List(ctx, &configMapList, client.InNamespace(h.namespace), client.MatchingLabels{
-		"krkn-job-id": jobId,
+		"krkn-job-id": jobID,
 	}); err == nil {
 		for _, cm := range configMapList.Items {
-			h.client.Delete(ctx, &cm)
+			_ = h.client.Delete(ctx, &cm) // Best-effort cleanup
 		}
 	}
 
 	var secretList corev1.SecretList
 	if err := h.client.List(ctx, &secretList, client.InNamespace(h.namespace), client.MatchingLabels{
-		"krkn-job-id": jobId,
+		"krkn-job-id": jobID,
 	}); err == nil {
 		for _, secret := range secretList.Items {
-			h.client.Delete(ctx, &secret)
+			_ = h.client.Delete(ctx, &secret) // Best-effort cleanup
 		}
 	}
 
 	response := JobStatusResponse{
-		JobId:   jobId,
+		JobID:   jobID,
 		Status:  "Stopped",
 		Message: "Job stopped and deleted successfully",
 	}
@@ -1702,7 +1692,7 @@ func (h *Handler) DeleteScenarioRun(w http.ResponseWriter, r *http.Request) {
 // DeleteScenarioRunComplete handles DELETE /api/v1/scenarios/run/{scenarioRunName}
 // It deletes the entire KrknScenarioRun CR (all jobs)
 func (h *Handler) DeleteScenarioRunComplete(w http.ResponseWriter, r *http.Request) {
-	scenarioRunName, err := extractPathSuffix(r.URL.Path, "/api/v1/scenarios/run/")
+	scenarioRunName, err := extractPathSuffix(r.URL.Path, ScenariosRunPath+"/")
 	if err != nil {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
 			Error:   "bad_request",
@@ -1733,8 +1723,37 @@ func (h *Handler) DeleteScenarioRunComplete(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// Check access permissions
-	if !checkScenarioRunAccess(w, r, &scenarioRun) {
+	// Check if user can cancel the entire scenario run
+	// Admin can cancel anything, regular users must have 'cancel' permission on ALL jobs
+	claims := auth.GetClaimsFromContext(ctx)
+	if claims == nil {
+		writeJSONError(w, http.StatusUnauthorized, ErrorResponse{
+			Error:   "unauthorized",
+			Message: "No authentication claims found",
+		})
+		return
+	}
+
+	hasAccess, err := h.checkScenarioRunCancelAccess(
+		ctx,
+		claims.UserID,
+		&scenarioRun,
+	)
+
+	if err != nil {
+		log.FromContext(ctx).Error(err, "Failed to validate cancel permissions", "scenarioRunName", scenarioRunName, "userID", claims.UserID)
+		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+			Error:   "internal_error",
+			Message: "Failed to validate cancel permissions",
+		})
+		return
+	}
+
+	if !hasAccess {
+		writeJSONError(w, http.StatusForbidden, ErrorResponse{
+			Error:   "forbidden",
+			Message: "Access denied. You must have cancel permission on all jobs in this run to delete it",
+		})
 		return
 	}
 
@@ -1745,9 +1764,10 @@ func (h *Handler) DeleteScenarioRunComplete(w http.ResponseWriter, r *http.Reque
 
 	// Delete the CR - owner references will cascade delete all pods/configmaps/secrets
 	if err := h.client.Delete(ctx, &scenarioRun); err != nil {
+		log.FromContext(ctx).Error(err, "Failed to delete scenario run", "scenarioRunName", scenarioRunName)
 		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
 			Error:   "internal_error",
-			Message: "Failed to delete scenario run: " + err.Error(),
+			Message: "Failed to delete scenario run",
 		})
 		return
 	}
@@ -1758,22 +1778,22 @@ func (h *Handler) DeleteScenarioRunComplete(w http.ResponseWriter, r *http.Reque
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// DeleteSingleJob handles DELETE /api/v1/scenarios/run/jobs/{jobId}
+// DeleteSingleJob handles DELETE /api/v1/scenarios/run/jobs/{jobID}
 // It cancels a single job by setting CancelRequested flag and deleting the pod
 func (h *Handler) DeleteSingleJob(w http.ResponseWriter, r *http.Request) {
-	// Parse path: /api/v1/scenarios/run/jobs/{jobId}
-	jobId, err := extractPathSuffix(r.URL.Path, "/api/v1/scenarios/run/jobs/")
+	// Parse path: /api/v1/scenarios/run/jobs/{jobID}
+	jobID, err := extractPathSuffix(r.URL.Path, ScenariosRunJobsPath+"/")
 	if err != nil {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
 			Error:   "bad_request",
-			Message: "jobId " + err.Error(),
+			Message: "jobID " + err.Error(),
 		})
 		return
 	}
 
-	ctx := context.Background()
+	ctx := r.Context()
 
-	// Find KrknScenarioRun containing this jobId
+	// Find KrknScenarioRun containing this jobID
 	var scenarioRunList krknv1alpha1.KrknScenarioRunList
 	if err := h.client.List(ctx, &scenarioRunList, client.InNamespace(h.namespace)); err != nil {
 		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
@@ -1790,7 +1810,7 @@ func (h *Handler) DeleteSingleJob(w http.ResponseWriter, r *http.Request) {
 	for i := range scenarioRunList.Items {
 		sr := &scenarioRunList.Items[i]
 		for j, job := range sr.Status.ClusterJobs {
-			if job.JobId == jobId {
+			if job.JobID == jobID {
 				foundScenarioRun = sr
 				foundJobIndex = j
 				break
@@ -1804,16 +1824,21 @@ func (h *Handler) DeleteSingleJob(w http.ResponseWriter, r *http.Request) {
 	if foundScenarioRun == nil {
 		writeJSONError(w, http.StatusNotFound, ErrorResponse{
 			Error:   "not_found",
-			Message: "Job '" + jobId + "' not found",
+			Message: "Job '" + jobID + "' not found",
 		})
 		return
 	}
 
 	job := &foundScenarioRun.Status.ClusterJobs[foundJobIndex]
 
+	// Check if user has 'cancel' permission on this specific job
+	if !h.checkJobAccess(w, r, job, groupauth.ActionCancel, "cancel") {
+		return
+	}
+
 	log.Log.Info("cancelling single job",
 		"scenarioRunName", foundScenarioRun.Name,
-		"jobId", jobId,
+		"jobID", jobID,
 		"clusterName", job.ClusterName,
 		"currentPhase", job.Phase)
 
@@ -1822,21 +1847,22 @@ func (h *Handler) DeleteSingleJob(w http.ResponseWriter, r *http.Request) {
 
 	// Update CR status
 	if err := h.client.Status().Update(ctx, foundScenarioRun); err != nil {
+		log.FromContext(ctx).Error(err, "Failed to update scenario run status", "scenarioRunName", foundScenarioRun.Name, "jobID", jobID)
 		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
 			Error:   "internal_error",
-			Message: "Failed to update scenario run status: " + err.Error(),
+			Message: "Failed to update scenario run status",
 		})
 		return
 	}
 
 	log.Log.Info("set CancelRequested flag",
 		"scenarioRunName", foundScenarioRun.Name,
-		"jobId", jobId)
+		"jobID", jobID)
 
 	// Delete the pod (controller will see CancelRequested and not retry)
 	var podList corev1.PodList
 	if err := h.client.List(ctx, &podList, client.InNamespace(h.namespace), client.MatchingLabels{
-		"krkn-job-id": jobId,
+		"krkn-job-id": jobID,
 	}); err == nil && len(podList.Items) > 0 {
 		pod := podList.Items[0]
 		gracePeriod := int64(5)
@@ -1847,12 +1873,12 @@ func (h *Handler) DeleteSingleJob(w http.ResponseWriter, r *http.Request) {
 		if err := h.client.Delete(ctx, &pod, &deleteOptions); err != nil {
 			log.Log.Error(err, "failed to delete pod during job cancellation",
 				"scenarioRunName", foundScenarioRun.Name,
-				"jobId", jobId,
+				"jobID", jobID,
 				"podName", pod.Name)
 		} else {
 			log.Log.Info("deleted pod for cancelled job",
 				"scenarioRunName", foundScenarioRun.Name,
-				"jobId", jobId,
+				"jobID", jobID,
 				"podName", pod.Name)
 		}
 	}
@@ -1860,22 +1886,22 @@ func (h *Handler) DeleteSingleJob(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// GetSingleJob handles GET /api/v1/scenarios/run/jobs/{jobId}
-// It returns the status of a single job by jobId (jobId is unique across all scenario runs)
+// GetSingleJob handles GET /api/v1/scenarios/run/jobs/{jobID}
+// It returns the status of a single job by jobID (jobID is unique across all scenario runs)
 func (h *Handler) GetSingleJob(w http.ResponseWriter, r *http.Request) {
-	// Parse path: /api/v1/scenarios/run/jobs/{jobId}
-	jobId, err := extractPathSuffix(r.URL.Path, "/api/v1/scenarios/run/jobs/")
+	// Parse path: /api/v1/scenarios/run/jobs/{jobID}
+	jobID, err := extractPathSuffix(r.URL.Path, ScenariosRunJobsPath+"/")
 	if err != nil {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
 			Error:   "bad_request",
-			Message: "jobId " + err.Error(),
+			Message: "jobID " + err.Error(),
 		})
 		return
 	}
 
 	ctx := r.Context()
 
-	// Find KrknScenarioRun containing this jobId
+	// Find KrknScenarioRun containing this jobID
 	var scenarioRunList krknv1alpha1.KrknScenarioRunList
 	if err := h.client.List(ctx, &scenarioRunList, client.InNamespace(h.namespace)); err != nil {
 		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
@@ -1887,14 +1913,12 @@ func (h *Handler) GetSingleJob(w http.ResponseWriter, r *http.Request) {
 
 	// Search for job across all scenario runs
 	var foundJob *krknv1alpha1.ClusterJobStatus
-	var foundScenarioRun *krknv1alpha1.KrknScenarioRun
 
 	for i := range scenarioRunList.Items {
 		sr := &scenarioRunList.Items[i]
 		for j := range sr.Status.ClusterJobs {
-			if sr.Status.ClusterJobs[j].JobId == jobId {
+			if sr.Status.ClusterJobs[j].JobID == jobID {
 				foundJob = &sr.Status.ClusterJobs[j]
-				foundScenarioRun = sr
 				break
 			}
 		}
@@ -1906,13 +1930,13 @@ func (h *Handler) GetSingleJob(w http.ResponseWriter, r *http.Request) {
 	if foundJob == nil {
 		writeJSONError(w, http.StatusNotFound, ErrorResponse{
 			Error:   "not_found",
-			Message: "Job '" + jobId + "' not found",
+			Message: "Job '" + jobID + "' not found",
 		})
 		return
 	}
 
-	// Check access permissions on parent ScenarioRun
-	if !checkScenarioRunAccess(w, r, foundScenarioRun) {
+	// Check if user has permission to view this specific job
+	if !h.checkJobAccess(w, r, foundJob, groupauth.ActionView, "view") {
 		return
 	}
 
@@ -1920,7 +1944,7 @@ func (h *Handler) GetSingleJob(w http.ResponseWriter, r *http.Request) {
 	response := ClusterJobStatusResponse{
 		ProviderName:    foundJob.ProviderName,
 		ClusterName:     foundJob.ClusterName,
-		JobId:           foundJob.JobId,
+		JobID:           foundJob.JobID,
 		PodName:         foundJob.PodName,
 		Phase:           foundJob.Phase,
 		Message:         foundJob.Message,
@@ -1939,7 +1963,7 @@ func (h *Handler) ScenariosRunRouter(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path
 
 	// Root endpoint: /api/v1/scenarios/run
-	if path == "/api/v1/scenarios/run" {
+	if path == ScenariosRunPath {
 		switch r.Method {
 		case http.MethodPost:
 			h.PostScenarioRun(w, r)
@@ -1952,12 +1976,12 @@ func (h *Handler) ScenariosRunRouter(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Nested endpoints
-	if strings.HasPrefix(path, "/api/v1/scenarios/run/") {
-		// Note: WebSocket logs endpoint (/jobs/{jobId}/logs) is handled in server.go
+	if strings.HasPrefix(path, ScenariosRunPath+"/") {
+		// Note: WebSocket logs endpoint (/jobs/{jobID}/logs) is handled in server.go
 		// before reaching this router, so no need to check for it here
 
-		// Check for /jobs/{jobId} pattern (GET or DELETE single job)
-		if strings.HasPrefix(path, "/api/v1/scenarios/run/jobs/") {
+		// Check for /jobs/{jobID} pattern (GET or DELETE single job)
+		if strings.HasPrefix(path, ScenariosRunJobsPath+"/") {
 			switch r.Method {
 			case http.MethodGet:
 				h.GetSingleJob(w, r)

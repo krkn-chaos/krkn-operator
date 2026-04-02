@@ -16,6 +16,8 @@ limitations under the License.
 Assisted-by: Claude Sonnet 4.5 (claude-sonnet-4-5@20250929)
 */
 
+// Package kubeconfig provides utilities for generating and validating Kubernetes kubeconfig files.
+// It supports token-based and credential-based authentication methods.
 package kubeconfig
 
 import (

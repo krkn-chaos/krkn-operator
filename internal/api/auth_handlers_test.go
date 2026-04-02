@@ -19,6 +19,7 @@ Assisted-by: Claude Sonnet 4.5 (claude-sonnet-4-5@20250929)
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -57,7 +58,7 @@ func setupAuthTestHandler(users ...*krknv1alpha1.KrknUser) *Handler {
 func TestIsRegistered_NoAdmins(t *testing.T) {
 	handler := setupAuthTestHandler()
 
-	req := httptest.NewRequest("GET", "/api/v1/auth/is-registered", nil)
+	req := httptest.NewRequest("GET", AuthIsRegistered, nil)
 	w := httptest.NewRecorder()
 	handler.IsRegistered(w, req)
 
@@ -96,7 +97,7 @@ func TestIsRegistered_WithAdmin(t *testing.T) {
 
 	handler := setupAuthTestHandler(adminUser)
 
-	req := httptest.NewRequest("GET", "/api/v1/auth/is-registered", nil)
+	req := httptest.NewRequest("GET", AuthIsRegistered, nil)
 	w := httptest.NewRecorder()
 	handler.IsRegistered(w, req)
 
@@ -119,7 +120,7 @@ func TestIsRegistered_MethodNotAllowed(t *testing.T) {
 
 	methods := []string{"POST", "PUT", "DELETE", "PATCH"}
 	for _, method := range methods {
-		req := httptest.NewRequest(method, "/api/v1/auth/is-registered", nil)
+		req := httptest.NewRequest(method, AuthIsRegistered, nil)
 		w := httptest.NewRecorder()
 		handler.IsRegistered(w, req)
 
@@ -141,7 +142,7 @@ func TestRegister_FirstAdmin_Success(t *testing.T) {
 		"role": "admin"
 	}`
 
-	req := httptest.NewRequest("POST", "/api/v1/auth/register", strings.NewReader(reqBody))
+	req := httptest.NewRequest("POST", AuthRegister, strings.NewReader(reqBody))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	handler.Register(w, req)
@@ -165,7 +166,7 @@ func TestRegister_FirstAdmin_Success(t *testing.T) {
 
 	// Verify the KrknUser was created with Active=true
 	users := &krknv1alpha1.KrknUserList{}
-	if err := handler.client.List(nil, users); err != nil {
+	if err := handler.client.List(context.TODO(), users); err != nil {
 		t.Fatalf("Failed to list users: %v", err)
 	}
 
@@ -194,7 +195,7 @@ func TestRegister_FirstUser_MustBeAdmin(t *testing.T) {
 		"role": "user"
 	}`
 
-	req := httptest.NewRequest("POST", "/api/v1/auth/register", strings.NewReader(reqBody))
+	req := httptest.NewRequest("POST", AuthRegister, strings.NewReader(reqBody))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	handler.Register(w, req)
@@ -278,7 +279,7 @@ func TestRegister_Validation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			req := httptest.NewRequest("POST", "/api/v1/auth/register", strings.NewReader(tt.reqBody))
+			req := httptest.NewRequest("POST", AuthRegister, strings.NewReader(tt.reqBody))
 			req.Header.Set("Content-Type", "application/json")
 			w := httptest.NewRecorder()
 			handler.Register(w, req)
@@ -357,7 +358,7 @@ func TestLogin_Success(t *testing.T) {
 		"password": "TestPassword123"
 	}`
 
-	req := httptest.NewRequest("POST", "/api/v1/auth/login", strings.NewReader(reqBody))
+	req := httptest.NewRequest("POST", AuthLogin, strings.NewReader(reqBody))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	handler.Login(w, req)
@@ -459,7 +460,7 @@ func TestLogin_InvalidCredentials(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			req := httptest.NewRequest("POST", "/api/v1/auth/login", strings.NewReader(tt.reqBody))
+			req := httptest.NewRequest("POST", AuthLogin, strings.NewReader(tt.reqBody))
 			req.Header.Set("Content-Type", "application/json")
 			w := httptest.NewRecorder()
 			handler.Login(w, req)
@@ -518,7 +519,7 @@ func TestLogin_InactiveUser(t *testing.T) {
 		"password": "TestPassword123"
 	}`
 
-	req := httptest.NewRequest("POST", "/api/v1/auth/login", strings.NewReader(reqBody))
+	req := httptest.NewRequest("POST", AuthLogin, strings.NewReader(reqBody))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	handler.Login(w, req)

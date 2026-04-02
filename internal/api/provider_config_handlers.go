@@ -68,7 +68,7 @@ func (h *Handler) PostProviderConfig(w http.ResponseWriter, r *http.Request) {
 // GetProviderConfigByUUID handles GET /api/v1/provider-config/{uuid} endpoint
 // Returns 100 Continue when pending, 200 OK with config_data when Completed
 func (h *Handler) GetProviderConfigByUUID(w http.ResponseWriter, r *http.Request) {
-	uuid, err := extractPathSuffix(r.URL.Path, "/api/v1/provider-config/")
+	uuid, err := extractPathSuffix(r.URL.Path, ProviderConfigPath+"/")
 	if err != nil {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
 			Error:   "bad_request",
@@ -121,7 +121,7 @@ func (h *Handler) UpdateProviderConfigValues(w http.ResponseWriter, r *http.Requ
 	logger := log.FromContext(ctx)
 
 	// Extract UUID from path
-	uuid := strings.TrimPrefix(r.URL.Path, "/api/v1/provider-config/")
+	uuid := strings.TrimPrefix(r.URL.Path, ProviderConfigPath+"/")
 	if uuid == "" {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
 			Error:   "bad_request",
@@ -348,7 +348,7 @@ func (h *Handler) ProviderConfigHandler(w http.ResponseWriter, r *http.Request) 
 	path := r.URL.Path
 
 	// Root endpoint: POST to create new config request (admin only)
-	if path == "/api/v1/provider-config" {
+	if path == ProviderConfigPath {
 		if r.Method != http.MethodPost {
 			writeJSONError(w, http.StatusMethodNotAllowed, ErrorResponse{
 				Error:   "method_not_allowed",
@@ -367,7 +367,7 @@ func (h *Handler) ProviderConfigHandler(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// Nested endpoints with UUID: GET for all, POST (update) for admin only
-	if strings.HasPrefix(path, "/api/v1/provider-config/") {
+	if strings.HasPrefix(path, ProviderConfigPath+"/") {
 		// POST requires admin
 		if r.Method == http.MethodPost {
 			if !h.requireAdminForMethods(w, r, []string{http.MethodPost}) {

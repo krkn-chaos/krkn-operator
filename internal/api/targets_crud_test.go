@@ -20,6 +20,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -79,7 +80,7 @@ func TestCreateTarget_WithKubeconfig(t *testing.T) {
 	}
 
 	body, _ := json.Marshal(reqBody)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/operator/targets", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, OperatorTargetsPath, bytes.NewReader(body))
 	w := httptest.NewRecorder()
 
 	handler.CreateTarget(w, req)
@@ -144,7 +145,7 @@ func TestCreateTarget_WithToken(t *testing.T) {
 	}
 
 	body, _ := json.Marshal(reqBody)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/operator/targets", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, OperatorTargetsPath, bytes.NewReader(body))
 	w := httptest.NewRecorder()
 
 	handler.CreateTarget(w, req)
@@ -191,7 +192,7 @@ func TestCreateTarget_WithCredentials(t *testing.T) {
 	}
 
 	body, _ := json.Marshal(reqBody)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/operator/targets", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, OperatorTargetsPath, bytes.NewReader(body))
 	w := httptest.NewRecorder()
 
 	handler.CreateTarget(w, req)
@@ -305,7 +306,7 @@ func TestCreateTarget_MissingRequiredFields(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			body, _ := json.Marshal(tt.reqBody)
-			req := httptest.NewRequest(http.MethodPost, "/api/v1/operator/targets", bytes.NewReader(body))
+			req := httptest.NewRequest(http.MethodPost, OperatorTargetsPath, bytes.NewReader(body))
 			w := httptest.NewRecorder()
 
 			handler.CreateTarget(w, req)
@@ -346,7 +347,7 @@ func TestCreateTarget_DuplicateClusterName(t *testing.T) {
 		},
 	}
 
-	if err := handler.client.Create(nil, existingTarget); err != nil {
+	if err := handler.client.Create(context.TODO(), existingTarget); err != nil {
 		t.Fatalf("Failed to create existing target: %v", err)
 	}
 
@@ -358,7 +359,7 @@ func TestCreateTarget_DuplicateClusterName(t *testing.T) {
 	}
 
 	body, _ := json.Marshal(reqBody)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/operator/targets", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, OperatorTargetsPath, bytes.NewReader(body))
 	w := httptest.NewRecorder()
 
 	handler.CreateTarget(w, req)
@@ -413,12 +414,12 @@ func TestListTargets(t *testing.T) {
 	}
 
 	for _, target := range targets {
-		if err := handler.client.Create(nil, &target); err != nil {
+		if err := handler.client.Create(context.TODO(), &target); err != nil {
 			t.Fatalf("Failed to create test target: %v", err)
 		}
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/operator/targets", nil)
+	req := httptest.NewRequest(http.MethodGet, OperatorTargetsPath, nil)
 	w := httptest.NewRecorder()
 
 	handler.ListTargets(w, req)
@@ -475,11 +476,11 @@ func TestGetTarget(t *testing.T) {
 		},
 	}
 
-	if err := handler.client.Create(nil, target); err != nil {
+	if err := handler.client.Create(context.TODO(), target); err != nil {
 		t.Fatalf("Failed to create test target: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/operator/targets/test-uuid", nil)
+	req := httptest.NewRequest(http.MethodGet, OperatorTargetsPath+"/test-uuid", nil)
 	w := httptest.NewRecorder()
 
 	handler.GetTarget(w, req)
@@ -505,7 +506,7 @@ func TestGetTarget(t *testing.T) {
 func TestGetTarget_NotFound(t *testing.T) {
 	handler := setupTestHandler()
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/operator/targets/non-existent-uuid", nil)
+	req := httptest.NewRequest(http.MethodGet, OperatorTargetsPath+"/non-existent-uuid", nil)
 	w := httptest.NewRecorder()
 
 	handler.GetTarget(w, req)
@@ -546,15 +547,15 @@ func TestDeleteTarget(t *testing.T) {
 		},
 	}
 
-	if err := handler.client.Create(nil, secret); err != nil {
+	if err := handler.client.Create(context.TODO(), secret); err != nil {
 		t.Fatalf("Failed to create secret: %v", err)
 	}
 
-	if err := handler.client.Create(nil, target); err != nil {
+	if err := handler.client.Create(context.TODO(), target); err != nil {
 		t.Fatalf("Failed to create target: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodDelete, "/api/v1/operator/targets/"+targetUUID, nil)
+	req := httptest.NewRequest(http.MethodDelete, OperatorTargetsPath+"/"+targetUUID, nil)
 	w := httptest.NewRecorder()
 
 	handler.DeleteTarget(w, req)
@@ -565,7 +566,7 @@ func TestDeleteTarget(t *testing.T) {
 
 	// Verify target was deleted
 	var deletedTarget krknv1alpha1.KrknOperatorTarget
-	err := handler.client.Get(nil, client.ObjectKey{
+	err := handler.client.Get(context.TODO(), client.ObjectKey{
 		Name:      targetUUID,
 		Namespace: handler.namespace,
 	}, &deletedTarget)
@@ -576,7 +577,7 @@ func TestDeleteTarget(t *testing.T) {
 
 	// Verify secret was deleted
 	var deletedSecret corev1.Secret
-	err = handler.client.Get(nil, client.ObjectKey{
+	err = handler.client.Get(context.TODO(), client.ObjectKey{
 		Name:      secretUUID,
 		Namespace: handler.namespace,
 	}, &deletedSecret)
@@ -618,11 +619,11 @@ func TestUpdateTarget(t *testing.T) {
 		},
 	}
 
-	if err := handler.client.Create(nil, secret); err != nil {
+	if err := handler.client.Create(context.TODO(), secret); err != nil {
 		t.Fatalf("Failed to create secret: %v", err)
 	}
 
-	if err := handler.client.Create(nil, target); err != nil {
+	if err := handler.client.Create(context.TODO(), target); err != nil {
 		t.Fatalf("Failed to create target: %v", err)
 	}
 
@@ -637,7 +638,7 @@ func TestUpdateTarget(t *testing.T) {
 	}
 
 	body, _ := json.Marshal(updateReq)
-	req := httptest.NewRequest(http.MethodPut, "/api/v1/operator/targets/"+targetUUID, bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPut, OperatorTargetsPath+"/"+targetUUID, bytes.NewReader(body))
 	w := httptest.NewRecorder()
 
 	handler.UpdateTarget(w, req)
@@ -648,7 +649,7 @@ func TestUpdateTarget(t *testing.T) {
 
 	// Verify target was updated
 	var updatedTarget krknv1alpha1.KrknOperatorTarget
-	err := handler.client.Get(nil, client.ObjectKey{
+	err := handler.client.Get(context.TODO(), client.ObjectKey{
 		Name:      targetUUID,
 		Namespace: handler.namespace,
 	}, &updatedTarget)
@@ -671,7 +672,7 @@ func TestUpdateTarget(t *testing.T) {
 
 	// Verify secret was updated
 	var updatedSecret corev1.Secret
-	err = handler.client.Get(nil, client.ObjectKey{
+	err = handler.client.Get(context.TODO(), client.ObjectKey{
 		Name:      secretUUID,
 		Namespace: handler.namespace,
 	}, &updatedSecret)

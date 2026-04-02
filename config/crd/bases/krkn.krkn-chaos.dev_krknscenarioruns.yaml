@@ -138,7 +138,7 @@ spec:
                 minProperties: 1
                 type: object
               targetRequestId:
-                description: TargetRequestId is the reference to the KrknTargetRequest
+                description: TargetRequestID is the reference to the KrknTargetRequest
                   CR
                 type: string
               token:
@@ -166,6 +166,10 @@ spec:
                       description: CancelRequested indicates if the user has requested
                         cancellation
                       type: boolean
+                    clusterApiUrl:
+                      description: ClusterAPIURL is the API URL of the cluster for
+                        permission checks
+                      type: string
                     clusterName:
                       description: ClusterName is the name of the target cluster
                       type: string
@@ -178,7 +182,7 @@ spec:
                         (OOMKilled, ContainerError, etc.)
                       type: string
                     jobId:
-                      description: JobId is the unique identifier for this job
+                      description: JobID is the unique identifier for this job
                       type: string
                     lastRetryTime:
                       description: LastRetryTime is when the last retry was initiated
