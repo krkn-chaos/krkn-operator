@@ -931,13 +931,13 @@ func TestGetScenarioRunStatusWithoutClusterAPIURL(t *testing.T) {
 	}
 
 	tests := []struct {
-		name        string
-		scenarioRun *krknv1alpha1.KrknScenarioRun
-		expectAllow bool
-		description string
+		name           string
+		scenarioRun    *krknv1alpha1.KrknScenarioRun
+		expectedStatus int
+		description    string
 	}{
 		{
-			name: "allow access to run with no jobs (just created)",
+			name: "return 201 for run with no jobs (just created)",
 			scenarioRun: &krknv1alpha1.KrknScenarioRun{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "run-no-jobs",
@@ -947,11 +947,11 @@ func TestGetScenarioRunStatusWithoutClusterAPIURL(t *testing.T) {
 					ClusterJobs: []krknv1alpha1.ClusterJobStatus{},
 				},
 			},
-			expectAllow: true,
-			description: "Run just created, no jobs yet",
+			expectedStatus: http.StatusCreated,
+			description:    "Run just created, no jobs yet",
 		},
 		{
-			name: "allow access to run with jobs missing ClusterAPIURL (controller not processed yet)",
+			name: "return 201 for run with jobs missing ClusterAPIURL (controller not processed yet)",
 			scenarioRun: &krknv1alpha1.KrknScenarioRun{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "run-jobs-no-url",
@@ -967,11 +967,11 @@ func TestGetScenarioRunStatusWithoutClusterAPIURL(t *testing.T) {
 					},
 				},
 			},
-			expectAllow: true,
-			description: "Jobs exist but ClusterAPIURL not populated yet",
+			expectedStatus: http.StatusCreated,
+			description:    "Jobs exist but ClusterAPIURL not populated yet",
 		},
 		{
-			name: "allow access to run with job having ClusterAPIURL (user has permission)",
+			name: "return 200 for run with job having ClusterAPIURL (user has permission)",
 			scenarioRun: &krknv1alpha1.KrknScenarioRun{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "run-with-permission",
@@ -987,11 +987,11 @@ func TestGetScenarioRunStatusWithoutClusterAPIURL(t *testing.T) {
 					},
 				},
 			},
-			expectAllow: true,
-			description: "Job with ClusterAPIURL, user has view permission",
+			expectedStatus: http.StatusOK,
+			description:    "Job with ClusterAPIURL, user has view permission",
 		},
 		{
-			name: "deny access to run with job on unauthorized cluster",
+			name: "return 403 for run with job on unauthorized cluster",
 			scenarioRun: &krknv1alpha1.KrknScenarioRun{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "run-unauthorized",
@@ -1007,8 +1007,8 @@ func TestGetScenarioRunStatusWithoutClusterAPIURL(t *testing.T) {
 					},
 				},
 			},
-			expectAllow: false,
-			description: "Job with ClusterAPIURL, user does NOT have permission",
+			expectedStatus: http.StatusForbidden,
+			description:    "Job with ClusterAPIURL, user does NOT have permission",
 		},
 	}
 
@@ -1032,16 +1032,9 @@ func TestGetScenarioRunStatusWithoutClusterAPIURL(t *testing.T) {
 			w := httptest.NewRecorder()
 			handler.GetScenarioRunStatus(w, req)
 
-			if tt.expectAllow {
-				if w.Code != http.StatusOK {
-					t.Errorf("%s: Expected status 200, got %d. Response: %s",
-						tt.description, w.Code, w.Body.String())
-				}
-			} else {
-				if w.Code != http.StatusForbidden {
-					t.Errorf("%s: Expected status 403, got %d. Response: %s",
-						tt.description, w.Code, w.Body.String())
-				}
+			if w.Code != tt.expectedStatus {
+				t.Errorf("%s: Expected status %d, got %d. Response: %s",
+					tt.description, tt.expectedStatus, w.Code, w.Body.String())
 			}
 		})
 	}
