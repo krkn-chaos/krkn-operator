@@ -27,7 +27,9 @@ Components Deployed:
 The Krkn Console is available at:
 
 {{- if .Values.console.route.enabled }}
-  OpenShift Route: https://{{ .Values.console.route.host | default (printf "%s-%s.apps.example.com" (include "krkn-operator.console.fullname" .) (include "krkn-operator.namespace" .)) }}
+  OpenShift Route:
+    Get the URL with:
+      kubectl get route {{ include "krkn-operator.console.fullname" . }} -n {{ include "krkn-operator.namespace" . }} -o jsonpath='{.spec.host}'
 
 {{- else if .Values.console.ingress.enabled }}
   {{- range .Values.console.ingress.hosts }}
@@ -57,19 +59,6 @@ The Krkn Console is available at:
 {{- else }}
   Console is disabled. Enable it in values.yaml (console.enabled: true)
 {{- end }}
-
-=============================================================================
-🔌 OPERATOR API ENDPOINT
-=============================================================================
-
-The operator API is accessible at:
-  Service: {{ include "krkn-operator.operator.fullname" . }}.{{ include "krkn-operator.namespace" . }}.svc.cluster.local:{{ .Values.operator.service.port }}
-
-To access externally via port-forward:
-  kubectl port-forward -n {{ include "krkn-operator.namespace" . }} svc/{{ include "krkn-operator.operator.fullname" . }} 8080:{{ .Values.operator.service.port }}
-
-API Documentation:
-  Swagger UI: http://localhost:8080/swagger/index.html (after port-forward)
 
 =============================================================================
 {{- if .Values.acm.enabled }}
