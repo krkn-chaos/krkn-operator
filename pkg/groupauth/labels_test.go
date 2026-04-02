@@ -183,12 +183,12 @@ func TestSanitizeGroupName(t *testing.T) {
 			want:      "dev.team_name",
 		},
 		{
-			name:      "very long name",
+			name:      "very long name - no truncation",
 			groupName: "this-is-a-very-long-group-name-that-exceeds-the-kubernetes-label-limit-of-sixty-three-characters",
-			want:      "this-is-a-very-long-group-name-that-exceeds-the-kubernetes-labe",
+			want:      "this-is-a-very-long-group-name-that-exceeds-the-kubernetes-label-limit-of-sixty-three-characters",
 		},
 		{
-			name:      "long name ending with hyphen after truncation",
+			name:      "long name with trailing hyphens",
 			groupName: "this-is-a-very-long-group-name-that-exceeds-kubernetes-label--",
 			want:      "this-is-a-very-long-group-name-that-exceeds-kubernetes-label",
 		},
@@ -211,9 +211,16 @@ func TestSanitizeGroupName(t *testing.T) {
 				t.Errorf("SanitizeGroupName() = %q, want %q", got, tt.want)
 			}
 
-			// Verify result is valid Kubernetes label
-			if len(got) > 63 {
-				t.Errorf("SanitizeGroupName() result too long: %d characters", len(got))
+			// Verify result doesn't have leading/trailing invalid characters
+			if len(got) > 0 {
+				firstChar := got[0]
+				lastChar := got[len(got)-1]
+				if firstChar == '-' || firstChar == '_' || firstChar == '.' {
+					t.Errorf("SanitizeGroupName() result has invalid leading char: %c", firstChar)
+				}
+				if lastChar == '-' || lastChar == '_' || lastChar == '.' {
+					t.Errorf("SanitizeGroupName() result has invalid trailing char: %c", lastChar)
+				}
 			}
 		})
 	}

@@ -49,7 +49,7 @@ func ExtractGroupNamesFromLabels(labels map[string]string) []string {
 // - Replaces invalid characters with hyphens
 // - Converts to lowercase
 // - Ensures it starts/ends with alphanumeric
-// - Truncates to 63 characters max
+// Note: Does NOT truncate. Caller must validate length (63 char limit for K8s labels).
 func SanitizeGroupName(groupName string) string {
 	// Replace invalid characters with hyphens
 	sanitized := regexp.MustCompile(`[^a-zA-Z0-9\-_.]+`).ReplaceAllString(groupName, "-")
@@ -59,13 +59,6 @@ func SanitizeGroupName(groupName string) string {
 
 	// Convert to lowercase
 	sanitized = strings.ToLower(sanitized)
-
-	// Truncate to 63 characters (Kubernetes label name limit)
-	if len(sanitized) > 63 {
-		sanitized = sanitized[:63]
-		// Re-trim in case truncation added trailing invalid chars
-		sanitized = strings.TrimRight(sanitized, "-_.")
-	}
 
 	return sanitized
 }

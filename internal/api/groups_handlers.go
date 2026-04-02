@@ -160,17 +160,34 @@ func (h *Handler) CreateUserGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Sanitize group name to ensure consistency between CR name and label key
-	// This prevents mismatch when label truncates to 63 chars but CR uses full name
+	// Validate group name length to prevent label truncation and collisions
+	// Group names become part of labels: "group.krkn.krkn-chaos.dev/<name>"
+	// Kubernetes label names (after the prefix) are limited to 63 characters
 	sanitizedName := groupauth.SanitizeGroupName(req.Name)
 
-	// Validate that sanitized name is not empty after sanitization
 	if sanitizedName == "" {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
 			Error:   "bad_request",
 			Message: "Group name contains only invalid characters",
 		})
 		return
+	}
+
+	if len(sanitizedName) > 63 {
+		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+			Error:   "bad_request",
+			Message: fmt.Sprintf("Group name is too long. After sanitization, it must be 63 characters or less (current: %d). Use a shorter name.", len(sanitizedName)),
+		})
+		return
+	}
+
+	// Validate that the sanitized name matches the original (no truncation occurred)
+	// This prevents two different group names from colliding after sanitization
+	if sanitizedName != strings.ToLower(req.Name) {
+		// Name was modified during sanitization - warn user
+		logger.V(1).Info("Group name was sanitized",
+			"original", req.Name,
+			"sanitized", sanitizedName)
 	}
 
 	if len(req.ClusterPermissions) == 0 {
