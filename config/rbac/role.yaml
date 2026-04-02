@@ -78,3 +78,25 @@ rules:
   - krknscenarioruns/finalizers
   verbs:
   - update
+- apiGroups:
+  - krkn.krkn-chaos.dev
+  resources:
+  - krknusergroups
+  - krknusers
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - krkn.krkn-chaos.dev
+  resources:
+  - krknusergroups/status
+  - krknusers/status
+  verbs:
+  - get
+  - patch
+  - update

@@ -61,6 +61,7 @@ rules:
   - krknoperatortargets
   - krkntargetrequests
   - krknscenarioruns
+  - krknusergroups
   - krknusers
   verbs:
   - create
@@ -78,6 +79,7 @@ rules:
   - krknoperatortargets/status
   - krkntargetrequests/status
   - krknscenarioruns/status
+  - krknusergroups/status
   - krknusers/status
   verbs:
   - get
@@ -126,6 +128,7 @@ rules:
   - krknoperatortargets
   - krkntargetrequests
   - krknscenarioruns
+  - krknusergroups
   - krknusers
   verbs:
   - create
@@ -143,6 +146,7 @@ rules:
   - krknoperatortargets/status
   - krkntargetrequests/status
   - krknscenarioruns/status
+  - krknusergroups/status
   - krknusers/status
   verbs:
   - get
@@ -156,6 +160,7 @@ rules:
   - krknoperatortargets/finalizers
   - krkntargetrequests/finalizers
   - krknscenarioruns/finalizers
+  - krknusergroups/finalizers
   - krknusers/finalizers
   verbs:
   - update
