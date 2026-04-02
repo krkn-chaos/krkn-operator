@@ -39,7 +39,7 @@ import (
 // ListUserGroups handles GET /api/v1/groups
 // Lists all user groups (admin only)
 func (h *Handler) ListUserGroups(w http.ResponseWriter, r *http.Request) {
-	ctx := context.Background()
+	ctx := r.Context()
 	logger := log.FromContext(ctx).WithName("list-user-groups")
 
 	// Check admin privileges
@@ -79,7 +79,7 @@ func (h *Handler) ListUserGroups(w http.ResponseWriter, r *http.Request) {
 // GetUserGroup handles GET /api/v1/groups/:groupName
 // Returns a single user group (admin only)
 func (h *Handler) GetUserGroup(w http.ResponseWriter, r *http.Request) {
-	ctx := context.Background()
+	ctx := r.Context()
 	logger := log.FromContext(ctx).WithName("get-user-group")
 
 	// Check admin privileges
@@ -129,7 +129,7 @@ func (h *Handler) GetUserGroup(w http.ResponseWriter, r *http.Request) {
 // CreateUserGroup handles POST /api/v1/groups
 // Creates a new user group (admin only)
 func (h *Handler) CreateUserGroup(w http.ResponseWriter, r *http.Request) {
-	ctx := context.Background()
+	ctx := r.Context()
 	logger := log.FromContext(ctx).WithName("create-user-group")
 
 	// Check admin privileges
@@ -256,7 +256,7 @@ func (h *Handler) CreateUserGroup(w http.ResponseWriter, r *http.Request) {
 // UpdateUserGroup handles PATCH /api/v1/groups/:groupName
 // Updates a user group (admin only)
 func (h *Handler) UpdateUserGroup(w http.ResponseWriter, r *http.Request) {
-	ctx := context.Background()
+	ctx := r.Context()
 	logger := log.FromContext(ctx).WithName("update-user-group")
 
 	// Check admin privileges
@@ -365,7 +365,7 @@ func (h *Handler) UpdateUserGroup(w http.ResponseWriter, r *http.Request) {
 // DeleteUserGroup handles DELETE /api/v1/groups/:groupName
 // Deletes a user group (admin only)
 func (h *Handler) DeleteUserGroup(w http.ResponseWriter, r *http.Request) {
-	ctx := context.Background()
+	ctx := r.Context()
 	logger := log.FromContext(ctx).WithName("delete-user-group")
 
 	// Check admin privileges
@@ -431,7 +431,7 @@ func (h *Handler) DeleteUserGroup(w http.ResponseWriter, r *http.Request) {
 // ListGroupMembers handles GET /api/v1/groups/:groupName/members
 // Lists all members of a group (admin only)
 func (h *Handler) ListGroupMembers(w http.ResponseWriter, r *http.Request) {
-	ctx := context.Background()
+	ctx := r.Context()
 	logger := log.FromContext(ctx).WithName("list-group-members")
 
 	// Check admin privileges
@@ -506,7 +506,7 @@ func (h *Handler) ListGroupMembers(w http.ResponseWriter, r *http.Request) {
 // AddGroupMember handles POST /api/v1/groups/:groupName/members
 // Adds a user to a group by adding label (admin only)
 func (h *Handler) AddGroupMember(w http.ResponseWriter, r *http.Request) {
-	ctx := context.Background()
+	ctx := r.Context()
 	logger := log.FromContext(ctx).WithName("add-group-member")
 
 	// Check admin privileges
@@ -620,7 +620,7 @@ func (h *Handler) AddGroupMember(w http.ResponseWriter, r *http.Request) {
 // RemoveGroupMember handles DELETE /api/v1/groups/:groupName/members/:userId
 // Removes a user from a group by removing label (admin only)
 func (h *Handler) RemoveGroupMember(w http.ResponseWriter, r *http.Request) {
-	ctx := context.Background()
+	ctx := r.Context()
 	logger := log.FromContext(ctx).WithName("remove-group-member")
 
 	// Check admin privileges
