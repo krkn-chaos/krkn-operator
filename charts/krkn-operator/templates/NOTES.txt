@@ -129,8 +129,7 @@ To enable monitoring:
 📚 DOCUMENTATION & SUPPORT
 =============================================================================
 
-Documentation: https://github.com/krkn-chaos/krkn-operator
-Examples:      https://github.com/krkn-chaos/krkn-operator/tree/main/examples
+Documentation: https://krkn-chaos.dev/docs/krkn-operator/
 Issues:        https://github.com/krkn-chaos/krkn-operator/issues
 
 Quick CRD Examples:
