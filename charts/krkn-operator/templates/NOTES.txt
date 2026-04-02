@@ -28,8 +28,12 @@ The Krkn Console is available at:
 
 {{- if .Values.console.route.enabled }}
   OpenShift Route:
+  {{- if .Values.console.route.hostname }}
+    https://{{ .Values.console.route.hostname }}
+  {{- else }}
     Get the URL with:
       kubectl get route {{ include "krkn-operator.console.fullname" . }} -n {{ include "krkn-operator.namespace" . }} -o jsonpath='{.spec.host}'
+  {{- end }}
 
 {{- else if .Values.console.ingress.enabled }}
   {{- range .Values.console.ingress.hosts }}

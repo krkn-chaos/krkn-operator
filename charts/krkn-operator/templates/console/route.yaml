@@ -21,9 +21,10 @@ spec:
     weight: 100
   port:
     targetPort: http
-  {{- if .Values.console.route.tls }}
+  {{- if .Values.console.route.tls.enabled }}
   tls:
-    {{- toYaml .Values.console.route.tls | nindent 4 }}
+    termination: {{ .Values.console.route.tls.termination }}
+    insecureEdgeTerminationPolicy: {{ .Values.console.route.tls.insecureEdgeTerminationPolicy }}
   {{- end }}
   wildcardPolicy: None
 {{- end }}
