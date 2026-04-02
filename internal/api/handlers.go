@@ -951,6 +951,14 @@ func (h *Handler) GetScenarioRunStatus(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		// Count jobs with ClusterAPIURL populated (to detect newly created runs)
+		jobsWithClusterURL := 0
+		for _, job := range scenarioRun.Status.ClusterJobs {
+			if job.ClusterAPIURL != "" {
+				jobsWithClusterURL++
+			}
+		}
+
 		// Filter jobs to only those user has view permission for
 		filteredJobs = h.filterJobsByPermission(
 			scenarioRun.Status.ClusterJobs,
@@ -959,8 +967,9 @@ func (h *Handler) GetScenarioRunStatus(w http.ResponseWriter, r *http.Request) {
 			groupauth.ActionView,
 		)
 
-		// If user has no access to any jobs, return forbidden
-		if len(filteredJobs) == 0 {
+		// If jobs have ClusterAPIURL populated but user has no access to any, return forbidden
+		// However, if no jobs have ClusterAPIURL (run just created), allow access
+		if len(filteredJobs) == 0 && jobsWithClusterURL > 0 {
 			writeJSONError(w, http.StatusForbidden, ErrorResponse{
 				Error:   "forbidden",
 				Message: "Access denied. You do not have permission to view jobs in this scenario run",

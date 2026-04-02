@@ -20,6 +20,8 @@ package api
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -876,4 +878,171 @@ func TestEndToEndClusterSegregation(t *testing.T) {
 			t.Errorf("Expected ClusterJobs[0].ClusterAPIURL = '%s', got '%s'", expectedURL, run.Status.ClusterJobs[0].ClusterAPIURL)
 		}
 	})
+}
+
+// TestGetScenarioRunStatusWithoutClusterAPIURL verifies that users can view runs
+// that were just created and don't have ClusterAPIURL populated yet (race condition)
+func TestGetScenarioRunStatusWithoutClusterAPIURL(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = krknv1alpha1.AddToScheme(scheme)
+	_ = corev1.AddToScheme(scheme)
+
+	tg := auth.NewTokenGenerator(
+		[]byte("test-secret-key-at-least-32-bytes-long"),
+		TokenDuration,
+		"krkn-operator",
+	)
+
+	// Create user with permission on cluster1
+	userToken, _ := tg.GenerateToken("user@example.com", "user", "User", "Test", "Org")
+	userClaims, _ := tg.ValidateToken(userToken)
+
+	testGroup := &krknv1alpha1.KrknUserGroup{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-group",
+			Namespace: "krkn-operator-system",
+		},
+		Spec: krknv1alpha1.KrknUserGroupSpec{
+			Name:        "test-group",
+			Description: "Test group",
+			ClusterPermissions: map[string]krknv1alpha1.ClusterPermissionSet{
+				"https://cluster1.example.com:6443": {
+					Actions: []string{"view"},
+				},
+			},
+		},
+	}
+
+	testUser := &krknv1alpha1.KrknUser{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "krknuser-user-example-com",
+			Namespace: "krkn-operator-system",
+			Labels: map[string]string{
+				"group.krkn.krkn-chaos.dev/test-group": "true",
+			},
+		},
+		Spec: krknv1alpha1.KrknUserSpec{
+			UserID:            "user@example.com",
+			Name:              "User",
+			Surname:           "Test",
+			Role:              "user",
+			PasswordSecretRef: "user-password",
+		},
+	}
+
+	tests := []struct {
+		name        string
+		scenarioRun *krknv1alpha1.KrknScenarioRun
+		expectAllow bool
+		description string
+	}{
+		{
+			name: "allow access to run with no jobs (just created)",
+			scenarioRun: &krknv1alpha1.KrknScenarioRun{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "run-no-jobs",
+					Namespace: "krkn-operator-system",
+				},
+				Status: krknv1alpha1.KrknScenarioRunStatus{
+					ClusterJobs: []krknv1alpha1.ClusterJobStatus{},
+				},
+			},
+			expectAllow: true,
+			description: "Run just created, no jobs yet",
+		},
+		{
+			name: "allow access to run with jobs missing ClusterAPIURL (controller not processed yet)",
+			scenarioRun: &krknv1alpha1.KrknScenarioRun{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "run-jobs-no-url",
+					Namespace: "krkn-operator-system",
+				},
+				Status: krknv1alpha1.KrknScenarioRunStatus{
+					ClusterJobs: []krknv1alpha1.ClusterJobStatus{
+						{
+							ClusterName:   "cluster1",
+							ClusterAPIURL: "", // Not populated yet
+							JobID:         "job-1",
+						},
+					},
+				},
+			},
+			expectAllow: true,
+			description: "Jobs exist but ClusterAPIURL not populated yet",
+		},
+		{
+			name: "allow access to run with job having ClusterAPIURL (user has permission)",
+			scenarioRun: &krknv1alpha1.KrknScenarioRun{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "run-with-permission",
+					Namespace: "krkn-operator-system",
+				},
+				Status: krknv1alpha1.KrknScenarioRunStatus{
+					ClusterJobs: []krknv1alpha1.ClusterJobStatus{
+						{
+							ClusterName:   "cluster1",
+							ClusterAPIURL: "https://cluster1.example.com:6443",
+							JobID:         "job-1",
+						},
+					},
+				},
+			},
+			expectAllow: true,
+			description: "Job with ClusterAPIURL, user has view permission",
+		},
+		{
+			name: "deny access to run with job on unauthorized cluster",
+			scenarioRun: &krknv1alpha1.KrknScenarioRun{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "run-unauthorized",
+					Namespace: "krkn-operator-system",
+				},
+				Status: krknv1alpha1.KrknScenarioRunStatus{
+					ClusterJobs: []krknv1alpha1.ClusterJobStatus{
+						{
+							ClusterName:   "cluster2",
+							ClusterAPIURL: "https://cluster2.example.com:6443",
+							JobID:         "job-2",
+						},
+					},
+				},
+			},
+			expectAllow: false,
+			description: "Job with ClusterAPIURL, user does NOT have permission",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fakeClient := fakeclient.NewClientBuilder().
+				WithScheme(scheme).
+				WithObjects(testGroup, testUser, tt.scenarioRun).
+				Build()
+
+			handler := &Handler{
+				client:    fakeClient,
+				clientset: fake.NewSimpleClientset(),
+				namespace: "krkn-operator-system",
+			}
+
+			req := httptest.NewRequest("GET", "/api/v1/scenarios/run/"+tt.scenarioRun.Name, nil)
+			ctx := context.WithValue(req.Context(), auth.UserClaimsKey, userClaims)
+			req = req.WithContext(ctx)
+
+			w := httptest.NewRecorder()
+			handler.GetScenarioRunStatus(w, req)
+
+			if tt.expectAllow {
+				if w.Code != http.StatusOK {
+					t.Errorf("%s: Expected status 200, got %d. Response: %s",
+						tt.description, w.Code, w.Body.String())
+				}
+			} else {
+				if w.Code != http.StatusForbidden {
+					t.Errorf("%s: Expected status 403, got %d. Response: %s",
+						tt.description, w.Code, w.Body.String())
+				}
+			}
+		})
+	}
 }
