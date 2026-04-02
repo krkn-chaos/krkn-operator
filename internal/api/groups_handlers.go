@@ -160,6 +160,19 @@ func (h *Handler) CreateUserGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Sanitize group name to ensure consistency between CR name and label key
+	// This prevents mismatch when label truncates to 63 chars but CR uses full name
+	sanitizedName := groupauth.SanitizeGroupName(req.Name)
+
+	// Validate that sanitized name is not empty after sanitization
+	if sanitizedName == "" {
+		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+			Error:   "bad_request",
+			Message: "Group name contains only invalid characters",
+		})
+		return
+	}
+
 	if len(req.ClusterPermissions) == 0 {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
 			Error:   "bad_request",
@@ -185,14 +198,15 @@ func (h *Handler) CreateUserGroup(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Create KrknUserGroup CRD
+	// Create KrknUserGroup CRD using sanitized name for consistency with labels
+	// This ensures CR name matches the label suffix extracted by GetUserGroups
 	group := &krknv1alpha1.KrknUserGroup{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      req.Name,
+			Name:      sanitizedName,
 			Namespace: h.namespace,
 		},
 		Spec: krknv1alpha1.KrknUserGroupSpec{
-			Name:               req.Name,
+			Name:               req.Name, // Keep original name in spec for display purposes
 			Description:        req.Description,
 			ClusterPermissions: clusterPerms,
 		},
