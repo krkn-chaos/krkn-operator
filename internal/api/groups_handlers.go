@@ -680,8 +680,11 @@ func (h *Handler) RemoveGroupMember(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) GroupsRouter(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path
 
-	// Root endpoint: /api/v1/groups
-	if path == GroupsPath {
+	// Normalize path by removing trailing slash for root endpoint
+	normalizedPath := strings.TrimSuffix(path, "/")
+
+	// Root endpoint: /api/v1/groups or /api/v1/groups/
+	if normalizedPath == GroupsPath {
 		if r.Method == http.MethodGet {
 			h.ListUserGroups(w, r)
 			return
@@ -702,7 +705,12 @@ func (h *Handler) GroupsRouter(w http.ResponseWriter, r *http.Request) {
 	// Group-specific endpoints: /api/v1/groups/:groupName
 	if strings.HasPrefix(path, GroupsPath+"/") {
 		// Members endpoints: /api/v1/groups/:groupName/members
-		if strings.Contains(path, "/members") {
+		// Use HasSuffix or segment matching to avoid matching group names containing "members"
+		pathAfterGroups := strings.TrimPrefix(path, GroupsPath+"/")
+		segments := strings.Split(pathAfterGroups, "/")
+
+		// Check if this is a members endpoint (second segment is "members")
+		if len(segments) >= 2 && segments[1] == "members" {
 			// DELETE /api/v1/groups/:groupName/members/:userId
 			if r.Method == http.MethodDelete && strings.Count(path, "/") == 6 {
 				h.RemoveGroupMember(w, r)
