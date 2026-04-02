@@ -38,6 +38,9 @@ type ClusterJobStatus struct {
 	ProviderName string `json:"providerName"`
 	// ClusterName is the name of the target cluster
 	ClusterName string `json:"clusterName"`
+	// ClusterAPIURL is the API URL of the cluster for permission checks
+	// +optional
+	ClusterAPIURL string `json:"clusterApiUrl,omitempty"`
 	// JobID is the unique identifier for this job
 	JobID string `json:"jobId"`
 	// PodName is the name of the pod running the scenario
@@ -82,12 +85,6 @@ type KrknScenarioRunSpec struct {
 	// Example: {"krkn-operator": ["cluster1", "cluster2"], "krkn-operator-acm": ["cluster3"]}
 	// +kubebuilder:validation:MinProperties=1
 	TargetClusters map[string][]string `json:"targetClusters"`
-
-	// ClusterAPIURLs maps cluster names to their API URLs for group-based permission checks.
-	// This is populated at creation time from the KrknTargetRequest.
-	// Key: cluster name, Value: cluster API URL
-	// +optional
-	ClusterAPIURLs map[string]string `json:"clusterApiUrls,omitempty"`
 
 	// ScenarioName is the name of the scenario to run
 	ScenarioName string `json:"scenarioName"`

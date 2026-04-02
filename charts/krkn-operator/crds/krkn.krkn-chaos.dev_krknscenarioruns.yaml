@@ -57,14 +57,6 @@ spec:
           spec:
             description: KrknScenarioRunSpec defines the desired state of KrknScenarioRun
             properties:
-              clusterApiUrls:
-                additionalProperties:
-                  type: string
-                description: |-
-                  ClusterAPIURLs maps cluster names to their API URLs for group-based permission checks.
-                  This is populated at creation time from the KrknTargetRequest.
-                  Key: cluster name, Value: cluster API URL
-                type: object
               environment:
                 additionalProperties:
                   type: string
@@ -174,6 +166,10 @@ spec:
                       description: CancelRequested indicates if the user has requested
                         cancellation
                       type: boolean
+                    clusterApiUrl:
+                      description: ClusterAPIURL is the API URL of the cluster for
+                        permission checks
+                      type: string
                     clusterName:
                       description: ClusterName is the name of the target cluster
                       type: string

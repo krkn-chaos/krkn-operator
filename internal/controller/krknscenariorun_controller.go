@@ -261,6 +261,40 @@ func (r *KrknScenarioRunReconciler) createClusterJob(
 		return fmt.Errorf("failed to decode kubeconfig: %w", err)
 	}
 
+	// Fetch KrknTargetRequest to extract ClusterAPIURL for permission checks
+	var targetRequest krknv1alpha1.KrknTargetRequest
+	if err := r.Get(ctx, types.NamespacedName{
+		Name:      scenarioRun.Spec.TargetRequestID,
+		Namespace: r.Namespace,
+	}, &targetRequest); err != nil {
+		logger.Error(err, "Failed to fetch KrknTargetRequest for ClusterAPIURL extraction",
+			"targetRequestId", scenarioRun.Spec.TargetRequestID)
+		// Non-fatal - continue without ClusterAPIURL (defensive)
+	}
+
+	// Extract ClusterAPIURL for this specific cluster
+	var clusterAPIURL string
+	if providerTargets, exists := targetRequest.Status.TargetData[providerName]; exists {
+		for _, cluster := range providerTargets {
+			if cluster.ClusterName == clusterName {
+				clusterAPIURL = cluster.ClusterAPIURL
+				break
+			}
+		}
+	}
+
+	if clusterAPIURL == "" {
+		logger.Error(nil, "ClusterAPIURL not found for cluster - job will not be visible to non-admins",
+			"providerName", providerName,
+			"clusterName", clusterName,
+			"targetRequestId", scenarioRun.Spec.TargetRequestID)
+		// Continue anyway - job will be created but won't be visible to non-admins
+	} else {
+		logger.V(1).Info("Extracted ClusterAPIURL for job",
+			"clusterName", clusterName,
+			"clusterAPIURL", clusterAPIURL)
+	}
+
 	// Create ConfigMap for kubeconfig
 	kubeconfigConfigMapName := fmt.Sprintf("krkn-job-%s-kubeconfig", jobID)
 	kubeconfigLabels := map[string]string{
@@ -555,6 +589,7 @@ func (r *KrknScenarioRunReconciler) createClusterJob(
 	now := metav1.Now()
 	if existingJobIndex >= 0 {
 		// Update existing entry (retry case)
+		// Preserve ClusterAPIURL - it should already be set from first attempt
 		scenarioRun.Status.ClusterJobs[existingJobIndex].JobID = jobID
 		scenarioRun.Status.ClusterJobs[existingJobIndex].PodName = podName
 		scenarioRun.Status.ClusterJobs[existingJobIndex].Phase = "Pending"
@@ -569,21 +604,23 @@ func (r *KrknScenarioRunReconciler) createClusterJob(
 	} else {
 		// New job (first attempt)
 		jobStatus := krknv1alpha1.ClusterJobStatus{
-			ProviderName: providerName,
-			ClusterName:  clusterName,
-			JobID:        jobID,
-			PodName:      podName,
-			Phase:        "Pending",
-			StartTime:    &now,
-			RetryCount:   0,
-			MaxRetries:   0, // Will be set from spec on first failure
+			ProviderName:  providerName,
+			ClusterName:   clusterName,
+			ClusterAPIURL: clusterAPIURL,
+			JobID:         jobID,
+			PodName:       podName,
+			Phase:         "Pending",
+			StartTime:     &now,
+			RetryCount:    0,
+			MaxRetries:    0, // Will be set from spec on first failure
 		}
 		scenarioRun.Status.ClusterJobs = append(scenarioRun.Status.ClusterJobs, jobStatus)
 
 		logger.Info("created new cluster job",
 			"cluster", clusterName,
 			"jobID", jobID,
-			"pod", podName)
+			"pod", podName,
+			"clusterAPIURL", clusterAPIURL)
 	}
 
 	return nil

@@ -464,13 +464,6 @@ func (in *KrknScenarioRunSpec) DeepCopyInto(out *KrknScenarioRunSpec) {
 			(*out)[key] = outVal
 		}
 	}
-	if in.ClusterAPIURLs != nil {
-		in, out := &in.ClusterAPIURLs, &out.ClusterAPIURLs
-		*out = make(map[string]string, len(*in))
-		for key, val := range *in {
-			(*out)[key] = val
-		}
-	}
 	if in.Files != nil {
 		in, out := &in.Files, &out.Files
 		*out = make([]FileMount, len(*in))

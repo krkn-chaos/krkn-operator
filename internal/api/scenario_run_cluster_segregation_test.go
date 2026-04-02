@@ -136,13 +136,15 @@ func TestClusterSegregationMultipleUsers(t *testing.T) {
 				Name:      "run-cluster1-only",
 				Namespace: "krkn-operator-system",
 			},
-			Spec: krknv1alpha1.KrknScenarioRunSpec{
-				ClusterAPIURLs: map[string]string{
-					"cluster1": "https://cluster1.example.com:6443",
-				},
-			},
 			Status: krknv1alpha1.KrknScenarioRunStatus{
 				Phase: "Running",
+				ClusterJobs: []krknv1alpha1.ClusterJobStatus{
+					{
+						ClusterName:   "cluster1",
+						ClusterAPIURL: "https://cluster1.example.com:6443",
+						JobID:         "job-1-cluster1",
+					},
+				},
 			},
 		},
 		{
@@ -150,13 +152,15 @@ func TestClusterSegregationMultipleUsers(t *testing.T) {
 				Name:      "run-cluster2-only",
 				Namespace: "krkn-operator-system",
 			},
-			Spec: krknv1alpha1.KrknScenarioRunSpec{
-				ClusterAPIURLs: map[string]string{
-					"cluster2": "https://cluster2.example.com:6443",
-				},
-			},
 			Status: krknv1alpha1.KrknScenarioRunStatus{
 				Phase: "Running",
+				ClusterJobs: []krknv1alpha1.ClusterJobStatus{
+					{
+						ClusterName:   "cluster2",
+						ClusterAPIURL: "https://cluster2.example.com:6443",
+						JobID:         "job-2-cluster2",
+					},
+				},
 			},
 		},
 		{
@@ -164,14 +168,20 @@ func TestClusterSegregationMultipleUsers(t *testing.T) {
 				Name:      "run-both-clusters",
 				Namespace: "krkn-operator-system",
 			},
-			Spec: krknv1alpha1.KrknScenarioRunSpec{
-				ClusterAPIURLs: map[string]string{
-					"cluster1": "https://cluster1.example.com:6443",
-					"cluster2": "https://cluster2.example.com:6443",
-				},
-			},
 			Status: krknv1alpha1.KrknScenarioRunStatus{
 				Phase: "Running",
+				ClusterJobs: []krknv1alpha1.ClusterJobStatus{
+					{
+						ClusterName:   "cluster1",
+						ClusterAPIURL: "https://cluster1.example.com:6443",
+						JobID:         "job-3-cluster1",
+					},
+					{
+						ClusterName:   "cluster2",
+						ClusterAPIURL: "https://cluster2.example.com:6443",
+						JobID:         "job-4-cluster2",
+					},
+				},
 			},
 		},
 		{
@@ -179,13 +189,15 @@ func TestClusterSegregationMultipleUsers(t *testing.T) {
 				Name:      "run-cluster3-unauthorized",
 				Namespace: "krkn-operator-system",
 			},
-			Spec: krknv1alpha1.KrknScenarioRunSpec{
-				ClusterAPIURLs: map[string]string{
-					"cluster3": "https://cluster3.example.com:6443",
-				},
-			},
 			Status: krknv1alpha1.KrknScenarioRunStatus{
 				Phase: "Running",
+				ClusterJobs: []krknv1alpha1.ClusterJobStatus{
+					{
+						ClusterName:   "cluster3",
+						ClusterAPIURL: "https://cluster3.example.com:6443",
+						JobID:         "job-5-cluster3",
+					},
+				},
 			},
 		},
 	}
@@ -303,9 +315,13 @@ func TestClusterSegregationWithNoGroups(t *testing.T) {
 	runs := []krknv1alpha1.KrknScenarioRun{
 		{
 			ObjectMeta: metav1.ObjectMeta{Name: "run1"},
-			Spec: krknv1alpha1.KrknScenarioRunSpec{
-				ClusterAPIURLs: map[string]string{
-					"cluster1": "https://cluster1.example.com:6443",
+			Status: krknv1alpha1.KrknScenarioRunStatus{
+				ClusterJobs: []krknv1alpha1.ClusterJobStatus{
+					{
+						ClusterName:   "cluster1",
+						ClusterAPIURL: "https://cluster1.example.com:6443",
+						JobID:         "job-1",
+					},
 				},
 			},
 		},
@@ -330,9 +346,9 @@ func TestClusterSegregationWithNoGroups(t *testing.T) {
 	}
 }
 
-// TestClusterSegregationLegacyRunsWithoutAPIURLs verifies that legacy runs
-// without ClusterAPIURLs are excluded for regular users but visible to admins
-func TestClusterSegregationLegacyRunsWithoutAPIURLs(t *testing.T) {
+// TestClusterSegregationLegacyRunsWithoutJobs verifies that legacy runs
+// without jobs are excluded for regular users but visible to admins
+func TestClusterSegregationLegacyRunsWithoutJobs(t *testing.T) {
 	scheme := runtime.NewScheme()
 	_ = krknv1alpha1.AddToScheme(scheme)
 	_ = corev1.AddToScheme(scheme)
@@ -384,16 +400,20 @@ func TestClusterSegregationLegacyRunsWithoutAPIURLs(t *testing.T) {
 
 	runs := []krknv1alpha1.KrknScenarioRun{
 		{
-			ObjectMeta: metav1.ObjectMeta{Name: "legacy-run-no-urls"},
-			Spec: krknv1alpha1.KrknScenarioRunSpec{
-				ClusterAPIURLs: map[string]string{}, // Empty map - legacy run
+			ObjectMeta: metav1.ObjectMeta{Name: "legacy-run-no-jobs"},
+			Status: krknv1alpha1.KrknScenarioRunStatus{
+				ClusterJobs: []krknv1alpha1.ClusterJobStatus{}, // No jobs - legacy run
 			},
 		},
 		{
-			ObjectMeta: metav1.ObjectMeta{Name: "new-run-with-urls"},
-			Spec: krknv1alpha1.KrknScenarioRunSpec{
-				ClusterAPIURLs: map[string]string{
-					"cluster1": "https://cluster1.example.com:6443",
+			ObjectMeta: metav1.ObjectMeta{Name: "new-run-with-jobs"},
+			Status: krknv1alpha1.KrknScenarioRunStatus{
+				ClusterJobs: []krknv1alpha1.ClusterJobStatus{
+					{
+						ClusterName:   "cluster1",
+						ClusterAPIURL: "https://cluster1.example.com:6443",
+						JobID:         "job-1",
+					},
 				},
 			},
 		},
@@ -418,7 +438,7 @@ func TestClusterSegregationLegacyRunsWithoutAPIURLs(t *testing.T) {
 		t.Errorf("Admin should see 2 runs (including legacy), got %d", len(adminFiltered))
 	}
 
-	// Test regular user - should see only new run with URLs
+	// Test regular user - should see only new run with jobs
 	userCtx := context.WithValue(context.Background(), auth.UserClaimsKey, userClaims)
 	userFiltered := handler.filterScenarioRunsByGroupPermission(runs, userCtx)
 
@@ -426,8 +446,8 @@ func TestClusterSegregationLegacyRunsWithoutAPIURLs(t *testing.T) {
 		t.Errorf("User should see 1 run (excluding legacy), got %d", len(userFiltered))
 	}
 
-	if len(userFiltered) > 0 && userFiltered[0].Name != "new-run-with-urls" {
-		t.Errorf("User should see 'new-run-with-urls', got '%s'", userFiltered[0].Name)
+	if len(userFiltered) > 0 && userFiltered[0].Name != "new-run-with-jobs" {
+		t.Errorf("User should see 'new-run-with-jobs', got '%s'", userFiltered[0].Name)
 	}
 }
 
@@ -520,22 +540,26 @@ func TestEndToEndClusterSegregation(t *testing.T) {
 		},
 	}
 
-	// Manually create scenario runs (simulating what PostScenarioRun does)
-	// In real scenario, these would be created via the API endpoint
+	// Manually create scenario runs (simulating what controller does)
+	// In real scenario, these would be created via the API endpoint and controller
 	runOnCluster1 := &krknv1alpha1.KrknScenarioRun{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "run-on-cluster1",
 			Namespace: "krkn-operator-system",
 		},
 		Spec: krknv1alpha1.KrknScenarioRunSpec{
-			ClusterAPIURLs: map[string]string{
-				"cluster1": "https://cluster1.example.com:6443",
-			},
 			ScenarioImage: "test:latest",
 			ScenarioName:  "test-scenario",
 		},
 		Status: krknv1alpha1.KrknScenarioRunStatus{
 			Phase: "Running",
+			ClusterJobs: []krknv1alpha1.ClusterJobStatus{
+				{
+					ClusterName:   "cluster1",
+					ClusterAPIURL: "https://cluster1.example.com:6443",
+					JobID:         "job-1",
+				},
+			},
 		},
 	}
 
@@ -545,14 +569,18 @@ func TestEndToEndClusterSegregation(t *testing.T) {
 			Namespace: "krkn-operator-system",
 		},
 		Spec: krknv1alpha1.KrknScenarioRunSpec{
-			ClusterAPIURLs: map[string]string{
-				"cluster2": "https://cluster2.example.com:6443",
-			},
 			ScenarioImage: "test:latest",
 			ScenarioName:  "test-scenario",
 		},
 		Status: krknv1alpha1.KrknScenarioRunStatus{
 			Phase: "Running",
+			ClusterJobs: []krknv1alpha1.ClusterJobStatus{
+				{
+					ClusterName:   "cluster2",
+					ClusterAPIURL: "https://cluster2.example.com:6443",
+					JobID:         "job-2",
+				},
+			},
 		},
 	}
 
@@ -613,8 +641,8 @@ func TestEndToEndClusterSegregation(t *testing.T) {
 		}
 	})
 
-	// Test 3: Verify ClusterAPIURLs are populated correctly
-	t.Run("Verify ClusterAPIURLs are populated", func(t *testing.T) {
+	// Test 3: Verify job-level ClusterAPIURL is populated correctly
+	t.Run("Verify job ClusterAPIURL is populated", func(t *testing.T) {
 		var run krknv1alpha1.KrknScenarioRun
 		ctx := context.Background()
 
@@ -622,13 +650,13 @@ func TestEndToEndClusterSegregation(t *testing.T) {
 			t.Fatalf("Failed to get run: %v", err)
 		}
 
-		if len(run.Spec.ClusterAPIURLs) == 0 {
-			t.Error("ClusterAPIURLs should be populated, got empty map")
+		if len(run.Status.ClusterJobs) == 0 {
+			t.Error("ClusterJobs should be populated, got empty array")
 		}
 
 		expectedURL := "https://cluster1.example.com:6443"
-		if run.Spec.ClusterAPIURLs["cluster1"] != expectedURL {
-			t.Errorf("Expected ClusterAPIURLs['cluster1'] = '%s', got '%s'", expectedURL, run.Spec.ClusterAPIURLs["cluster1"])
+		if run.Status.ClusterJobs[0].ClusterAPIURL != expectedURL {
+			t.Errorf("Expected ClusterJobs[0].ClusterAPIURL = '%s', got '%s'", expectedURL, run.Status.ClusterJobs[0].ClusterAPIURL)
 		}
 	})
 }

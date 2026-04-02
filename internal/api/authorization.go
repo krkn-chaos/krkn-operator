@@ -133,13 +133,13 @@ func (h *Handler) checkScenarioRunAccessWithAction(
 		return true
 	}
 
-	// Reject runs without cluster API URLs (defensive - should not happen for new runs)
-	if len(scenarioRun.Spec.ClusterAPIURLs) == 0 {
-		http.Error(w, `{"error":"forbidden","message":"Access denied. This scenario run has no cluster API URLs"}`, http.StatusForbidden)
+	// Reject runs without jobs (defensive - should not happen for new runs)
+	if len(scenarioRun.Status.ClusterJobs) == 0 {
+		http.Error(w, `{"error":"forbidden","message":"Access denied. This scenario run has no jobs"}`, http.StatusForbidden)
 		return false
 	}
 
-	// Check if user has required permission on ANY cluster in this run
+	// Check if user has required permission on ANY job in this run
 	hasAccess, err := h.checkScenarioRunGroupAccess(
 		ctx,
 		claims.UserID,
@@ -164,8 +164,8 @@ func (h *Handler) checkScenarioRunAccessWithAction(
 	return true
 }
 
-// checkScenarioRunGroupAccess checks if user has the specified permission on ANY cluster in the scenario run.
-// Returns true if user has permission on at least one cluster, false otherwise.
+// checkScenarioRunGroupAccess checks if user has the specified permission on ANY job in the scenario run.
+// Returns true if user has permission on at least one job, false otherwise.
 func (h *Handler) checkScenarioRunGroupAccess(
 	ctx context.Context,
 	userID string,
@@ -182,14 +182,18 @@ func (h *Handler) checkScenarioRunGroupAccess(
 		return false, nil // No groups = no access
 	}
 
-	// Check if user has permission on ANY cluster in the run
-	for _, clusterAPIURL := range scenarioRun.Spec.ClusterAPIURLs {
-		if groupauth.CanPerformAction(userGroups, clusterAPIURL, requiredAction) {
-			return true, nil // User has access to at least one cluster
+	// Check if user has permission on ANY job in the run
+	for _, job := range scenarioRun.Status.ClusterJobs {
+		if job.ClusterAPIURL == "" {
+			continue // Skip jobs without ClusterAPIURL
+		}
+
+		if groupauth.CanPerformAction(userGroups, job.ClusterAPIURL, requiredAction) {
+			return true, nil // User has access to at least one job
 		}
 	}
 
-	return false, nil // No permission on any cluster
+	return false, nil // No permission on any job
 }
 
 // filterScenarioRunsByGroupPermission filters scenario runs based on group permissions.
@@ -197,8 +201,7 @@ func (h *Handler) checkScenarioRunGroupAccess(
 // Filtering rules:
 // - If no claims in context (e.g., tests), return all runs
 // - Admins see all runs
-// - Regular users see only runs where they have 'view' permission on ANY cluster
-// - Runs without ClusterAPIURLs are excluded for regular users
+// - Regular users see only runs where they have 'view' permission on AT LEAST ONE job
 //
 // Parameters:
 //   - runs: The list of scenario runs to filter
@@ -221,16 +224,11 @@ func (h *Handler) filterScenarioRunsByGroupPermission(
 		return runs
 	}
 
-	// Regular users: filter by group permissions
+	// Regular users: filter by group permissions on jobs
 	filtered := make([]krknv1alpha1.KrknScenarioRun, 0)
 
 	for _, run := range runs {
-		// Skip runs without cluster API URLs (defensive)
-		if len(run.Spec.ClusterAPIURLs) == 0 {
-			continue
-		}
-
-		// Check if user has 'view' permission on ANY cluster in this run
+		// Check if user has 'view' permission on ANY job in this run
 		hasAccess, err := h.checkScenarioRunGroupAccess(
 			ctx,
 			claims.UserID,
@@ -254,4 +252,106 @@ func (h *Handler) filterScenarioRunsByGroupPermission(
 	}
 
 	return filtered
+}
+
+// filterJobsByPermission filters cluster jobs based on user's group permissions.
+// Returns only jobs where user has the specified permission on the job's cluster.
+//
+// Parameters:
+//   - jobs: The list of cluster jobs to filter
+//   - ctx: The request context containing user claims
+//   - userGroups: User's group memberships
+//   - requiredAction: The action to check (e.g., ActionView, ActionCancel)
+//
+// Returns a filtered list of jobs the user is authorized to see
+func (h *Handler) filterJobsByPermission(
+	jobs []krknv1alpha1.ClusterJobStatus,
+	ctx context.Context,
+	userGroups []krknv1alpha1.KrknUserGroup,
+	requiredAction groupauth.Action,
+) []krknv1alpha1.ClusterJobStatus {
+	filtered := make([]krknv1alpha1.ClusterJobStatus, 0)
+
+	for _, job := range jobs {
+		// Skip jobs without ClusterAPIURL (defensive - shouldn't happen for new jobs)
+		if job.ClusterAPIURL == "" {
+			log.FromContext(ctx).V(1).Info("Job missing ClusterAPIURL, skipping",
+				"jobID", job.JobID,
+				"clusterName", job.ClusterName)
+			continue
+		}
+
+		// Check if user has required permission on this job's cluster
+		if groupauth.CanPerformAction(userGroups, job.ClusterAPIURL, requiredAction) {
+			filtered = append(filtered, job)
+		}
+	}
+
+	return filtered
+}
+
+// checkJobAccess verifies if the authenticated user has permission to access
+// a specific job using group-based permissions.
+//
+// Parameters:
+//   - w: The HTTP response writer
+//   - r: The HTTP request containing user claims in context
+//   - job: The job to check access for
+//   - requiredAction: The action to check (e.g., ActionView, ActionCancel)
+//   - actionName: Human-readable action name for error messages
+//
+// Returns true if access is allowed, false if denied (with error written to response)
+func (h *Handler) checkJobAccess(
+	w http.ResponseWriter,
+	r *http.Request,
+	job *krknv1alpha1.ClusterJobStatus,
+	requiredAction groupauth.Action,
+	actionName string,
+) bool {
+	ctx := r.Context()
+	claims := auth.GetClaimsFromContext(ctx)
+
+	// Defensive check
+	if claims == nil {
+		http.Error(w, `{"error":"unauthorized","message":"No authentication claims found"}`, http.StatusUnauthorized)
+		return false
+	}
+
+	// Admins bypass all checks
+	if auth.IsAdmin(ctx) {
+		return true
+	}
+
+	// Check if job has ClusterAPIURL
+	if job.ClusterAPIURL == "" {
+		http.Error(w, `{"error":"forbidden","message":"Access denied. Job has no cluster API URL"}`, http.StatusForbidden)
+		return false
+	}
+
+	// Check group-based permissions
+	hasAccess, err := groupauth.HasClusterPermission(
+		ctx,
+		h.client,
+		claims.UserID,
+		h.namespace,
+		job.ClusterAPIURL,
+		requiredAction,
+	)
+
+	if err != nil {
+		log.FromContext(ctx).Error(err, "Failed to check job access",
+			"userID", claims.UserID,
+			"jobID", job.JobID,
+			"action", requiredAction)
+		http.Error(w, `{"error":"internal_error","message":"Failed to validate access"}`, http.StatusInternalServerError)
+		return false
+	}
+
+	if !hasAccess {
+		errorMsg := fmt.Sprintf(`{"error":"forbidden","message":"Access denied. You do not have permission to %s this job"}`, actionName)
+		http.Error(w, errorMsg, http.StatusForbidden)
+		return false
+	}
+
+	return true
 }

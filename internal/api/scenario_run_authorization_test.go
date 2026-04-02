@@ -29,7 +29,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 	fakeclient "sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
@@ -140,20 +139,24 @@ func TestCheckScenarioRunAccess(t *testing.T) {
 			name:   "admin can access any scenario run",
 			claims: adminClaims,
 			scenarioRun: &krknv1alpha1.KrknScenarioRun{
-				Spec: krknv1alpha1.KrknScenarioRunSpec{
-					ClusterAPIURLs: map[string]string{
-						"cluster1": "https://cluster1.example.com:6443",
+				Status: krknv1alpha1.KrknScenarioRunStatus{
+					ClusterJobs: []krknv1alpha1.ClusterJobStatus{
+						{
+							ClusterName:   "cluster1",
+							ClusterAPIURL: "https://cluster1.example.com:6443",
+							JobID:         "job-1",
+						},
 					},
 				},
 			},
 			expectAllow: true,
 		},
 		{
-			name:   "run without cluster API URLs is rejected (admin bypasses)",
+			name:   "run without jobs is rejected (admin bypasses)",
 			claims: adminClaims,
 			scenarioRun: &krknv1alpha1.KrknScenarioRun{
-				Spec: krknv1alpha1.KrknScenarioRunSpec{
-					ClusterAPIURLs: map[string]string{},
+				Status: krknv1alpha1.KrknScenarioRunStatus{
+					ClusterJobs: []krknv1alpha1.ClusterJobStatus{},
 				},
 			},
 			expectAllow: true, // Admin bypasses this check
@@ -162,9 +165,13 @@ func TestCheckScenarioRunAccess(t *testing.T) {
 			name:   "user with group permission can access run",
 			claims: userClaims,
 			scenarioRun: &krknv1alpha1.KrknScenarioRun{
-				Spec: krknv1alpha1.KrknScenarioRunSpec{
-					ClusterAPIURLs: map[string]string{
-						"cluster1": "https://cluster1.example.com:6443",
+				Status: krknv1alpha1.KrknScenarioRunStatus{
+					ClusterJobs: []krknv1alpha1.ClusterJobStatus{
+						{
+							ClusterName:   "cluster1",
+							ClusterAPIURL: "https://cluster1.example.com:6443",
+							JobID:         "job-1",
+						},
 					},
 				},
 			},
@@ -174,9 +181,13 @@ func TestCheckScenarioRunAccess(t *testing.T) {
 			name:   "user without permission cannot access run",
 			claims: userClaims,
 			scenarioRun: &krknv1alpha1.KrknScenarioRun{
-				Spec: krknv1alpha1.KrknScenarioRunSpec{
-					ClusterAPIURLs: map[string]string{
-						"cluster2": "https://cluster2.example.com:6443",
+				Status: krknv1alpha1.KrknScenarioRunStatus{
+					ClusterJobs: []krknv1alpha1.ClusterJobStatus{
+						{
+							ClusterName:   "cluster2",
+							ClusterAPIURL: "https://cluster2.example.com:6443",
+							JobID:         "job-2",
+						},
 					},
 				},
 			},
@@ -184,11 +195,11 @@ func TestCheckScenarioRunAccess(t *testing.T) {
 			expectedStatus: http.StatusForbidden,
 		},
 		{
-			name:   "run without cluster API URLs is rejected (user)",
+			name:   "run without jobs is rejected (user)",
 			claims: userClaims,
 			scenarioRun: &krknv1alpha1.KrknScenarioRun{
-				Spec: krknv1alpha1.KrknScenarioRunSpec{
-					ClusterAPIURLs: map[string]string{},
+				Status: krknv1alpha1.KrknScenarioRunStatus{
+					ClusterJobs: []krknv1alpha1.ClusterJobStatus{},
 				},
 			},
 			expectAllow:    false,
@@ -284,32 +295,48 @@ func TestFilterScenarioRunsByGroupPermission(t *testing.T) {
 	runs := []krknv1alpha1.KrknScenarioRun{
 		{
 			ObjectMeta: metav1.ObjectMeta{Name: "run1-cluster1"},
-			Spec: krknv1alpha1.KrknScenarioRunSpec{
-				ClusterAPIURLs: map[string]string{
-					"cluster1": "https://cluster1.example.com:6443",
+			Status: krknv1alpha1.KrknScenarioRunStatus{
+				ClusterJobs: []krknv1alpha1.ClusterJobStatus{
+					{
+						ClusterName:   "cluster1",
+						ClusterAPIURL: "https://cluster1.example.com:6443",
+						JobID:         "job-1",
+					},
 				},
 			},
 		},
 		{
 			ObjectMeta: metav1.ObjectMeta{Name: "run2-cluster2"},
-			Spec: krknv1alpha1.KrknScenarioRunSpec{
-				ClusterAPIURLs: map[string]string{
-					"cluster2": "https://cluster2.example.com:6443",
+			Status: krknv1alpha1.KrknScenarioRunStatus{
+				ClusterJobs: []krknv1alpha1.ClusterJobStatus{
+					{
+						ClusterName:   "cluster2",
+						ClusterAPIURL: "https://cluster2.example.com:6443",
+						JobID:         "job-2",
+					},
 				},
 			},
 		},
 		{
-			ObjectMeta: metav1.ObjectMeta{Name: "run3-legacy-no-urls"},
-			Spec: krknv1alpha1.KrknScenarioRunSpec{
-				ClusterAPIURLs: map[string]string{},
+			ObjectMeta: metav1.ObjectMeta{Name: "run3-legacy-no-jobs"},
+			Status: krknv1alpha1.KrknScenarioRunStatus{
+				ClusterJobs: []krknv1alpha1.ClusterJobStatus{},
 			},
 		},
 		{
 			ObjectMeta: metav1.ObjectMeta{Name: "run4-both-clusters"},
-			Spec: krknv1alpha1.KrknScenarioRunSpec{
-				ClusterAPIURLs: map[string]string{
-					"cluster1": "https://cluster1.example.com:6443",
-					"cluster2": "https://cluster2.example.com:6443",
+			Status: krknv1alpha1.KrknScenarioRunStatus{
+				ClusterJobs: []krknv1alpha1.ClusterJobStatus{
+					{
+						ClusterName:   "cluster1",
+						ClusterAPIURL: "https://cluster1.example.com:6443",
+						JobID:         "job-3",
+					},
+					{
+						ClusterName:   "cluster2",
+						ClusterAPIURL: "https://cluster2.example.com:6443",
+						JobID:         "job-4",
+					},
 				},
 			},
 		},
@@ -325,7 +352,7 @@ func TestFilterScenarioRunsByGroupPermission(t *testing.T) {
 			name:          "admin sees all runs",
 			claims:        adminClaims,
 			expectedCount: 4,
-			expectedNames: []string{"run1-cluster1", "run2-cluster2", "run3-legacy-no-urls", "run4-both-clusters"},
+			expectedNames: []string{"run1-cluster1", "run2-cluster2", "run3-legacy-no-jobs", "run4-both-clusters"},
 		},
 		{
 			name:          "user sees only runs with group permission on at least one cluster",
@@ -374,7 +401,6 @@ func TestFilterScenarioRunsByGroupPermission(t *testing.T) {
 }
 
 // TestPostScenarioRunSetsOwner verifies that PostScenarioRun sets the owner user ID
-// and populates ClusterAPIURLs correctly
 func TestPostScenarioRunSetsOwner(t *testing.T) {
 	scheme := runtime.NewScheme()
 	krknv1alpha1.AddToScheme(scheme)
@@ -485,23 +511,6 @@ func TestPostScenarioRunSetsOwner(t *testing.T) {
 		t.Errorf("Expected OwnerUserID to be 'user@test.com', got '%s'", response.OwnerUserID)
 	}
 
-	// Verify the created ScenarioRun has ClusterAPIURLs populated
-	scenarioRun := &krknv1alpha1.KrknScenarioRun{}
-	scenarioRunKey := client.ObjectKey{
-		Name:      response.ScenarioRunName,
-		Namespace: "krkn-operator-system",
-	}
-	if err := fakeClient.Get(ctx, scenarioRunKey, scenarioRun); err != nil {
-		t.Fatalf("Failed to get created ScenarioRun: %v", err)
-	}
-
-	if len(scenarioRun.Spec.ClusterAPIURLs) == 0 {
-		t.Error("Expected ClusterAPIURLs to be populated, got empty map")
-	}
-
-	expectedURL := "https://cluster1.example.com:6443"
-	if scenarioRun.Spec.ClusterAPIURLs["cluster-1"] != expectedURL {
-		t.Errorf("Expected ClusterAPIURLs['cluster-1'] to be '%s', got '%s'",
-			expectedURL, scenarioRun.Spec.ClusterAPIURLs["cluster-1"])
-	}
+	// Note: ClusterAPIURL is now populated by the controller in job status,
+	// not by the API handler in spec, so we don't verify it here
 }

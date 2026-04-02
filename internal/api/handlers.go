@@ -768,37 +768,6 @@ func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Build cluster API URL mapping ONLY for requested clusters (not all clusters in TargetData)
-	// This ensures scenario run only stores clusters it actually targets
-	// Note: If a requested cluster is not found in TargetData, it's skipped (controller will handle the error)
-	clusterAPIURLs := make(map[string]string)
-	for providerName, requestedClusters := range req.TargetClusters {
-		// Get clusters for this provider from TargetData
-		providerTargets, exists := targetRequest.Status.TargetData[providerName]
-		if !exists {
-			logger.V(1).Info("Provider not found in TargetData, skipping",
-				"providerName", providerName)
-			continue
-		}
-
-		// Build map of available clusters for quick lookup
-		availableClusters := make(map[string]string) // clusterName -> clusterAPIURL
-		for _, cluster := range providerTargets {
-			availableClusters[cluster.ClusterName] = cluster.ClusterAPIURL
-		}
-
-		// Add only requested clusters that exist to ClusterAPIURLs
-		for _, clusterName := range requestedClusters {
-			if apiURL, exists := availableClusters[clusterName]; exists {
-				clusterAPIURLs[clusterName] = apiURL
-			} else {
-				logger.V(1).Info("Requested cluster not found in TargetData, skipping",
-					"clusterName", clusterName,
-					"providerName", providerName)
-			}
-		}
-	}
-
 	// Validate user permissions (group-based access control)
 	// Admins bypass validation, regular users must have 'run' permission on all target clusters
 	userClaims := auth.GetClaimsFromContext(ctx)
@@ -853,7 +822,6 @@ func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
 			TargetRequestID:    req.TargetRequestID,
 			OwnerUserID:        ownerUserID,
 			TargetClusters:     req.TargetClusters,
-			ClusterAPIURLs:     clusterAPIURLs,
 			ScenarioName:       req.ScenarioName,
 			ScenarioImage:      req.ScenarioImage,
 			KubeconfigPath:     req.KubeconfigPath,
@@ -968,14 +936,42 @@ func (h *Handler) GetScenarioRunStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check access permissions
-	if !h.checkScenarioRunAccess(w, r, &scenarioRun) {
-		return
+	claims := auth.GetClaimsFromContext(ctx)
+
+	// Filter jobs based on permissions (admins see all, users see only authorized jobs)
+	filteredJobs := scenarioRun.Status.ClusterJobs
+	if claims != nil && !auth.IsAdmin(ctx) {
+		// Fetch user groups
+		userGroups, err := groupauth.GetUserGroups(ctx, h.client, claims.UserID, h.namespace)
+		if err != nil {
+			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+				Error:   "internal_error",
+				Message: "Failed to fetch user groups: " + err.Error(),
+			})
+			return
+		}
+
+		// Filter jobs to only those user has view permission for
+		filteredJobs = h.filterJobsByPermission(
+			scenarioRun.Status.ClusterJobs,
+			ctx,
+			userGroups,
+			groupauth.ActionView,
+		)
+
+		// If user has no access to any jobs, return forbidden
+		if len(filteredJobs) == 0 {
+			writeJSONError(w, http.StatusForbidden, ErrorResponse{
+				Error:   "forbidden",
+				Message: "Access denied. You do not have permission to view jobs in this scenario run",
+			})
+			return
+		}
 	}
 
-	// Convert ClusterJobStatus to response type
-	clusterJobs := make([]ClusterJobStatusResponse, len(scenarioRun.Status.ClusterJobs))
-	for i, job := range scenarioRun.Status.ClusterJobs {
+	// Convert filtered ClusterJobStatus to response type
+	clusterJobs := make([]ClusterJobStatusResponse, len(filteredJobs))
+	for i, job := range filteredJobs {
 		clusterJobs[i] = ClusterJobStatusResponse{
 			ProviderName:    job.ProviderName,
 			ClusterName:     job.ClusterName,
@@ -1237,41 +1233,59 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check if user has 'view' permission on ANY cluster in this scenario run
-	// Admins bypass this check, regular users must have view permission
+	// Find the specific job for this jobID
+	var targetJob *krknv1alpha1.ClusterJobStatus
+	for i := range scenarioRun.Status.ClusterJobs {
+		if scenarioRun.Status.ClusterJobs[i].JobID == jobID {
+			targetJob = &scenarioRun.Status.ClusterJobs[i]
+			break
+		}
+	}
+
+	if targetJob == nil {
+		logger.Error(nil, "Job not found in scenario run",
+			"scenarioRunName", scenarioRunName,
+			"jobID", jobID)
+		_ = conn.WriteMessage(websocket.TextMessage, []byte("ERROR: Job not found in scenario run"))
+		return
+	}
+
+	// Check if user has 'view' permission on this specific job's cluster
 	if !auth.IsAdmin(ctx) {
-		// Reject runs without cluster API URLs (defensive)
-		if len(scenarioRun.Spec.ClusterAPIURLs) == 0 {
-			logger.Error(nil, "Access denied: scenario run has no cluster API URLs",
+		if targetJob.ClusterAPIURL == "" {
+			logger.Error(nil, "Access denied: job has no cluster API URL",
 				"scenarioRunName", scenarioRunName,
+				"jobID", jobID,
 				"userID", claims.UserID)
-			_ = conn.WriteMessage(websocket.TextMessage, []byte("ERROR: Access denied. This scenario run has no cluster API URLs"))
+			_ = conn.WriteMessage(websocket.TextMessage, []byte("ERROR: Access denied. Job has no cluster API URL"))
 			return
 		}
 
-		// Check group-based permissions
-		hasAccess, err := h.checkScenarioRunGroupAccess(
+		hasAccess, err := groupauth.HasClusterPermission(
 			ctx,
+			h.client,
 			claims.UserID,
-			&scenarioRun,
+			h.namespace,
+			targetJob.ClusterAPIURL,
 			groupauth.ActionView,
 		)
 
 		if err != nil {
-			logger.Error(err, "Failed to check scenario run access for logs",
+			logger.Error(err, "Failed to check job access for logs",
 				"scenarioRunName", scenarioRunName,
-				"userID", claims.UserID,
-				"jobID", jobID)
+				"jobID", jobID,
+				"userID", claims.UserID)
 			_ = conn.WriteMessage(websocket.TextMessage, []byte("ERROR: Failed to validate access permissions"))
 			return
 		}
 
 		if !hasAccess {
-			logger.Info("Access denied: user does not have view permission on scenario run",
+			logger.Info("Access denied: user does not have view permission on job",
 				"scenarioRunName", scenarioRunName,
+				"jobID", jobID,
 				"userID", claims.UserID,
-				"jobID", jobID)
-			_ = conn.WriteMessage(websocket.TextMessage, []byte("ERROR: Access denied. You do not have permission to view logs for this scenario run"))
+				"clusterAPIURL", targetJob.ClusterAPIURL)
+			_ = conn.WriteMessage(websocket.TextMessage, []byte("ERROR: Access denied. You do not have permission to view logs for this job"))
 			return
 		}
 	}
@@ -1280,6 +1294,7 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 		"scenarioRunName", scenarioRunName,
 		"jobID", jobID,
 		"userID", claims.UserID,
+		"clusterAPIURL", targetJob.ClusterAPIURL,
 		"isAdmin", auth.IsAdmin(ctx))
 
 	// Set up ping/pong handlers to detect client disconnection
@@ -1663,8 +1678,29 @@ func (h *Handler) DeleteScenarioRunComplete(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// Check access permissions (requires 'cancel' permission)
-	if !h.checkScenarioRunAccessWithAction(w, r, &scenarioRun, groupauth.ActionCancel, "cancel") {
+	// Check if user has 'cancel' permission on AT LEAST ONE job in the run
+	// (admins bypass this check in checkScenarioRunGroupAccess)
+	claims := auth.GetClaimsFromContext(ctx)
+	if claims == nil {
+		writeJSONError(w, http.StatusUnauthorized, ErrorResponse{
+			Error:   "unauthorized",
+			Message: "No authentication claims found",
+		})
+		return
+	}
+
+	hasAccess, err := h.checkScenarioRunGroupAccess(
+		ctx,
+		claims.UserID,
+		&scenarioRun,
+		groupauth.ActionCancel,
+	)
+
+	if err != nil || !hasAccess {
+		writeJSONError(w, http.StatusForbidden, ErrorResponse{
+			Error:   "forbidden",
+			Message: "Access denied. You do not have permission to cancel jobs in this scenario run",
+		})
 		return
 	}
 
@@ -1739,12 +1775,12 @@ func (h *Handler) DeleteSingleJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check access permissions (requires 'cancel' permission)
-	if !h.checkScenarioRunAccessWithAction(w, r, foundScenarioRun, groupauth.ActionCancel, "cancel") {
+	job := &foundScenarioRun.Status.ClusterJobs[foundJobIndex]
+
+	// Check if user has 'cancel' permission on this specific job
+	if !h.checkJobAccess(w, r, job, groupauth.ActionCancel, "cancel") {
 		return
 	}
-
-	job := &foundScenarioRun.Status.ClusterJobs[foundJobIndex]
 
 	log.Log.Info("cancelling single job",
 		"scenarioRunName", foundScenarioRun.Name,
@@ -1822,14 +1858,12 @@ func (h *Handler) GetSingleJob(w http.ResponseWriter, r *http.Request) {
 
 	// Search for job across all scenario runs
 	var foundJob *krknv1alpha1.ClusterJobStatus
-	var foundScenarioRun *krknv1alpha1.KrknScenarioRun
 
 	for i := range scenarioRunList.Items {
 		sr := &scenarioRunList.Items[i]
 		for j := range sr.Status.ClusterJobs {
 			if sr.Status.ClusterJobs[j].JobID == jobID {
 				foundJob = &sr.Status.ClusterJobs[j]
-				foundScenarioRun = sr
 				break
 			}
 		}
@@ -1846,8 +1880,8 @@ func (h *Handler) GetSingleJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check access permissions on parent ScenarioRun
-	if !h.checkScenarioRunAccess(w, r, foundScenarioRun) {
+	// Check if user has permission to view this specific job
+	if !h.checkJobAccess(w, r, foundJob, groupauth.ActionView, "view") {
 		return
 	}
 
