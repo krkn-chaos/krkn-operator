@@ -508,6 +508,61 @@ func TestCountClustersFromTargetData(t *testing.T) {
 	}
 }
 
+func TestHasAction(t *testing.T) {
+	tests := []struct {
+		name           string
+		actions        []Action
+		requiredAction Action
+		want           bool
+	}{
+		{
+			name:           "action exists in list",
+			actions:        []Action{ActionView, ActionRun, ActionCancel},
+			requiredAction: ActionRun,
+			want:           true,
+		},
+		{
+			name:           "action does not exist in list",
+			actions:        []Action{ActionView, ActionCancel},
+			requiredAction: ActionRun,
+			want:           false,
+		},
+		{
+			name:           "empty action list",
+			actions:        []Action{},
+			requiredAction: ActionView,
+			want:           false,
+		},
+		{
+			name:           "nil action list",
+			actions:        nil,
+			requiredAction: ActionView,
+			want:           false,
+		},
+		{
+			name:           "single action matches",
+			actions:        []Action{ActionView},
+			requiredAction: ActionView,
+			want:           true,
+		},
+		{
+			name:           "single action does not match",
+			actions:        []Action{ActionView},
+			requiredAction: ActionRun,
+			want:           false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := hasAction(tt.actions, tt.requiredAction)
+			if got != tt.want {
+				t.Errorf("hasAction() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 // Helper function to check if a string contains a substring
 func contains(s, substr string) bool {
 	return len(substr) > 0 && len(s) >= len(substr) && (s == substr || len(s) > len(substr) && (s[:len(substr)] == substr || s[len(s)-len(substr):] == substr || containsInMiddle(s, substr)))

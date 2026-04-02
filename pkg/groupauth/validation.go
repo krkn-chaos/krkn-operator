@@ -65,10 +65,13 @@ func ValidateScenarioRunAccess(
 		return fmt.Errorf("user %s does not belong to any groups and has no cluster access", userID)
 	}
 
-	// 2. Build clusterName -> apiURL mapping from TargetRequest
+	// 2. Aggregate permissions once (optimization: avoid re-aggregating for each cluster)
+	aggregatedPermissions := AggregateClusterPermissions(userGroups)
+
+	// 3. Build clusterName -> apiURL mapping from TargetRequest
 	clusterAPIURLMap := buildClusterAPIURLMap(targetRequest)
 
-	// 3. Validate each target cluster
+	// 4. Validate each target cluster
 	for provider, clusterNames := range targetClusters {
 		for _, clusterName := range clusterNames {
 			apiURL, exists := clusterAPIURLMap[clusterName]
@@ -77,7 +80,7 @@ func ValidateScenarioRunAccess(
 			}
 
 			// Check if user has 'run' permission on this cluster
-			if !CanPerformAction(userGroups, apiURL, ActionRun) {
+			if !hasAction(aggregatedPermissions[apiURL], ActionRun) {
 				logger.V(1).Info("Permission denied",
 					"userID", userID,
 					"clusterName", clusterName,
@@ -130,6 +133,9 @@ func FilterClustersByPermission(
 		return map[string][]krknv1alpha1.ClusterTarget{}, nil
 	}
 
+	// Aggregate permissions once (optimization: avoid re-aggregating for each cluster)
+	aggregatedPermissions := AggregateClusterPermissions(userGroups)
+
 	// Filter clusters by permission
 	filtered := make(map[string][]krknv1alpha1.ClusterTarget)
 
@@ -137,7 +143,7 @@ func FilterClustersByPermission(
 		allowedClusters := make([]krknv1alpha1.ClusterTarget, 0)
 
 		for _, cluster := range clusters {
-			if CanPerformAction(userGroups, cluster.ClusterAPIURL, requiredAction) {
+			if hasAction(aggregatedPermissions[cluster.ClusterAPIURL], requiredAction) {
 				allowedClusters = append(allowedClusters, cluster)
 			}
 		}
@@ -186,4 +192,14 @@ func countClustersFromTargetData(targetData map[string][]krknv1alpha1.ClusterTar
 		total += len(clusters)
 	}
 	return total
+}
+
+// hasAction checks if an action exists in the given slice of actions
+func hasAction(actions []Action, requiredAction Action) bool {
+	for _, action := range actions {
+		if action == requiredAction {
+			return true
+		}
+	}
+	return false
 }
