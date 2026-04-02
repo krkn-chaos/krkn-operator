@@ -830,6 +830,10 @@ func buildUserGroupResponse(ctx context.Context, k8sClient client.Client, group 
 
 // validateClusterPermissions validates that all actions are valid
 func validateClusterPermissions(permissions map[string]ClusterPermissionSet) error {
+	if len(permissions) == 0 {
+		return fmt.Errorf("at least one cluster permission is required")
+	}
+
 	for apiURL, permSet := range permissions {
 		if len(permSet.Actions) == 0 {
 			return fmt.Errorf("cluster %s must have at least one action", apiURL)

@@ -20,15 +20,18 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	fakeclient "sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
@@ -360,6 +363,66 @@ func TestUpdateUserGroup_Success(t *testing.T) {
 		t.Error("Expected cluster permissions for cluster1")
 	} else if len(perms.Actions) != 2 {
 		t.Errorf("Expected 2 actions, got %d", len(perms.Actions))
+	}
+}
+
+func TestUpdateUserGroup_EmptyClusterPermissions(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = krknv1alpha1.AddToScheme(scheme)
+
+	existingGroup := &krknv1alpha1.KrknUserGroup{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "dev-team",
+			Namespace: "default",
+		},
+		Spec: krknv1alpha1.KrknUserGroupSpec{
+			Name:        "dev-team",
+			Description: "Existing group",
+			ClusterPermissions: map[string]krknv1alpha1.ClusterPermissionSet{
+				"https://api.cluster1.com": {
+					Actions: []string{"view"},
+				},
+			},
+		},
+	}
+
+	fakeClient := fakeclient.NewClientBuilder().
+		WithScheme(scheme).
+		WithRuntimeObjects(existingGroup).
+		Build()
+
+	fakeClientset := fake.NewSimpleClientset()
+	handler := NewHandler(fakeClient, fakeClientset, "default", "localhost:50051")
+
+	// Try to update with empty clusterPermissions
+	// Note: We use raw JSON instead of marshaling because an empty map with omitempty
+	// would be omitted from the JSON output, and we want to test the empty map case
+	reqBody := `{"clusterPermissions": {}}`
+	req := httptest.NewRequest("PATCH", GroupsPath+"/dev-team", bytes.NewBufferString(reqBody))
+	req = req.WithContext(createAdminContext())
+	w := httptest.NewRecorder()
+
+	handler.UpdateUserGroup(w, req)
+
+	// Should return 400 Bad Request, not 500 Internal Server Error
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("Expected status %d, got %d. Body: %s", http.StatusBadRequest, w.Code, w.Body.String())
+	}
+
+	// Verify error message
+	responseBody := w.Body.String()
+	if !strings.Contains(responseBody, "at least one cluster permission") {
+		t.Errorf("Expected error about cluster permissions, got: %s", responseBody)
+	}
+
+	// Verify the group was NOT updated (should still have original permissions)
+	var group krknv1alpha1.KrknUserGroup
+	if err := fakeClient.Get(context.Background(), client.ObjectKey{Name: "dev-team", Namespace: "default"}, &group); err != nil {
+		t.Fatalf("Failed to get group: %v", err)
+	}
+
+	if len(group.Spec.ClusterPermissions) != 1 {
+		t.Errorf("Expected 1 cluster permission (unchanged), got %d", len(group.Spec.ClusterPermissions))
 	}
 }
 
