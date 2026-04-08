@@ -43,6 +43,8 @@ rules:
   - krknoperatortargets/status
   - krknscenarioruns/status
   - krkntargetrequests/status
+  - krknusergroups/status
+  - krknusers/status
   verbs:
   - get
   - patch
@@ -64,23 +66,6 @@ rules:
   - krknoperatortargets
   - krknscenarioruns
   - krkntargetrequests
-  verbs:
-  - create
-  - delete
-  - get
-  - list
-  - patch
-  - update
-  - watch
-- apiGroups:
-  - krkn.krkn-chaos.dev
-  resources:
-  - krknscenarioruns/finalizers
-  verbs:
-  - update
-- apiGroups:
-  - krkn.krkn-chaos.dev
-  resources:
   - krknusergroups
   - krknusers
   verbs:
@@ -94,9 +79,6 @@ rules:
 - apiGroups:
   - krkn.krkn-chaos.dev
   resources:
-  - krknusergroups/status
-  - krknusers/status
+  - krknscenarioruns/finalizers
   verbs:
-  - get
-  - patch
   - update
