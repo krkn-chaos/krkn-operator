@@ -792,8 +792,9 @@ func TestCleanupDiscoveryTargetRequest_Idempotent(t *testing.T) {
 	fakeClientset := fake.NewSimpleClientset()
 	handler := NewHandler(fakeClient, fakeClientset, "default", "localhost:50051")
 
+	ctx := context.Background()
 	// This should not error - idempotent cleanup
-	handler.cleanupDiscoveryTargetRequest("non-existent-uuid")
+	handler.cleanupDiscoveryTargetRequest(ctx, "non-existent-uuid")
 
 	// If we get here without panic, the test passes (idempotent behavior)
 }
@@ -810,8 +811,9 @@ func TestCleanupDiscoveryTargetRequest_EmptyUUID(t *testing.T) {
 	fakeClientset := fake.NewSimpleClientset()
 	handler := NewHandler(fakeClient, fakeClientset, "default", "localhost:50051")
 
+	ctx := context.Background()
 	// Empty UUID should be a no-op
-	handler.cleanupDiscoveryTargetRequest("")
+	handler.cleanupDiscoveryTargetRequest(ctx, "")
 
 	// If we get here without panic, the test passes
 }
@@ -851,8 +853,8 @@ func TestCleanupDiscoveryTargetRequest_Success(t *testing.T) {
 		t.Fatalf("Expected CR to exist before cleanup, got error: %v", err)
 	}
 
-	// Perform cleanup (synchronous - not in goroutine for testing)
-	handler.cleanupDiscoveryTargetRequest(discoveryUUID)
+	// Perform cleanup (synchronous)
+	handler.cleanupDiscoveryTargetRequest(ctx, discoveryUUID)
 
 	// Verify CR was deleted
 	var afterCleanup krknv1alpha1.KrknTargetRequest

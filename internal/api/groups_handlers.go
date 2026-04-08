@@ -45,16 +45,12 @@ import (
 // cleanupDiscoveryTargetRequest deletes a KrknTargetRequest CR by UUID.
 // This is called after successful group create/update to clean up discovery CRs.
 // It is idempotent - ignores NotFound errors if the CR was already deleted.
-// NOTE: This function should be called in a goroutine with context.Background()
-// to avoid context cancellation when the HTTP response is sent.
-func (h *Handler) cleanupDiscoveryTargetRequest(discoveryUUID string) {
+func (h *Handler) cleanupDiscoveryTargetRequest(ctx context.Context, discoveryUUID string) {
 	if discoveryUUID == "" {
 		return
 	}
 
-	// Use background context - this cleanup may run after HTTP response is sent
-	ctx := context.Background()
-	logger := log.Log.WithName("cleanup-discovery-target-request")
+	logger := log.FromContext(ctx).WithName("cleanup-discovery-target-request")
 	logger.Info("Cleaning up discovery target request", "uuid", discoveryUUID)
 
 	// Delete the KrknTargetRequest CR
@@ -291,10 +287,9 @@ func (h *Handler) CreateUserGroup(w http.ResponseWriter, r *http.Request) {
 
 	logger.Info("Created user group", "groupName", req.Name, "clusterCount", len(req.ClusterPermissions))
 
-	// Clean up discovery target request if provided
-	// This runs in the background and doesn't block the response
+	// Clean up discovery target request if provided (synchronous)
 	if req.DiscoveryUUID != "" {
-		go h.cleanupDiscoveryTargetRequest(req.DiscoveryUUID)
+		h.cleanupDiscoveryTargetRequest(ctx, req.DiscoveryUUID)
 	}
 
 	writeJSON(w, http.StatusCreated, CreateUserGroupResponse{
@@ -406,10 +401,9 @@ func (h *Handler) UpdateUserGroup(w http.ResponseWriter, r *http.Request) {
 
 	logger.Info("Updated user group", "groupName", groupName)
 
-	// Clean up discovery target request if provided
-	// This runs in the background and doesn't block the response
+	// Clean up discovery target request if provided (synchronous)
 	if req.DiscoveryUUID != "" {
-		go h.cleanupDiscoveryTargetRequest(req.DiscoveryUUID)
+		h.cleanupDiscoveryTargetRequest(ctx, req.DiscoveryUUID)
 	}
 
 	writeJSON(w, http.StatusOK, UpdateUserGroupResponse{
