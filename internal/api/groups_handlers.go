@@ -381,7 +381,9 @@ func (h *Handler) UpdateUserGroup(w http.ResponseWriter, r *http.Request) {
 		updated = true
 	}
 
-	if !updated {
+	// Check if there's anything to do (update group or cleanup discovery)
+	hasDiscoveryCleanup := req.DiscoveryUUID != ""
+	if !updated && !hasDiscoveryCleanup {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
 			Error:   "bad_request",
 			Message: "No fields to update",
@@ -389,20 +391,21 @@ func (h *Handler) UpdateUserGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Update group
-	if err := h.client.Update(ctx, group); err != nil {
-		logger.Error(err, "Failed to update user group", "groupName", groupName)
-		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
-			Error:   "internal_error",
-			Message: "Failed to update user group",
-		})
-		return
+	// Update group if there were changes to description or clusterPermissions
+	if updated {
+		if err := h.client.Update(ctx, group); err != nil {
+			logger.Error(err, "Failed to update user group", "groupName", groupName)
+			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+				Error:   "internal_error",
+				Message: "Failed to update user group",
+			})
+			return
+		}
+		logger.Info("Updated user group", "groupName", groupName)
 	}
 
-	logger.Info("Updated user group", "groupName", groupName)
-
 	// Clean up discovery target request if provided (synchronous)
-	if req.DiscoveryUUID != "" {
+	if hasDiscoveryCleanup {
 		h.cleanupDiscoveryTargetRequest(ctx, req.DiscoveryUUID)
 	}
 

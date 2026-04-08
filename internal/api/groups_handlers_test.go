@@ -779,6 +779,87 @@ func TestUpdateUserGroup_WithDiscoveryUUID(t *testing.T) {
 	}
 }
 
+func TestUpdateUserGroup_OnlyDiscoveryUUID(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = krknv1alpha1.AddToScheme(scheme)
+	_ = corev1.AddToScheme(scheme)
+
+	group := &krknv1alpha1.KrknUserGroup{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-group",
+			Namespace: "default",
+		},
+		Spec: krknv1alpha1.KrknUserGroupSpec{
+			Name:        "test-group",
+			Description: "Original description",
+			ClusterPermissions: map[string]krknv1alpha1.ClusterPermissionSet{
+				"https://api.cluster1.com": {
+					Actions: []string{"view"},
+				},
+			},
+		},
+	}
+
+	// Create a KrknTargetRequest that should be deleted
+	discoveryUUID := "test-only-discovery-uuid"
+	targetRequest := &krknv1alpha1.KrknTargetRequest{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      discoveryUUID,
+			Namespace: "default",
+		},
+		Spec: krknv1alpha1.KrknTargetRequestSpec{
+			UUID: discoveryUUID,
+		},
+		Status: krknv1alpha1.KrknTargetRequestStatus{
+			Status: "completed",
+		},
+	}
+
+	fakeClient := fakeclient.NewClientBuilder().
+		WithScheme(scheme).
+		WithRuntimeObjects(group, targetRequest).
+		Build()
+
+	fakeClientset := fake.NewSimpleClientset()
+	handler := NewHandler(fakeClient, fakeClientset, "default", "localhost:50051")
+
+	// Request with ONLY discoveryUuid (no description or clusterPermissions)
+	reqBody := UpdateUserGroupRequest{
+		DiscoveryUUID: discoveryUUID,
+	}
+
+	body, _ := json.Marshal(reqBody)
+	req := httptest.NewRequest("PATCH", GroupsPath+"/test-group", bytes.NewBuffer(body))
+	req = req.WithContext(createAdminContext())
+	w := httptest.NewRecorder()
+
+	handler.UpdateUserGroup(w, req)
+
+	// Should succeed even with only discoveryUuid
+	if w.Code != http.StatusOK {
+		t.Errorf("Expected status %d, got %d. Body: %s", http.StatusOK, w.Code, w.Body.String())
+	}
+
+	// Verify CR was deleted
+	ctx := context.Background()
+	var deletedRequest krknv1alpha1.KrknTargetRequest
+	err := fakeClient.Get(ctx, client.ObjectKey{Name: discoveryUUID, Namespace: "default"}, &deletedRequest)
+	if err == nil {
+		t.Errorf("Expected KrknTargetRequest to be deleted")
+	}
+
+	// Verify group was NOT updated (description should remain the same)
+	var updatedGroup krknv1alpha1.KrknUserGroup
+	err = fakeClient.Get(ctx, client.ObjectKey{Name: "test-group", Namespace: "default"}, &updatedGroup)
+	if err != nil {
+		t.Fatalf("Failed to get updated group: %v", err)
+	}
+
+	if updatedGroup.Spec.Description != "Original description" {
+		t.Errorf("Group description should not have changed, got: %s", updatedGroup.Spec.Description)
+	}
+}
+
 func TestCleanupDiscoveryTargetRequest_Idempotent(t *testing.T) {
 	scheme := runtime.NewScheme()
 	_ = krknv1alpha1.AddToScheme(scheme)
