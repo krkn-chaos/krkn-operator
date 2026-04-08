@@ -792,10 +792,8 @@ func TestCleanupDiscoveryTargetRequest_Idempotent(t *testing.T) {
 	fakeClientset := fake.NewSimpleClientset()
 	handler := NewHandler(fakeClient, fakeClientset, "default", "localhost:50051")
 
-	ctx := context.Background()
-
 	// This should not error - idempotent cleanup
-	handler.cleanupDiscoveryTargetRequest(ctx, "non-existent-uuid")
+	handler.cleanupDiscoveryTargetRequest("non-existent-uuid")
 
 	// If we get here without panic, the test passes (idempotent behavior)
 }
@@ -812,12 +810,59 @@ func TestCleanupDiscoveryTargetRequest_EmptyUUID(t *testing.T) {
 	fakeClientset := fake.NewSimpleClientset()
 	handler := NewHandler(fakeClient, fakeClientset, "default", "localhost:50051")
 
-	ctx := context.Background()
-
 	// Empty UUID should be a no-op
-	handler.cleanupDiscoveryTargetRequest(ctx, "")
+	handler.cleanupDiscoveryTargetRequest("")
 
 	// If we get here without panic, the test passes
+}
+
+func TestCleanupDiscoveryTargetRequest_Success(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = krknv1alpha1.AddToScheme(scheme)
+	_ = corev1.AddToScheme(scheme)
+
+	discoveryUUID := "test-cleanup-uuid"
+	targetRequest := &krknv1alpha1.KrknTargetRequest{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      discoveryUUID,
+			Namespace: "default",
+		},
+		Spec: krknv1alpha1.KrknTargetRequestSpec{
+			UUID: discoveryUUID,
+		},
+		Status: krknv1alpha1.KrknTargetRequestStatus{
+			Status: "completed",
+		},
+	}
+
+	fakeClient := fakeclient.NewClientBuilder().
+		WithScheme(scheme).
+		WithRuntimeObjects(targetRequest).
+		Build()
+
+	fakeClientset := fake.NewSimpleClientset()
+	handler := NewHandler(fakeClient, fakeClientset, "default", "localhost:50051")
+
+	// Verify CR exists before cleanup
+	ctx := context.Background()
+	var beforeCleanup krknv1alpha1.KrknTargetRequest
+	err := fakeClient.Get(ctx, client.ObjectKey{Name: discoveryUUID, Namespace: "default"}, &beforeCleanup)
+	if err != nil {
+		t.Fatalf("Expected CR to exist before cleanup, got error: %v", err)
+	}
+
+	// Perform cleanup (synchronous - not in goroutine for testing)
+	handler.cleanupDiscoveryTargetRequest(discoveryUUID)
+
+	// Verify CR was deleted
+	var afterCleanup krknv1alpha1.KrknTargetRequest
+	err = fakeClient.Get(ctx, client.ObjectKey{Name: discoveryUUID, Namespace: "default"}, &afterCleanup)
+	if err == nil {
+		t.Errorf("Expected CR to be deleted, but it still exists")
+	}
+	if !strings.Contains(err.Error(), "not found") {
+		t.Errorf("Expected 'not found' error, got: %v", err)
+	}
 }
 
 // Helper function

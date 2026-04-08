@@ -45,12 +45,16 @@ import (
 // cleanupDiscoveryTargetRequest deletes a KrknTargetRequest CR by UUID.
 // This is called after successful group create/update to clean up discovery CRs.
 // It is idempotent - ignores NotFound errors if the CR was already deleted.
-func (h *Handler) cleanupDiscoveryTargetRequest(ctx context.Context, discoveryUUID string) {
+// NOTE: This function should be called in a goroutine with context.Background()
+// to avoid context cancellation when the HTTP response is sent.
+func (h *Handler) cleanupDiscoveryTargetRequest(discoveryUUID string) {
 	if discoveryUUID == "" {
 		return
 	}
 
-	logger := log.FromContext(ctx).WithName("cleanup-discovery-target-request")
+	// Use background context - this cleanup may run after HTTP response is sent
+	ctx := context.Background()
+	logger := log.Log.WithName("cleanup-discovery-target-request")
 	logger.Info("Cleaning up discovery target request", "uuid", discoveryUUID)
 
 	// Delete the KrknTargetRequest CR
@@ -290,7 +294,7 @@ func (h *Handler) CreateUserGroup(w http.ResponseWriter, r *http.Request) {
 	// Clean up discovery target request if provided
 	// This runs in the background and doesn't block the response
 	if req.DiscoveryUUID != "" {
-		go h.cleanupDiscoveryTargetRequest(ctx, req.DiscoveryUUID)
+		go h.cleanupDiscoveryTargetRequest(req.DiscoveryUUID)
 	}
 
 	writeJSON(w, http.StatusCreated, CreateUserGroupResponse{
@@ -405,7 +409,7 @@ func (h *Handler) UpdateUserGroup(w http.ResponseWriter, r *http.Request) {
 	// Clean up discovery target request if provided
 	// This runs in the background and doesn't block the response
 	if req.DiscoveryUUID != "" {
-		go h.cleanupDiscoveryTargetRequest(ctx, req.DiscoveryUUID)
+		go h.cleanupDiscoveryTargetRequest(req.DiscoveryUUID)
 	}
 
 	writeJSON(w, http.StatusOK, UpdateUserGroupResponse{
