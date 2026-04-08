@@ -1,0 +1,5 @@
+allora voglio aggiungere una feature: la feature è la seguente voglio poter salvare/modificare/cancellare le configurazioni degli scenari,  quindi la struct ScenarioRunRequest serializzata in json, vorrei quindi
+  creare un nuovo CR che sia KrknScenarioRunTemplate. Non sarà necessario creare un controller per questo dal momento che non sarà necessario riconciliarlo, verrà usato semplicemente come una configmap con il vantaggio
+  di essere selezionabile con kubectl. dovranno essere create le rispettive api rest per il frontend. la proprietà del CR a livello di api dovrà essere gestita a livello di group quindi, come gli utenti, verrà marcata
+  tramite una label group.krkn.krkn-chaos.dev/<group-name>=true e dovrà essere filtrata e gestita la proprietà in accordo. A livello di frontend dovrà essere gestita nel seguente modo: run scenario -> selezione del
+  target cous

@@ -627,6 +627,8 @@ type CreateUserGroupRequest struct {
 	Description string `json:"description,omitempty"`
 	// ClusterPermissions is a map of clusterAPIURL to permitted actions (required, min 1)
 	ClusterPermissions map[string]ClusterPermissionSet `json:"clusterPermissions"`
+	// DiscoveryUUID is the optional UUID of a KrknTargetRequest to delete after group creation
+	DiscoveryUUID string `json:"discoveryUuid,omitempty"`
 }
 
 // CreateUserGroupResponse represents the response for POST /api/v1/groups
@@ -643,6 +645,8 @@ type UpdateUserGroupRequest struct {
 	Description *string `json:"description,omitempty"`
 	// ClusterPermissions is a map of clusterAPIURL to permitted actions (optional)
 	ClusterPermissions map[string]ClusterPermissionSet `json:"clusterPermissions,omitempty"`
+	// DiscoveryUUID is the optional UUID of a KrknTargetRequest to delete after group update
+	DiscoveryUUID string `json:"discoveryUuid,omitempty"`
 }
 
 // UpdateUserGroupResponse represents the response for PATCH /api/v1/groups/:groupName

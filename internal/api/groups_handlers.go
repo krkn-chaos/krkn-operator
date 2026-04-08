@@ -36,6 +36,46 @@ import (
 	"github.com/krkn-chaos/krkn-operator/pkg/groupauth"
 )
 
+// +kubebuilder:rbac:groups=krkn.krkn-chaos.dev,resources=krknusergroups,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=krkn.krkn-chaos.dev,resources=krknusergroups/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=krkn.krkn-chaos.dev,resources=krknusers,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=krkn.krkn-chaos.dev,resources=krknusers/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=krkn.krkn-chaos.dev,resources=krkntargetrequests,verbs=delete
+
+// cleanupDiscoveryTargetRequest deletes a KrknTargetRequest CR by UUID.
+// This is called after successful group create/update to clean up discovery CRs.
+// It is idempotent - ignores NotFound errors if the CR was already deleted.
+func (h *Handler) cleanupDiscoveryTargetRequest(ctx context.Context, discoveryUUID string) {
+	if discoveryUUID == "" {
+		return
+	}
+
+	logger := log.FromContext(ctx).WithName("cleanup-discovery-target-request")
+	logger.Info("Cleaning up discovery target request", "uuid", discoveryUUID)
+
+	// Delete the KrknTargetRequest CR
+	targetRequest := &krknv1alpha1.KrknTargetRequest{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      discoveryUUID,
+			Namespace: h.namespace,
+		},
+	}
+
+	err := h.client.Delete(ctx, targetRequest)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			// Already deleted - this is fine (idempotent)
+			logger.V(1).Info("Discovery target request already deleted", "uuid", discoveryUUID)
+			return
+		}
+		// Log error but don't fail the request - cleanup is best-effort
+		logger.Error(err, "Failed to delete discovery target request", "uuid", discoveryUUID)
+		return
+	}
+
+	logger.Info("Successfully deleted discovery target request", "uuid", discoveryUUID)
+}
+
 // ListUserGroups handles GET /api/v1/groups
 // Lists all user groups (admin only)
 func (h *Handler) ListUserGroups(w http.ResponseWriter, r *http.Request) {
@@ -247,6 +287,12 @@ func (h *Handler) CreateUserGroup(w http.ResponseWriter, r *http.Request) {
 
 	logger.Info("Created user group", "groupName", req.Name, "clusterCount", len(req.ClusterPermissions))
 
+	// Clean up discovery target request if provided
+	// This runs in the background and doesn't block the response
+	if req.DiscoveryUUID != "" {
+		go h.cleanupDiscoveryTargetRequest(ctx, req.DiscoveryUUID)
+	}
+
 	writeJSON(w, http.StatusCreated, CreateUserGroupResponse{
 		Message: "User group created successfully",
 		Name:    req.Name,
@@ -355,6 +401,12 @@ func (h *Handler) UpdateUserGroup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	logger.Info("Updated user group", "groupName", groupName)
+
+	// Clean up discovery target request if provided
+	// This runs in the background and doesn't block the response
+	if req.DiscoveryUUID != "" {
+		go h.cleanupDiscoveryTargetRequest(ctx, req.DiscoveryUUID)
+	}
 
 	writeJSON(w, http.StatusOK, UpdateUserGroupResponse{
 		Message: "User group updated successfully",
