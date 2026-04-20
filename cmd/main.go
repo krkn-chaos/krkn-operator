@@ -20,6 +20,8 @@ import (
 	"context"
 	"crypto/tls"
 	"flag"
+	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 
@@ -47,6 +49,7 @@ import (
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
 	"github.com/krkn-chaos/krkn-operator/internal/api"
 	"github.com/krkn-chaos/krkn-operator/internal/controller"
+	"github.com/krkn-chaos/krkn-operator/pkg/auth"
 	"github.com/krkn-chaos/krkn-operator/pkg/configmap"
 	"github.com/krkn-chaos/krkn-operator/pkg/configstore"
 	"github.com/krkn-chaos/krkn-operator/pkg/provider"
@@ -278,8 +281,24 @@ func main() {
 	}
 	// +kubebuilder:scaffold:builder
 
+	// Setup JWT SecretManager (must start BEFORE API server)
+	// This ensures all replicas load the same JWT secret from Kubernetes
+	// preventing auth inconsistencies in multi-replica deployments
+	jwtSecretManager := auth.NewSecretManager(
+		mgr.GetClient(),
+		krknNamespace,
+		api.TokenDuration,
+		"krkn-operator",
+	)
+	if err := mgr.Add(jwtSecretManager); err != nil {
+		setupLog.Error(err, "unable to add JWT secret manager to manager")
+		os.Exit(1)
+	}
+	setupLog.Info("JWT secret manager configured", "namespace", krknNamespace)
+
 	// Setup and add REST API server
-	apiServer := api.NewServer(apiPort, mgr.GetClient(), clientset, krknNamespace, grpcServerAddr)
+	// SecretManager must be added to manager before API server
+	apiServer := api.NewServer(apiPort, mgr.GetClient(), clientset, krknNamespace, grpcServerAddr, jwtSecretManager)
 	setupLog.Info("gRPC server address", "address", grpcServerAddr)
 	if err := mgr.Add(apiServer); err != nil {
 		setupLog.Error(err, "unable to add REST API server to manager")
@@ -323,6 +342,17 @@ func main() {
 	}
 	if err := mgr.AddReadyzCheck("readyz", healthz.Ping); err != nil {
 		setupLog.Error(err, "unable to set up ready check")
+		os.Exit(1)
+	}
+	// Add JWT secret readiness check
+	// Pod will not receive traffic until JWT secret is loaded
+	if err := mgr.AddReadyzCheck("jwt-secret", func(req *http.Request) error {
+		if !jwtSecretManager.IsReady() {
+			return fmt.Errorf("JWT secret not yet loaded")
+		}
+		return nil
+	}); err != nil {
+		setupLog.Error(err, "unable to set up JWT secret ready check")
 		os.Exit(1)
 	}
 

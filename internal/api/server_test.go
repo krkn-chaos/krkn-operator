@@ -18,13 +18,23 @@ package api
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"k8s.io/client-go/kubernetes/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	fakeclient "sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
+	"github.com/krkn-chaos/krkn-operator/pkg/auth"
 )
+
+// createMockSecretManager creates a SecretManager for testing
+// Note: This does not initialize the secret (Start() is not called)
+// These tests only verify server structure, not authentication functionality
+func createMockSecretManager(k8sClient client.Client, namespace string) *auth.SecretManager {
+	return auth.NewSecretManager(k8sClient, namespace, 24*time.Hour, "test-issuer")
+}
 
 // TestServerNeedLeaderElection verifies that the API server does not require leader election
 // This ensures the API is available on all replicas for high availability
@@ -36,7 +46,10 @@ func TestServerNeedLeaderElection(t *testing.T) {
 	k8sClient := fakeclient.NewClientBuilder().WithScheme(scheme).Build()
 	clientset := fake.NewSimpleClientset()
 
-	server := NewServer(8080, k8sClient, clientset, "test-namespace", "localhost:50051")
+	// Create a mock SecretManager (in real usage, this would be started before API server)
+	secretManager := createMockSecretManager(k8sClient, "test-namespace")
+
+	server := NewServer(8080, k8sClient, clientset, "test-namespace", "localhost:50051", secretManager)
 
 	// Test
 	needsLeaderElection := server.NeedLeaderElection()
@@ -54,8 +67,9 @@ func TestServerImplementsLeaderElectionRunnable(t *testing.T) {
 
 	k8sClient := fakeclient.NewClientBuilder().WithScheme(scheme).Build()
 	clientset := fake.NewSimpleClientset()
+	secretManager := createMockSecretManager(k8sClient, "test-namespace")
 
-	server := NewServer(8080, k8sClient, clientset, "test-namespace", "localhost:50051")
+	server := NewServer(8080, k8sClient, clientset, "test-namespace", "localhost:50051", secretManager)
 
 	// Test - This will compile only if Server implements the interface correctly
 	var _ interface {
@@ -83,9 +97,12 @@ func TestServerStatelessBehavior(t *testing.T) {
 		k8sClient := fakeclient.NewClientBuilder().WithScheme(scheme).Build()
 		clientset := fake.NewSimpleClientset()
 
+		// All replicas share the same SecretManager (loaded from same Kubernetes secret)
+		secretManager := createMockSecretManager(k8sClient, "test-namespace")
+
 		// Create two server instances (simulating two replicas)
-		server1 := NewServer(8081, k8sClient, clientset, "test-namespace", "localhost:50051")
-		server2 := NewServer(8082, k8sClient, clientset, "test-namespace", "localhost:50051")
+		server1 := NewServer(8081, k8sClient, clientset, "test-namespace", "localhost:50051", secretManager)
+		server2 := NewServer(8082, k8sClient, clientset, "test-namespace", "localhost:50051", secretManager)
 
 		// Both servers share the same client but have independent HTTP servers
 		assert.NotNil(t, server1)
@@ -105,8 +122,9 @@ func TestServerVsControllerLeaderElection(t *testing.T) {
 
 		k8sClient := fakeclient.NewClientBuilder().WithScheme(scheme).Build()
 		clientset := fake.NewSimpleClientset()
+		secretManager := createMockSecretManager(k8sClient, "test-namespace")
 
-		server := NewServer(8080, k8sClient, clientset, "test-namespace", "localhost:50051")
+		server := NewServer(8080, k8sClient, clientset, "test-namespace", "localhost:50051", secretManager)
 
 		// API server should be available on all replicas
 		assert.False(t, server.NeedLeaderElection(),
@@ -122,5 +140,17 @@ func TestServerVsControllerLeaderElection(t *testing.T) {
 		// This ensures only the leader replica runs reconciliation loops
 		// preventing race conditions and infinite reconciliation loops
 		assert.True(t, true, "Controllers must use leader election (default behavior)")
+	})
+
+	t.Run("SecretManager should NOT use leader election", func(t *testing.T) {
+		scheme, err := krknv1alpha1.SchemeBuilder.Build()
+		assert.NoError(t, err)
+
+		k8sClient := fakeclient.NewClientBuilder().WithScheme(scheme).Build()
+		secretManager := createMockSecretManager(k8sClient, "test-namespace")
+
+		// All replicas need to load the JWT secret
+		assert.False(t, secretManager.NeedLeaderElection(),
+			"SecretManager must run on all replicas to load the same JWT secret")
 	})
 }

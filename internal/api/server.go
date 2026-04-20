@@ -39,21 +39,35 @@ type Server struct {
 	server         *http.Server
 	handler        *Handler
 	authMiddleware *auth.Middleware
+	secretManager  *auth.SecretManager
 }
 
 // NewServer creates a new API server
-func NewServer(port int, client client.Client, clientset kubernetes.Interface, namespace string, grpcServerAddr string) *Server {
+//
+// Parameters:
+//   - port: HTTP port to listen on
+//   - client: Kubernetes client
+//   - clientset: Kubernetes clientset
+//   - namespace: Operator namespace
+//   - grpcServerAddr: gRPC server address
+//   - secretManager: JWT secret manager (must be started before API server receives traffic)
+//
+// Returns a new Server instance
+func NewServer(port int, client client.Client, clientset kubernetes.Interface, namespace string, grpcServerAddr string, secretManager *auth.SecretManager) *Server {
 	handler := NewHandler(client, clientset, namespace, grpcServerAddr)
 
-	// Create auth middleware with lazy JWT secret loading
-	// The secret will be loaded on first request when the cache is ready
+	// Create auth middleware using SecretManager
+	// The SecretManager is started as a Runnable before the API server starts
+	// so the JWT secret is guaranteed to be loaded when the first request arrives
 	getTokenGen := func() *auth.TokenGenerator {
-		jwtSecret, err := handler.getOrCreateJWTSecret(context.Background())
+		tokenGen, err := secretManager.GetTokenGenerator()
 		if err != nil {
-			log.Log.Error(err, "Failed to get JWT secret, using fallback")
-			jwtSecret = []byte("fallback-secret-key-change-this-immediately")
+			// This should never happen if SecretManager started successfully
+			// Return nil and let middleware return 503 Service Unavailable
+			log.Log.Error(err, "CRITICAL: Failed to get TokenGenerator from SecretManager")
+			return nil
 		}
-		return auth.NewTokenGenerator(jwtSecret, TokenDuration, "krkn-operator")
+		return tokenGen
 	}
 	authMw := auth.NewLazyMiddleware(getTokenGen)
 
@@ -132,6 +146,7 @@ func NewServer(port int, client client.Client, clientset kubernetes.Interface, n
 		server:         server,
 		handler:        handler,
 		authMiddleware: authMw,
+		secretManager:  secretManager,
 	}
 }
 
