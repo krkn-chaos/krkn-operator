@@ -204,3 +204,11 @@ func (rw *responseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	}
 	return hijacker.Hijack()
 }
+
+// NeedLeaderElection implements manager.LeaderElectionRunnable
+// Returns false because the API server is stateless and should run on all replicas
+// to provide high availability. Kubernetes' optimistic concurrency control (resourceVersion)
+// handles any potential race conditions when multiple replicas modify the same resources.
+func (s *Server) NeedLeaderElection() bool {
+	return false
+}
