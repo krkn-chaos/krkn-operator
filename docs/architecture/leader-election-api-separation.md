@@ -121,6 +121,45 @@ resources:
     memory: 512Mi
 ```
 
+## Startup Sequence and Race Condition Prevention
+
+### API Server Startup Wait
+
+The API server implements a wait mechanism to prevent race conditions during startup:
+
+```
+1. Manager starts all Runnables in parallel:
+   - SecretManager.Start() begins loading JWT secret
+   - APIServer.Start() begins but WAITS
+
+2. APIServer.Start() polls SecretManager.IsReady() every 100ms
+   - Logs: "Waiting for JWT secret to be ready..."
+   - Timeout: 2 minutes (prevents infinite wait)
+
+3. When SecretManager.IsReady() returns true:
+   - Logs: "✅ JWT secret ready, starting HTTP server"
+   - HTTP server starts accepting connections
+   - Logs: "🚀 REST API server started and accepting connections"
+```
+
+This prevents the race condition where:
+- ❌ HTTP server accepts requests before JWT secret is loaded
+- ❌ Auth middleware fails with "JWT secret not yet loaded"
+- ❌ Early requests receive 500 errors
+
+### Expected Startup Logs
+
+Successful startup sequence:
+
+```
+🔐 Starting JWT secret manager
+📥 Found existing JWT secret in Kubernetes
+✅ JWT secret loaded successfully - authentication system ready
+🌐 Starting REST API server (waiting for JWT secret to be ready)
+✅ JWT secret ready, starting HTTP server
+🚀 REST API server started and accepting connections
+```
+
 ## Migration Notes
 
 ### Before (Single Leader)
@@ -128,6 +167,7 @@ resources:
 - API server ran only on leader replica
 - Standby replicas returned 502 errors
 - Service load balancer would fail ~66% of requests (in 3-replica setup)
+- JWT secret loaded lazily on first request with hardcoded fallback
 
 ### After (Multi-Active API)
 
@@ -135,6 +175,8 @@ resources:
 - All replicas can serve API traffic
 - 0% failure rate from leader election
 - Better resource utilization
+- JWT secret loaded at startup before accepting traffic
+- No hardcoded fallback, fail-fast on errors
 
 ### Rollout
 

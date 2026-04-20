@@ -151,16 +151,45 @@ func NewServer(port int, client client.Client, clientset kubernetes.Interface, n
 }
 
 // Start starts the API server
+// It waits for the JWT SecretManager to be ready before accepting traffic
 func (s *Server) Start(ctx context.Context) error {
 	logger := log.FromContext(ctx)
-	logger.Info("Starting REST API server", "addr", s.server.Addr)
+	logger.Info("🌐 Starting REST API server (waiting for JWT secret to be ready)", "addr", s.server.Addr)
 
+	// Wait for JWT SecretManager to be ready before starting HTTP server
+	// This prevents the server from accepting requests before authentication is configured
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+
+	timeout := time.After(2 * time.Minute) // Max wait time for JWT secret
+	for {
+		select {
+		case <-ctx.Done():
+			logger.Info("Context cancelled while waiting for JWT secret")
+			return ctx.Err()
+
+		case <-timeout:
+			logger.Error(nil, "❌ Timeout waiting for JWT secret to be ready")
+			return fmt.Errorf("timeout waiting for JWT secret to be ready after 2 minutes")
+
+		case <-ticker.C:
+			if s.secretManager.IsReady() {
+				logger.Info("✅ JWT secret ready, starting HTTP server", "addr", s.server.Addr)
+				goto startServer
+			}
+			logger.V(1).Info("Waiting for JWT secret to be ready...")
+		}
+	}
+
+startServer:
 	errChan := make(chan error, 1)
 	go func() {
 		if err := s.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			errChan <- err
 		}
 	}()
+
+	logger.Info("🚀 REST API server started and accepting connections", "addr", s.server.Addr)
 
 	select {
 	case err := <-errChan:
