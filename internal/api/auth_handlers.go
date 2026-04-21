@@ -450,10 +450,10 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get or create JWT secret
-	jwtSecret, err := h.getOrCreateJWTSecret(ctx)
+	// Get token generator from SecretManager
+	tokenGen, err := h.getTokenGenerator(ctx)
 	if err != nil {
-		logger.Error(err, "Failed to get JWT secret")
+		logger.Error(err, "Failed to get token generator")
 		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
 			Error:   "internal_error",
 			Message: "Failed to generate token",
@@ -462,7 +462,6 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Generate JWT token
-	tokenGen := auth.NewTokenGenerator(jwtSecret, TokenDuration, "krkn-operator")
 	token, err := tokenGen.GenerateToken(user.Spec.UserID, user.Spec.Role, user.Spec.Name, user.Spec.Surname, user.Spec.Organization)
 	if err != nil {
 		logger.Error(err, "Failed to generate token")
@@ -494,65 +493,11 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// getOrCreateJWTSecret retrieves the JWT secret or creates it if it doesn't exist
+// getOrCreateJWTSecret is DEPRECATED: Use SecretManager instead
+// This function is no longer used and exists only for backward compatibility
+// All JWT secret operations now go through pkg/auth.SecretManager
+// which ensures consistency across all replicas
 func (h *Handler) getOrCreateJWTSecret(ctx context.Context) ([]byte, error) {
-	logger := log.FromContext(ctx).WithName("jwt-secret")
-	secret := &corev1.Secret{}
-	secretKey := client.ObjectKey{
-		Namespace: h.namespace,
-		Name:      GetJWTSecretName(),
-	}
-
-	err := h.client.Get(ctx, secretKey, secret)
-	if err == nil {
-		// Secret exists
-		logger.V(1).Info("Using existing JWT secret")
-		jwtSecret, ok := secret.Data[JWTSecretKey]
-		if !ok {
-			return nil, fmt.Errorf("jwt-secret key not found in secret")
-		}
-		return jwtSecret, nil
-	}
-
-	// Secret doesn't exist, create it
-	// Generate a random 32-byte secret
-	randomSecret := make([]byte, 32)
-	for i := range randomSecret {
-		randomSecret[i] = byte(time.Now().UnixNano() % 256)
-	}
-
-	newSecret := &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      GetJWTSecretName(),
-			Namespace: h.namespace,
-			Labels: map[string]string{
-				"app.kubernetes.io/name":      "krkn-operator",
-				"app.kubernetes.io/component": "authentication",
-			},
-		},
-		Type: corev1.SecretTypeOpaque,
-		Data: map[string][]byte{
-			JWTSecretKey: randomSecret,
-		},
-	}
-
-	if err := h.client.Create(ctx, newSecret); err != nil {
-		// If secret already exists (race condition), try to get it
-		if apierrors.IsAlreadyExists(err) {
-			logger.Info("JWT secret already exists, retrieving it")
-			// Retry Get
-			if getErr := h.client.Get(ctx, secretKey, secret); getErr != nil {
-				return nil, fmt.Errorf("JWT secret exists but failed to retrieve it: %w", getErr)
-			}
-			jwtSecret, ok := secret.Data[JWTSecretKey]
-			if !ok {
-				return nil, fmt.Errorf("jwt-secret key not found in existing secret")
-			}
-			return jwtSecret, nil
-		}
-		return nil, fmt.Errorf("failed to create JWT secret: %w", err)
-	}
-
-	logger.Info("Created new JWT secret")
-	return randomSecret, nil
+	// This method should never be called - all callers have been updated to use SecretManager
+	return nil, fmt.Errorf("getOrCreateJWTSecret is deprecated, use SecretManager instead")
 }

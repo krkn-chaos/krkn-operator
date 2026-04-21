@@ -54,7 +54,7 @@ type Server struct {
 //
 // Returns a new Server instance
 func NewServer(port int, client client.Client, clientset kubernetes.Interface, namespace string, grpcServerAddr string, secretManager *auth.SecretManager) *Server {
-	handler := NewHandler(client, clientset, namespace, grpcServerAddr)
+	handler := NewHandler(client, clientset, namespace, grpcServerAddr, secretManager)
 
 	// Create auth middleware using SecretManager
 	// The SecretManager is started as a Runnable before the API server starts

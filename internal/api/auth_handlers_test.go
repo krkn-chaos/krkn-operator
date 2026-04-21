@@ -52,7 +52,7 @@ func setupAuthTestHandler(users ...*krknv1alpha1.KrknUser) *Handler {
 		WithStatusSubresource(&krknv1alpha1.KrknUser{}).
 		Build()
 	fakeClientset := fake.NewSimpleClientset()
-	return NewHandler(fakeClient, fakeClientset, "default", "localhost:50051")
+	return NewTestHandler(fakeClient, fakeClientset, "default", "localhost:50051")
 }
 
 func TestIsRegistered_NoAdmins(t *testing.T) {
@@ -348,10 +348,10 @@ func TestLogin_Success(t *testing.T) {
 
 	fakeClient := fakeclient.NewClientBuilder().
 		WithScheme(scheme).
-		WithRuntimeObjects(user, secret).
+		WithRuntimeObjects(user, secret, TestJWTSecret("default")).
 		Build()
 	fakeClientset := fake.NewSimpleClientset()
-	handler := NewHandler(fakeClient, fakeClientset, "default", "localhost:50051")
+	handler := NewTestHandler(fakeClient, fakeClientset, "default", "localhost:50051")
 
 	reqBody := `{
 		"userId": "[email protected]",
@@ -430,10 +430,10 @@ func TestLogin_InvalidCredentials(t *testing.T) {
 
 	fakeClient := fakeclient.NewClientBuilder().
 		WithScheme(scheme).
-		WithRuntimeObjects(user, secret).
+		WithRuntimeObjects(user, secret, TestJWTSecret("default")).
 		Build()
 	fakeClientset := fake.NewSimpleClientset()
-	handler := NewHandler(fakeClient, fakeClientset, "default", "localhost:50051")
+	handler := NewTestHandler(fakeClient, fakeClientset, "default", "localhost:50051")
 
 	tests := []struct {
 		name       string
@@ -509,10 +509,10 @@ func TestLogin_InactiveUser(t *testing.T) {
 
 	fakeClient := fakeclient.NewClientBuilder().
 		WithScheme(scheme).
-		WithRuntimeObjects(user, secret).
+		WithRuntimeObjects(user, secret, TestJWTSecret("default")).
 		Build()
 	fakeClientset := fake.NewSimpleClientset()
-	handler := NewHandler(fakeClient, fakeClientset, "default", "localhost:50051")
+	handler := NewTestHandler(fakeClient, fakeClientset, "default", "localhost:50051")
 
 	reqBody := `{
 		"userId": "[email protected]",

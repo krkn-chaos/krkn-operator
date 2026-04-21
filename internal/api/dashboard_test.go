@@ -109,7 +109,7 @@ func TestGetActiveRunsOverview_AllUsersSeesAll(t *testing.T) {
 		Build()
 
 	fakeClientset := fake.NewSimpleClientset()
-	handler := NewHandler(fakeClient, fakeClientset, "default", "localhost:50051")
+	handler := NewTestHandler(fakeClient, fakeClientset, "default", "localhost:50051")
 
 	// Admin context
 	ctx := context.WithValue(context.Background(), auth.UserClaimsKey, &auth.Claims{
@@ -209,7 +209,7 @@ func TestGetActiveRunsOverview_UserSeesAll(t *testing.T) {
 		Build()
 
 	fakeClientset := fake.NewSimpleClientset()
-	handler := NewHandler(fakeClient, fakeClientset, "default", "localhost:50051")
+	handler := NewTestHandler(fakeClient, fakeClientset, "default", "localhost:50051")
 
 	// User context for user1
 	ctx := context.WithValue(context.Background(), auth.UserClaimsKey, &auth.Claims{
@@ -287,7 +287,7 @@ func TestGetActiveRunsOverview_NoActiveRuns(t *testing.T) {
 		Build()
 
 	fakeClientset := fake.NewSimpleClientset()
-	handler := NewHandler(fakeClient, fakeClientset, "default", "localhost:50051")
+	handler := NewTestHandler(fakeClient, fakeClientset, "default", "localhost:50051")
 
 	ctx := context.WithValue(context.Background(), auth.UserClaimsKey, &auth.Claims{
 		UserID: "admin@example.com",
@@ -363,7 +363,7 @@ func TestGetActiveRunsOverview_MixedJobStates(t *testing.T) {
 		Build()
 
 	fakeClientset := fake.NewSimpleClientset()
-	handler := NewHandler(fakeClient, fakeClientset, "default", "localhost:50051")
+	handler := NewTestHandler(fakeClient, fakeClientset, "default", "localhost:50051")
 
 	ctx := context.WithValue(context.Background(), auth.UserClaimsKey, &auth.Claims{
 		UserID: "user1@example.com",
