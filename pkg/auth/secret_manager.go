@@ -34,7 +34,7 @@ import (
 
 const (
 	// JWTSecretName is the name of the Kubernetes Secret containing the JWT signing key
-	JWTSecretName = "krkn-operator-jwt"
+	JWTSecretName = "krkn-operator-jwt" // #nosec G101 -- This is a Secret name (metadata), not credentials; actual secret value is randomly generated and stored in Secret.Data[JWTSecretKey]
 	// JWTSecretKey is the key in the Secret data map
 	JWTSecretKey = "jwt-secret"
 	// JWTSecretLength is the length of the JWT secret in bytes (256 bits)
