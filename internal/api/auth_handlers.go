@@ -479,4 +479,3 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		Surname:   user.Spec.Surname,
 	})
 }
-

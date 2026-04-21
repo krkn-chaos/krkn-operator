@@ -18,6 +18,7 @@ package api
 
 import (
 	"context"
+	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -42,30 +43,48 @@ func TestJWTSecret(namespace string) *corev1.Secret {
 	}
 }
 
-// NewTestHandler creates a Handler with an initialized SecretManager for testing
-// IMPORTANT: The JWT secret MUST be included when creating the fake client:
+// NewTestHandler creates a Handler with a SecretManager for testing
 //
+// For tests that use JWT authentication (Login, Register, etc.):
+//
+//	scheme := runtime.NewScheme()
+//	_ = krknv1alpha1.AddToScheme(scheme)
+//	_ = corev1.AddToScheme(scheme)  // REQUIRED for JWT tests
 //	client := fakeclient.NewClientBuilder().
 //	    WithScheme(scheme).
 //	    WithRuntimeObjects(user, secret, api.TestJWTSecret("default")).
 //	    Build()
-//	handler := api.NewTestHandler(client, clientset, "default", "localhost:50051")
 //
-// If the JWT secret doesn't exist, SecretManager will try to create it
+// For tests that don't use JWT (authorization tests, etc.):
+//
+//	scheme := runtime.NewScheme()
+//	_ = krknv1alpha1.AddToScheme(scheme)
+//	client := fakeclient.NewClientBuilder().WithScheme(scheme).Build()
+//	// SecretManager will not be initialized, but handler will still work
+//	// for endpoints that don't require JWT generation/validation
 func NewTestHandler(client client.Client, clientset kubernetes.Interface, namespace string, grpcServerAddr string) *Handler {
 	// Try to create/initialize SecretManager for testing
+	// This will fail if the scheme doesn't include corev1 (Secret type not registered)
 	secretManager, err := auth.NewTestSecretManager(client, namespace)
 	if err != nil {
-		// If it fails, try creating the secret first
-		ctx := context.Background()
-		_ = client.Create(ctx, TestJWTSecret(namespace))
+		// Check if this is a scheme issue (Secret type not registered)
+		if strings.Contains(err.Error(), "no kind is registered for the type") {
+			// Scheme doesn't support Secret - create an uninitialized SecretManager
+			// Tests that don't use JWT will work fine
+			// Tests that try to use JWT will get a clear error when they call GetTokenGenerator()
+			secretManager = auth.NewSecretManager(client, namespace, TokenDuration, "krkn-operator")
+		} else {
+			// Try creating the secret first (maybe it just doesn't exist)
+			ctx := context.Background()
+			_ = client.Create(ctx, TestJWTSecret(namespace))
 
-		// Retry
-		secretManager, err = auth.NewTestSecretManager(client, namespace)
-		if err != nil {
-			// Still failing - panic with helpful message
-			panic("NewTestHandler: failed to initialize SecretManager even after creating JWT secret. " +
-				"Make sure to include TestJWTSecret(namespace) in WithRuntimeObjects(). Error: " + err.Error())
+			// Retry
+			secretManager, err = auth.NewTestSecretManager(client, namespace)
+			if err != nil {
+				// Still failing - create uninitialized manager
+				// This allows tests to run but JWT operations will fail with clear errors
+				secretManager = auth.NewSecretManager(client, namespace, TokenDuration, "krkn-operator")
+			}
 		}
 	}
 
