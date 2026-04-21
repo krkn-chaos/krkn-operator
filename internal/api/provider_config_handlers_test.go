@@ -68,7 +68,7 @@ func TestUpdateProviderConfigValues_CreatesNativeKeyValueFormat(t *testing.T) {
 	fakeClient := fakeclient.NewClientBuilder().WithScheme(scheme).WithObjects(config).Build()
 	fakeClientset := fake.NewSimpleClientset()
 
-	handler := NewHandler(fakeClient, fakeClientset, "default", "localhost:50051")
+	handler := NewTestHandler(fakeClient, fakeClientset, "default", "localhost:50051")
 
 	// Create request
 	reqBody := ProviderConfigUpdateRequest{
@@ -158,7 +158,7 @@ func TestUpdateProviderConfigValues_UpdatesExistingConfigMap(t *testing.T) {
 		WithObjects(config, existingConfigMap).Build()
 	fakeClientset := fake.NewSimpleClientset()
 
-	handler := NewHandler(fakeClient, fakeClientset, "default", "localhost:50051")
+	handler := NewTestHandler(fakeClient, fakeClientset, "default", "localhost:50051")
 
 	// Create request with new value
 	reqBody := ProviderConfigUpdateRequest{

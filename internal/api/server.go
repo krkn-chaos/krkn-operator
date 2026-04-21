@@ -39,21 +39,35 @@ type Server struct {
 	server         *http.Server
 	handler        *Handler
 	authMiddleware *auth.Middleware
+	secretManager  *auth.SecretManager
 }
 
 // NewServer creates a new API server
-func NewServer(port int, client client.Client, clientset kubernetes.Interface, namespace string, grpcServerAddr string) *Server {
-	handler := NewHandler(client, clientset, namespace, grpcServerAddr)
+//
+// Parameters:
+//   - port: HTTP port to listen on
+//   - client: Kubernetes client
+//   - clientset: Kubernetes clientset
+//   - namespace: Operator namespace
+//   - grpcServerAddr: gRPC server address
+//   - secretManager: JWT secret manager (must be started before API server receives traffic)
+//
+// Returns a new Server instance
+func NewServer(port int, client client.Client, clientset kubernetes.Interface, namespace string, grpcServerAddr string, secretManager *auth.SecretManager) *Server {
+	handler := NewHandler(client, clientset, namespace, grpcServerAddr, secretManager)
 
-	// Create auth middleware with lazy JWT secret loading
-	// The secret will be loaded on first request when the cache is ready
+	// Create auth middleware using SecretManager
+	// The SecretManager is started as a Runnable before the API server starts
+	// so the JWT secret is guaranteed to be loaded when the first request arrives
 	getTokenGen := func() *auth.TokenGenerator {
-		jwtSecret, err := handler.getOrCreateJWTSecret(context.Background())
+		tokenGen, err := secretManager.GetTokenGenerator()
 		if err != nil {
-			log.Log.Error(err, "Failed to get JWT secret, using fallback")
-			jwtSecret = []byte("fallback-secret-key-change-this-immediately")
+			// This should never happen if SecretManager started successfully
+			// Return nil and let middleware return 503 Service Unavailable
+			log.Log.Error(err, "CRITICAL: Failed to get TokenGenerator from SecretManager")
+			return nil
 		}
-		return auth.NewTokenGenerator(jwtSecret, TokenDuration, "krkn-operator")
+		return tokenGen
 	}
 	authMw := auth.NewLazyMiddleware(getTokenGen)
 
@@ -132,20 +146,50 @@ func NewServer(port int, client client.Client, clientset kubernetes.Interface, n
 		server:         server,
 		handler:        handler,
 		authMiddleware: authMw,
+		secretManager:  secretManager,
 	}
 }
 
 // Start starts the API server
+// It waits for the JWT SecretManager to be ready before accepting traffic
 func (s *Server) Start(ctx context.Context) error {
 	logger := log.FromContext(ctx)
-	logger.Info("Starting REST API server", "addr", s.server.Addr)
+	logger.Info("🌐 Starting REST API server (waiting for JWT secret to be ready)", "addr", s.server.Addr)
 
+	// Wait for JWT SecretManager to be ready before starting HTTP server
+	// This prevents the server from accepting requests before authentication is configured
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+
+	timeout := time.After(2 * time.Minute) // Max wait time for JWT secret
+	for {
+		select {
+		case <-ctx.Done():
+			logger.Info("Context cancelled while waiting for JWT secret")
+			return ctx.Err()
+
+		case <-timeout:
+			logger.Error(nil, "❌ Timeout waiting for JWT secret to be ready")
+			return fmt.Errorf("timeout waiting for JWT secret to be ready after 2 minutes")
+
+		case <-ticker.C:
+			if s.secretManager.IsReady() {
+				logger.Info("✅ JWT secret ready, starting HTTP server", "addr", s.server.Addr)
+				goto startServer
+			}
+			logger.V(1).Info("Waiting for JWT secret to be ready...")
+		}
+	}
+
+startServer:
 	errChan := make(chan error, 1)
 	go func() {
 		if err := s.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			errChan <- err
 		}
 	}()
+
+	logger.Info("🚀 REST API server started and accepting connections", "addr", s.server.Addr)
 
 	select {
 	case err := <-errChan:
@@ -203,4 +247,12 @@ func (rw *responseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 		return nil, nil, fmt.Errorf("ResponseWriter does not implement http.Hijacker")
 	}
 	return hijacker.Hijack()
+}
+
+// NeedLeaderElection implements manager.LeaderElectionRunnable
+// Returns false because the API server is stateless and should run on all replicas
+// to provide high availability. Kubernetes' optimistic concurrency control (resourceVersion)
+// handles any potential race conditions when multiple replicas modify the same resources.
+func (s *Server) NeedLeaderElection() bool {
+	return false
 }

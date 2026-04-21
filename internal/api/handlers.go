@@ -55,26 +55,28 @@ type Handler struct {
 	clientset      kubernetes.Interface
 	namespace      string
 	grpcServerAddr string
+	secretManager  *auth.SecretManager
 }
 
 // NewHandler creates a new Handler
-func NewHandler(client client.Client, clientset kubernetes.Interface, namespace string, grpcServerAddr string) *Handler {
+func NewHandler(client client.Client, clientset kubernetes.Interface, namespace string, grpcServerAddr string, secretManager *auth.SecretManager) *Handler {
 	return &Handler{
 		client:         client,
 		clientset:      clientset,
 		namespace:      namespace,
 		grpcServerAddr: grpcServerAddr,
+		secretManager:  secretManager,
 	}
 }
 
 // getTokenGenerator creates a TokenGenerator for JWT validation (used for WebSocket auth)
-// It uses the same JWT secret as the HTTP middleware
+// It uses the same JWT secret as the HTTP middleware via SecretManager
 func (h *Handler) getTokenGenerator(ctx context.Context) (*auth.TokenGenerator, error) {
-	jwtSecret, err := h.getOrCreateJWTSecret(ctx)
+	tokenGen, err := h.secretManager.GetTokenGenerator()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get JWT secret: %w", err)
+		return nil, fmt.Errorf("failed to get token generator from SecretManager: %w", err)
 	}
-	return auth.NewTokenGenerator(jwtSecret, TokenDuration, "krkn-operator"), nil
+	return tokenGen, nil
 }
 
 // GetClusters handles GET /api/v1/clusters endpoint

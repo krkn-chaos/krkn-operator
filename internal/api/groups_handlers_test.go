@@ -80,7 +80,7 @@ func TestListUserGroups_Success(t *testing.T) {
 		Build()
 
 	fakeClientset := fake.NewSimpleClientset()
-	handler := NewHandler(fakeClient, fakeClientset, "default", "localhost:50051")
+	handler := NewTestHandler(fakeClient, fakeClientset, "default", "localhost:50051")
 
 	req := httptest.NewRequest("GET", GroupsPath, nil)
 	req = req.WithContext(createAdminContext())
@@ -112,7 +112,7 @@ func TestListUserGroups_Forbidden(t *testing.T) {
 
 	fakeClient := fakeclient.NewClientBuilder().WithScheme(scheme).Build()
 	fakeClientset := fake.NewSimpleClientset()
-	handler := NewHandler(fakeClient, fakeClientset, "default", "localhost:50051")
+	handler := NewTestHandler(fakeClient, fakeClientset, "default", "localhost:50051")
 
 	req := httptest.NewRequest("GET", GroupsPath, nil)
 	req = req.WithContext(createUserContext("user@example.com")) // Non-admin user
@@ -152,7 +152,7 @@ func TestGetUserGroup_Success(t *testing.T) {
 		Build()
 
 	fakeClientset := fake.NewSimpleClientset()
-	handler := NewHandler(fakeClient, fakeClientset, "default", "localhost:50051")
+	handler := NewTestHandler(fakeClient, fakeClientset, "default", "localhost:50051")
 
 	req := httptest.NewRequest("GET", GroupsPath+"/dev-team", nil)
 	req = req.WithContext(createAdminContext())
@@ -180,7 +180,7 @@ func TestGetUserGroup_NotFound(t *testing.T) {
 
 	fakeClient := fakeclient.NewClientBuilder().WithScheme(scheme).Build()
 	fakeClientset := fake.NewSimpleClientset()
-	handler := NewHandler(fakeClient, fakeClientset, "default", "localhost:50051")
+	handler := NewTestHandler(fakeClient, fakeClientset, "default", "localhost:50051")
 
 	req := httptest.NewRequest("GET", GroupsPath+"/nonexistent", nil)
 	req = req.WithContext(createAdminContext())
@@ -199,7 +199,7 @@ func TestCreateUserGroup_Success(t *testing.T) {
 
 	fakeClient := fakeclient.NewClientBuilder().WithScheme(scheme).Build()
 	fakeClientset := fake.NewSimpleClientset()
-	handler := NewHandler(fakeClient, fakeClientset, "default", "localhost:50051")
+	handler := NewTestHandler(fakeClient, fakeClientset, "default", "localhost:50051")
 
 	createReq := CreateUserGroupRequest{
 		Name:        "dev-team",
@@ -238,7 +238,7 @@ func TestCreateUserGroup_ValidationError(t *testing.T) {
 
 	fakeClient := fakeclient.NewClientBuilder().WithScheme(scheme).Build()
 	fakeClientset := fake.NewSimpleClientset()
-	handler := NewHandler(fakeClient, fakeClientset, "default", "localhost:50051")
+	handler := NewTestHandler(fakeClient, fakeClientset, "default", "localhost:50051")
 
 	tests := []struct {
 		name    string
@@ -317,7 +317,7 @@ func TestUpdateUserGroup_Success(t *testing.T) {
 		Build()
 
 	fakeClientset := fake.NewSimpleClientset()
-	handler := NewHandler(fakeClient, fakeClientset, "default", "localhost:50051")
+	handler := NewTestHandler(fakeClient, fakeClientset, "default", "localhost:50051")
 
 	updateReq := UpdateUserGroupRequest{
 		Description: strPtr("New description"),
@@ -392,7 +392,7 @@ func TestUpdateUserGroup_EmptyClusterPermissions(t *testing.T) {
 		Build()
 
 	fakeClientset := fake.NewSimpleClientset()
-	handler := NewHandler(fakeClient, fakeClientset, "default", "localhost:50051")
+	handler := NewTestHandler(fakeClient, fakeClientset, "default", "localhost:50051")
 
 	// Try to update with empty clusterPermissions
 	// Note: We use raw JSON instead of marshaling because an empty map with omitempty
@@ -446,7 +446,7 @@ func TestDeleteUserGroup_Success(t *testing.T) {
 		Build()
 
 	fakeClientset := fake.NewSimpleClientset()
-	handler := NewHandler(fakeClient, fakeClientset, "default", "localhost:50051")
+	handler := NewTestHandler(fakeClient, fakeClientset, "default", "localhost:50051")
 
 	req := httptest.NewRequest("DELETE", GroupsPath+"/dev-team", nil)
 	req = req.WithContext(createAdminContext())
@@ -512,7 +512,7 @@ func TestListGroupMembers_Success(t *testing.T) {
 		Build()
 
 	fakeClientset := fake.NewSimpleClientset()
-	handler := NewHandler(fakeClient, fakeClientset, "default", "localhost:50051")
+	handler := NewTestHandler(fakeClient, fakeClientset, "default", "localhost:50051")
 
 	req := httptest.NewRequest("GET", GroupsPath+"/dev-team/members", nil)
 	req = req.WithContext(createAdminContext())
@@ -569,7 +569,7 @@ func TestAddGroupMember_Success(t *testing.T) {
 		Build()
 
 	fakeClientset := fake.NewSimpleClientset()
-	handler := NewHandler(fakeClient, fakeClientset, "default", "localhost:50051")
+	handler := NewTestHandler(fakeClient, fakeClientset, "default", "localhost:50051")
 
 	addReq := AddGroupMemberRequest{
 		UserID: "user@example.com",
@@ -624,7 +624,7 @@ func TestRemoveGroupMember_Success(t *testing.T) {
 		Build()
 
 	fakeClientset := fake.NewSimpleClientset()
-	handler := NewHandler(fakeClient, fakeClientset, "default", "localhost:50051")
+	handler := NewTestHandler(fakeClient, fakeClientset, "default", "localhost:50051")
 
 	req := httptest.NewRequest("DELETE", GroupsPath+"/dev-team/members/user@example.com", nil)
 	req = req.WithContext(createAdminContext())
@@ -663,7 +663,7 @@ func TestCreateUserGroup_WithDiscoveryUUID(t *testing.T) {
 		Build()
 
 	fakeClientset := fake.NewSimpleClientset()
-	handler := NewHandler(fakeClient, fakeClientset, "default", "localhost:50051")
+	handler := NewTestHandler(fakeClient, fakeClientset, "default", "localhost:50051")
 
 	reqBody := CreateUserGroupRequest{
 		Name:        "test-group",
@@ -749,7 +749,7 @@ func TestUpdateUserGroup_WithDiscoveryUUID(t *testing.T) {
 		Build()
 
 	fakeClientset := fake.NewSimpleClientset()
-	handler := NewHandler(fakeClient, fakeClientset, "default", "localhost:50051")
+	handler := NewTestHandler(fakeClient, fakeClientset, "default", "localhost:50051")
 
 	newDesc := "Updated description"
 	reqBody := UpdateUserGroupRequest{
@@ -821,7 +821,7 @@ func TestUpdateUserGroup_OnlyDiscoveryUUID(t *testing.T) {
 		Build()
 
 	fakeClientset := fake.NewSimpleClientset()
-	handler := NewHandler(fakeClient, fakeClientset, "default", "localhost:50051")
+	handler := NewTestHandler(fakeClient, fakeClientset, "default", "localhost:50051")
 
 	// Request with ONLY discoveryUuid (no description or clusterPermissions)
 	reqBody := UpdateUserGroupRequest{
@@ -871,7 +871,7 @@ func TestCleanupDiscoveryTargetRequest_Idempotent(t *testing.T) {
 		Build()
 
 	fakeClientset := fake.NewSimpleClientset()
-	handler := NewHandler(fakeClient, fakeClientset, "default", "localhost:50051")
+	handler := NewTestHandler(fakeClient, fakeClientset, "default", "localhost:50051")
 
 	ctx := context.Background()
 	// This should not error - idempotent cleanup
@@ -890,7 +890,7 @@ func TestCleanupDiscoveryTargetRequest_EmptyUUID(t *testing.T) {
 		Build()
 
 	fakeClientset := fake.NewSimpleClientset()
-	handler := NewHandler(fakeClient, fakeClientset, "default", "localhost:50051")
+	handler := NewTestHandler(fakeClient, fakeClientset, "default", "localhost:50051")
 
 	ctx := context.Background()
 	// Empty UUID should be a no-op
@@ -924,7 +924,7 @@ func TestCleanupDiscoveryTargetRequest_Success(t *testing.T) {
 		Build()
 
 	fakeClientset := fake.NewSimpleClientset()
-	handler := NewHandler(fakeClient, fakeClientset, "default", "localhost:50051")
+	handler := NewTestHandler(fakeClient, fakeClientset, "default", "localhost:50051")
 
 	// Verify CR exists before cleanup
 	ctx := context.Background()

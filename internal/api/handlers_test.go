@@ -65,7 +65,7 @@ func TestGetClusters_Success(t *testing.T) {
 
 	fakeClient := fakeclient.NewClientBuilder().WithScheme(scheme).WithObjects(targetRequest).Build()
 	fakeClientset := fake.NewSimpleClientset()
-	handler := NewHandler(fakeClient, fakeClientset, "default", "localhost:50051")
+	handler := NewTestHandler(fakeClient, fakeClientset, "default", "localhost:50051")
 
 	req := httptest.NewRequest("GET", ClustersPath+"?id=test-request", nil)
 	w := httptest.NewRecorder()
@@ -100,7 +100,7 @@ func TestGetClusters_NotFound(t *testing.T) {
 
 	fakeClient := fakeclient.NewClientBuilder().WithScheme(scheme).Build()
 	fakeClientset := fake.NewSimpleClientset()
-	handler := NewHandler(fakeClient, fakeClientset, "default", "localhost:50051")
+	handler := NewTestHandler(fakeClient, fakeClientset, "default", "localhost:50051")
 
 	req := httptest.NewRequest("GET", ClustersPath+"?id=non-existent", nil)
 	w := httptest.NewRecorder()
@@ -127,7 +127,7 @@ func TestHealthCheck(t *testing.T) {
 
 	fakeClient := fakeclient.NewClientBuilder().WithScheme(scheme).Build()
 	fakeClientset := fake.NewSimpleClientset()
-	handler := NewHandler(fakeClient, fakeClientset, "default", "localhost:50051")
+	handler := NewTestHandler(fakeClient, fakeClientset, "default", "localhost:50051")
 
 	req := httptest.NewRequest("GET", HealthPath, nil)
 	w := httptest.NewRecorder()
@@ -154,7 +154,7 @@ func TestPostTarget_LegacyEndpoint(t *testing.T) {
 
 	fakeClient := fakeclient.NewClientBuilder().WithScheme(scheme).Build()
 	fakeClientset := fake.NewSimpleClientset()
-	handler := NewHandler(fakeClient, fakeClientset, "default", "localhost:50051")
+	handler := NewTestHandler(fakeClient, fakeClientset, "default", "localhost:50051")
 
 	req := httptest.NewRequest("POST", TargetsPath, nil)
 	w := httptest.NewRecorder()
@@ -209,7 +209,7 @@ func TestGetTargetByUUID_NotCompleted(t *testing.T) {
 
 	fakeClient := fakeclient.NewClientBuilder().WithScheme(scheme).WithObjects(targetRequest).Build()
 	fakeClientset := fake.NewSimpleClientset()
-	handler := NewHandler(fakeClient, fakeClientset, "default", "localhost:50051")
+	handler := NewTestHandler(fakeClient, fakeClientset, "default", "localhost:50051")
 
 	req := httptest.NewRequest("GET", TargetsPath+"/test-uuid", nil)
 	w := httptest.NewRecorder()
@@ -240,7 +240,7 @@ func TestGetTargetByUUID_Completed(t *testing.T) {
 
 	fakeClient := fakeclient.NewClientBuilder().WithScheme(scheme).WithObjects(targetRequest).Build()
 	fakeClientset := fake.NewSimpleClientset()
-	handler := NewHandler(fakeClient, fakeClientset, "default", "localhost:50051")
+	handler := NewTestHandler(fakeClient, fakeClientset, "default", "localhost:50051")
 
 	req := httptest.NewRequest("GET", TargetsPath+"/test-uuid", nil)
 	w := httptest.NewRecorder()
@@ -258,7 +258,7 @@ func TestGetTargetByUUID_NotFound(t *testing.T) {
 
 	fakeClient := fakeclient.NewClientBuilder().WithScheme(scheme).Build()
 	fakeClientset := fake.NewSimpleClientset()
-	handler := NewHandler(fakeClient, fakeClientset, "default", "localhost:50051")
+	handler := NewTestHandler(fakeClient, fakeClientset, "default", "localhost:50051")
 
 	req := httptest.NewRequest("GET", TargetsPath+"/non-existent-uuid", nil)
 	w := httptest.NewRecorder()
@@ -324,7 +324,7 @@ func setupScenarioRunTestHandler(targetRequestID string, clusters map[string]str
 
 	fakeClient := fakeclient.NewClientBuilder().WithScheme(scheme).WithObjects(secret, targetRequest).Build()
 	fakeClientset := fake.NewSimpleClientset()
-	return NewHandler(fakeClient, fakeClientset, "default", "localhost:50051")
+	return NewTestHandler(fakeClient, fakeClientset, "default", "localhost:50051")
 }
 
 func TestPostScenarioRun_SingleTarget_Success(t *testing.T) {
@@ -680,7 +680,7 @@ func TestListScenarioRuns_Success(t *testing.T) {
 		WithObjects(scenarioRun1, scenarioRun2, scenarioRun3).
 		Build()
 	fakeClientset := fake.NewSimpleClientset()
-	handler := NewHandler(fakeClient, fakeClientset, "default", "localhost:50051")
+	handler := NewTestHandler(fakeClient, fakeClientset, "default", "localhost:50051")
 
 	req := httptest.NewRequest("GET", ScenariosRunPath, nil)
 	w := httptest.NewRecorder()
@@ -751,7 +751,7 @@ func TestListScenarioRuns_FilterByScenarioName(t *testing.T) {
 		WithObjects(scenarioRun1, scenarioRun2).
 		Build()
 	fakeClientset := fake.NewSimpleClientset()
-	handler := NewHandler(fakeClient, fakeClientset, "default", "localhost:50051")
+	handler := NewTestHandler(fakeClient, fakeClientset, "default", "localhost:50051")
 
 	req := httptest.NewRequest("GET", ScenariosRunPath+"?scenarioName=pod-delete", nil)
 	w := httptest.NewRecorder()

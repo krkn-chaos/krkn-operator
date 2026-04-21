@@ -48,7 +48,7 @@ func setupUserTestHandler(objects ...runtime.Object) *Handler {
 		WithStatusSubresource(&krknv1alpha1.KrknUser{}).
 		Build()
 	fakeClientset := fake.NewSimpleClientset()
-	return NewHandler(fakeClient, fakeClientset, "default", "localhost:50051")
+	return NewTestHandler(fakeClient, fakeClientset, "default", "localhost:50051")
 }
 
 // createTestUser creates a test user with password secret
