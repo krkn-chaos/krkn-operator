@@ -43,20 +43,7 @@ const (
 	AdminRoleLabel = "krkn.krkn-chaos.dev/role"
 	// UserAccountLabel is the label used to identify user account CRDs
 	UserAccountLabel = "krkn.krkn-chaos.dev/user-account"
-	// JWTSecretKey is the key in the JWT secret
-	JWTSecretKey = "jwt-secret"
-	// DefaultJWTSecretName is the default name of the secret containing the JWT signing key
-	// Can be overridden via JWT_SECRET_NAME environment variable
-	DefaultJWTSecretName = "krkn-operator-jwt-secret" // #nosec G101 -- This is a default name, not credentials; actual secret is stored in Kubernetes Secret with random generated value
 )
-
-// GetJWTSecretName returns the JWT secret name from environment or default
-func GetJWTSecretName() string {
-	if name := os.Getenv("JWT_SECRET_NAME"); name != "" {
-		return name
-	}
-	return DefaultJWTSecretName
-}
 
 var (
 	// TokenDuration is how long JWT tokens remain valid
@@ -493,11 +480,3 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// getOrCreateJWTSecret is DEPRECATED: Use SecretManager instead
-// This function is no longer used and exists only for backward compatibility
-// All JWT secret operations now go through pkg/auth.SecretManager
-// which ensures consistency across all replicas
-func (h *Handler) getOrCreateJWTSecret(ctx context.Context) ([]byte, error) {
-	// This method should never be called - all callers have been updated to use SecretManager
-	return nil, fmt.Errorf("getOrCreateJWTSecret is deprecated, use SecretManager instead")
-}
