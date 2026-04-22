@@ -342,17 +342,74 @@ func (h *Handler) PostTarget(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, response)
 }
 
-// TargetsHandler handles both GET /api/v1/targets/{UUID} and POST /api/v1/targets endpoints
+// DeleteTargetByUUID handles DELETE /api/v1/targets/{uuid} endpoint
+// It deletes a KrknTargetRequest resource by UUID
+func (h *Handler) DeleteTargetByUUID(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	logger := log.FromContext(ctx).WithName("delete-target")
+
+	// Extract UUID from path
+	uuid, err := extractPathSuffix(r.URL.Path, TargetsPath+"/")
+	if err != nil {
+		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+			Error:   "bad_request",
+			Message: "UUID " + err.Error(),
+		})
+		return
+	}
+
+	logger.Info("Deleting KrknTargetRequest", "uuid", uuid)
+
+	// Fetch the KrknTargetRequest to verify it exists
+	var targetRequest krknv1alpha1.KrknTargetRequest
+	if err := h.client.Get(ctx, types.NamespacedName{
+		Name:      uuid,
+		Namespace: h.namespace,
+	}, &targetRequest); err != nil {
+		if client.IgnoreNotFound(err) == nil {
+			logger.Info("KrknTargetRequest not found", "uuid", uuid)
+			writeJSONError(w, http.StatusNotFound, ErrorResponse{
+				Error:   "not_found",
+				Message: "KrknTargetRequest with UUID '" + uuid + "' not found",
+			})
+		} else {
+			logger.Error(err, "Failed to get KrknTargetRequest", "uuid", uuid)
+			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+				Error:   "internal_error",
+				Message: "Failed to get KrknTargetRequest",
+			})
+		}
+		return
+	}
+
+	// Delete the KrknTargetRequest
+	if err := h.client.Delete(ctx, &targetRequest); err != nil {
+		logger.Error(err, "Failed to delete KrknTargetRequest", "uuid", uuid)
+		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+			Error:   "internal_error",
+			Message: "Failed to delete KrknTargetRequest",
+		})
+		return
+	}
+
+	logger.Info("Successfully deleted KrknTargetRequest", "uuid", uuid)
+	// Return 204 No Content on successful deletion
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// TargetsHandler handles GET, POST, and DELETE for /api/v1/targets endpoints
 // It routes to the appropriate handler based on the HTTP method
 func (h *Handler) TargetsHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
 		h.GetTargetByUUID(w, r)
 	} else if r.Method == http.MethodPost {
 		h.PostTarget(w, r)
+	} else if r.Method == http.MethodDelete {
+		h.DeleteTargetByUUID(w, r)
 	} else {
 		writeJSONError(w, http.StatusMethodNotAllowed, ErrorResponse{
 			Error:   "method_not_allowed",
-			Message: "Only GET and POST methods are allowed",
+			Message: "Only GET, POST, and DELETE methods are allowed",
 		})
 	}
 }

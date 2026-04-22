@@ -17,6 +17,7 @@ limitations under the License.
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -24,8 +25,10 @@ import (
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	fakeclient "sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -266,6 +269,197 @@ func TestGetTargetByUUID_NotFound(t *testing.T) {
 
 	if w.Code != http.StatusNotFound {
 		t.Errorf("Expected status code %d (Not Found), got %d", http.StatusNotFound, w.Code)
+	}
+}
+
+// TestDeleteTargetByUUID_Success tests successful deletion of a KrknTargetRequest
+func TestDeleteTargetByUUID_Success(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = krknv1alpha1.AddToScheme(scheme)
+	_ = corev1.AddToScheme(scheme)
+
+	// Create a KrknTargetRequest to delete
+	targetRequest := &krknv1alpha1.KrknTargetRequest{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-uuid-delete",
+			Namespace: "default",
+		},
+		Spec: krknv1alpha1.KrknTargetRequestSpec{
+			UUID: "test-uuid-delete",
+		},
+		Status: krknv1alpha1.KrknTargetRequestStatus{
+			Status: "Completed",
+		},
+	}
+
+	fakeClient := fakeclient.NewClientBuilder().
+		WithScheme(scheme).
+		WithRuntimeObjects(targetRequest, TestJWTSecret("default")).
+		Build()
+	fakeClientset := fake.NewSimpleClientset()
+	handler := NewTestHandler(fakeClient, fakeClientset, "default", "localhost:50051")
+
+	req := httptest.NewRequest(http.MethodDelete, TargetsPath+"/test-uuid-delete", nil)
+	w := httptest.NewRecorder()
+	handler.DeleteTargetByUUID(w, req)
+
+	// Verify response
+	if w.Code != http.StatusNoContent {
+		t.Errorf("Expected status code %d (No Content), got %d. Body: %s",
+			http.StatusNoContent, w.Code, w.Body.String())
+	}
+
+	// Verify the KrknTargetRequest was actually deleted
+	ctx := context.Background()
+	var deletedRequest krknv1alpha1.KrknTargetRequest
+	err := fakeClient.Get(ctx, types.NamespacedName{
+		Name:      "test-uuid-delete",
+		Namespace: "default",
+	}, &deletedRequest)
+
+	if err == nil {
+		t.Error("Expected KrknTargetRequest to be deleted, but it still exists")
+	}
+	if !apierrors.IsNotFound(err) {
+		t.Errorf("Expected NotFound error, got: %v", err)
+	}
+}
+
+// TestDeleteTargetByUUID_NotFound tests deletion of non-existent KrknTargetRequest
+func TestDeleteTargetByUUID_NotFound(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = krknv1alpha1.AddToScheme(scheme)
+	_ = corev1.AddToScheme(scheme)
+
+	fakeClient := fakeclient.NewClientBuilder().
+		WithScheme(scheme).
+		WithRuntimeObjects(TestJWTSecret("default")).
+		Build()
+	fakeClientset := fake.NewSimpleClientset()
+	handler := NewTestHandler(fakeClient, fakeClientset, "default", "localhost:50051")
+
+	req := httptest.NewRequest(http.MethodDelete, TargetsPath+"/non-existent-uuid", nil)
+	w := httptest.NewRecorder()
+	handler.DeleteTargetByUUID(w, req)
+
+	// Verify 404 response
+	if w.Code != http.StatusNotFound {
+		t.Errorf("Expected status code %d (Not Found), got %d", http.StatusNotFound, w.Code)
+	}
+
+	// Verify error response structure
+	var errResp ErrorResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &errResp); err != nil {
+		t.Fatalf("Failed to unmarshal error response: %v", err)
+	}
+
+	if errResp.Error != "not_found" {
+		t.Errorf("Expected error code 'not_found', got '%s'", errResp.Error)
+	}
+	if !strings.Contains(errResp.Message, "non-existent-uuid") {
+		t.Errorf("Expected error message to contain UUID, got '%s'", errResp.Message)
+	}
+}
+
+// TestDeleteTargetByUUID_InvalidUUID tests deletion with malformed UUID
+func TestDeleteTargetByUUID_InvalidUUID(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = krknv1alpha1.AddToScheme(scheme)
+	_ = corev1.AddToScheme(scheme)
+
+	fakeClient := fakeclient.NewClientBuilder().
+		WithScheme(scheme).
+		WithRuntimeObjects(TestJWTSecret("default")).
+		Build()
+	fakeClientset := fake.NewSimpleClientset()
+	handler := NewTestHandler(fakeClient, fakeClientset, "default", "localhost:50051")
+
+	// Test with empty UUID (no path suffix)
+	req := httptest.NewRequest(http.MethodDelete, TargetsPath+"/", nil)
+	w := httptest.NewRecorder()
+	handler.DeleteTargetByUUID(w, req)
+
+	// Verify 400 Bad Request response
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("Expected status code %d (Bad Request), got %d", http.StatusBadRequest, w.Code)
+	}
+
+	var errResp ErrorResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &errResp); err != nil {
+		t.Fatalf("Failed to unmarshal error response: %v", err)
+	}
+
+	if errResp.Error != "bad_request" {
+		t.Errorf("Expected error code 'bad_request', got '%s'", errResp.Error)
+	}
+}
+
+// TestTargetsHandler_DELETE tests routing to DeleteTargetByUUID via TargetsHandler
+func TestTargetsHandler_DELETE(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = krknv1alpha1.AddToScheme(scheme)
+	_ = corev1.AddToScheme(scheme)
+
+	// Create a KrknTargetRequest to delete
+	targetRequest := &krknv1alpha1.KrknTargetRequest{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-uuid-handler",
+			Namespace: "default",
+		},
+		Spec: krknv1alpha1.KrknTargetRequestSpec{
+			UUID: "test-uuid-handler",
+		},
+	}
+
+	fakeClient := fakeclient.NewClientBuilder().
+		WithScheme(scheme).
+		WithRuntimeObjects(targetRequest, TestJWTSecret("default")).
+		Build()
+	fakeClientset := fake.NewSimpleClientset()
+	handler := NewTestHandler(fakeClient, fakeClientset, "default", "localhost:50051")
+
+	// Test DELETE method is routed correctly
+	req := httptest.NewRequest(http.MethodDelete, TargetsPath+"/test-uuid-handler", nil)
+	w := httptest.NewRecorder()
+	handler.TargetsHandler(w, req)
+
+	if w.Code != http.StatusNoContent {
+		t.Errorf("Expected status code %d (No Content), got %d", http.StatusNoContent, w.Code)
+	}
+}
+
+// TestTargetsHandler_UnsupportedMethod tests that unsupported methods return 405
+func TestTargetsHandler_UnsupportedMethod(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = krknv1alpha1.AddToScheme(scheme)
+	_ = corev1.AddToScheme(scheme)
+
+	fakeClient := fakeclient.NewClientBuilder().
+		WithScheme(scheme).
+		WithRuntimeObjects(TestJWTSecret("default")).
+		Build()
+	fakeClientset := fake.NewSimpleClientset()
+	handler := NewTestHandler(fakeClient, fakeClientset, "default", "localhost:50051")
+
+	// Test unsupported method (PATCH)
+	req := httptest.NewRequest(http.MethodPatch, TargetsPath+"/test-uuid", nil)
+	w := httptest.NewRecorder()
+	handler.TargetsHandler(w, req)
+
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Errorf("Expected status code %d (Method Not Allowed), got %d", http.StatusMethodNotAllowed, w.Code)
+	}
+
+	var errResp ErrorResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &errResp); err != nil {
+		t.Fatalf("Failed to unmarshal error response: %v", err)
+	}
+
+	if errResp.Error != "method_not_allowed" {
+		t.Errorf("Expected error code 'method_not_allowed', got '%s'", errResp.Error)
+	}
+	if !strings.Contains(errResp.Message, "GET, POST, and DELETE") {
+		t.Errorf("Expected error message to list allowed methods, got '%s'", errResp.Message)
 	}
 }
 
