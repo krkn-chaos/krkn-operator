@@ -82,6 +82,7 @@ func NewServer(port int, client client.Client, clientset kubernetes.Interface, n
 	mux.Handle(HealthPath, authMw.RequireAuth(http.HandlerFunc(handler.HealthCheck)))
 	mux.Handle(ClustersPath, authMw.RequireAuth(http.HandlerFunc(handler.GetClusters)))
 	mux.Handle(NodesPath, authMw.RequireAuth(http.HandlerFunc(handler.GetNodes)))
+	mux.Handle(TerminalPath, authMw.RequireAuth(http.HandlerFunc(handler.ExecuteTerminal)))
 	mux.Handle(TargetsPath, authMw.RequireAuth(http.HandlerFunc(handler.TargetsHandler)))
 	mux.Handle(TargetsPath+"/", authMw.RequireAuth(http.HandlerFunc(handler.TargetsHandler)))
 

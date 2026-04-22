@@ -43,6 +43,7 @@ const (
 	HealthPath   = APIBasePath + "/health"
 	ClustersPath = APIBasePath + "/clusters"
 	NodesPath    = APIBasePath + "/nodes"
+	TerminalPath = APIBasePath + "/terminal"
 )
 
 // Legacy targets endpoints (deprecated, use OperatorTargetsPath)
