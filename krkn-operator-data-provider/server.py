@@ -120,11 +120,19 @@ class DataProviderServicer(dataprovider_pb2_grpc.DataProviderServiceServicer):
             # Set timeout (default 120 seconds)
             timeout_seconds = request.timeout_seconds if request.timeout_seconds > 0 else 120
 
-            # Execute command
+            # Create clean environment for subprocess to avoid gRPC warnings
+            env = os.environ.copy()
+            env['GRPC_VERBOSITY'] = 'NONE'
+            env['GRPC_TRACE'] = ''
+            env['GRPC_GO_LOG_VERBOSITY_LEVEL'] = '999'
+            env['GRPC_GO_LOG_SEVERITY_LEVEL'] = 'ERROR'
+
+            # Execute command with clean environment
             result = subprocess.run(
                 cmd,
                 capture_output=True,
-                timeout=timeout_seconds
+                timeout=timeout_seconds,
+                env=env
             )
 
             logger.info(f"Command completed with exit code {result.returncode}")
