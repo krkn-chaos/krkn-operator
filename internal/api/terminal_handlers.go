@@ -84,9 +84,9 @@ func (h *Handler) ExecuteTerminal(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
-		// Command not permitted (subcommand/flag blocked) → 401
+		// Command not permitted (subcommand/flag blocked) → 403
 		if errors.Is(err, terminal.ErrCommandNotPermitted) {
-			writeJSONError(w, http.StatusUnauthorized, ErrorResponse{
+			writeJSONError(w, http.StatusForbidden, ErrorResponse{
 				Error:   "not_permitted",
 				Message: "Command not permitted",
 			})

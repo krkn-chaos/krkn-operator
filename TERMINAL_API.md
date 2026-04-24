@@ -66,14 +66,24 @@ The token is obtained via the `/api/v1/auth/login` endpoint.
 
 **Error Types:**
 
-- `not_found`: Command or kubeconfig not found
+- `not_found`: Command is not kubectl/oc or kubeconfig not found
 - `not_permitted`: Command not permitted (write operations or streaming flags)
+- `command_failed`: Command executed but returned non-zero exit code
 - `timeout`: Command execution timed out (120s limit)
 - `execution_error`: General execution error
 - `invalid_command`: Failed to parse command
 - `invalid_request`: Missing required fields or invalid JSON
 
-**Error Response (400/403/404/500):**
+**HTTP Status Codes:**
+
+- `200 OK`: Command executed successfully (check exit_code)
+- `400 Bad Request`: Invalid request, malformed command, or command returned exit_code > 0
+- `403 Forbidden`: Subcommand not in whitelist or blocked flag used
+- `404 Not Found`: Command is not kubectl/oc, or kubeconfig/cluster not found
+- `408 Request Timeout`: Command execution exceeded 120 seconds
+- `500 Internal Server Error`: Server error during execution
+
+**Error Response (400/403/404/408/500):**
 
 ```json
 {
