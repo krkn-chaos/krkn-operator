@@ -40,10 +40,11 @@ const (
 
 // Core resource endpoints
 const (
-	HealthPath   = APIBasePath + "/health"
-	ClustersPath = APIBasePath + "/clusters"
-	NodesPath    = APIBasePath + "/nodes"
-	TerminalPath = APIBasePath + "/terminal"
+	HealthPath                   = APIBasePath + "/health"
+	ClustersPath                 = APIBasePath + "/clusters"
+	NodesPath                    = APIBasePath + "/nodes"
+	TerminalPath                 = APIBasePath + "/terminal"
+	TerminalAvailableCommandsPath = TerminalPath + "/available-commands"
 )
 
 // Legacy targets endpoints (deprecated, use OperatorTargetsPath)

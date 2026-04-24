@@ -66,12 +66,15 @@ func ParseCommand(cmdString string) (*ParsedCommand, error) {
 	// First token is the command (kubectl or oc)
 	cmd.Command = tokens[0]
 
-	if len(tokens) < 2 {
-		return nil, fmt.Errorf("missing subcommand after %s", cmd.Command)
+	// Second token is the subcommand (optional - allows bare "kubectl" or "oc" for help)
+	if len(tokens) >= 2 {
+		cmd.Subcommand = tokens[1]
+	} else {
+		// No subcommand provided (e.g., just "kubectl" or "oc")
+		// This is valid - will show help output
+		cmd.Subcommand = ""
+		return cmd, nil
 	}
-
-	// Second token is the subcommand
-	cmd.Subcommand = tokens[1]
 
 	// Parse remaining tokens as args or flags
 	i := 2

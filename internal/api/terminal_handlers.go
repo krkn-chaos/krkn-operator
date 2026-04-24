@@ -106,13 +106,10 @@ func (h *Handler) ExecuteTerminal(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Quick check: command must start with "kubectl" or "oc" before parsing
+	// Quick check: command must be in allowed list before parsing
 	// This ensures we return 404 for invalid commands like "ls", "bash", etc.
-	cmdLower := strings.ToLower(strings.TrimSpace(req.Command))
-	if !strings.HasPrefix(cmdLower, "kubectl ") &&
-	   !strings.HasPrefix(cmdLower, "oc ") &&
-	   cmdLower != "kubectl" &&
-	   cmdLower != "oc" {
+	cmdTokens := strings.Fields(strings.TrimSpace(req.Command))
+	if len(cmdTokens) == 0 || !terminal.IsCommandAllowed(cmdTokens[0]) {
 		writeJSONError(w, http.StatusNotFound, ErrorResponse{
 			Error:   "not_found",
 			Message: "Command must be kubectl or oc",
@@ -127,31 +124,6 @@ func (h *Handler) ExecuteTerminal(w http.ResponseWriter, r *http.Request) {
 			Error:   "not_found",
 			Message: fmt.Sprintf("Failed to get kubeconfig: %v", err),
 		})
-		return
-	}
-
-	// Special case: "kubectl" or "oc" without subcommand should show help
-	// Skip parsing and validation, send directly to gRPC
-	if cmdLower == "kubectl" || cmdLower == "oc" {
-		parsedCmd := &terminal.ParsedCommand{
-			Command:      req.Command,
-			Subcommand:   "",
-			Args:         []string{},
-			Flags:        map[string]string{},
-			BooleanFlags: []string{},
-		}
-		response, err := h.executeKubectlViaGRPC(ctx, kubeconfigBase64, parsedCmd)
-		if err != nil {
-			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
-				Error:   "execution_error",
-				Message: "Command execution failed",
-			})
-			return
-		}
-		// Return response (will contain help output)
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		_ = json.NewEncoder(w).Encode(response) // If encoding fails, client gets partial response
 		return
 	}
 

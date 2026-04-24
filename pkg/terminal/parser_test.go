@@ -250,10 +250,16 @@ func TestParseCommand(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name:    "only command, no subcommand",
-			input:   "kubectl",
-			want:    nil,
-			wantErr: true,
+			name:  "only command, no subcommand",
+			input: "kubectl",
+			want: &ParsedCommand{
+				Command:      "kubectl",
+				Subcommand:   "",
+				Args:         []string{},
+				Flags:        map[string]string{},
+				BooleanFlags: []string{},
+			},
+			wantErr: false,
 		},
 		{
 			name:    "unclosed quote",

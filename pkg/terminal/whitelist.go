@@ -31,21 +31,9 @@ var (
 	ErrCommandNotPermitted = errors.New("command_not_permitted")
 )
 
-// AllowedSubcommands defines read-only kubectl/oc subcommands
-var AllowedSubcommands = map[string]bool{
-	"get":      true,
-	"describe": true,
-	"logs":     true,
-	"top":      true,
-	"explain":  true,
-	"version":  true,
-	"api-resources": true,
-	"api-versions":  true,
-	"cluster-info":  true,
-}
-
 // BlockedFlags defines flags that enable streaming or watch modes
 // These are blocked in v1 because they require WebSocket/SSE support
+// NOTE: This is kept for backward compatibility, use BlockedFlagsSpec for the canonical list
 var BlockedFlags = []string{
 	"watch",
 	"w",
@@ -57,14 +45,17 @@ var BlockedFlags = []string{
 // ValidateCommand validates that a command is safe to execute (read-only)
 // Returns an error if the command is not permitted
 func ValidateCommand(cmd *ParsedCommand) error {
-	// Validate command is kubectl or oc
-	if cmd.Command != "kubectl" && cmd.Command != "oc" {
+	// Validate command is in allowed list (kubectl or oc)
+	if !IsCommandAllowed(cmd.Command) {
 		return ErrCommandNotFound
 	}
 
-	// Validate subcommand is in whitelist
-	if !AllowedSubcommands[cmd.Subcommand] {
-		return ErrCommandNotPermitted
+	// Empty subcommand is allowed (shows help output)
+	if cmd.Subcommand != "" {
+		// Validate subcommand is in whitelist for this command
+		if !IsSubcommandAllowed(cmd.Command, cmd.Subcommand) {
+			return ErrCommandNotPermitted
+		}
 	}
 
 	// Check for blocked streaming flags
