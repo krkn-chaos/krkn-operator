@@ -222,7 +222,11 @@ func (h *Handler) executeKubectlViaGRPC(ctx context.Context, kubeconfigBase64 st
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to gRPC server: %w", err)
 	}
-	defer conn.Close()
+	defer func() {
+		if closeErr := conn.Close(); closeErr != nil {
+			log.FromContext(ctx).Error(closeErr, "Failed to close gRPC connection")
+		}
+	}()
 
 	client := pb.NewDataProviderServiceClient(conn)
 
