@@ -41,11 +41,8 @@ type TerminalResponse struct {
 	ExitCode int `json:"exit_code"`
 
 	// Error contains the error type if execution failed
-	// Possible values: "not_found", "not_permitted", "execution_error", "timeout"
+	// Possible values: "not_found", "not_permitted", "command_failed", "execution_error", "timeout"
 	Error string `json:"error,omitempty"`
-
-	// Message provides additional context about the error
-	Message string `json:"message,omitempty"`
 }
 
 // ParsedCommand represents a parsed kubectl/oc command

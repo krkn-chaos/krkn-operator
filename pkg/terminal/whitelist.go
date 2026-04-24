@@ -18,8 +18,17 @@ limitations under the License.
 package terminal
 
 import (
-	"fmt"
+	"errors"
 	"strings"
+)
+
+// Custom error types for better error handling
+var (
+	// ErrCommandNotFound is returned when command is not kubectl or oc
+	ErrCommandNotFound = errors.New("command_not_found")
+
+	// ErrCommandNotPermitted is returned when subcommand or flag is not allowed
+	ErrCommandNotPermitted = errors.New("command_not_permitted")
 )
 
 // AllowedSubcommands defines read-only kubectl/oc subcommands
@@ -50,12 +59,12 @@ var BlockedFlags = []string{
 func ValidateCommand(cmd *ParsedCommand) error {
 	// Validate command is kubectl or oc
 	if cmd.Command != "kubectl" && cmd.Command != "oc" {
-		return fmt.Errorf("command must be 'kubectl' or 'oc', got '%s'", cmd.Command)
+		return ErrCommandNotFound
 	}
 
 	// Validate subcommand is in whitelist
 	if !AllowedSubcommands[cmd.Subcommand] {
-		return fmt.Errorf("subcommand '%s' is not permitted (read-only commands only)", cmd.Subcommand)
+		return ErrCommandNotPermitted
 	}
 
 	// Check for blocked streaming flags
@@ -63,13 +72,13 @@ func ValidateCommand(cmd *ParsedCommand) error {
 		// Check boolean flags
 		for _, flag := range cmd.BooleanFlags {
 			if flag == blockedFlag {
-				return fmt.Errorf("flag '--%s' is not supported (streaming commands blocked in v1)", blockedFlag)
+				return ErrCommandNotPermitted
 			}
 		}
 
 		// Check valued flags (in case user passes --watch=true)
 		if _, exists := cmd.Flags[blockedFlag]; exists {
-			return fmt.Errorf("flag '--%s' is not supported (streaming commands blocked in v1)", blockedFlag)
+			return ErrCommandNotPermitted
 		}
 	}
 

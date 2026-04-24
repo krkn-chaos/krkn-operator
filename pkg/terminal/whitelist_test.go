@@ -17,16 +17,16 @@ limitations under the License.
 package terminal
 
 import (
-	"strings"
+	"errors"
 	"testing"
 )
 
 func TestValidateCommand(t *testing.T) {
 	tests := []struct {
-		name    string
-		cmd     *ParsedCommand
-		wantErr bool
-		errMsg  string
+		name        string
+		cmd         *ParsedCommand
+		wantErr     bool
+		expectedErr error
 	}{
 		{
 			name: "valid kubectl get",
@@ -37,7 +37,8 @@ func TestValidateCommand(t *testing.T) {
 				Flags:        map[string]string{},
 				BooleanFlags: []string{},
 			},
-			wantErr: false,
+			wantErr:     false,
+			expectedErr: nil,
 		},
 		{
 			name: "valid oc get",
@@ -48,7 +49,8 @@ func TestValidateCommand(t *testing.T) {
 				Flags:        map[string]string{},
 				BooleanFlags: []string{},
 			},
-			wantErr: false,
+			wantErr:     false,
+			expectedErr: nil,
 		},
 		{
 			name: "valid kubectl describe",
@@ -59,7 +61,8 @@ func TestValidateCommand(t *testing.T) {
 				Flags:        map[string]string{"namespace": "default"},
 				BooleanFlags: []string{},
 			},
-			wantErr: false,
+			wantErr:     false,
+			expectedErr: nil,
 		},
 		{
 			name: "valid kubectl logs",
@@ -70,7 +73,8 @@ func TestValidateCommand(t *testing.T) {
 				Flags:        map[string]string{"tail": "100"},
 				BooleanFlags: []string{"timestamps"},
 			},
-			wantErr: false,
+			wantErr:     false,
+			expectedErr: nil,
 		},
 		{
 			name: "valid kubectl top",
@@ -81,7 +85,8 @@ func TestValidateCommand(t *testing.T) {
 				Flags:        map[string]string{},
 				BooleanFlags: []string{},
 			},
-			wantErr: false,
+			wantErr:     false,
+			expectedErr: nil,
 		},
 		{
 			name: "valid kubectl explain",
@@ -92,7 +97,8 @@ func TestValidateCommand(t *testing.T) {
 				Flags:        map[string]string{},
 				BooleanFlags: []string{},
 			},
-			wantErr: false,
+			wantErr:     false,
+			expectedErr: nil,
 		},
 		{
 			name: "valid kubectl version",
@@ -103,7 +109,8 @@ func TestValidateCommand(t *testing.T) {
 				Flags:        map[string]string{},
 				BooleanFlags: []string{},
 			},
-			wantErr: false,
+			wantErr:     false,
+			expectedErr: nil,
 		},
 		{
 			name: "invalid command - not kubectl or oc",
@@ -114,8 +121,8 @@ func TestValidateCommand(t *testing.T) {
 				Flags:        map[string]string{},
 				BooleanFlags: []string{},
 			},
-			wantErr: true,
-			errMsg:  "command must be 'kubectl' or 'oc'",
+			wantErr:     true,
+			expectedErr: ErrCommandNotFound,
 		},
 		{
 			name: "invalid subcommand - write operation",
@@ -126,8 +133,8 @@ func TestValidateCommand(t *testing.T) {
 				Flags:        map[string]string{},
 				BooleanFlags: []string{},
 			},
-			wantErr: true,
-			errMsg:  "is not permitted",
+			wantErr:     true,
+			expectedErr: ErrCommandNotPermitted,
 		},
 		{
 			name: "invalid subcommand - apply",
@@ -138,8 +145,8 @@ func TestValidateCommand(t *testing.T) {
 				Flags:        map[string]string{"filename": "deploy.yaml"},
 				BooleanFlags: []string{},
 			},
-			wantErr: true,
-			errMsg:  "is not permitted",
+			wantErr:     true,
+			expectedErr: ErrCommandNotPermitted,
 		},
 		{
 			name: "invalid subcommand - create",
@@ -150,8 +157,8 @@ func TestValidateCommand(t *testing.T) {
 				Flags:        map[string]string{},
 				BooleanFlags: []string{},
 			},
-			wantErr: true,
-			errMsg:  "is not permitted",
+			wantErr:     true,
+			expectedErr: ErrCommandNotPermitted,
 		},
 		{
 			name: "blocked flag - watch",
@@ -163,7 +170,7 @@ func TestValidateCommand(t *testing.T) {
 				BooleanFlags: []string{"watch"},
 			},
 			wantErr: true,
-			errMsg:  "streaming commands blocked",
+			expectedErr: ErrCommandNotPermitted,
 		},
 		{
 			name: "blocked flag - w (short)",
@@ -175,7 +182,7 @@ func TestValidateCommand(t *testing.T) {
 				BooleanFlags: []string{"w"},
 			},
 			wantErr: true,
-			errMsg:  "streaming commands blocked",
+			expectedErr: ErrCommandNotPermitted,
 		},
 		{
 			name: "blocked flag - follow",
@@ -187,7 +194,7 @@ func TestValidateCommand(t *testing.T) {
 				BooleanFlags: []string{"follow"},
 			},
 			wantErr: true,
-			errMsg:  "streaming commands blocked",
+			expectedErr: ErrCommandNotPermitted,
 		},
 		{
 			name: "blocked flag - f (short)",
@@ -199,7 +206,7 @@ func TestValidateCommand(t *testing.T) {
 				BooleanFlags: []string{"f"},
 			},
 			wantErr: true,
-			errMsg:  "streaming commands blocked",
+			expectedErr: ErrCommandNotPermitted,
 		},
 		{
 			name: "blocked flag - watch with value",
@@ -211,7 +218,7 @@ func TestValidateCommand(t *testing.T) {
 				BooleanFlags: []string{},
 			},
 			wantErr: true,
-			errMsg:  "streaming commands blocked",
+			expectedErr: ErrCommandNotPermitted,
 		},
 		{
 			name: "blocked flag - watch-only",
@@ -223,7 +230,7 @@ func TestValidateCommand(t *testing.T) {
 				BooleanFlags: []string{"watch-only"},
 			},
 			wantErr: true,
-			errMsg:  "streaming commands blocked",
+			expectedErr: ErrCommandNotPermitted,
 		},
 		{
 			name: "valid command with allowed flags",
@@ -234,7 +241,8 @@ func TestValidateCommand(t *testing.T) {
 				Flags:        map[string]string{"namespace": "default", "output": "yaml"},
 				BooleanFlags: []string{"show-labels", "all-namespaces"},
 			},
-			wantErr: false,
+			wantErr:     false,
+			expectedErr: nil,
 		},
 	}
 
@@ -245,8 +253,8 @@ func TestValidateCommand(t *testing.T) {
 				t.Errorf("ValidateCommand() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
-			if tt.wantErr && err != nil && !strings.Contains(err.Error(), tt.errMsg) {
-				t.Errorf("ValidateCommand() error = %v, want error containing %q", err, tt.errMsg)
+			if tt.wantErr && !errors.Is(err, tt.expectedErr) {
+				t.Errorf("ValidateCommand() error = %v, want %v", err, tt.expectedErr)
 			}
 		})
 	}

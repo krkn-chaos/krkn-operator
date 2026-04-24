@@ -19,6 +19,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
@@ -75,9 +76,26 @@ func (h *Handler) ExecuteTerminal(w http.ResponseWriter, r *http.Request) {
 
 	// Validate command (read-only, no streaming)
 	if err := terminal.ValidateCommand(parsedCmd); err != nil {
+		// Check if command not found (not kubectl/oc) → 404
+		if errors.Is(err, terminal.ErrCommandNotFound) {
+			writeJSONError(w, http.StatusNotFound, ErrorResponse{
+				Error:   "not_found",
+				Message: "Command must be kubectl or oc",
+			})
+			return
+		}
+		// Command not permitted (subcommand/flag blocked) → 401
+		if errors.Is(err, terminal.ErrCommandNotPermitted) {
+			writeJSONError(w, http.StatusUnauthorized, ErrorResponse{
+				Error:   "not_permitted",
+				Message: "Command not permitted",
+			})
+			return
+		}
+		// Fallback for unknown validation errors → 400
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
-			Error:   "not_permitted",
-			Message: fmt.Sprintf("Command not permitted: %v", err),
+			Error:   "invalid_command",
+			Message: "Invalid command",
 		})
 		return
 	}
@@ -87,12 +105,46 @@ func (h *Handler) ExecuteTerminal(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
 			Error:   "execution_error",
-			Message: fmt.Sprintf("Failed to execute command: %v", err),
+			Message: "Command execution failed",
 		})
 		return
 	}
 
-	// Return response
+	// Check if gRPC returned an error
+	if response.Error != "" {
+		switch response.Error {
+		case "not_found":
+			// kubectl/oc command not found on server → 404
+			writeJSONError(w, http.StatusNotFound, ErrorResponse{
+				Error:   "not_found",
+				Message: "Command not found on server",
+			})
+		case "timeout":
+			// Command execution timed out → 408
+			writeJSONError(w, http.StatusRequestTimeout, ErrorResponse{
+				Error:   "timeout",
+				Message: "Command execution timed out",
+			})
+		default:
+			// Other execution errors → 500
+			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+				Error:   "execution_error",
+				Message: "Command execution failed",
+			})
+		}
+		return
+	}
+
+	// Check exit code - if > 0, command failed → 400
+	if response.ExitCode > 0 {
+		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+			Error:   "command_failed",
+			Message: "Command returned non-zero exit code",
+		})
+		return
+	}
+
+	// Success - return response with stdout/stderr
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(response)
@@ -135,20 +187,6 @@ func (h *Handler) executeKubectlViaGRPC(ctx context.Context, kubeconfigBase64 st
 		StderrBase64: grpcResp.StderrBase64,
 		ExitCode:     int(grpcResp.ExitCode),
 		Error:        grpcResp.Error,
-	}
-
-	// Add message based on error type
-	if grpcResp.Error != "" {
-		switch grpcResp.Error {
-		case "not_found":
-			response.Message = "Command not found on server"
-		case "timeout":
-			response.Message = "Command execution timed out"
-		case "execution_error":
-			response.Message = "Command execution failed"
-		default:
-			response.Message = "Unknown error occurred"
-		}
 	}
 
 	return response, nil
