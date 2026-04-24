@@ -44,21 +44,3 @@ type TerminalResponse struct {
 	// Possible values: "not_found", "not_permitted", "command_failed", "execution_error", "timeout"
 	Error string `json:"error,omitempty"`
 }
-
-// ParsedCommand represents a parsed kubectl/oc command
-type ParsedCommand struct {
-	// Command is either "kubectl" or "oc"
-	Command string
-
-	// Subcommand is the kubectl subcommand (e.g., "get", "describe")
-	Subcommand string
-
-	// Args are positional arguments (e.g., ["pods", "nginx"])
-	Args []string
-
-	// Flags are named flags with values (e.g., {"namespace": "default", "output": "yaml"})
-	Flags map[string]string
-
-	// BooleanFlags are flags without values (e.g., ["all-namespaces", "show-labels"])
-	BooleanFlags []string
-}
