@@ -177,12 +177,12 @@ func (h *Handler) ExecuteTerminal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check exit code - if > 0, command failed → 400
+	// Check exit code - if > 0, command failed → 400 BUT still return stdout/stderr
 	if response.ExitCode > 0 {
-		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
-			Error:   "command_failed",
-			Message: "Command returned non-zero exit code",
-		})
+		response.Error = "command_failed"
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(response)
 		return
 	}
 

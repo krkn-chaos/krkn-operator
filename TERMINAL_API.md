@@ -76,19 +76,32 @@ The token is obtained via the `/api/v1/auth/login` endpoint.
 
 **HTTP Status Codes:**
 
-- `200 OK`: Command executed successfully (check exit_code)
-- `400 Bad Request`: Invalid request, malformed command, or command returned exit_code > 0
+- `200 OK`: Command executed successfully (exit_code = 0)
+- `400 Bad Request`: Command returned exit_code > 0 (includes stdout/stderr in response body)
 - `403 Forbidden`: Subcommand not in whitelist or blocked flag used
 - `404 Not Found`: Command is not kubectl/oc, or kubeconfig/cluster not found
 - `408 Request Timeout`: Command execution exceeded 120 seconds
 - `500 Internal Server Error`: Server error during execution
 
-**Error Response (400/403/404/408/500):**
+**Error Response (403/404/408/500):**
 
 ```json
 {
   "error": "error_type",
   "message": "Human-readable error message"
+}
+```
+
+**Special Case - 400 Bad Request (Command Failed):**
+
+When a command executes but returns exit_code > 0, the response includes full output:
+
+```json
+{
+  "stdout_base64": "string",
+  "stderr_base64": "string",
+  "exit_code": 1,
+  "error": "command_failed"
 }
 ```
 
@@ -270,16 +283,45 @@ nginx-deployment-1       2/2     Running   0          1h
 }
 ```
 
-**Response (400 Bad Request):**
+**Response (403 Forbidden):**
 
 ```json
 {
   "error": "not_permitted",
-  "message": "Command not permitted: flag '--watch' is not supported (streaming commands blocked in v1)"
+  "message": "Command not permitted"
 }
 ```
 
-### Example 6: Invalid Kubeconfig (Error)
+### Example 6: Command with Non-Zero Exit Code
+
+**Request:**
+
+```json
+{
+  "cluster_id": "production-cluster",
+  "uuid": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "command": "kubectl get pod nonexistent-pod"
+}
+```
+
+**Response (400 Bad Request):**
+
+```json
+{
+  "stdout_base64": "",
+  "stderr_base64": "RXJyb3I6IHBvZHMgIm5vbmV4aXN0ZW50LXBvZCIgbm90IGZvdW5kCg==",
+  "exit_code": 1,
+  "error": "command_failed"
+}
+```
+
+**Decoded stderr:**
+
+```
+Error: pods "nonexistent-pod" not found
+```
+
+### Example 7: Invalid Kubeconfig (Error)
 
 **Request:**
 
