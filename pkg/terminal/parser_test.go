@@ -411,6 +411,18 @@ func TestTokenize(t *testing.T) {
 			wantErr: true,
 		},
 		{
+			name:    "unclosed quote with multi-byte last char (emoji)",
+			input:   `kubectl get "test 😀`,
+			want:    nil,
+			wantErr: true,
+		},
+		{
+			name:    "unclosed quote with multi-byte last char (unicode)",
+			input:   `kubectl get "test 中文`,
+			want:    nil,
+			wantErr: true,
+		},
+		{
 			name:    "empty string",
 			input:   "",
 			want:    nil,

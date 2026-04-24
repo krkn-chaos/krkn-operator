@@ -129,7 +129,7 @@ func tokenize(s string) ([]string, error) {
 	inQuote := false
 	quoteChar := rune(0)
 
-	for i, r := range s {
+	for _, r := range s {
 		switch {
 		case r == '"' || r == '\'':
 			if !inQuote {
@@ -158,11 +158,14 @@ func tokenize(s string) ([]string, error) {
 		default:
 			current.WriteRune(r)
 		}
+	}
 
-		// Check for unclosed quote at end
-		if i == len(s)-1 && inQuote {
-			return nil, fmt.Errorf("unclosed quote in command")
-		}
+	// Check for unclosed quote after processing all characters
+	// This must be done outside the loop because 'range' over a string
+	// iterates by rune, and index i is the byte offset (not character index)
+	// If the last character is multi-byte (e.g., emoji), i will never equal len(s)-1
+	if inQuote {
+		return nil, fmt.Errorf("unclosed quote in command")
 	}
 
 	// Add final token if any
