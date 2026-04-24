@@ -18,15 +18,11 @@ package api
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
-	pb "github.com/krkn-chaos/krkn-operator/proto/dataprovider"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/test/bufconn"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
@@ -34,46 +30,6 @@ import (
 
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
 )
-
-// mockDataProviderServer implements a mock gRPC server for testing
-type mockDataProviderServer struct {
-	pb.UnimplementedDataProviderServiceServer
-	executeKubectlFunc func(context.Context, *pb.ExecuteKubectlRequest) (*pb.ExecuteKubectlResponse, error)
-}
-
-func (m *mockDataProviderServer) ExecuteKubectl(ctx context.Context, req *pb.ExecuteKubectlRequest) (*pb.ExecuteKubectlResponse, error) {
-	if m.executeKubectlFunc != nil {
-		return m.executeKubectlFunc(ctx, req)
-	}
-	return &pb.ExecuteKubectlResponse{}, nil
-}
-
-// setupTestServer creates a test gRPC server and returns the client connection address
-func setupTestServer(t *testing.T, mock *mockDataProviderServer) (string, func()) {
-	buffer := 1024 * 1024
-	listener := bufconn.Listen(buffer)
-
-	server := grpc.NewServer()
-	pb.RegisterDataProviderServiceServer(server, mock)
-
-	go func() {
-		if err := server.Serve(listener); err != nil {
-			t.Logf("Server exited with error: %v", err)
-		}
-	}()
-
-	// Return a dialer that connects to the bufconn listener
-	// For simplicity, we'll use localhost with a real port in these tests
-	// In production tests, you'd use bufconn.DialContext
-	cleanup := func() {
-		server.Stop()
-		listener.Close()
-	}
-
-	// Note: In real tests, you'd use bufconn.DialContext
-	// For now, we'll mock at the handler level
-	return "bufconn", cleanup
-}
 
 func TestExecuteTerminal_ValidationErrors(t *testing.T) {
 	scheme := runtime.NewScheme()
