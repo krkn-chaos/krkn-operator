@@ -85,7 +85,6 @@ class DataProviderServicer(dataprovider_pb2_grpc.DataProviderServiceServicer):
         Returns:
             ExecuteKubectlResponse containing stdout/stderr in base64 and exit code
         """
-        kubeconfig_file = None
         try:
             logger.info(f"Received ExecuteKubectl request: {request.command} {request.subcommand}")
 
@@ -93,64 +92,65 @@ class DataProviderServicer(dataprovider_pb2_grpc.DataProviderServiceServicer):
             kubeconfig_decoded = base64.b64decode(request.kubeconfig_base64).decode('utf-8')
             logger.debug("Kubeconfig decoded successfully")
 
-            # Create temporary kubeconfig file
-            kubeconfig_file = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.kubeconfig')
-            kubeconfig_file.write(kubeconfig_decoded)
-            kubeconfig_file.close()
-            logger.debug(f"Temporary kubeconfig created at {kubeconfig_file.name}")
+            # Create temporary kubeconfig file (auto-deleted when context exits)
+            with tempfile.NamedTemporaryFile(mode='w', delete=True, suffix='.kubeconfig') as kubeconfig_file:
+                kubeconfig_file.write(kubeconfig_decoded)
+                kubeconfig_file.flush()  # Ensure data is written to disk
+                logger.debug(f"Temporary kubeconfig created at {kubeconfig_file.name}")
 
-            # Build command
-            cmd = [request.command, request.subcommand]
-            cmd.extend(request.args)
+                # Build command
+                cmd = [request.command, request.subcommand]
+                cmd.extend(request.args)
 
-            # Add named flags (use single - for short flags, double -- for long flags)
-            for key, value in request.flags.items():
-                if len(key) == 1:
-                    # Short flag: -n
-                    cmd.append(f"-{key}")
-                else:
-                    # Long flag: --namespace
-                    cmd.append(f"--{key}")
-                cmd.append(value)
+                # Add named flags (use single - for short flags, double -- for long flags)
+                for key, value in request.flags.items():
+                    if len(key) == 1:
+                        # Short flag: -n
+                        cmd.append(f"-{key}")
+                    else:
+                        # Long flag: --namespace
+                        cmd.append(f"--{key}")
+                    cmd.append(value)
 
-            # Add boolean flags (use single - for short flags, double -- for long flags)
-            for flag in request.boolean_flags:
-                if len(flag) == 1:
-                    # Short flag: -A
-                    cmd.append(f"-{flag}")
-                else:
-                    # Long flag: --all-namespaces
-                    cmd.append(f"--{flag}")
+                # Add boolean flags (use single - for short flags, double -- for long flags)
+                for flag in request.boolean_flags:
+                    if len(flag) == 1:
+                        # Short flag: -A
+                        cmd.append(f"-{flag}")
+                    else:
+                        # Long flag: --all-namespaces
+                        cmd.append(f"--{flag}")
 
-            # Add kubeconfig flag
-            cmd.append(f"--kubeconfig={kubeconfig_file.name}")
+                # Add kubeconfig flag
+                cmd.append(f"--kubeconfig={kubeconfig_file.name}")
 
-            logger.info(f"Executing command: {' '.join(cmd)}")
+                logger.info(f"Executing command: {' '.join(cmd)}")
 
-            # Set timeout (default 120 seconds)
-            timeout_seconds = request.timeout_seconds if request.timeout_seconds > 0 else 120
+                # Set timeout (default 120 seconds)
+                timeout_seconds = request.timeout_seconds if request.timeout_seconds > 0 else 120
 
-            # Execute command
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                timeout=timeout_seconds
-            )
+                # Execute command (file exists during execution)
+                result = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    timeout=timeout_seconds
+                )
 
-            logger.info(f"Command completed with exit code {result.returncode}")
+                logger.info(f"Command completed with exit code {result.returncode}")
 
-            # Encode stdout and stderr to base64
-            stdout_base64 = base64.b64encode(result.stdout).decode('utf-8')
-            stderr_base64 = base64.b64encode(result.stderr).decode('utf-8')
+                # Encode stdout and stderr to base64
+                stdout_base64 = base64.b64encode(result.stdout).decode('utf-8')
+                stderr_base64 = base64.b64encode(result.stderr).decode('utf-8')
 
-            # Return response
-            response = dataprovider_pb2.ExecuteKubectlResponse(
-                stdout_base64=stdout_base64,
-                stderr_base64=stderr_base64,
-                exit_code=result.returncode,
-                error=""
-            )
-            return response
+                # Return response
+                response = dataprovider_pb2.ExecuteKubectlResponse(
+                    stdout_base64=stdout_base64,
+                    stderr_base64=stderr_base64,
+                    exit_code=result.returncode,
+                    error=""
+                )
+                return response
+                # Temporary file is automatically deleted here when exiting 'with' block
 
         except subprocess.TimeoutExpired:
             logger.error(f"Command execution timed out after {timeout_seconds}s")
@@ -184,15 +184,6 @@ class DataProviderServicer(dataprovider_pb2_grpc.DataProviderServiceServicer):
                 exit_code=-1,
                 error="execution_error"
             )
-
-        finally:
-            # Clean up temporary kubeconfig file
-            if kubeconfig_file and os.path.exists(kubeconfig_file.name):
-                try:
-                    os.unlink(kubeconfig_file.name)
-                    logger.debug(f"Removed temporary kubeconfig {kubeconfig_file.name}")
-                except Exception as e:
-                    logger.warning(f"Failed to remove temporary kubeconfig: {str(e)}")
 
 
 def serve(port=50051):
