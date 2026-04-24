@@ -93,14 +93,24 @@ class DataProviderServicer(dataprovider_pb2_grpc.DataProviderServiceServicer):
             cmd = [request.command, request.subcommand]
             cmd.extend(request.args)
 
-            # Add named flags (--flag value)
+            # Add named flags (use single - for short flags, double -- for long flags)
             for key, value in request.flags.items():
-                cmd.append(f"--{key}")
+                if len(key) == 1:
+                    # Short flag: -n
+                    cmd.append(f"-{key}")
+                else:
+                    # Long flag: --namespace
+                    cmd.append(f"--{key}")
                 cmd.append(value)
 
-            # Add boolean flags (--flag)
+            # Add boolean flags (use single - for short flags, double -- for long flags)
             for flag in request.boolean_flags:
-                cmd.append(f"--{flag}")
+                if len(flag) == 1:
+                    # Short flag: -A
+                    cmd.append(f"-{flag}")
+                else:
+                    # Long flag: --all-namespaces
+                    cmd.append(f"--{flag}")
 
             # Add kubeconfig flag
             cmd.append(f"--kubeconfig={kubeconfig_file.name}")
