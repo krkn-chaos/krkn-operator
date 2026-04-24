@@ -221,6 +221,23 @@ func TestExecuteTerminal_HelpCommand(t *testing.T) {
 	// - Should return help output in stdout
 }
 
+// TestExecuteTerminal_PermissionCheck documents permission enforcement behavior
+func TestExecuteTerminal_PermissionCheck(t *testing.T) {
+	t.Skip("Requires mocking getClusterAPIURL and HasClusterPermission")
+
+	// Expected behavior:
+	// 1. Admin users bypass permission checks
+	// 2. Regular users must have 'run' permission on cluster
+	// 3. Users without 'run' permission get 403 Forbidden
+	// 4. Permission check happens BEFORE command validation
+	// 5. Permission check happens BEFORE kubeconfig retrieval
+	//
+	// This ensures:
+	// - Users can only execute terminal commands on clusters they can run scenarios on
+	// - Consistent with group-based access control model
+	// - Early rejection prevents wasted processing
+}
+
 // TestExecuteTerminal_IntegrationCases documents integration test cases
 // These require a real gRPC server and are typically run in e2e tests
 func TestExecuteTerminal_IntegrationCases(t *testing.T) {
@@ -234,4 +251,7 @@ func TestExecuteTerminal_IntegrationCases(t *testing.T) {
 	// 5. Short flags (-n namespace) work correctly
 	// 6. Long flags (--namespace=default) work correctly
 	// 7. Mixed flags work correctly
+	// 8. User with run permission can execute commands (200 OK)
+	// 9. User without run permission gets 403 Forbidden
+	// 10. Admin can execute commands on any cluster
 }

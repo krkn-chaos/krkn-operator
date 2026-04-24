@@ -344,9 +344,10 @@ Error: pods "nonexistent-pod" not found
 
 ## Permissions
 
-- Users must have **view** or **edit** permission on the cluster to execute terminal commands
+- Users must have **run** permission on the cluster to execute terminal commands
 - Admin users have access to all clusters
-- Regular users only have access to clusters shared with them via group permissions
+- Regular users only have access to clusters where their group has `run` permission
+- Permission check happens before command validation and kubeconfig retrieval
 
 ## Timeout
 

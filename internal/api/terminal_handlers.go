@@ -25,10 +25,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/krkn-chaos/krkn-operator/pkg/auth"
+	"github.com/krkn-chaos/krkn-operator/pkg/groupauth"
 	"github.com/krkn-chaos/krkn-operator/pkg/terminal"
 	pb "github.com/krkn-chaos/krkn-operator/proto/dataprovider"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 // ExecuteTerminal handles POST /api/v1/terminal
@@ -54,6 +57,54 @@ func (h *Handler) ExecuteTerminal(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
+
+	// Check user permissions (group-based access control)
+	// Admins bypass validation, regular users must have 'run' permission on the cluster
+	claims := auth.GetClaimsFromContext(ctx)
+	if claims != nil && !auth.IsAdmin(ctx) {
+		// Get cluster API URL for permission check
+		// Terminal API uses UUID (maps to target ID) and ClusterID (maps to cluster name)
+		clusterAPIURL, err := h.getClusterAPIURL(ctx, "", req.UUID, req.ClusterID)
+		if err != nil {
+			log.FromContext(ctx).Error(err, "Failed to get cluster API URL for permission check")
+			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+				Error:   "internal_error",
+				Message: "Failed to validate cluster permissions",
+			})
+			return
+		}
+
+		// Check if user has 'run' permission on this cluster
+		// Users need run permission to execute terminal commands on the target cluster
+		hasPermission, err := groupauth.HasClusterPermission(
+			ctx,
+			h.client,
+			claims.UserID,
+			h.namespace,
+			clusterAPIURL,
+			groupauth.ActionRun,
+		)
+		if err != nil {
+			log.FromContext(ctx).Error(err, "Failed to check cluster permissions", "userID", claims.UserID)
+			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+				Error:   "internal_error",
+				Message: "Failed to validate access permissions",
+			})
+			return
+		}
+
+		if !hasPermission {
+			log.FromContext(ctx).Info("User lacks run permission to execute terminal commands on cluster",
+				"userID", claims.UserID,
+				"clusterAPIURL", clusterAPIURL,
+			)
+			writeJSONError(w, http.StatusForbidden, ErrorResponse{
+				Error:   "forbidden",
+				Message: "You do not have run permission on this cluster",
+			})
+			return
+		}
+	}
 
 	// Quick check: command must start with "kubectl" or "oc" before parsing
 	// This ensures we return 404 for invalid commands like "ls", "bash", etc.
