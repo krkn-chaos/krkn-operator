@@ -11,6 +11,16 @@ import subprocess
 import tempfile
 from concurrent import futures
 
+# Disable gRPC and glog warnings BEFORE importing grpc
+os.environ['GRPC_VERBOSITY'] = 'ERROR'
+os.environ['GRPC_TRACE'] = ''
+os.environ['GRPC_GO_LOG_VERBOSITY_LEVEL'] = '999'
+os.environ['GRPC_GO_LOG_SEVERITY_LEVEL'] = 'ERROR'
+# Disable glog (used by kubectl client-go)
+os.environ['GLOG_logtostderr'] = '0'
+os.environ['GLOG_v'] = '0'
+os.environ['GLOG_stderrthreshold'] = '3'  # Only FATAL
+
 import grpc
 from generated import dataprovider_pb2, dataprovider_pb2_grpc
 from krkn_lib.k8s import KrknKubernetes
@@ -120,19 +130,11 @@ class DataProviderServicer(dataprovider_pb2_grpc.DataProviderServiceServicer):
             # Set timeout (default 120 seconds)
             timeout_seconds = request.timeout_seconds if request.timeout_seconds > 0 else 120
 
-            # Create clean environment for subprocess to avoid gRPC warnings
-            env = os.environ.copy()
-            env['GRPC_VERBOSITY'] = 'NONE'
-            env['GRPC_TRACE'] = ''
-            env['GRPC_GO_LOG_VERBOSITY_LEVEL'] = '999'
-            env['GRPC_GO_LOG_SEVERITY_LEVEL'] = 'ERROR'
-
-            # Execute command with clean environment
+            # Execute command
             result = subprocess.run(
                 cmd,
                 capture_output=True,
-                timeout=timeout_seconds,
-                env=env
+                timeout=timeout_seconds
             )
 
             logger.info(f"Command completed with exit code {result.returncode}")
