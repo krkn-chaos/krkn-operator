@@ -1,0 +1,11 @@
+# gosec configuration
+# Exclude auto-generated protobuf files from security scanning
+
+exclude-generated: true
+
+excludes:
+  # Exclude protobuf generated files
+  - G103  # Allow unsafe in generated protobuf files
+
+exclude-dirs:
+  - proto/dataprovider  # Exclude generated protobuf directory

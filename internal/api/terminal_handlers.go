@@ -100,7 +100,7 @@ func (h *Handler) ExecuteTerminal(w http.ResponseWriter, r *http.Request) {
 		// Return response (will contain help output)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(response)
+		_ = json.NewEncoder(w).Encode(response) // If encoding fails, client gets partial response
 		return
 	}
 
@@ -182,14 +182,14 @@ func (h *Handler) ExecuteTerminal(w http.ResponseWriter, r *http.Request) {
 		response.Error = "command_failed"
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(response)
+		_ = json.NewEncoder(w).Encode(response) // If encoding fails, client gets partial response
 		return
 	}
 
 	// Success - return response with stdout/stderr
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(response)
+	_ = json.NewEncoder(w).Encode(response) // If encoding fails, client gets partial response
 }
 
 // executeKubectlViaGRPC executes a kubectl command via the gRPC data provider
