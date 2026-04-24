@@ -25,16 +25,14 @@ import (
 
 // AvailableCommandsResponse represents the response for GET /api/v1/terminal/available-commands
 type AvailableCommandsResponse struct {
-	Commands     []terminal.CommandSpec     `json:"commands"`
-	BlockedFlags []terminal.BlockedFlagSpec `json:"blocked_flags"`
+	Commands []terminal.CommandSpec `json:"commands"`
 }
 
 // GetAvailableCommands handles GET /api/v1/terminal/available-commands
-// Returns the list of all permitted commands, subcommands, and blocked flags
+// Returns the list of all permitted commands and subcommands
 func (h *Handler) GetAvailableCommands(w http.ResponseWriter, r *http.Request) {
 	response := AvailableCommandsResponse{
-		Commands:     terminal.GetAllowedCommands(),
-		BlockedFlags: terminal.GetBlockedFlags(),
+		Commands: terminal.GetAllowedCommands(),
 	}
 
 	w.Header().Set("Content-Type", "application/json")
