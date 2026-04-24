@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/krkn-chaos/krkn-operator/pkg/terminal"
@@ -54,6 +55,20 @@ func (h *Handler) ExecuteTerminal(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 
+	// Quick check: command must start with "kubectl" or "oc" before parsing
+	// This ensures we return 404 for invalid commands like "ls", "bash", etc.
+	cmdLower := strings.ToLower(strings.TrimSpace(req.Command))
+	if !strings.HasPrefix(cmdLower, "kubectl ") &&
+	   !strings.HasPrefix(cmdLower, "oc ") &&
+	   cmdLower != "kubectl" &&
+	   cmdLower != "oc" {
+		writeJSONError(w, http.StatusNotFound, ErrorResponse{
+			Error:   "not_found",
+			Message: "Command must be kubectl or oc",
+		})
+		return
+	}
+
 	// Get kubeconfig using legacy helper (UUID maps to target ID, ClusterID maps to cluster name)
 	kubeconfigBase64, err := h.getKubeconfig(ctx, "", req.UUID, req.ClusterID)
 	if err != nil {
@@ -64,9 +79,36 @@ func (h *Handler) ExecuteTerminal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Special case: "kubectl" or "oc" without subcommand should show help
+	// Skip parsing and validation, send directly to gRPC
+	if cmdLower == "kubectl" || cmdLower == "oc" {
+		parsedCmd := &terminal.ParsedCommand{
+			Command:      req.Command,
+			Subcommand:   "",
+			Args:         []string{},
+			Flags:        map[string]string{},
+			BooleanFlags: []string{},
+		}
+		response, err := h.executeKubectlViaGRPC(ctx, kubeconfigBase64, parsedCmd)
+		if err != nil {
+			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+				Error:   "execution_error",
+				Message: "Command execution failed",
+			})
+			return
+		}
+		// Return response (will contain help output)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(response)
+		return
+	}
+
 	// Parse command
 	parsedCmd, err := terminal.ParseCommand(req.Command)
 	if err != nil {
+		// If parsing failed and it's not kubectl/oc, return 404
+		// (though this should have been caught above)
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
 			Error:   "invalid_command",
 			Message: fmt.Sprintf("Failed to parse command: %v", err),
