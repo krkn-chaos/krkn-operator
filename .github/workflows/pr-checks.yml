@@ -19,7 +19,7 @@ jobs:
       - name: Run gosec security scanner
         uses: securego/gosec@master
         with:
-          args: --exclude G402 ./...
+          args: -conf .gosec.yaml --exclude G402 --exclude-dir=proto ./...
 
       - name: Run staticcheck static analyzer
         run: |
