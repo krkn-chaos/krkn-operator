@@ -1,0 +1,4 @@
+proto/dataprovider/*.pb.go
+proto/dataprovider/*.pb.go:G103
+./proto/dataprovider/*.pb.go
+**/proto/**/*.pb.go

@@ -24,7 +24,7 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x12\x64\x61taprovider.proto\x12\x0c\x64\x61taprovider\",\n\x0fGetNodesRequest\x12\x19\n\x11kubeconfig_base64\x18\x01 \x01(\t\"!\n\x10GetNodesResponse\x12\r\n\x05nodes\x18\x01 \x03(\t2`\n\x13\x44\x61taProviderService\x12I\n\x08GetNodes\x12\x1d.dataprovider.GetNodesRequest\x1a\x1e.dataprovider.GetNodesResponseB8Z6github.com/krkn-chaos/krkn-operator/proto/dataproviderb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x12\x64\x61taprovider.proto\x12\x0c\x64\x61taprovider\",\n\x0fGetNodesRequest\x12\x19\n\x11kubeconfig_base64\x18\x01 \x01(\t\"!\n\x10GetNodesResponse\x12\r\n\x05nodes\x18\x01 \x03(\t\"\x82\x02\n\x15\x45xecuteKubectlRequest\x12\x19\n\x11kubeconfig_base64\x18\x01 \x01(\t\x12\x0f\n\x07\x63ommand\x18\x02 \x01(\t\x12\x12\n\nsubcommand\x18\x03 \x01(\t\x12\x0c\n\x04\x61rgs\x18\x04 \x03(\t\x12=\n\x05\x66lags\x18\x05 \x03(\x0b\x32..dataprovider.ExecuteKubectlRequest.FlagsEntry\x12\x15\n\rboolean_flags\x18\x06 \x03(\t\x12\x17\n\x0ftimeout_seconds\x18\x07 \x01(\x05\x1a,\n\nFlagsEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\t:\x02\x38\x01\"h\n\x16\x45xecuteKubectlResponse\x12\x15\n\rstdout_base64\x18\x01 \x01(\t\x12\x15\n\rstderr_base64\x18\x02 \x01(\t\x12\x11\n\texit_code\x18\x03 \x01(\x05\x12\r\n\x05\x65rror\x18\x04 \x01(\t2\xbd\x01\n\x13\x44\x61taProviderService\x12I\n\x08GetNodes\x12\x1d.dataprovider.GetNodesRequest\x1a\x1e.dataprovider.GetNodesResponse\x12[\n\x0e\x45xecuteKubectl\x12#.dataprovider.ExecuteKubectlRequest\x1a$.dataprovider.ExecuteKubectlResponseB8Z6github.com/krkn-chaos/krkn-operator/proto/dataproviderb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -32,10 +32,18 @@ _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'dataprovider_pb2', _globals
 if not _descriptor._USE_C_DESCRIPTORS:
   _globals['DESCRIPTOR']._loaded_options = None
   _globals['DESCRIPTOR']._serialized_options = b'Z6github.com/krkn-chaos/krkn-operator/proto/dataprovider'
+  _globals['_EXECUTEKUBECTLREQUEST_FLAGSENTRY']._loaded_options = None
+  _globals['_EXECUTEKUBECTLREQUEST_FLAGSENTRY']._serialized_options = b'8\001'
   _globals['_GETNODESREQUEST']._serialized_start=36
   _globals['_GETNODESREQUEST']._serialized_end=80
   _globals['_GETNODESRESPONSE']._serialized_start=82
   _globals['_GETNODESRESPONSE']._serialized_end=115
-  _globals['_DATAPROVIDERSERVICE']._serialized_start=117
-  _globals['_DATAPROVIDERSERVICE']._serialized_end=213
+  _globals['_EXECUTEKUBECTLREQUEST']._serialized_start=118
+  _globals['_EXECUTEKUBECTLREQUEST']._serialized_end=376
+  _globals['_EXECUTEKUBECTLREQUEST_FLAGSENTRY']._serialized_start=332
+  _globals['_EXECUTEKUBECTLREQUEST_FLAGSENTRY']._serialized_end=376
+  _globals['_EXECUTEKUBECTLRESPONSE']._serialized_start=378
+  _globals['_EXECUTEKUBECTLRESPONSE']._serialized_end=482
+  _globals['_DATAPROVIDERSERVICE']._serialized_start=485
+  _globals['_DATAPROVIDERSERVICE']._serialized_end=674
 # @@protoc_insertion_point(module_scope)

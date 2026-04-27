@@ -8,6 +8,9 @@ option go_package = "github.com/krkn-chaos/krkn-operator/proto/dataprovider";
 service DataProviderService {
   // GetNodes retrieves the list of nodes from a Kubernetes cluster
   rpc GetNodes(GetNodesRequest) returns (GetNodesResponse);
+
+  // ExecuteKubectl executes kubectl or oc commands with read-only permissions
+  rpc ExecuteKubectl(ExecuteKubectlRequest) returns (ExecuteKubectlResponse);
 }
 
 // GetNodesRequest contains the kubeconfig to access the cluster
@@ -20,4 +23,43 @@ message GetNodesRequest {
 message GetNodesResponse {
   // List of node names
   repeated string nodes = 1;
+}
+
+// ExecuteKubectlRequest contains the command to execute and authentication
+message ExecuteKubectlRequest {
+  // kubeconfig in base64 format
+  string kubeconfig_base64 = 1;
+
+  // command to execute (kubectl or oc)
+  string command = 2;
+
+  // subcommand (e.g., get, describe, logs)
+  string subcommand = 3;
+
+  // positional arguments (e.g., pods, nginx, default)
+  repeated string args = 4;
+
+  // named flags with values (e.g., namespace: default, output: yaml)
+  map<string, string> flags = 5;
+
+  // boolean flags without values (e.g., all-namespaces, show-labels)
+  repeated string boolean_flags = 6;
+
+  // timeout in seconds (default: 120)
+  int32 timeout_seconds = 7;
+}
+
+// ExecuteKubectlResponse contains the command execution result
+message ExecuteKubectlResponse {
+  // stdout output in base64 format
+  string stdout_base64 = 1;
+
+  // stderr output in base64 format
+  string stderr_base64 = 2;
+
+  // command exit code (0 = success)
+  int32 exit_code = 3;
+
+  // error message if execution failed (not_found, not_permitted, execution_error, timeout)
+  string error = 4;
 }

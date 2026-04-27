@@ -19,13 +19,13 @@ jobs:
       - name: Run gosec security scanner
         uses: securego/gosec@master
         with:
-          args: --exclude G402 ./...
+          args: --exclude G402 --exclude G103 --exclude-dir=proto ./...
 
       - name: Run staticcheck static analyzer
         run: |
           wget -q https://github.com/dominikh/go-tools/releases/latest/download/staticcheck_linux_amd64.tar.gz
           tar xfz staticcheck_linux_amd64.tar.gz
-          ./staticcheck/staticcheck -checks all ./...
+          ./staticcheck/staticcheck -checks all $(go list ./... | grep -v '/proto/')
 
       - name: Set up envtest binaries
         run: make setup-envtest

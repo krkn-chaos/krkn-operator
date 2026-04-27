@@ -6,7 +6,20 @@ gRPC server that provides data from Kubernetes clusters using krkn-lib
 
 import base64
 import logging
+import os
+import subprocess
+import tempfile
 from concurrent import futures
+
+# Disable gRPC and glog warnings BEFORE importing grpc
+os.environ['GRPC_VERBOSITY'] = 'ERROR'
+os.environ['GRPC_TRACE'] = ''
+os.environ['GRPC_GO_LOG_VERBOSITY_LEVEL'] = '999'
+os.environ['GRPC_GO_LOG_SEVERITY_LEVEL'] = 'ERROR'
+# Disable glog (used by kubectl client-go)
+os.environ['GLOG_logtostderr'] = '0'
+os.environ['GLOG_v'] = '0'
+os.environ['GLOG_stderrthreshold'] = '3'  # Only FATAL
 
 import grpc
 from generated import dataprovider_pb2, dataprovider_pb2_grpc
@@ -60,6 +73,117 @@ class DataProviderServicer(dataprovider_pb2_grpc.DataProviderServiceServicer):
             context.set_code(grpc.StatusCode.INTERNAL)
             context.set_details(f"Failed to get nodes: {str(e)}")
             return dataprovider_pb2.GetNodesResponse()
+
+    def ExecuteKubectl(self, request, context):
+        """
+        Execute kubectl or oc command with read-only permissions
+
+        Args:
+            request: ExecuteKubectlRequest containing command details and kubeconfig
+            context: gRPC context
+
+        Returns:
+            ExecuteKubectlResponse containing stdout/stderr in base64 and exit code
+        """
+        try:
+            logger.info(f"Received ExecuteKubectl request: {request.command} {request.subcommand}")
+
+            # Decode base64 kubeconfig
+            kubeconfig_decoded = base64.b64decode(request.kubeconfig_base64).decode('utf-8')
+            logger.debug("Kubeconfig decoded successfully")
+
+            # Create temporary kubeconfig file (auto-deleted when context exits)
+            with tempfile.NamedTemporaryFile(mode='w', delete=True, suffix='.kubeconfig') as kubeconfig_file:
+                kubeconfig_file.write(kubeconfig_decoded)
+                kubeconfig_file.flush()  # Ensure data is written to disk
+                logger.debug(f"Temporary kubeconfig created at {kubeconfig_file.name}")
+
+                # Build command
+                cmd = [request.command, request.subcommand]
+                cmd.extend(request.args)
+
+                # Add named flags (use single - for short flags, double -- for long flags)
+                for key, value in request.flags.items():
+                    if len(key) == 1:
+                        # Short flag: -n
+                        cmd.append(f"-{key}")
+                    else:
+                        # Long flag: --namespace
+                        cmd.append(f"--{key}")
+                    cmd.append(value)
+
+                # Add boolean flags (use single - for short flags, double -- for long flags)
+                for flag in request.boolean_flags:
+                    if len(flag) == 1:
+                        # Short flag: -A
+                        cmd.append(f"-{flag}")
+                    else:
+                        # Long flag: --all-namespaces
+                        cmd.append(f"--{flag}")
+
+                # Add kubeconfig flag
+                cmd.append(f"--kubeconfig={kubeconfig_file.name}")
+
+                logger.info(f"Executing command: {' '.join(cmd)}")
+
+                # Set timeout (default 120 seconds)
+                timeout_seconds = request.timeout_seconds if request.timeout_seconds > 0 else 120
+
+                # Execute command (file exists during execution)
+                result = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    timeout=timeout_seconds
+                )
+
+                logger.info(f"Command completed with exit code {result.returncode}")
+
+                # Encode stdout and stderr to base64
+                stdout_base64 = base64.b64encode(result.stdout).decode('utf-8')
+                stderr_base64 = base64.b64encode(result.stderr).decode('utf-8')
+
+                # Return response
+                response = dataprovider_pb2.ExecuteKubectlResponse(
+                    stdout_base64=stdout_base64,
+                    stderr_base64=stderr_base64,
+                    exit_code=result.returncode,
+                    error=""
+                )
+                return response
+                # Temporary file is automatically deleted here when exiting 'with' block
+
+        except subprocess.TimeoutExpired:
+            logger.error(f"Command execution timed out after {timeout_seconds}s")
+            context.set_code(grpc.StatusCode.DEADLINE_EXCEEDED)
+            context.set_details("Command execution timed out")
+            return dataprovider_pb2.ExecuteKubectlResponse(
+                stdout_base64="",
+                stderr_base64="",
+                exit_code=-1,
+                error="timeout"
+            )
+
+        except FileNotFoundError:
+            logger.error(f"Command not found: {request.command}")
+            context.set_code(grpc.StatusCode.NOT_FOUND)
+            context.set_details(f"Command '{request.command}' not found")
+            return dataprovider_pb2.ExecuteKubectlResponse(
+                stdout_base64="",
+                stderr_base64="",
+                exit_code=-1,
+                error="not_found"
+            )
+
+        except Exception as e:
+            logger.error(f"Error in ExecuteKubectl: {str(e)}", exc_info=True)
+            context.set_code(grpc.StatusCode.INTERNAL)
+            context.set_details(f"Failed to execute command: {str(e)}")
+            return dataprovider_pb2.ExecuteKubectlResponse(
+                stdout_base64="",
+                stderr_base64="",
+                exit_code=-1,
+                error="execution_error"
+            )
 
 
 def serve(port=50051):

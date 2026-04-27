@@ -5,7 +5,7 @@ import warnings
 
 from . import dataprovider_pb2 as dataprovider__pb2
 
-GRPC_GENERATED_VERSION = '1.76.0'
+GRPC_GENERATED_VERSION = '1.80.0'
 GRPC_VERSION = grpc.__version__
 _version_not_supported = False
 
@@ -40,6 +40,11 @@ class DataProviderServiceStub(object):
                 request_serializer=dataprovider__pb2.GetNodesRequest.SerializeToString,
                 response_deserializer=dataprovider__pb2.GetNodesResponse.FromString,
                 _registered_method=True)
+        self.ExecuteKubectl = channel.unary_unary(
+                '/dataprovider.DataProviderService/ExecuteKubectl',
+                request_serializer=dataprovider__pb2.ExecuteKubectlRequest.SerializeToString,
+                response_deserializer=dataprovider__pb2.ExecuteKubectlResponse.FromString,
+                _registered_method=True)
 
 
 class DataProviderServiceServicer(object):
@@ -53,6 +58,13 @@ class DataProviderServiceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def ExecuteKubectl(self, request, context):
+        """ExecuteKubectl executes kubectl or oc commands with read-only permissions
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_DataProviderServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -60,6 +72,11 @@ def add_DataProviderServiceServicer_to_server(servicer, server):
                     servicer.GetNodes,
                     request_deserializer=dataprovider__pb2.GetNodesRequest.FromString,
                     response_serializer=dataprovider__pb2.GetNodesResponse.SerializeToString,
+            ),
+            'ExecuteKubectl': grpc.unary_unary_rpc_method_handler(
+                    servicer.ExecuteKubectl,
+                    request_deserializer=dataprovider__pb2.ExecuteKubectlRequest.FromString,
+                    response_serializer=dataprovider__pb2.ExecuteKubectlResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -90,6 +107,33 @@ class DataProviderService(object):
             '/dataprovider.DataProviderService/GetNodes',
             dataprovider__pb2.GetNodesRequest.SerializeToString,
             dataprovider__pb2.GetNodesResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ExecuteKubectl(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/dataprovider.DataProviderService/ExecuteKubectl',
+            dataprovider__pb2.ExecuteKubectlRequest.SerializeToString,
+            dataprovider__pb2.ExecuteKubectlResponse.FromString,
             options,
             channel_credentials,
             insecure,

@@ -313,11 +313,21 @@ func (h *Handler) PostTarget(w http.ResponseWriter, r *http.Request) {
 	// Generate a new UUID
 	newUUID := uuid.New().String()
 
+	// Extract user claims for ownership tracking
+	claims := auth.GetClaimsFromContext(ctx)
+
+	// Build labels with owner tracking
+	labels := make(map[string]string)
+	if claims != nil {
+		labels["krkn.krkn-chaos.dev/owner-user"] = sanitizeUserID(claims.UserID)
+	}
+
 	// Create a new KrknTargetRequest CR
 	targetRequest := &krknv1alpha1.KrknTargetRequest{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      newUUID,
 			Namespace: h.namespace,
+			Labels:    labels,
 		},
 		Spec: krknv1alpha1.KrknTargetRequestSpec{
 			UUID: newUUID,
@@ -342,17 +352,115 @@ func (h *Handler) PostTarget(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, response)
 }
 
-// TargetsHandler handles both GET /api/v1/targets/{UUID} and POST /api/v1/targets endpoints
+// DeleteTargetByUUID handles DELETE /api/v1/targets/{uuid} endpoint
+// It deletes a KrknTargetRequest resource by UUID
+// Authorization: Admin can delete any resource, owner can delete their own
+func (h *Handler) DeleteTargetByUUID(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	logger := log.FromContext(ctx).WithName("delete-target")
+
+	// Extract UUID from path
+	uuid, err := extractPathSuffix(r.URL.Path, TargetsPath+"/")
+	if err != nil {
+		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+			Error:   "bad_request",
+			Message: "UUID " + err.Error(),
+		})
+		return
+	}
+
+	logger.Info("Deleting KrknTargetRequest", "uuid", uuid)
+
+	// Fetch the KrknTargetRequest to verify it exists
+	var targetRequest krknv1alpha1.KrknTargetRequest
+	if err := h.client.Get(ctx, types.NamespacedName{
+		Name:      uuid,
+		Namespace: h.namespace,
+	}, &targetRequest); err != nil {
+		if client.IgnoreNotFound(err) == nil {
+			logger.Info("KrknTargetRequest not found", "uuid", uuid)
+			writeJSONError(w, http.StatusNotFound, ErrorResponse{
+				Error:   "not_found",
+				Message: "KrknTargetRequest with UUID '" + uuid + "' not found",
+			})
+		} else {
+			logger.Error(err, "Failed to get KrknTargetRequest", "uuid", uuid)
+			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+				Error:   "internal_error",
+				Message: "Failed to get KrknTargetRequest",
+			})
+		}
+		return
+	}
+
+	// Admin bypass - can delete any resource
+	if auth.IsAdmin(ctx) {
+		if err := h.client.Delete(ctx, &targetRequest); err != nil {
+			logger.Error(err, "Failed to delete KrknTargetRequest", "uuid", uuid)
+			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+				Error:   "internal_error",
+				Message: "Failed to delete KrknTargetRequest",
+			})
+			return
+		}
+		logger.Info("Successfully deleted KrknTargetRequest (admin)", "uuid", uuid)
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	// Non-admin: check ownership
+	claims := auth.GetClaimsFromContext(ctx)
+	if claims == nil {
+		writeJSONError(w, http.StatusUnauthorized, ErrorResponse{
+			Error:   "unauthorized",
+			Message: "No authentication claims found",
+		})
+		return
+	}
+
+	// Extract owner from label
+	ownerLabel := targetRequest.Labels["krkn.krkn-chaos.dev/owner-user"]
+	currentUserSanitized := sanitizeUserID(claims.UserID)
+
+	if ownerLabel != currentUserSanitized {
+		logger.Info("Denying delete - user is not the owner",
+			"uuid", uuid,
+			"userID", claims.UserID,
+			"owner", ownerLabel)
+		writeJSONError(w, http.StatusForbidden, ErrorResponse{
+			Error:   "forbidden",
+			Message: "You can only delete resources you created",
+		})
+		return
+	}
+
+	// User is the owner - proceed with deletion
+	if err := h.client.Delete(ctx, &targetRequest); err != nil {
+		logger.Error(err, "Failed to delete KrknTargetRequest", "uuid", uuid)
+		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+			Error:   "internal_error",
+			Message: "Failed to delete KrknTargetRequest",
+		})
+		return
+	}
+
+	logger.Info("Successfully deleted KrknTargetRequest (owner)", "uuid", uuid)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// TargetsHandler handles GET, POST, and DELETE for /api/v1/targets endpoints
 // It routes to the appropriate handler based on the HTTP method
 func (h *Handler) TargetsHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
 		h.GetTargetByUUID(w, r)
 	} else if r.Method == http.MethodPost {
 		h.PostTarget(w, r)
+	} else if r.Method == http.MethodDelete {
+		h.DeleteTargetByUUID(w, r)
 	} else {
 		writeJSONError(w, http.StatusMethodNotAllowed, ErrorResponse{
 			Error:   "method_not_allowed",
-			Message: "Only GET and POST methods are allowed",
+			Message: "Only GET, POST, and DELETE methods are allowed",
 		})
 	}
 }

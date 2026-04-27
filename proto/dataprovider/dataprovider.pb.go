@@ -2,9 +2,8 @@
 // versions:
 // 	protoc-gen-go v1.36.11
 // 	protoc        v5.29.3
-// source: dataprovider.proto
+// source: proto/dataprovider.proto
 
-// Package dataprovider provides gRPC service definitions for cluster data provider operations.
 package dataprovider
 
 import (
@@ -33,7 +32,7 @@ type GetNodesRequest struct {
 
 func (x *GetNodesRequest) Reset() {
 	*x = GetNodesRequest{}
-	mi := &file_dataprovider_proto_msgTypes[0]
+	mi := &file_proto_dataprovider_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -45,7 +44,7 @@ func (x *GetNodesRequest) String() string {
 func (*GetNodesRequest) ProtoMessage() {}
 
 func (x *GetNodesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_dataprovider_proto_msgTypes[0]
+	mi := &file_proto_dataprovider_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -58,7 +57,7 @@ func (x *GetNodesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetNodesRequest.ProtoReflect.Descriptor instead.
 func (*GetNodesRequest) Descriptor() ([]byte, []int) {
-	return file_dataprovider_proto_rawDescGZIP(), []int{0}
+	return file_proto_dataprovider_proto_rawDescGZIP(), []int{0}
 }
 
 func (x *GetNodesRequest) GetKubeconfigBase64() string {
@@ -79,7 +78,7 @@ type GetNodesResponse struct {
 
 func (x *GetNodesResponse) Reset() {
 	*x = GetNodesResponse{}
-	mi := &file_dataprovider_proto_msgTypes[1]
+	mi := &file_proto_dataprovider_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -91,7 +90,7 @@ func (x *GetNodesResponse) String() string {
 func (*GetNodesResponse) ProtoMessage() {}
 
 func (x *GetNodesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_dataprovider_proto_msgTypes[1]
+	mi := &file_proto_dataprovider_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -104,7 +103,7 @@ func (x *GetNodesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetNodesResponse.ProtoReflect.Descriptor instead.
 func (*GetNodesResponse) Descriptor() ([]byte, []int) {
-	return file_dataprovider_proto_rawDescGZIP(), []int{1}
+	return file_proto_dataprovider_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *GetNodesResponse) GetNodes() []string {
@@ -114,65 +113,264 @@ func (x *GetNodesResponse) GetNodes() []string {
 	return nil
 }
 
-var File_dataprovider_proto protoreflect.FileDescriptor
+// ExecuteKubectlRequest contains the command to execute and authentication
+type ExecuteKubectlRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// kubeconfig in base64 format
+	KubeconfigBase64 string `protobuf:"bytes,1,opt,name=kubeconfig_base64,json=kubeconfigBase64,proto3" json:"kubeconfig_base64,omitempty"`
+	// command to execute (kubectl or oc)
+	Command string `protobuf:"bytes,2,opt,name=command,proto3" json:"command,omitempty"`
+	// subcommand (e.g., get, describe, logs)
+	Subcommand string `protobuf:"bytes,3,opt,name=subcommand,proto3" json:"subcommand,omitempty"`
+	// positional arguments (e.g., pods, nginx, default)
+	Args []string `protobuf:"bytes,4,rep,name=args,proto3" json:"args,omitempty"`
+	// named flags with values (e.g., namespace: default, output: yaml)
+	Flags map[string]string `protobuf:"bytes,5,rep,name=flags,proto3" json:"flags,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	// boolean flags without values (e.g., all-namespaces, show-labels)
+	BooleanFlags []string `protobuf:"bytes,6,rep,name=boolean_flags,json=booleanFlags,proto3" json:"boolean_flags,omitempty"`
+	// timeout in seconds (default: 120)
+	TimeoutSeconds int32 `protobuf:"varint,7,opt,name=timeout_seconds,json=timeoutSeconds,proto3" json:"timeout_seconds,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
 
-const file_dataprovider_proto_rawDesc = "" +
+func (x *ExecuteKubectlRequest) Reset() {
+	*x = ExecuteKubectlRequest{}
+	mi := &file_proto_dataprovider_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ExecuteKubectlRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ExecuteKubectlRequest) ProtoMessage() {}
+
+func (x *ExecuteKubectlRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_dataprovider_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ExecuteKubectlRequest.ProtoReflect.Descriptor instead.
+func (*ExecuteKubectlRequest) Descriptor() ([]byte, []int) {
+	return file_proto_dataprovider_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *ExecuteKubectlRequest) GetKubeconfigBase64() string {
+	if x != nil {
+		return x.KubeconfigBase64
+	}
+	return ""
+}
+
+func (x *ExecuteKubectlRequest) GetCommand() string {
+	if x != nil {
+		return x.Command
+	}
+	return ""
+}
+
+func (x *ExecuteKubectlRequest) GetSubcommand() string {
+	if x != nil {
+		return x.Subcommand
+	}
+	return ""
+}
+
+func (x *ExecuteKubectlRequest) GetArgs() []string {
+	if x != nil {
+		return x.Args
+	}
+	return nil
+}
+
+func (x *ExecuteKubectlRequest) GetFlags() map[string]string {
+	if x != nil {
+		return x.Flags
+	}
+	return nil
+}
+
+func (x *ExecuteKubectlRequest) GetBooleanFlags() []string {
+	if x != nil {
+		return x.BooleanFlags
+	}
+	return nil
+}
+
+func (x *ExecuteKubectlRequest) GetTimeoutSeconds() int32 {
+	if x != nil {
+		return x.TimeoutSeconds
+	}
+	return 0
+}
+
+// ExecuteKubectlResponse contains the command execution result
+type ExecuteKubectlResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// stdout output in base64 format
+	StdoutBase64 string `protobuf:"bytes,1,opt,name=stdout_base64,json=stdoutBase64,proto3" json:"stdout_base64,omitempty"`
+	// stderr output in base64 format
+	StderrBase64 string `protobuf:"bytes,2,opt,name=stderr_base64,json=stderrBase64,proto3" json:"stderr_base64,omitempty"`
+	// command exit code (0 = success)
+	ExitCode int32 `protobuf:"varint,3,opt,name=exit_code,json=exitCode,proto3" json:"exit_code,omitempty"`
+	// error message if execution failed (not_found, not_permitted, execution_error, timeout)
+	Error         string `protobuf:"bytes,4,opt,name=error,proto3" json:"error,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ExecuteKubectlResponse) Reset() {
+	*x = ExecuteKubectlResponse{}
+	mi := &file_proto_dataprovider_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ExecuteKubectlResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ExecuteKubectlResponse) ProtoMessage() {}
+
+func (x *ExecuteKubectlResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_dataprovider_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ExecuteKubectlResponse.ProtoReflect.Descriptor instead.
+func (*ExecuteKubectlResponse) Descriptor() ([]byte, []int) {
+	return file_proto_dataprovider_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *ExecuteKubectlResponse) GetStdoutBase64() string {
+	if x != nil {
+		return x.StdoutBase64
+	}
+	return ""
+}
+
+func (x *ExecuteKubectlResponse) GetStderrBase64() string {
+	if x != nil {
+		return x.StderrBase64
+	}
+	return ""
+}
+
+func (x *ExecuteKubectlResponse) GetExitCode() int32 {
+	if x != nil {
+		return x.ExitCode
+	}
+	return 0
+}
+
+func (x *ExecuteKubectlResponse) GetError() string {
+	if x != nil {
+		return x.Error
+	}
+	return ""
+}
+
+var File_proto_dataprovider_proto protoreflect.FileDescriptor
+
+const file_proto_dataprovider_proto_rawDesc = "" +
 	"\n" +
-	"\x12dataprovider.proto\x12\fdataprovider\">\n" +
+	"\x18proto/dataprovider.proto\x12\fdataprovider\">\n" +
 	"\x0fGetNodesRequest\x12+\n" +
 	"\x11kubeconfig_base64\x18\x01 \x01(\tR\x10kubeconfigBase64\"(\n" +
 	"\x10GetNodesResponse\x12\x14\n" +
-	"\x05nodes\x18\x01 \x03(\tR\x05nodes2`\n" +
+	"\x05nodes\x18\x01 \x03(\tR\x05nodes\"\xe0\x02\n" +
+	"\x15ExecuteKubectlRequest\x12+\n" +
+	"\x11kubeconfig_base64\x18\x01 \x01(\tR\x10kubeconfigBase64\x12\x18\n" +
+	"\acommand\x18\x02 \x01(\tR\acommand\x12\x1e\n" +
+	"\n" +
+	"subcommand\x18\x03 \x01(\tR\n" +
+	"subcommand\x12\x12\n" +
+	"\x04args\x18\x04 \x03(\tR\x04args\x12D\n" +
+	"\x05flags\x18\x05 \x03(\v2..dataprovider.ExecuteKubectlRequest.FlagsEntryR\x05flags\x12#\n" +
+	"\rboolean_flags\x18\x06 \x03(\tR\fbooleanFlags\x12'\n" +
+	"\x0ftimeout_seconds\x18\a \x01(\x05R\x0etimeoutSeconds\x1a8\n" +
+	"\n" +
+	"FlagsEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x95\x01\n" +
+	"\x16ExecuteKubectlResponse\x12#\n" +
+	"\rstdout_base64\x18\x01 \x01(\tR\fstdoutBase64\x12#\n" +
+	"\rstderr_base64\x18\x02 \x01(\tR\fstderrBase64\x12\x1b\n" +
+	"\texit_code\x18\x03 \x01(\x05R\bexitCode\x12\x14\n" +
+	"\x05error\x18\x04 \x01(\tR\x05error2\xbd\x01\n" +
 	"\x13DataProviderService\x12I\n" +
-	"\bGetNodes\x12\x1d.dataprovider.GetNodesRequest\x1a\x1e.dataprovider.GetNodesResponseB8Z6github.com/krkn-chaos/krkn-operator/proto/dataproviderb\x06proto3"
+	"\bGetNodes\x12\x1d.dataprovider.GetNodesRequest\x1a\x1e.dataprovider.GetNodesResponse\x12[\n" +
+	"\x0eExecuteKubectl\x12#.dataprovider.ExecuteKubectlRequest\x1a$.dataprovider.ExecuteKubectlResponseB8Z6github.com/krkn-chaos/krkn-operator/proto/dataproviderb\x06proto3"
 
 var (
-	file_dataprovider_proto_rawDescOnce sync.Once
-	file_dataprovider_proto_rawDescData []byte
+	file_proto_dataprovider_proto_rawDescOnce sync.Once
+	file_proto_dataprovider_proto_rawDescData []byte
 )
 
-func file_dataprovider_proto_rawDescGZIP() []byte {
-	file_dataprovider_proto_rawDescOnce.Do(func() {
-		file_dataprovider_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_dataprovider_proto_rawDesc), len(file_dataprovider_proto_rawDesc))) // #nosec G103 -- Required by protobuf compiler, cannot be avoided in generated code
+func file_proto_dataprovider_proto_rawDescGZIP() []byte {
+	file_proto_dataprovider_proto_rawDescOnce.Do(func() {
+		file_proto_dataprovider_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_proto_dataprovider_proto_rawDesc), len(file_proto_dataprovider_proto_rawDesc)))
 	})
-	return file_dataprovider_proto_rawDescData
+	return file_proto_dataprovider_proto_rawDescData
 }
 
-var file_dataprovider_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
-var file_dataprovider_proto_goTypes = []any{
-	(*GetNodesRequest)(nil),  // 0: dataprovider.GetNodesRequest
-	(*GetNodesResponse)(nil), // 1: dataprovider.GetNodesResponse
+var file_proto_dataprovider_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
+var file_proto_dataprovider_proto_goTypes = []any{
+	(*GetNodesRequest)(nil),        // 0: dataprovider.GetNodesRequest
+	(*GetNodesResponse)(nil),       // 1: dataprovider.GetNodesResponse
+	(*ExecuteKubectlRequest)(nil),  // 2: dataprovider.ExecuteKubectlRequest
+	(*ExecuteKubectlResponse)(nil), // 3: dataprovider.ExecuteKubectlResponse
+	nil,                            // 4: dataprovider.ExecuteKubectlRequest.FlagsEntry
 }
-var file_dataprovider_proto_depIdxs = []int32{
-	0, // 0: dataprovider.DataProviderService.GetNodes:input_type -> dataprovider.GetNodesRequest
-	1, // 1: dataprovider.DataProviderService.GetNodes:output_type -> dataprovider.GetNodesResponse
-	1, // [1:2] is the sub-list for method output_type
-	0, // [0:1] is the sub-list for method input_type
-	0, // [0:0] is the sub-list for extension type_name
-	0, // [0:0] is the sub-list for extension extendee
-	0, // [0:0] is the sub-list for field type_name
+var file_proto_dataprovider_proto_depIdxs = []int32{
+	4, // 0: dataprovider.ExecuteKubectlRequest.flags:type_name -> dataprovider.ExecuteKubectlRequest.FlagsEntry
+	0, // 1: dataprovider.DataProviderService.GetNodes:input_type -> dataprovider.GetNodesRequest
+	2, // 2: dataprovider.DataProviderService.ExecuteKubectl:input_type -> dataprovider.ExecuteKubectlRequest
+	1, // 3: dataprovider.DataProviderService.GetNodes:output_type -> dataprovider.GetNodesResponse
+	3, // 4: dataprovider.DataProviderService.ExecuteKubectl:output_type -> dataprovider.ExecuteKubectlResponse
+	3, // [3:5] is the sub-list for method output_type
+	1, // [1:3] is the sub-list for method input_type
+	1, // [1:1] is the sub-list for extension type_name
+	1, // [1:1] is the sub-list for extension extendee
+	0, // [0:1] is the sub-list for field type_name
 }
 
-func init() { file_dataprovider_proto_init() }
-func file_dataprovider_proto_init() {
-	if File_dataprovider_proto != nil {
+func init() { file_proto_dataprovider_proto_init() }
+func file_proto_dataprovider_proto_init() {
+	if File_proto_dataprovider_proto != nil {
 		return
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: unsafe.Slice(unsafe.StringData(file_dataprovider_proto_rawDesc), len(file_dataprovider_proto_rawDesc)), // #nosec G103 -- Required by protobuf compiler, cannot be avoided in generated code
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_proto_dataprovider_proto_rawDesc), len(file_proto_dataprovider_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   2,
+			NumMessages:   5,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
-		GoTypes:           file_dataprovider_proto_goTypes,
-		DependencyIndexes: file_dataprovider_proto_depIdxs,
-		MessageInfos:      file_dataprovider_proto_msgTypes,
+		GoTypes:           file_proto_dataprovider_proto_goTypes,
+		DependencyIndexes: file_proto_dataprovider_proto_depIdxs,
+		MessageInfos:      file_proto_dataprovider_proto_msgTypes,
 	}.Build()
-	File_dataprovider_proto = out.File
-	file_dataprovider_proto_goTypes = nil
-	file_dataprovider_proto_depIdxs = nil
+	File_proto_dataprovider_proto = out.File
+	file_proto_dataprovider_proto_goTypes = nil
+	file_proto_dataprovider_proto_depIdxs = nil
 }

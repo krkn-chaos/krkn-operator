@@ -2,9 +2,8 @@
 // versions:
 // - protoc-gen-go-grpc v1.6.0
 // - protoc             v5.29.3
-// source: dataprovider.proto
+// source: proto/dataprovider.proto
 
-// Package dataprovider provides gRPC service definitions for cluster data provider operations.
 package dataprovider
 
 import (
@@ -20,7 +19,8 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	DataProviderService_GetNodes_FullMethodName = "/dataprovider.DataProviderService/GetNodes"
+	DataProviderService_GetNodes_FullMethodName       = "/dataprovider.DataProviderService/GetNodes"
+	DataProviderService_ExecuteKubectl_FullMethodName = "/dataprovider.DataProviderService/ExecuteKubectl"
 )
 
 // DataProviderServiceClient is the client API for DataProviderService service.
@@ -31,6 +31,8 @@ const (
 type DataProviderServiceClient interface {
 	// GetNodes retrieves the list of nodes from a Kubernetes cluster
 	GetNodes(ctx context.Context, in *GetNodesRequest, opts ...grpc.CallOption) (*GetNodesResponse, error)
+	// ExecuteKubectl executes kubectl or oc commands with read-only permissions
+	ExecuteKubectl(ctx context.Context, in *ExecuteKubectlRequest, opts ...grpc.CallOption) (*ExecuteKubectlResponse, error)
 }
 
 type dataProviderServiceClient struct {
@@ -51,6 +53,16 @@ func (c *dataProviderServiceClient) GetNodes(ctx context.Context, in *GetNodesRe
 	return out, nil
 }
 
+func (c *dataProviderServiceClient) ExecuteKubectl(ctx context.Context, in *ExecuteKubectlRequest, opts ...grpc.CallOption) (*ExecuteKubectlResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ExecuteKubectlResponse)
+	err := c.cc.Invoke(ctx, DataProviderService_ExecuteKubectl_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // DataProviderServiceServer is the server API for DataProviderService service.
 // All implementations must embed UnimplementedDataProviderServiceServer
 // for forward compatibility.
@@ -59,6 +71,8 @@ func (c *dataProviderServiceClient) GetNodes(ctx context.Context, in *GetNodesRe
 type DataProviderServiceServer interface {
 	// GetNodes retrieves the list of nodes from a Kubernetes cluster
 	GetNodes(context.Context, *GetNodesRequest) (*GetNodesResponse, error)
+	// ExecuteKubectl executes kubectl or oc commands with read-only permissions
+	ExecuteKubectl(context.Context, *ExecuteKubectlRequest) (*ExecuteKubectlResponse, error)
 	mustEmbedUnimplementedDataProviderServiceServer()
 }
 
@@ -71,6 +85,9 @@ type UnimplementedDataProviderServiceServer struct{}
 
 func (UnimplementedDataProviderServiceServer) GetNodes(context.Context, *GetNodesRequest) (*GetNodesResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetNodes not implemented")
+}
+func (UnimplementedDataProviderServiceServer) ExecuteKubectl(context.Context, *ExecuteKubectlRequest) (*ExecuteKubectlResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ExecuteKubectl not implemented")
 }
 func (UnimplementedDataProviderServiceServer) mustEmbedUnimplementedDataProviderServiceServer() {}
 func (UnimplementedDataProviderServiceServer) testEmbeddedByValue()                             {}
@@ -111,6 +128,24 @@ func _DataProviderService_GetNodes_Handler(srv interface{}, ctx context.Context,
 	return interceptor(ctx, in, info, handler)
 }
 
+func _DataProviderService_ExecuteKubectl_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ExecuteKubectlRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DataProviderServiceServer).ExecuteKubectl(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DataProviderService_ExecuteKubectl_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DataProviderServiceServer).ExecuteKubectl(ctx, req.(*ExecuteKubectlRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // DataProviderService_ServiceDesc is the grpc.ServiceDesc for DataProviderService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -122,7 +157,11 @@ var DataProviderService_ServiceDesc = grpc.ServiceDesc{
 			MethodName: "GetNodes",
 			Handler:    _DataProviderService_GetNodes_Handler,
 		},
+		{
+			MethodName: "ExecuteKubectl",
+			Handler:    _DataProviderService_ExecuteKubectl_Handler,
+		},
 	},
 	Streams:  []grpc.StreamDesc{},
-	Metadata: "dataprovider.proto",
+	Metadata: "proto/dataprovider.proto",
 }
