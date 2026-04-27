@@ -313,11 +313,21 @@ func (h *Handler) PostTarget(w http.ResponseWriter, r *http.Request) {
 	// Generate a new UUID
 	newUUID := uuid.New().String()
 
+	// Extract user claims for ownership tracking
+	claims := auth.GetClaimsFromContext(ctx)
+
+	// Build labels with owner tracking
+	labels := make(map[string]string)
+	if claims != nil {
+		labels["krkn.krkn-chaos.dev/owner-user"] = sanitizeUserID(claims.UserID)
+	}
+
 	// Create a new KrknTargetRequest CR
 	targetRequest := &krknv1alpha1.KrknTargetRequest{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      newUUID,
 			Namespace: h.namespace,
+			Labels:    labels,
 		},
 		Spec: krknv1alpha1.KrknTargetRequestSpec{
 			UUID: newUUID,
@@ -344,6 +354,7 @@ func (h *Handler) PostTarget(w http.ResponseWriter, r *http.Request) {
 
 // DeleteTargetByUUID handles DELETE /api/v1/targets/{uuid} endpoint
 // It deletes a KrknTargetRequest resource by UUID
+// Authorization: Admin can delete any resource, owner can delete their own
 func (h *Handler) DeleteTargetByUUID(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	logger := log.FromContext(ctx).WithName("delete-target")
@@ -382,7 +393,48 @@ func (h *Handler) DeleteTargetByUUID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Delete the KrknTargetRequest
+	// Admin bypass - can delete any resource
+	if auth.IsAdmin(ctx) {
+		if err := h.client.Delete(ctx, &targetRequest); err != nil {
+			logger.Error(err, "Failed to delete KrknTargetRequest", "uuid", uuid)
+			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+				Error:   "internal_error",
+				Message: "Failed to delete KrknTargetRequest",
+			})
+			return
+		}
+		logger.Info("Successfully deleted KrknTargetRequest (admin)", "uuid", uuid)
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	// Non-admin: check ownership
+	claims := auth.GetClaimsFromContext(ctx)
+	if claims == nil {
+		writeJSONError(w, http.StatusUnauthorized, ErrorResponse{
+			Error:   "unauthorized",
+			Message: "No authentication claims found",
+		})
+		return
+	}
+
+	// Extract owner from label
+	ownerLabel := targetRequest.Labels["krkn.krkn-chaos.dev/owner-user"]
+	currentUserSanitized := sanitizeUserID(claims.UserID)
+
+	if ownerLabel != currentUserSanitized {
+		logger.Info("Denying delete - user is not the owner",
+			"uuid", uuid,
+			"userID", claims.UserID,
+			"owner", ownerLabel)
+		writeJSONError(w, http.StatusForbidden, ErrorResponse{
+			Error:   "forbidden",
+			Message: "You can only delete resources you created",
+		})
+		return
+	}
+
+	// User is the owner - proceed with deletion
 	if err := h.client.Delete(ctx, &targetRequest); err != nil {
 		logger.Error(err, "Failed to delete KrknTargetRequest", "uuid", uuid)
 		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
@@ -392,8 +444,7 @@ func (h *Handler) DeleteTargetByUUID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	logger.Info("Successfully deleted KrknTargetRequest", "uuid", uuid)
-	// Return 204 No Content on successful deletion
+	logger.Info("Successfully deleted KrknTargetRequest (owner)", "uuid", uuid)
 	w.WriteHeader(http.StatusNoContent)
 }
 
