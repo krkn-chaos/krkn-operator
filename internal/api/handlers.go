@@ -308,8 +308,19 @@ func (h *Handler) GetTargetByUUID(w http.ResponseWriter, r *http.Request) {
 
 // PostTarget handles POST /api/v1/targets endpoint (legacy - creates KrknTargetRequest)
 // This endpoint triggers the krkn-operator-acm to discover and return target clusters
+// Requires admin privileges
 func (h *Handler) PostTarget(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+
+	// Require admin privileges
+	if !auth.IsAdmin(ctx) {
+		writeJSONError(w, http.StatusForbidden, ErrorResponse{
+			Error:   "forbidden",
+			Message: "This operation requires admin privileges",
+		})
+		return
+	}
+
 	// Generate a new UUID
 	newUUID := uuid.New().String()
 
@@ -344,9 +355,19 @@ func (h *Handler) PostTarget(w http.ResponseWriter, r *http.Request) {
 
 // DeleteTargetByUUID handles DELETE /api/v1/targets/{uuid} endpoint
 // It deletes a KrknTargetRequest resource by UUID
+// Requires admin privileges
 func (h *Handler) DeleteTargetByUUID(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	logger := log.FromContext(ctx).WithName("delete-target")
+
+	// Require admin privileges
+	if !auth.IsAdmin(ctx) {
+		writeJSONError(w, http.StatusForbidden, ErrorResponse{
+			Error:   "forbidden",
+			Message: "This operation requires admin privileges",
+		})
+		return
+	}
 
 	// Extract UUID from path
 	uuid, err := extractPathSuffix(r.URL.Path, TargetsPath+"/")

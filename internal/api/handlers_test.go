@@ -160,6 +160,7 @@ func TestPostTarget_LegacyEndpoint(t *testing.T) {
 	handler := NewTestHandler(fakeClient, fakeClientset, "default", "localhost:50051")
 
 	req := httptest.NewRequest("POST", TargetsPath, nil)
+	req = req.WithContext(createAdminContext())
 	w := httptest.NewRecorder()
 	handler.PostTarget(w, req)
 
@@ -300,6 +301,7 @@ func TestDeleteTargetByUUID_Success(t *testing.T) {
 	handler := NewTestHandler(fakeClient, fakeClientset, "default", "localhost:50051")
 
 	req := httptest.NewRequest(http.MethodDelete, TargetsPath+"/test-uuid-delete", nil)
+	req = req.WithContext(createAdminContext())
 	w := httptest.NewRecorder()
 	handler.DeleteTargetByUUID(w, req)
 
@@ -339,6 +341,7 @@ func TestDeleteTargetByUUID_NotFound(t *testing.T) {
 	handler := NewTestHandler(fakeClient, fakeClientset, "default", "localhost:50051")
 
 	req := httptest.NewRequest(http.MethodDelete, TargetsPath+"/non-existent-uuid", nil)
+	req = req.WithContext(createAdminContext())
 	w := httptest.NewRecorder()
 	handler.DeleteTargetByUUID(w, req)
 
@@ -376,6 +379,7 @@ func TestDeleteTargetByUUID_InvalidUUID(t *testing.T) {
 
 	// Test with empty UUID (no path suffix)
 	req := httptest.NewRequest(http.MethodDelete, TargetsPath+"/", nil)
+	req = req.WithContext(createAdminContext())
 	w := httptest.NewRecorder()
 	handler.DeleteTargetByUUID(w, req)
 
@@ -420,11 +424,100 @@ func TestTargetsHandler_DELETE(t *testing.T) {
 
 	// Test DELETE method is routed correctly
 	req := httptest.NewRequest(http.MethodDelete, TargetsPath+"/test-uuid-handler", nil)
+	req = req.WithContext(createAdminContext())
 	w := httptest.NewRecorder()
 	handler.TargetsHandler(w, req)
 
 	if w.Code != http.StatusNoContent {
 		t.Errorf("Expected status code %d (No Content), got %d", http.StatusNoContent, w.Code)
+	}
+}
+
+// TestPostTarget_NonAdmin_Forbidden tests that non-admin users cannot create targets
+func TestPostTarget_NonAdmin_Forbidden(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = krknv1alpha1.AddToScheme(scheme)
+	_ = corev1.AddToScheme(scheme)
+
+	fakeClient := fakeclient.NewClientBuilder().
+		WithScheme(scheme).
+		Build()
+	fakeClientset := fake.NewSimpleClientset()
+	handler := NewTestHandler(fakeClient, fakeClientset, "default", "localhost:50051")
+
+	req := httptest.NewRequest(http.MethodPost, TargetsPath, nil)
+	req = req.WithContext(createUserContext("user@test.local"))
+	w := httptest.NewRecorder()
+	handler.PostTarget(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Errorf("Expected status code %d (Forbidden), got %d. Body: %s",
+			http.StatusForbidden, w.Code, w.Body.String())
+	}
+
+	var errResp ErrorResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &errResp); err != nil {
+		t.Fatalf("Failed to unmarshal error response: %v", err)
+	}
+
+	if errResp.Error != "forbidden" {
+		t.Errorf("Expected error code 'forbidden', got '%s'", errResp.Error)
+	}
+}
+
+// TestDeleteTargetByUUID_NonAdmin_Forbidden tests that non-admin users cannot delete targets
+func TestDeleteTargetByUUID_NonAdmin_Forbidden(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = krknv1alpha1.AddToScheme(scheme)
+	_ = corev1.AddToScheme(scheme)
+
+	// Create a KrknTargetRequest
+	targetRequest := &krknv1alpha1.KrknTargetRequest{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-uuid-forbidden",
+			Namespace: "default",
+		},
+		Spec: krknv1alpha1.KrknTargetRequestSpec{
+			UUID: "test-uuid-forbidden",
+		},
+	}
+
+	fakeClient := fakeclient.NewClientBuilder().
+		WithScheme(scheme).
+		WithRuntimeObjects(targetRequest, TestJWTSecret("default")).
+		Build()
+	fakeClientset := fake.NewSimpleClientset()
+	handler := NewTestHandler(fakeClient, fakeClientset, "default", "localhost:50051")
+
+	req := httptest.NewRequest(http.MethodDelete, TargetsPath+"/test-uuid-forbidden", nil)
+	req = req.WithContext(createUserContext("user@test.local"))
+	w := httptest.NewRecorder()
+	handler.DeleteTargetByUUID(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Errorf("Expected status code %d (Forbidden), got %d. Body: %s",
+			http.StatusForbidden, w.Code, w.Body.String())
+	}
+
+	var errResp ErrorResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &errResp); err != nil {
+		t.Fatalf("Failed to unmarshal error response: %v", err)
+	}
+
+	if errResp.Error != "forbidden" {
+		t.Errorf("Expected error code 'forbidden', got '%s'", errResp.Error)
+	}
+
+	// Verify the target was NOT deleted
+	ctx := context.Background()
+	var existingRequest krknv1alpha1.KrknTargetRequest
+	err := fakeClient.Get(ctx, types.NamespacedName{
+		Name:      "test-uuid-forbidden",
+		Namespace: "default",
+	}, &existingRequest)
+
+	if err != nil {
+		t.Errorf("Target should still exist but got error: %v", err)
 	}
 }
 
