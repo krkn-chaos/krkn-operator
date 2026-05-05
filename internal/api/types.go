@@ -45,22 +45,11 @@ type ErrorResponse struct {
 }
 
 // ScenariosRequest represents the optional request body for POST /scenarios
-// If provided, uses private registry; if nil/empty, defaults to quay.io
+// If empty, defaults to quay.io; if registryName provided, uses named registry
 type ScenariosRequest struct {
-	// Username for private registry authentication (optional)
-	Username *string `json:"username,omitempty"`
-	// Password for private registry authentication (optional)
-	Password *string `json:"password,omitempty"`
-	// Token for private registry authentication (optional, alternative to username/password)
-	Token *string `json:"token,omitempty"`
-	// RegistryURL is the private registry URL (required if using private registry)
-	RegistryURL string `json:"registryUrl,omitempty"`
-	// ScenarioRepository is the scenario repository name (required if using private registry)
-	ScenarioRepository string `json:"scenarioRepository,omitempty"`
-	// SkipTLS skips TLS verification for private registry
-	SkipTLS bool `json:"skipTls,omitempty"`
-	// Insecure allows insecure connections to private registry
-	Insecure bool `json:"insecure,omitempty"`
+	// RegistryName is the name of a saved registry (optional)
+	// If omitted, defaults to quay.io public registry
+	RegistryName *string `json:"registryName,omitempty"`
 }
 
 // ScenarioTag represents a scenario available in the registry

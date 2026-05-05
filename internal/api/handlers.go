@@ -46,6 +46,7 @@ import (
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
 	"github.com/krkn-chaos/krkn-operator/pkg/auth"
 	"github.com/krkn-chaos/krkn-operator/pkg/groupauth"
+	"github.com/krkn-chaos/krkn-operator/pkg/registry"
 	pb "github.com/krkn-chaos/krkn-operator/proto/dataprovider"
 )
 
@@ -542,7 +543,10 @@ func (h *Handler) callGetNodesGRPC(kubeconfigBase64 string) ([]string, error) {
 
 // parseRegistryRequest parses and validates the registry request from the HTTP body.
 // Returns the registry configuration, provider mode, and any error.
-func parseRegistryRequest(r *http.Request) (*models.RegistryV2, provider.Mode, error) {
+func (h *Handler) parseRegistryRequest(r *http.Request) (*models.RegistryV2, provider.Mode, error) {
+	ctx := r.Context()
+
+	// Empty request body → use default quay.io
 	if r.ContentLength == 0 {
 		return nil, provider.Quay, nil
 	}
@@ -552,25 +556,30 @@ func parseRegistryRequest(r *http.Request) (*models.RegistryV2, provider.Mode, e
 		return nil, provider.Quay, fmt.Errorf("invalid request body: %w", err)
 	}
 
-	if req.RegistryURL == "" && req.ScenarioRepository == "" {
-		return nil, provider.Quay, nil
+	// Check for named registry
+	if req.RegistryName != nil && *req.RegistryName != "" {
+		// Load registry secret
+		secret, err := h.loadRegistrySecret(ctx, *req.RegistryName)
+		if err != nil {
+			return nil, provider.Quay, fmt.Errorf("registry '%s' not found", *req.RegistryName)
+		}
+
+		// Check user access
+		if !h.canAccessRegistry(ctx, secret) {
+			return nil, provider.Quay, fmt.Errorf("access denied to registry '%s'", *req.RegistryName)
+		}
+
+		// Extract RegistryV2 from secret
+		registryV2, err := registry.ExtractRegistryV2FromSecret(secret)
+		if err != nil {
+			return nil, provider.Quay, fmt.Errorf("invalid registry secret: %w", err)
+		}
+
+		return registryV2, provider.Private, nil
 	}
 
-	if req.RegistryURL == "" || req.ScenarioRepository == "" {
-		return nil, provider.Quay, fmt.Errorf("both registryUrl and scenarioRepository are required for private registry")
-	}
-
-	registry := &models.RegistryV2{
-		Username:           req.Username,
-		Password:           req.Password,
-		Token:              req.Token,
-		RegistryURL:        req.RegistryURL,
-		ScenarioRepository: req.ScenarioRepository,
-		SkipTLS:            req.SkipTLS,
-		Insecure:           req.Insecure,
-	}
-
-	return registry, provider.Private, nil
+	// No registry specified → use default quay.io
+	return nil, provider.Quay, nil
 }
 
 // createScenarioProvider creates and returns a scenario provider instance.
@@ -594,7 +603,7 @@ func createScenarioProvider(mode provider.Mode) (provider.ScenarioDataProvider, 
 // It returns the list of available krkn scenarios from quay.io or a private registry
 func (h *Handler) PostScenarios(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	registry, mode, err := parseRegistryRequest(r)
+	registry, mode, err := h.parseRegistryRequest(r)
 	if err != nil {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
 			Error:   "bad_request",
@@ -671,7 +680,7 @@ func (h *Handler) PostScenarioDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	registry, mode, err := parseRegistryRequest(r)
+	registry, mode, err := h.parseRegistryRequest(r)
 	if err != nil {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
 			Error:   "bad_request",
@@ -734,7 +743,7 @@ func (h *Handler) PostScenarioGlobals(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	registry, mode, err := parseRegistryRequest(r)
+	registry, mode, err := h.parseRegistryRequest(r)
 	if err != nil {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
 			Error:   "bad_request",
@@ -920,6 +929,41 @@ func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
 		)
 	}
 
+	// Load registry configuration if specified
+	var registryConfig *models.RegistryV2
+	if req.RegistryName != nil && *req.RegistryName != "" {
+		secret, err := h.loadRegistrySecret(ctx, *req.RegistryName)
+		if err != nil {
+			writeJSONError(w, http.StatusNotFound, ErrorResponse{
+				Error:   "not_found",
+				Message: fmt.Sprintf("Registry '%s' not found", *req.RegistryName),
+			})
+			return
+		}
+
+		// Check user access
+		if !h.canAccessRegistry(ctx, secret) {
+			writeJSONError(w, http.StatusForbidden, ErrorResponse{
+				Error:   "forbidden",
+				Message: fmt.Sprintf("Access denied to registry '%s'", *req.RegistryName),
+			})
+			return
+		}
+
+		// Extract registry configuration
+		registryConfig, err = registry.ExtractRegistryV2FromSecret(secret)
+		if err != nil {
+			logger.Error(err, "Failed to extract registry config from secret", "registryName", *req.RegistryName)
+			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+				Error:   "internal_error",
+				Message: "Failed to load registry configuration",
+			})
+			return
+		}
+
+		logger.V(1).Info("Loaded registry configuration", "registryName", *req.RegistryName)
+	}
+
 	// Generate scenario run name
 	scenarioRunName := fmt.Sprintf("%s-%s", req.ScenarioName, uuid.New().String()[:8])
 
@@ -948,9 +992,22 @@ func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
 			ScenarioImage:      req.ScenarioImage,
 			KubeconfigPath:     req.KubeconfigPath,
 			Environment:        req.Environment,
-			RegistryURL:        req.RegistryURL,
-			ScenarioRepository: req.ScenarioRepository,
 		},
+	}
+
+	// Set registry configuration if loaded
+	if registryConfig != nil {
+		scenarioRun.Spec.RegistryURL = registryConfig.RegistryURL
+		scenarioRun.Spec.ScenarioRepository = registryConfig.ScenarioRepository
+		if registryConfig.Token != nil {
+			scenarioRun.Spec.Token = *registryConfig.Token
+		}
+		if registryConfig.Username != nil {
+			scenarioRun.Spec.Username = *registryConfig.Username
+		}
+		if registryConfig.Password != nil {
+			scenarioRun.Spec.Password = *registryConfig.Password
+		}
 	}
 
 	// Convert FileMount from API type to CRD type
@@ -963,17 +1020,6 @@ func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
 				MountPath: f.MountPath,
 			}
 		}
-	}
-
-	// Set optional registry auth fields
-	if req.Token != nil {
-		scenarioRun.Spec.Token = *req.Token
-	}
-	if req.Username != nil {
-		scenarioRun.Spec.Username = *req.Username
-	}
-	if req.Password != nil {
-		scenarioRun.Spec.Password = *req.Password
 	}
 
 	// Create the CR

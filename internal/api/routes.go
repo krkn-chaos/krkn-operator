@@ -73,6 +73,12 @@ const (
 	GroupsPath = APIBasePath + "/groups"
 )
 
+// Registry management endpoints
+const (
+	RegistriesPath          = APIBasePath + "/registries"
+	RegistriesAvailablePath = RegistriesPath + "/available"
+)
+
 // Provider endpoints
 const (
 	ProvidersPath      = APIBasePath + "/providers"
