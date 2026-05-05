@@ -308,13 +308,51 @@ func (h *Handler) UpdateRegistry(w http.ResponseWriter, r *http.Request) {
 		updatedBy = claims.UserID
 	}
 
-	// Build new dockerconfigjson
+	// Determine credentials to use (new if provided, existing if not)
+	token := req.Token
+	username := req.Username
+	password := req.Password
+
+	// If credentials are not provided, extract from existing secret
+	credentialsProvided := false
+	if req.AuthType == registry.AuthTypeToken {
+		credentialsProvided = req.Token != ""
+	} else {
+		credentialsProvided = req.Username != "" || req.Password != ""
+	}
+
+	if !credentialsProvided {
+		// Extract existing credentials from secret
+		existingRegistry, err := registry.ExtractRegistryV2FromSecret(secret)
+		if err != nil {
+			logger.Error(err, "Failed to extract existing credentials", "registryName", registryName)
+			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+				Error:   "internal_error",
+				Message: "Failed to extract existing credentials",
+			})
+			return
+		}
+
+		// Use existing credentials
+		if req.AuthType == registry.AuthTypeToken && existingRegistry.Token != nil {
+			token = *existingRegistry.Token
+		} else if req.AuthType == registry.AuthTypePassword {
+			if existingRegistry.Username != nil {
+				username = *existingRegistry.Username
+			}
+			if existingRegistry.Password != nil {
+				password = *existingRegistry.Password
+			}
+		}
+	}
+
+	// Build new dockerconfigjson with determined credentials
 	dockerConfigJSON, err := registry.BuildDockerConfigJSON(
 		req.RegistryURL,
 		req.AuthType,
-		req.Token,
-		req.Username,
-		req.Password,
+		token,
+		username,
+		password,
 	)
 	if err != nil {
 		logger.Error(err, "Failed to build dockerconfigjson", "registryName", registryName)
@@ -729,12 +767,23 @@ func validateUpdateRegistryRequest(ctx context.Context, k8sClient client.Client,
 		return fmt.Errorf("authType must be '%s' or '%s'", registry.AuthTypeToken, registry.AuthTypePassword)
 	}
 
-	// Validate credentials match auth type
-	if req.AuthType == registry.AuthTypeToken && req.Token == "" {
-		return fmt.Errorf("token is required for token auth type")
+	// Validate credentials match auth type (only if provided - credentials are optional in update)
+	// If not provided, existing credentials will be kept
+	credentialsProvided := false
+	if req.AuthType == registry.AuthTypeToken {
+		credentialsProvided = req.Token != ""
+	} else { // AuthTypePassword
+		credentialsProvided = req.Username != "" || req.Password != ""
 	}
-	if req.AuthType == registry.AuthTypePassword && (req.Username == "" || req.Password == "") {
-		return fmt.Errorf("username and password are required for password auth type")
+
+	// If credentials are provided, validate they match the auth type
+	if credentialsProvided {
+		if req.AuthType == registry.AuthTypeToken && req.Token == "" {
+			return fmt.Errorf("token cannot be empty for token auth type")
+		}
+		if req.AuthType == registry.AuthTypePassword && (req.Username == "" || req.Password == "") {
+			return fmt.Errorf("both username and password are required for password auth type")
+		}
 	}
 
 	// Validate groups exist
