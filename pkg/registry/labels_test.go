@@ -35,11 +35,11 @@ func TestBuildRegistryLabels(t *testing.T) {
 			groups:         []string{"dev-team", "qa-team"},
 			availableToAll: false,
 			want: map[string]string{
-				AppNameLabel:                            AppName,
-				AppComponentLabel:                       ComponentRegistry,
-				AuthTypeLabel:                           AuthTypeToken,
-				"group.krkn.krkn-chaos.dev/dev-team":   "true",
-				"group.krkn.krkn-chaos.dev/qa-team":    "true",
+				AppNameLabel:                         AppName,
+				AppComponentLabel:                    ComponentRegistry,
+				AuthTypeLabel:                        AuthTypeToken,
+				"group.krkn.krkn-chaos.dev/dev-team": "true",
+				"group.krkn.krkn-chaos.dev/qa-team":  "true",
 			},
 		},
 		{
@@ -55,7 +55,7 @@ func TestBuildRegistryLabels(t *testing.T) {
 			},
 		},
 		{
-			name:           "no groups, not available to all",
+			name:           "token auth no groups",
 			authType:       AuthTypeToken,
 			groups:         []string{},
 			availableToAll: false,
@@ -300,8 +300,8 @@ func TestExtractGroupsFromLabels(t *testing.T) {
 		{
 			name: "mixed labels",
 			labels: map[string]string{
-				"group.krkn.krkn-chaos.dev/dev-team": "true",
-				"app.kubernetes.io/name":             "krkn-operator",
+				"group.krkn.krkn-chaos.dev/dev-team":     "true",
+				"app.kubernetes.io/name":                 "krkn-operator",
 				"registry.krkn.krkn-chaos.dev/auth-type": "token",
 			},
 			want: []string{"dev-team"},

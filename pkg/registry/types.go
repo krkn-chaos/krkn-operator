@@ -32,9 +32,8 @@ type CreateRegistryRequest struct {
 	RegistryURL        string   `json:"registryUrl"`
 	ScenarioRepository string   `json:"scenarioRepository"`
 	AuthType           string   `json:"authType"`
-	Token              string   `json:"token,omitempty"`
-	Username           string   `json:"username,omitempty"`
-	Password           string   `json:"password,omitempty"`
+	Username           string   `json:"username"`
+	Password           string   `json:"password"`
 	SkipTLS            bool     `json:"skipTls,omitempty"`
 	Insecure           bool     `json:"insecure,omitempty"`
 	Description        string   `json:"description,omitempty"`
@@ -47,7 +46,6 @@ type UpdateRegistryRequest struct {
 	RegistryURL        string   `json:"registryUrl"`
 	ScenarioRepository string   `json:"scenarioRepository"`
 	AuthType           string   `json:"authType"`
-	Token              string   `json:"token,omitempty"`
 	Username           string   `json:"username,omitempty"`
 	Password           string   `json:"password,omitempty"`
 	SkipTLS            bool     `json:"skipTls,omitempty"`

@@ -89,8 +89,6 @@ func (h *Handler) CreateRegistry(w http.ResponseWriter, r *http.Request) {
 	// Build dockerconfigjson
 	dockerConfigJSON, err := registry.BuildDockerConfigJSON(
 		req.RegistryURL,
-		req.AuthType,
-		req.Token,
 		req.Username,
 		req.Password,
 	)
@@ -309,17 +307,11 @@ func (h *Handler) UpdateRegistry(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Determine credentials to use (new if provided, existing if not)
-	token := req.Token
 	username := req.Username
 	password := req.Password
 
 	// If credentials are not provided, extract from existing secret
-	credentialsProvided := false
-	if req.AuthType == registry.AuthTypeToken {
-		credentialsProvided = req.Token != ""
-	} else {
-		credentialsProvided = req.Username != "" || req.Password != ""
-	}
+	credentialsProvided := req.Username != "" && req.Password != ""
 
 	if !credentialsProvided {
 		// Extract existing credentials from secret
@@ -334,23 +326,17 @@ func (h *Handler) UpdateRegistry(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Use existing credentials
-		if req.AuthType == registry.AuthTypeToken && existingRegistry.Token != nil {
-			token = *existingRegistry.Token
-		} else if req.AuthType == registry.AuthTypePassword {
-			if existingRegistry.Username != nil {
-				username = *existingRegistry.Username
-			}
-			if existingRegistry.Password != nil {
-				password = *existingRegistry.Password
-			}
+		if existingRegistry.Username != nil {
+			username = *existingRegistry.Username
+		}
+		if existingRegistry.Password != nil {
+			password = *existingRegistry.Password
 		}
 	}
 
 	// Build new dockerconfigjson with determined credentials
 	dockerConfigJSON, err := registry.BuildDockerConfigJSON(
 		req.RegistryURL,
-		req.AuthType,
-		token,
 		username,
 		password,
 	)
@@ -721,12 +707,9 @@ func validateCreateRegistryRequest(ctx context.Context, k8sClient client.Client,
 		return fmt.Errorf("authType must be '%s' or '%s'", registry.AuthTypeToken, registry.AuthTypePassword)
 	}
 
-	// Validate credentials match auth type
-	if req.AuthType == registry.AuthTypeToken && req.Token == "" {
-		return fmt.Errorf("token is required for token auth type")
-	}
-	if req.AuthType == registry.AuthTypePassword && (req.Username == "" || req.Password == "") {
-		return fmt.Errorf("username and password are required for password auth type")
+	// Validate credentials
+	if req.Username == "" || req.Password == "" {
+		return fmt.Errorf("username and password are required")
 	}
 
 	// Validate groups exist
@@ -767,23 +750,11 @@ func validateUpdateRegistryRequest(ctx context.Context, k8sClient client.Client,
 		return fmt.Errorf("authType must be '%s' or '%s'", registry.AuthTypeToken, registry.AuthTypePassword)
 	}
 
-	// Validate credentials match auth type (only if provided - credentials are optional in update)
-	// If not provided, existing credentials will be kept
-	credentialsProvided := false
-	if req.AuthType == registry.AuthTypeToken {
-		credentialsProvided = req.Token != ""
-	} else { // AuthTypePassword
-		credentialsProvided = req.Username != "" || req.Password != ""
-	}
-
-	// If credentials are provided, validate they match the auth type
-	if credentialsProvided {
-		if req.AuthType == registry.AuthTypeToken && req.Token == "" {
-			return fmt.Errorf("token cannot be empty for token auth type")
-		}
-		if req.AuthType == registry.AuthTypePassword && (req.Username == "" || req.Password == "") {
-			return fmt.Errorf("both username and password are required for password auth type")
-		}
+	// Validate credentials (optional in update - if not provided, existing ones are kept)
+	// If any credential is provided, both must be provided
+	credentialsProvided := req.Username != "" || req.Password != ""
+	if credentialsProvided && (req.Username == "" || req.Password == "") {
+		return fmt.Errorf("both username and password must be provided together")
 	}
 
 	// Validate groups exist

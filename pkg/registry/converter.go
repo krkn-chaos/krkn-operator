@@ -69,68 +69,48 @@ func ExtractRegistryV2FromSecret(secret *corev1.Secret) (*models.RegistryV2, err
 	}
 
 	// Decode the auth field (base64)
+	// Standard format is always base64(username:password)
 	decodedAuth, err := base64.StdEncoding.DecodeString(authEntry.Auth)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode auth field: %w", err)
 	}
 
-	// Get auth type from label
-	authType, ok := secret.Labels[AuthTypeLabel]
-	if !ok {
-		return nil, fmt.Errorf("missing required label: %s", AuthTypeLabel)
+	// Split username:password (standard format)
+	parts := strings.SplitN(string(decodedAuth), ":", 2)
+	if len(parts) != 2 {
+		return nil, fmt.Errorf("invalid auth format: expected base64(username:password)")
 	}
 
-	// Build RegistryV2 based on auth type
+	username := parts[0]
+	password := parts[1]
+
 	registry := &models.RegistryV2{
 		RegistryURL:        registryURL,
 		ScenarioRepository: scenarioRepo,
+		Username:           &username,
+		Password:           &password,
 		SkipTLS:            secret.Annotations[SkipTLSAnnotation] == "true",
 		Insecure:           secret.Annotations[InsecureAnnotation] == "true",
 	}
 
-	switch authType {
-	case AuthTypeToken:
-		token := string(decodedAuth)
-		registry.Token = &token
-	case AuthTypePassword:
-		// Split username:password
-		parts := strings.SplitN(string(decodedAuth), ":", 2)
-		if len(parts) != 2 {
-			return nil, fmt.Errorf("invalid password auth format: expected username:password")
-		}
-		username := parts[0]
-		password := parts[1]
-		registry.Username = &username
-		registry.Password = &password
-	default:
-		return nil, fmt.Errorf("invalid auth type: %s (expected %s or %s)",
-			authType, AuthTypeToken, AuthTypePassword)
+	// Check auth type label to determine if password should also populate Token field
+	authType := secret.Labels[AuthTypeLabel]
+	if authType == AuthTypeToken {
+		// For token auth, password field contains the actual token for API Bearer auth
+		registry.Token = &password
 	}
 
 	return registry, nil
 }
 
-// BuildDockerConfigJSON creates a .dockerconfigjson data field from RegistryV2
-func BuildDockerConfigJSON(registryURL string, authType string, token, username, password string) ([]byte, error) {
-	var authStr string
-
-	switch authType {
-	case AuthTypeToken:
-		if token == "" {
-			return nil, fmt.Errorf("token is required for token auth type")
-		}
-		// For token auth, encode just the token
-		authStr = base64.StdEncoding.EncodeToString([]byte(token))
-	case AuthTypePassword:
-		if username == "" || password == "" {
-			return nil, fmt.Errorf("username and password are required for password auth type")
-		}
-		// For password auth, encode username:password
-		authStr = base64.StdEncoding.EncodeToString([]byte(username + ":" + password))
-	default:
-		return nil, fmt.Errorf("invalid auth type: %s (expected %s or %s)",
-			authType, AuthTypeToken, AuthTypePassword)
+// BuildDockerConfigJSON creates a .dockerconfigjson data field with username:password auth
+func BuildDockerConfigJSON(registryURL, username, password string) ([]byte, error) {
+	if username == "" || password == "" {
+		return nil, fmt.Errorf("username and password are required")
 	}
+
+	// Standard format: base64(username:password)
+	authStr := base64.StdEncoding.EncodeToString([]byte(username + ":" + password))
 
 	dockerConfig := DockerConfig{
 		Auths: map[string]AuthEntry{
@@ -160,16 +140,6 @@ func ValidateRegistrySecret(secret *corev1.Secret) error {
 		if value, ok := secret.Labels[key]; !ok || value != expectedValue {
 			return fmt.Errorf("missing or invalid label: %s (expected %s)", key, expectedValue)
 		}
-	}
-
-	// Check auth type label
-	authType, ok := secret.Labels[AuthTypeLabel]
-	if !ok {
-		return fmt.Errorf("missing required label: %s", AuthTypeLabel)
-	}
-	if authType != AuthTypeToken && authType != AuthTypePassword {
-		return fmt.Errorf("invalid auth type: %s (expected %s or %s)",
-			authType, AuthTypeToken, AuthTypePassword)
 	}
 
 	// Check required annotations
@@ -207,17 +177,15 @@ func ValidateRegistrySecret(secret *corev1.Secret) error {
 		return fmt.Errorf("no auth entry found for registry %s", registryURL)
 	}
 
-	// Validate auth can be decoded
+	// Validate auth can be decoded and is in username:password format
 	decodedAuth, err := base64.StdEncoding.DecodeString(authEntry.Auth)
 	if err != nil {
 		return fmt.Errorf("invalid base64 encoding in auth field: %w", err)
 	}
 
-	// For password type, validate it contains ':'
-	if authType == AuthTypePassword {
-		if !strings.Contains(string(decodedAuth), ":") {
-			return fmt.Errorf("password auth must be in format username:password")
-		}
+	// Validate standard format username:password
+	if !strings.Contains(string(decodedAuth), ":") {
+		return fmt.Errorf("auth must be in format base64(username:password)")
 	}
 
 	return nil

@@ -239,12 +239,12 @@ func TestExecuteTerminal_ErrorMapping(t *testing.T) {
 func TestExecuteTerminal_GRPCErrorHandling(t *testing.T) {
 	// Document expected gRPC error handling behavior
 	grpcErrors := []struct {
-		name           string
-		grpcCodeName   string
-		grpcMessage    string
-		expectedHTTP   int
-		expectedError  string
-		description    string
+		name          string
+		grpcCodeName  string
+		grpcMessage   string
+		expectedHTTP  int
+		expectedError string
+		description   string
 	}{
 		{
 			name:          "gRPC NOT_FOUND",

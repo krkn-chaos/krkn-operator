@@ -169,7 +169,7 @@ func TestValidateCommand(t *testing.T) {
 				Flags:        map[string]string{},
 				BooleanFlags: []string{"watch"},
 			},
-			wantErr: true,
+			wantErr:     true,
 			expectedErr: ErrCommandNotPermitted,
 		},
 		{
@@ -181,7 +181,7 @@ func TestValidateCommand(t *testing.T) {
 				Flags:        map[string]string{},
 				BooleanFlags: []string{"w"},
 			},
-			wantErr: true,
+			wantErr:     true,
 			expectedErr: ErrCommandNotPermitted,
 		},
 		{
@@ -193,7 +193,7 @@ func TestValidateCommand(t *testing.T) {
 				Flags:        map[string]string{},
 				BooleanFlags: []string{"follow"},
 			},
-			wantErr: true,
+			wantErr:     true,
 			expectedErr: ErrCommandNotPermitted,
 		},
 		{
@@ -205,7 +205,7 @@ func TestValidateCommand(t *testing.T) {
 				Flags:        map[string]string{},
 				BooleanFlags: []string{"f"},
 			},
-			wantErr: true,
+			wantErr:     true,
 			expectedErr: ErrCommandNotPermitted,
 		},
 		{
@@ -217,7 +217,7 @@ func TestValidateCommand(t *testing.T) {
 				Flags:        map[string]string{"watch": "true"},
 				BooleanFlags: []string{},
 			},
-			wantErr: true,
+			wantErr:     true,
 			expectedErr: ErrCommandNotPermitted,
 		},
 		{
@@ -229,7 +229,7 @@ func TestValidateCommand(t *testing.T) {
 				Flags:        map[string]string{},
 				BooleanFlags: []string{"watch-only"},
 			},
-			wantErr: true,
+			wantErr:     true,
 			expectedErr: ErrCommandNotPermitted,
 		},
 		{

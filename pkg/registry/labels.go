@@ -60,7 +60,7 @@ const (
 	// ComponentRegistry is the value for AppComponentLabel
 	ComponentRegistry = "registry"
 
-	// AuthTypeToken indicates token-based authentication
+	// AuthTypeToken indicates token-based authentication (Bearer token for API calls)
 	AuthTypeToken = "token"
 	// AuthTypePassword indicates username/password-based authentication
 	AuthTypePassword = "password"

@@ -102,6 +102,10 @@ spec:
               password:
                 description: Password is the password for registry authentication
                 type: string
+              registryName:
+                description: RegistryName is the name of the saved private registry
+                  to use
+                type: string
               registryURL:
                 description: RegistryURL is the URL of the container registry
                 type: string

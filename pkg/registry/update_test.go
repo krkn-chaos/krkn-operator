@@ -28,8 +28,8 @@ import (
 // TestUpdateWithoutCredentials verifies that updating a registry without providing credentials
 // keeps the existing credentials intact
 func TestUpdateWithoutCredentials(t *testing.T) {
-	// Create initial secret with token auth
-	authStr := base64.StdEncoding.EncodeToString([]byte("original-token"))
+	// Create initial secret with OAuth token
+	authStr := base64.StdEncoding.EncodeToString([]byte("$oauthtoken:original-token"))
 	dockerConfig := DockerConfig{
 		Auths: map[string]AuthEntry{
 			"registry.example.com": {
@@ -46,7 +46,6 @@ func TestUpdateWithoutCredentials(t *testing.T) {
 			Labels: map[string]string{
 				AppNameLabel:      AppName,
 				AppComponentLabel: ComponentRegistry,
-				AuthTypeLabel:     AuthTypeToken,
 			},
 			Annotations: map[string]string{
 				RegistryURLAnnotation:        "registry.example.com",
@@ -69,14 +68,11 @@ func TestUpdateWithoutCredentials(t *testing.T) {
 		t.Fatalf("Failed to extract existing registry: %v", err)
 	}
 
-	// Simulate update without providing new credentials
-	// Use existing credentials
+	// Simulate update without providing new credentials - use existing
 	newDockerConfigJSON, err := BuildDockerConfigJSON(
-		"registry.example.com", // Same registry URL
-		AuthTypeToken,
-		*existingRegistry.Token, // Use existing token
-		"",
-		"",
+		"registry.example.com",
+		*existingRegistry.Username,
+		*existingRegistry.Password,
 	)
 	if err != nil {
 		t.Fatalf("Failed to build new dockerconfigjson: %v", err)
@@ -98,16 +94,16 @@ func TestUpdateWithoutCredentials(t *testing.T) {
 		t.Fatalf("Failed to decode auth: %v", err)
 	}
 
-	if string(decodedAuth) != "original-token" {
-		t.Errorf("Token changed! Got %v, want original-token", string(decodedAuth))
+	if string(decodedAuth) != "$oauthtoken:original-token" {
+		t.Errorf("Credentials changed! Got %v, want $oauthtoken:original-token", string(decodedAuth))
 	}
 }
 
 // TestUpdateWithNewCredentials verifies that updating a registry with new credentials
 // replaces the existing ones
 func TestUpdateWithNewCredentials(t *testing.T) {
-	// Create initial secret with token auth
-	authStr := base64.StdEncoding.EncodeToString([]byte("original-token"))
+	// Create initial secret
+	authStr := base64.StdEncoding.EncodeToString([]byte("$oauthtoken:original-token"))
 	dockerConfig := DockerConfig{
 		Auths: map[string]AuthEntry{
 			"registry.example.com": {
@@ -124,7 +120,6 @@ func TestUpdateWithNewCredentials(t *testing.T) {
 			Labels: map[string]string{
 				AppNameLabel:      AppName,
 				AppComponentLabel: ComponentRegistry,
-				AuthTypeLabel:     AuthTypeToken,
 			},
 			Annotations: map[string]string{
 				RegistryURLAnnotation:        "registry.example.com",
@@ -150,10 +145,8 @@ func TestUpdateWithNewCredentials(t *testing.T) {
 	// Simulate update WITH new credentials
 	newDockerConfigJSON, err := BuildDockerConfigJSON(
 		"registry.example.com",
-		AuthTypeToken,
-		"new-token", // New token provided
-		"",
-		"",
+		"$oauthtoken",
+		"new-token",
 	)
 	if err != nil {
 		t.Fatalf("Failed to build new dockerconfigjson: %v", err)
@@ -175,8 +168,8 @@ func TestUpdateWithNewCredentials(t *testing.T) {
 		t.Fatalf("Failed to decode auth: %v", err)
 	}
 
-	if string(decodedAuth) != "new-token" {
-		t.Errorf("Token not updated! Got %v, want new-token", string(decodedAuth))
+	if string(decodedAuth) != "$oauthtoken:new-token" {
+		t.Errorf("Credentials not updated! Got %v, want $oauthtoken:new-token", string(decodedAuth))
 	}
 }
 
@@ -200,7 +193,6 @@ func TestUpdatePasswordAuthWithoutCredentials(t *testing.T) {
 			Labels: map[string]string{
 				AppNameLabel:      AppName,
 				AppComponentLabel: ComponentRegistry,
-				AuthTypeLabel:     AuthTypePassword,
 			},
 			Annotations: map[string]string{
 				RegistryURLAnnotation:        "registry.io",
@@ -234,8 +226,6 @@ func TestUpdatePasswordAuthWithoutCredentials(t *testing.T) {
 	// Simulate update without providing new credentials - use existing ones
 	newDockerConfigJSON, err := BuildDockerConfigJSON(
 		"registry.io",
-		AuthTypePassword,
-		"",
 		*existingRegistry.Username,
 		*existingRegistry.Password,
 	)

@@ -621,10 +621,24 @@ func (h *Handler) PostScenarios(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// For API calls: if Token is set (token auth), clear Username/Password to force Bearer auth
+	// Username/Password are only for image pull, not for API calls
+	apiRegistry := registry
+	if registry != nil && registry.Token != nil {
+		apiRegistry = &models.RegistryV2{
+			RegistryURL:        registry.RegistryURL,
+			ScenarioRepository: registry.ScenarioRepository,
+			Token:              registry.Token,
+			SkipTLS:            registry.SkipTLS,
+			Insecure:           registry.Insecure,
+			// Username and Password intentionally nil for token-based API auth
+		}
+	}
+
 	// Get registry images (scenario list)
-	scenarioTags, err := scenarioProvider.GetRegistryImages(registry)
+	scenarioTags, err := scenarioProvider.GetRegistryImages(apiRegistry)
 	if err != nil {
-		log.FromContext(ctx).Error(err, "Failed to get scenarios from registry", "registry", registry)
+		log.FromContext(ctx).Error(err, "Failed to get scenarios from registry", "registry", apiRegistry)
 		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
 			Error:   "internal_error",
 			Message: "Failed to get scenarios from registry",
@@ -698,8 +712,22 @@ func (h *Handler) PostScenarioDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// For API calls: if Token is set (token auth), clear Username/Password to force Bearer auth
+	// Username/Password are only for image pull, not for API calls
+	apiRegistry := registry
+	if registry != nil && registry.Token != nil {
+		apiRegistry = &models.RegistryV2{
+			RegistryURL:        registry.RegistryURL,
+			ScenarioRepository: registry.ScenarioRepository,
+			Token:              registry.Token,
+			SkipTLS:            registry.SkipTLS,
+			Insecure:           registry.Insecure,
+			// Username and Password intentionally nil for token-based API auth
+		}
+	}
+
 	// Get scenario detail
-	scenarioDetail, err := scenarioProvider.GetScenarioDetail(scenarioName, registry)
+	scenarioDetail, err := scenarioProvider.GetScenarioDetail(scenarioName, apiRegistry)
 	if err != nil {
 		log.FromContext(ctx).Error(err, "Failed to get scenario detail", "scenarioName", scenarioName, "registry", registry)
 		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
@@ -761,8 +789,22 @@ func (h *Handler) PostScenarioGlobals(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// For API calls: if Token is set (token auth), clear Username/Password to force Bearer auth
+	// Username/Password are only for image pull, not for API calls
+	apiRegistry := registry
+	if registry != nil && registry.Token != nil {
+		apiRegistry = &models.RegistryV2{
+			RegistryURL:        registry.RegistryURL,
+			ScenarioRepository: registry.ScenarioRepository,
+			Token:              registry.Token,
+			SkipTLS:            registry.SkipTLS,
+			Insecure:           registry.Insecure,
+			// Username and Password intentionally nil for token-based API auth
+		}
+	}
+
 	// Get global environment
-	globalDetail, err := scenarioProvider.GetGlobalEnvironment(registry, scenarioName)
+	globalDetail, err := scenarioProvider.GetGlobalEnvironment(apiRegistry, scenarioName)
 	if err != nil {
 		log.FromContext(ctx).Error(err, "Failed to get global environment", "registry", registry, "scenarioName", scenarioName)
 		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
@@ -985,18 +1027,19 @@ func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
 			Labels:    labels,
 		},
 		Spec: krknv1alpha1.KrknScenarioRunSpec{
-			TargetRequestID:    req.TargetRequestID,
-			OwnerUserID:        ownerUserID,
-			TargetClusters:     req.TargetClusters,
-			ScenarioName:       req.ScenarioName,
-			ScenarioImage:      req.ScenarioImage,
-			KubeconfigPath:     req.KubeconfigPath,
-			Environment:        req.Environment,
+			TargetRequestID: req.TargetRequestID,
+			OwnerUserID:     ownerUserID,
+			TargetClusters:  req.TargetClusters,
+			ScenarioName:    req.ScenarioName,
+			ScenarioImage:   req.ScenarioImage,
+			KubeconfigPath:  req.KubeconfigPath,
+			Environment:     req.Environment,
 		},
 	}
 
 	// Set registry configuration if loaded
 	if registryConfig != nil {
+		scenarioRun.Spec.RegistryName = *req.RegistryName
 		scenarioRun.Spec.RegistryURL = registryConfig.RegistryURL
 		scenarioRun.Spec.ScenarioRepository = registryConfig.ScenarioRepository
 		if registryConfig.Token != nil {

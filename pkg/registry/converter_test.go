@@ -27,8 +27,8 @@ import (
 )
 
 func TestExtractRegistryV2FromSecret_Token(t *testing.T) {
-	// Create a valid dockerconfigjson for token auth
-	authStr := base64.StdEncoding.EncodeToString([]byte("my-secret-token"))
+	// Create a valid dockerconfigjson with token auth (username:token format)
+	authStr := base64.StdEncoding.EncodeToString([]byte("$oauthtoken:my-secret-token"))
 	dockerConfig := DockerConfig{
 		Auths: map[string]AuthEntry{
 			"registry.example.com": {
@@ -77,14 +77,15 @@ func TestExtractRegistryV2FromSecret_Token(t *testing.T) {
 	if registryV2.Insecure != false {
 		t.Errorf("Insecure = %v, want false", registryV2.Insecure)
 	}
+	if registryV2.Username == nil || *registryV2.Username != "$oauthtoken" {
+		t.Errorf("Username = %v, want $oauthtoken", registryV2.Username)
+	}
+	if registryV2.Password == nil || *registryV2.Password != "my-secret-token" {
+		t.Errorf("Password = %v, want my-secret-token", registryV2.Password)
+	}
+	// For token auth, Token field should be populated with password value
 	if registryV2.Token == nil || *registryV2.Token != "my-secret-token" {
 		t.Errorf("Token = %v, want my-secret-token", registryV2.Token)
-	}
-	if registryV2.Username != nil {
-		t.Errorf("Username should be nil for token auth")
-	}
-	if registryV2.Password != nil {
-		t.Errorf("Password should be nil for token auth")
 	}
 }
 
@@ -136,8 +137,9 @@ func TestExtractRegistryV2FromSecret_Password(t *testing.T) {
 	if registryV2.Password == nil || *registryV2.Password != "mypassword" {
 		t.Errorf("Password = %v, want mypassword", registryV2.Password)
 	}
+	// For password auth, Token field should NOT be populated
 	if registryV2.Token != nil {
-		t.Errorf("Token should be nil for password auth")
+		t.Errorf("Token should be nil for password auth, got %v", *registryV2.Token)
 	}
 }
 
@@ -189,14 +191,14 @@ func TestExtractRegistryV2FromSecret_MissingAnnotations(t *testing.T) {
 		wantErr     string
 	}{
 		{
-			name:        "missing registry URL",
+			name: "missing registry URL",
 			annotations: map[string]string{
 				ScenarioRepositoryAnnotation: "org/repo",
 			},
 			wantErr: "missing required annotation",
 		},
 		{
-			name:        "missing scenario repository",
+			name: "missing scenario repository",
 			annotations: map[string]string{
 				RegistryURLAnnotation: "registry.io",
 			},
@@ -232,13 +234,11 @@ func TestExtractRegistryV2FromSecret_MissingAnnotations(t *testing.T) {
 	}
 }
 
-func TestBuildDockerConfigJSON_Token(t *testing.T) {
+func TestBuildDockerConfigJSON_OAuth(t *testing.T) {
 	dockerConfigJSON, err := BuildDockerConfigJSON(
 		"registry.example.com",
-		AuthTypeToken,
+		"$oauthtoken",
 		"my-secret-token",
-		"",
-		"",
 	)
 	if err != nil {
 		t.Fatalf("BuildDockerConfigJSON() error = %v", err)
@@ -259,16 +259,14 @@ func TestBuildDockerConfigJSON_Token(t *testing.T) {
 		t.Fatalf("Failed to decode auth: %v", err)
 	}
 
-	if string(decodedAuth) != "my-secret-token" {
-		t.Errorf("Decoded auth = %v, want my-secret-token", string(decodedAuth))
+	if string(decodedAuth) != "$oauthtoken:my-secret-token" {
+		t.Errorf("Decoded auth = %v, want $oauthtoken:my-secret-token", string(decodedAuth))
 	}
 }
 
 func TestBuildDockerConfigJSON_Password(t *testing.T) {
 	dockerConfigJSON, err := BuildDockerConfigJSON(
 		"registry.io",
-		AuthTypePassword,
-		"",
 		"myuser",
 		"mypassword",
 	)
@@ -296,48 +294,28 @@ func TestBuildDockerConfigJSON_Password(t *testing.T) {
 	}
 }
 
-func TestBuildDockerConfigJSON_InvalidAuthType(t *testing.T) {
-	_, err := BuildDockerConfigJSON(
-		"registry.io",
-		"invalid-type",
-		"token",
-		"",
-		"",
-	)
-	if err == nil {
-		t.Error("Expected error for invalid auth type")
-	}
-	if !strings.Contains(err.Error(), "invalid auth type") {
-		t.Errorf("Error should mention invalid auth type, got: %v", err)
-	}
-}
-
 func TestBuildDockerConfigJSON_MissingCredentials(t *testing.T) {
 	tests := []struct {
 		name     string
-		authType string
-		token    string
 		username string
 		password string
 		wantErr  string
 	}{
 		{
-			name:     "token auth without token",
-			authType: AuthTypeToken,
-			token:    "",
-			wantErr:  "token is required",
-		},
-		{
-			name:     "password auth without username",
-			authType: AuthTypePassword,
+			name:     "missing username",
 			username: "",
 			password: "pass",
 			wantErr:  "username and password are required",
 		},
 		{
-			name:     "password auth without password",
-			authType: AuthTypePassword,
+			name:     "missing password",
 			username: "user",
+			password: "",
+			wantErr:  "username and password are required",
+		},
+		{
+			name:     "missing both",
+			username: "",
 			password: "",
 			wantErr:  "username and password are required",
 		},
@@ -347,8 +325,6 @@ func TestBuildDockerConfigJSON_MissingCredentials(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := BuildDockerConfigJSON(
 				"registry.io",
-				tt.authType,
-				tt.token,
 				tt.username,
 				tt.password,
 			)
@@ -372,7 +348,7 @@ func TestValidateRegistrySecret(t *testing.T) {
 		{
 			name: "valid token secret",
 			secret: func() *corev1.Secret {
-				authStr := base64.StdEncoding.EncodeToString([]byte("token"))
+				authStr := base64.StdEncoding.EncodeToString([]byte("$oauthtoken:token"))
 				dockerConfig := DockerConfig{
 					Auths: map[string]AuthEntry{
 						"registry.io": {Auth: authStr},
@@ -427,22 +403,7 @@ func TestValidateRegistrySecret(t *testing.T) {
 			errMsg:  "missing or invalid label",
 		},
 		{
-			name: "invalid auth type",
-			secret: &corev1.Secret{
-				ObjectMeta: metav1.ObjectMeta{
-					Labels: map[string]string{
-						AppNameLabel:      AppName,
-						AppComponentLabel: ComponentRegistry,
-						AuthTypeLabel:     "invalid",
-					},
-				},
-				Type: corev1.SecretTypeDockerConfigJson,
-			},
-			wantErr: true,
-			errMsg:  "invalid auth type",
-		},
-		{
-			name: "password auth without colon",
+			name: "auth without colon",
 			secret: func() *corev1.Secret {
 				authStr := base64.StdEncoding.EncodeToString([]byte("invalidformat"))
 				dockerConfig := DockerConfig{
@@ -457,7 +418,6 @@ func TestValidateRegistrySecret(t *testing.T) {
 						Labels: map[string]string{
 							AppNameLabel:      AppName,
 							AppComponentLabel: ComponentRegistry,
-							AuthTypeLabel:     AuthTypePassword,
 						},
 						Annotations: map[string]string{
 							RegistryURLAnnotation:        "registry.io",
@@ -475,7 +435,7 @@ func TestValidateRegistrySecret(t *testing.T) {
 				}
 			}(),
 			wantErr: true,
-			errMsg:  "password auth must be in format username:password",
+			errMsg:  "auth must be in format base64(username:password)",
 		},
 	}
 

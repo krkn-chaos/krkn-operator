@@ -125,6 +125,10 @@ type KrknScenarioRunSpec struct {
 	// +optional
 	Password string `json:"password,omitempty"`
 
+	// RegistryName is the name of the saved private registry to use
+	// +optional
+	RegistryName string `json:"registryName,omitempty"`
+
 	// MaxRetries is the maximum number of times to retry failed jobs
 	// +optional
 	// +kubebuilder:default=3
