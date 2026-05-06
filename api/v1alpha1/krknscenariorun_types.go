@@ -45,6 +45,9 @@ type ClusterJobStatus struct {
 	JobID string `json:"jobId"`
 	// PodName is the name of the pod running the scenario
 	PodName string `json:"podName,omitempty"`
+	// ContainerImage is the full container image path (registry/repository:tag) being run
+	// +optional
+	ContainerImage string `json:"containerImage,omitempty"`
 	// Phase is the current phase of the job (Pending, Running, Succeeded, Failed, Retrying, Cancelled, MaxRetriesExceeded)
 	// +kubebuilder:validation:Enum=Pending;Running;Succeeded;Failed;Retrying;Cancelled;MaxRetriesExceeded
 	Phase string `json:"phase"`

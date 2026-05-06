@@ -1194,6 +1194,7 @@ func (h *Handler) GetScenarioRunStatus(w http.ResponseWriter, r *http.Request) {
 					RunningJobs:     scenarioRun.Status.RunningJobs,
 					ClusterJobs:     []ClusterJobStatusResponse{},
 					OwnerUserID:     scenarioRun.Spec.OwnerUserID,
+					RegistryName:    scenarioRun.Spec.RegistryName,
 				}
 				writeJSON(w, http.StatusCreated, response)
 				return
@@ -1217,6 +1218,7 @@ func (h *Handler) GetScenarioRunStatus(w http.ResponseWriter, r *http.Request) {
 			ClusterName:     job.ClusterName,
 			JobID:           job.JobID,
 			PodName:         job.PodName,
+			ContainerImage:  job.ContainerImage,
 			Phase:           job.Phase,
 			Message:         job.Message,
 			StartTime:       convertMetaTime(job.StartTime),
@@ -1237,6 +1239,7 @@ func (h *Handler) GetScenarioRunStatus(w http.ResponseWriter, r *http.Request) {
 		RunningJobs:     scenarioRun.Status.RunningJobs,
 		ClusterJobs:     clusterJobs,
 		OwnerUserID:     scenarioRun.Spec.OwnerUserID,
+		RegistryName:    scenarioRun.Spec.RegistryName,
 	}
 
 	writeJSON(w, http.StatusOK, response)

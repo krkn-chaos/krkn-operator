@@ -181,6 +181,10 @@ spec:
                       description: CompletionTime is when the job completed
                       format: date-time
                       type: string
+                    containerImage:
+                      description: ContainerImage is the full container image path
+                        (registry/repository:tag) being run
+                      type: string
                     failureReason:
                       description: FailureReason contains a categorized failure reason
                         (OOMKilled, ContainerError, etc.)

@@ -301,6 +301,8 @@ type ScenarioRunStatusResponse struct {
 	ClusterJobs []ClusterJobStatusResponse `json:"clusterJobs"`
 	// OwnerUserID is the email address of the user who created this scenario run
 	OwnerUserID string `json:"ownerUserId,omitempty"`
+	// RegistryName is the name of the private registry used (empty for public registry)
+	RegistryName string `json:"registryName,omitempty"`
 }
 
 // ClusterJobStatusResponse represents the status of a job for a specific cluster
@@ -313,6 +315,8 @@ type ClusterJobStatusResponse struct {
 	JobID string `json:"jobId"`
 	// PodName is the name of the pod running the scenario
 	PodName string `json:"podName,omitempty"`
+	// ContainerImage is the full container image path being run
+	ContainerImage string `json:"containerImage,omitempty"`
 	// Phase is the current phase of the job
 	Phase string `json:"phase"`
 	// StartTime is when the job started

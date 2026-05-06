@@ -644,6 +644,7 @@ func (r *KrknScenarioRunReconciler) createClusterJob(
 		// Preserve ClusterAPIURL - it should already be set from first attempt
 		scenarioRun.Status.ClusterJobs[existingJobIndex].JobID = jobID
 		scenarioRun.Status.ClusterJobs[existingJobIndex].PodName = podName
+		scenarioRun.Status.ClusterJobs[existingJobIndex].ContainerImage = containerImage
 		scenarioRun.Status.ClusterJobs[existingJobIndex].Phase = "Pending"
 		scenarioRun.Status.ClusterJobs[existingJobIndex].StartTime = &now
 		scenarioRun.Status.ClusterJobs[existingJobIndex].CompletionTime = nil
@@ -656,15 +657,16 @@ func (r *KrknScenarioRunReconciler) createClusterJob(
 	} else {
 		// New job (first attempt)
 		jobStatus := krknv1alpha1.ClusterJobStatus{
-			ProviderName:  providerName,
-			ClusterName:   clusterName,
-			ClusterAPIURL: clusterAPIURL,
-			JobID:         jobID,
-			PodName:       podName,
-			Phase:         "Pending",
-			StartTime:     &now,
-			RetryCount:    0,
-			MaxRetries:    0, // Will be set from spec on first failure
+			ProviderName:   providerName,
+			ClusterName:    clusterName,
+			ClusterAPIURL:  clusterAPIURL,
+			JobID:          jobID,
+			PodName:        podName,
+			ContainerImage: containerImage,
+			Phase:          "Pending",
+			StartTime:      &now,
+			RetryCount:     0,
+			MaxRetries:     0, // Will be set from spec on first failure
 		}
 		scenarioRun.Status.ClusterJobs = append(scenarioRun.Status.ClusterJobs, jobStatus)
 
@@ -766,6 +768,15 @@ func (r *KrknScenarioRunReconciler) updateClusterJobStatuses(
 			"jobID", job.JobID,
 			"podName", job.PodName,
 			"podPhase", pod.Status.Phase)
+
+		// Backfill container image if not set (for legacy runs)
+		if job.ContainerImage == "" && len(pod.Spec.Containers) > 0 {
+			job.ContainerImage = pod.Spec.Containers[0].Image
+			logger.V(1).Info("backfilled container image from pod spec",
+				"cluster", job.ClusterName,
+				"jobID", job.JobID,
+				"containerImage", job.ContainerImage)
+		}
 
 		// Update job status based on pod phase
 		previousPhase := job.Phase
