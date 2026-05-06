@@ -94,11 +94,17 @@ func buildContainerImage(spec *krknv1alpha1.KrknScenarioRunSpec, config *krknctl
 	}
 
 	// Case 3: Public Quay registry
+	// Strip 'krkn-hub:' prefix if present (legacy frontend compatibility)
+	scenarioTag := spec.ScenarioImage
+	if strings.HasPrefix(scenarioTag, config.QuayScenarioRegistry+":") {
+		scenarioTag = strings.TrimPrefix(scenarioTag, config.QuayScenarioRegistry+":")
+	}
+
 	return fmt.Sprintf("%s/%s/%s:%s",
 		config.QuayHost,
 		config.QuayOrg,
 		config.QuayScenarioRegistry,
-		spec.ScenarioImage,
+		scenarioTag,
 	), nil
 }
 

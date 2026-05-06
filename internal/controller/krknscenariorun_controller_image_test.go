@@ -37,7 +37,7 @@ func getTestConfig(t *testing.T) *krknctlconfig.Config {
 func TestBuildContainerImage_PublicRegistry(t *testing.T) {
 	config := getTestConfig(t)
 
-	// Test default public Quay registry
+	// Test default public Quay registry (clean tag)
 	spec := &krknv1alpha1.KrknScenarioRunSpec{
 		ScenarioImage: "node-cpu-hog",
 	}
@@ -47,6 +47,26 @@ func TestBuildContainerImage_PublicRegistry(t *testing.T) {
 		t.Fatalf("Expected no error, got %v", err)
 	}
 
+	expected := "quay.io/krkn-chaos/krkn-hub:node-cpu-hog"
+	if image != expected {
+		t.Errorf("Expected image '%s', got '%s'", expected, image)
+	}
+}
+
+func TestBuildContainerImage_PublicRegistryWithPrefix(t *testing.T) {
+	config := getTestConfig(t)
+
+	// Test legacy frontend format with krkn-hub: prefix (should be stripped)
+	spec := &krknv1alpha1.KrknScenarioRunSpec{
+		ScenarioImage: "krkn-hub:node-cpu-hog",
+	}
+
+	image, err := buildContainerImage(spec, config)
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
+
+	// Should strip the prefix and construct correct path
 	expected := "quay.io/krkn-chaos/krkn-hub:node-cpu-hog"
 	if image != expected {
 		t.Errorf("Expected image '%s', got '%s'", expected, image)
@@ -142,6 +162,16 @@ func TestBuildContainerImage_DifferentPublicScenarios(t *testing.T) {
 			name:     "zone-outage",
 			scenario: "zone-outage",
 			expected: "quay.io/krkn-chaos/krkn-hub:zone-outage",
+		},
+		{
+			name:     "node-cpu-hog-with-prefix",
+			scenario: "krkn-hub:node-cpu-hog",
+			expected: "quay.io/krkn-chaos/krkn-hub:node-cpu-hog",
+		},
+		{
+			name:     "pod-scenarios-with-prefix",
+			scenario: "krkn-hub:pod-scenarios",
+			expected: "quay.io/krkn-chaos/krkn-hub:pod-scenarios",
 		},
 	}
 
