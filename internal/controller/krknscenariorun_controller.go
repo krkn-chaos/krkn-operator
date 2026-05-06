@@ -43,6 +43,7 @@ import (
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
 
 	"github.com/google/uuid"
+	krknctlconfig "github.com/krkn-chaos/krknctl/pkg/config"
 )
 
 // KrknScenarioRunReconciler reconciles a KrknScenarioRun object
@@ -475,10 +476,26 @@ func (r *KrknScenarioRunReconciler) createClusterJob(
 			Name: imagePullSecretName,
 		})
 
-		containerImage = scenarioRun.Spec.ScenarioImage
+		containerImage = fmt.Sprintf("%s/%s:%s",
+			scenarioRun.Spec.RegistryURL,
+			scenarioRun.Spec.ScenarioRepository,
+			scenarioRun.Spec.ScenarioImage,
+		)
 	} else {
-		// No private registry, use default image
-		containerImage = scenarioRun.Spec.ScenarioImage
+		// No private registry, use public Quay registry defaults
+		config, err := krknctlconfig.LoadConfig()
+		if err != nil {
+			cleanup()
+			return fmt.Errorf("failed to load krknctl config: %w", err)
+		}
+
+		// Build default image path: quay.io/krkn-chaos/krkn-hub:scenario-name
+		containerImage = fmt.Sprintf("%s/%s/%s:%s",
+			config.QuayHost,
+			config.QuayOrg,
+			config.QuayScenarioRegistry,
+			scenarioRun.Spec.ScenarioImage,
+		)
 	}
 
 	// Build volumes and volume mounts
