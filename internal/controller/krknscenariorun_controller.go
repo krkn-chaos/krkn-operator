@@ -403,7 +403,31 @@ func (r *KrknScenarioRunReconciler) createClusterJob(
 
 	// Handle private registry authentication
 	var imagePullSecrets []corev1.LocalObjectReference
-	if scenarioRun.Spec.RegistryURL != "" && scenarioRun.Spec.ScenarioRepository != "" {
+	var containerImage string
+
+	if scenarioRun.Spec.RegistryName != "" {
+		// Use saved private registry
+		imagePullSecrets = append(imagePullSecrets, corev1.LocalObjectReference{
+			Name: scenarioRun.Spec.RegistryName,
+		})
+
+		// Normalize scenarioImage: extract just the tag if it contains a colon
+		// This handles frontend sending "krkn-hub:node-cpu-hog" instead of just "node-cpu-hog"
+		scenarioTag := scenarioRun.Spec.ScenarioImage
+		if strings.Contains(scenarioTag, ":") {
+			// Extract tag part after last colon
+			parts := strings.Split(scenarioTag, ":")
+			scenarioTag = parts[len(parts)-1]
+		}
+
+		// Build full image path: registry.io/repo/path:tag
+		containerImage = fmt.Sprintf("%s/%s:%s",
+			scenarioRun.Spec.RegistryURL,
+			scenarioRun.Spec.ScenarioRepository,
+			scenarioTag,
+		)
+	} else if scenarioRun.Spec.RegistryURL != "" && scenarioRun.Spec.ScenarioRepository != "" {
+		// Legacy: create temporary pull secret (backward compatibility for inline credentials)
 		imagePullSecretName = fmt.Sprintf("krkn-job-%s-registry", jobID)
 
 		// Build docker config JSON
@@ -460,6 +484,11 @@ func (r *KrknScenarioRunReconciler) createClusterJob(
 		imagePullSecrets = append(imagePullSecrets, corev1.LocalObjectReference{
 			Name: imagePullSecretName,
 		})
+
+		containerImage = scenarioRun.Spec.ScenarioImage
+	} else {
+		// No private registry, use default image
+		containerImage = scenarioRun.Spec.ScenarioImage
 	}
 
 	// Build volumes and volume mounts
@@ -546,6 +575,9 @@ func (r *KrknScenarioRunReconciler) createClusterJob(
 	if ownerLabel := getOwnerLabel(scenarioRun); ownerLabel != "" {
 		podLabels["krkn.krkn-chaos.dev/owner-user"] = ownerLabel
 	}
+	if scenarioRun.Spec.RegistryName != "" {
+		podLabels["krkn-registry-name"] = scenarioRun.Spec.RegistryName
+	}
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      podName,
@@ -564,7 +596,7 @@ func (r *KrknScenarioRunReconciler) createClusterJob(
 			Containers: []corev1.Container{
 				{
 					Name:            "scenario",
-					Image:           scenarioRun.Spec.ScenarioImage,
+					Image:           containerImage,
 					Env:             envVars,
 					VolumeMounts:    volumeMounts,
 					ImagePullPolicy: corev1.PullAlways,
