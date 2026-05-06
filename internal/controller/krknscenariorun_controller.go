@@ -76,6 +76,37 @@ func getOwnerLabel(scenarioRun *krknv1alpha1.KrknScenarioRun) string {
 	return strings.ToLower(sanitized)
 }
 
+// buildContainerImage constructs the full container image path based on registry configuration.
+// Returns the container image path and any error encountered.
+//
+// Logic:
+// 1. If RegistryName is set: uses saved private registry (registryURL/scenarioRepository:scenarioImage)
+// 2. If RegistryURL and ScenarioRepository are set: uses inline private registry with same format
+// 3. Otherwise: uses public Quay registry defaults from krknctl config (quay.io/krkn-chaos/krkn-hub:scenarioImage)
+func buildContainerImage(spec *krknv1alpha1.KrknScenarioRunSpec) (string, error) {
+	// Case 1 & 2: Private registry (either saved or inline)
+	if spec.RegistryURL != "" && spec.ScenarioRepository != "" {
+		return fmt.Sprintf("%s/%s:%s",
+			spec.RegistryURL,
+			spec.ScenarioRepository,
+			spec.ScenarioImage,
+		), nil
+	}
+
+	// Case 3: Public Quay registry
+	config, err := krknctlconfig.LoadConfig()
+	if err != nil {
+		return "", fmt.Errorf("failed to load krknctl config: %w", err)
+	}
+
+	return fmt.Sprintf("%s/%s/%s:%s",
+		config.QuayHost,
+		config.QuayOrg,
+		config.QuayScenarioRegistry,
+		spec.ScenarioImage,
+	), nil
+}
+
 // Reconcile handles the reconciliation loop for KrknScenarioRun
 func (r *KrknScenarioRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
@@ -402,22 +433,21 @@ func (r *KrknScenarioRunReconciler) createClusterJob(
 		fileConfigMaps = append(fileConfigMaps, configMapName)
 	}
 
+	// Build container image path
+	containerImage, err := buildContainerImage(&scenarioRun.Spec)
+	if err != nil {
+		cleanup()
+		return fmt.Errorf("failed to build container image path: %w", err)
+	}
+
 	// Handle private registry authentication
 	var imagePullSecrets []corev1.LocalObjectReference
-	var containerImage string
 
 	if scenarioRun.Spec.RegistryName != "" {
 		// Use saved private registry
 		imagePullSecrets = append(imagePullSecrets, corev1.LocalObjectReference{
 			Name: scenarioRun.Spec.RegistryName,
 		})
-
-		// Build full image path: registry.io/repo/path:tag
-		containerImage = fmt.Sprintf("%s/%s:%s",
-			scenarioRun.Spec.RegistryURL,
-			scenarioRun.Spec.ScenarioRepository,
-			scenarioRun.Spec.ScenarioImage,
-		)
 	} else if scenarioRun.Spec.RegistryURL != "" && scenarioRun.Spec.ScenarioRepository != "" {
 		imagePullSecretName = fmt.Sprintf("krkn-job-%s-registry", jobID)
 
@@ -475,27 +505,6 @@ func (r *KrknScenarioRunReconciler) createClusterJob(
 		imagePullSecrets = append(imagePullSecrets, corev1.LocalObjectReference{
 			Name: imagePullSecretName,
 		})
-
-		containerImage = fmt.Sprintf("%s/%s:%s",
-			scenarioRun.Spec.RegistryURL,
-			scenarioRun.Spec.ScenarioRepository,
-			scenarioRun.Spec.ScenarioImage,
-		)
-	} else {
-		// No private registry, use public Quay registry defaults
-		config, err := krknctlconfig.LoadConfig()
-		if err != nil {
-			cleanup()
-			return fmt.Errorf("failed to load krknctl config: %w", err)
-		}
-
-		// Build default image path: quay.io/krkn-chaos/krkn-hub:scenario-name
-		containerImage = fmt.Sprintf("%s/%s/%s:%s",
-			config.QuayHost,
-			config.QuayOrg,
-			config.QuayScenarioRegistry,
-			scenarioRun.Spec.ScenarioImage,
-		)
 	}
 
 	// Build volumes and volume mounts
