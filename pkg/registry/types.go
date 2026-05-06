@@ -14,6 +14,10 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+// Package registry provides functionality for managing private container registries
+// in the krkn-operator ecosystem. It handles conversion between Kubernetes Secrets
+// and krknctl RegistryV2 configurations, manages labels and annotations for
+// group-based access control, and defines API types for registry CRUD operations.
 package registry
 
 // DockerConfig represents the structure of a Docker config.json
