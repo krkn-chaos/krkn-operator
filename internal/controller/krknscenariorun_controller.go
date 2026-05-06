@@ -43,6 +43,7 @@ import (
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
 
 	"github.com/google/uuid"
+	krknctlconfig "github.com/krkn-chaos/krknctl/pkg/config"
 )
 
 // KrknScenarioRunReconciler reconciles a KrknScenarioRun object
@@ -73,6 +74,38 @@ func getOwnerLabel(scenarioRun *krknv1alpha1.KrknScenarioRun) string {
 	sanitized := strings.ReplaceAll(scenarioRun.Spec.OwnerUserID, "@", "-")
 	sanitized = strings.ReplaceAll(sanitized, ".", "-")
 	return strings.ToLower(sanitized)
+}
+
+// buildContainerImage constructs the full container image path based on registry configuration.
+// Returns the container image path and any error encountered.
+//
+// Logic:
+// 1. If RegistryName is set: uses saved private registry (registryURL/scenarioRepository:scenarioImage)
+// 2. If RegistryURL and ScenarioRepository are set: uses inline private registry with same format
+// 3. Otherwise: uses public Quay registry defaults from krknctl config (quay.io/krkn-chaos/krkn-hub:scenarioImage)
+func buildContainerImage(spec *krknv1alpha1.KrknScenarioRunSpec, config *krknctlconfig.Config) (string, error) {
+	// Case 1 & 2: Private registry (either saved or inline)
+	if spec.RegistryURL != "" && spec.ScenarioRepository != "" {
+		return fmt.Sprintf("%s/%s:%s",
+			spec.RegistryURL,
+			spec.ScenarioRepository,
+			spec.ScenarioImage,
+		), nil
+	}
+
+	// Case 3: Public Quay registry
+	// Strip 'krkn-hub:' prefix if present (legacy frontend compatibility)
+	scenarioTag := spec.ScenarioImage
+	if strings.HasPrefix(scenarioTag, config.QuayScenarioRegistry+":") {
+		scenarioTag = strings.TrimPrefix(scenarioTag, config.QuayScenarioRegistry+":")
+	}
+
+	return fmt.Sprintf("%s/%s/%s:%s",
+		config.QuayHost,
+		config.QuayOrg,
+		config.QuayScenarioRegistry,
+		scenarioTag,
+	), nil
 }
 
 // Reconcile handles the reconciliation loop for KrknScenarioRun
@@ -238,10 +271,16 @@ func (r *KrknScenarioRunReconciler) createClusterJob(
 	// Generate unique job ID
 	jobID := uuid.New().String()
 
+	// Load krknctl config for defaults
+	krknctlCfg, err := krknctlconfig.LoadConfig()
+	if err != nil {
+		return fmt.Errorf("failed to load krknctl config: %w", err)
+	}
+
 	// Set default kubeconfig path if not provided
 	kubeconfigPath := scenarioRun.Spec.KubeconfigPath
 	if kubeconfigPath == "" {
-		kubeconfigPath = "/home/krkn/.kube/config"
+		kubeconfigPath = krknctlCfg.KubeconfigPath
 	}
 
 	logger.Info("getting kubeconfig for cluster",
@@ -401,9 +440,22 @@ func (r *KrknScenarioRunReconciler) createClusterJob(
 		fileConfigMaps = append(fileConfigMaps, configMapName)
 	}
 
+	// Build container image path
+	containerImage, err := buildContainerImage(&scenarioRun.Spec, &krknctlCfg)
+	if err != nil {
+		cleanup()
+		return fmt.Errorf("failed to build container image path: %w", err)
+	}
+
 	// Handle private registry authentication
 	var imagePullSecrets []corev1.LocalObjectReference
-	if scenarioRun.Spec.RegistryURL != "" && scenarioRun.Spec.ScenarioRepository != "" {
+
+	if scenarioRun.Spec.RegistryName != "" {
+		// Use saved private registry
+		imagePullSecrets = append(imagePullSecrets, corev1.LocalObjectReference{
+			Name: scenarioRun.Spec.RegistryName,
+		})
+	} else if scenarioRun.Spec.RegistryURL != "" && scenarioRun.Spec.ScenarioRepository != "" {
 		imagePullSecretName = fmt.Sprintf("krkn-job-%s-registry", jobID)
 
 		// Build docker config JSON
@@ -564,7 +616,7 @@ func (r *KrknScenarioRunReconciler) createClusterJob(
 			Containers: []corev1.Container{
 				{
 					Name:            "scenario",
-					Image:           scenarioRun.Spec.ScenarioImage,
+					Image:           containerImage,
 					Env:             envVars,
 					VolumeMounts:    volumeMounts,
 					ImagePullPolicy: corev1.PullAlways,
@@ -592,6 +644,7 @@ func (r *KrknScenarioRunReconciler) createClusterJob(
 		// Preserve ClusterAPIURL - it should already be set from first attempt
 		scenarioRun.Status.ClusterJobs[existingJobIndex].JobID = jobID
 		scenarioRun.Status.ClusterJobs[existingJobIndex].PodName = podName
+		scenarioRun.Status.ClusterJobs[existingJobIndex].ContainerImage = containerImage
 		scenarioRun.Status.ClusterJobs[existingJobIndex].Phase = "Pending"
 		scenarioRun.Status.ClusterJobs[existingJobIndex].StartTime = &now
 		scenarioRun.Status.ClusterJobs[existingJobIndex].CompletionTime = nil
@@ -604,15 +657,16 @@ func (r *KrknScenarioRunReconciler) createClusterJob(
 	} else {
 		// New job (first attempt)
 		jobStatus := krknv1alpha1.ClusterJobStatus{
-			ProviderName:  providerName,
-			ClusterName:   clusterName,
-			ClusterAPIURL: clusterAPIURL,
-			JobID:         jobID,
-			PodName:       podName,
-			Phase:         "Pending",
-			StartTime:     &now,
-			RetryCount:    0,
-			MaxRetries:    0, // Will be set from spec on first failure
+			ProviderName:   providerName,
+			ClusterName:    clusterName,
+			ClusterAPIURL:  clusterAPIURL,
+			JobID:          jobID,
+			PodName:        podName,
+			ContainerImage: containerImage,
+			Phase:          "Pending",
+			StartTime:      &now,
+			RetryCount:     0,
+			MaxRetries:     0, // Will be set from spec on first failure
 		}
 		scenarioRun.Status.ClusterJobs = append(scenarioRun.Status.ClusterJobs, jobStatus)
 
@@ -714,6 +768,15 @@ func (r *KrknScenarioRunReconciler) updateClusterJobStatuses(
 			"jobID", job.JobID,
 			"podName", job.PodName,
 			"podPhase", pod.Status.Phase)
+
+		// Backfill container image if not set (for legacy runs)
+		if job.ContainerImage == "" && len(pod.Spec.Containers) > 0 {
+			job.ContainerImage = pod.Spec.Containers[0].Image
+			logger.V(1).Info("backfilled container image from pod spec",
+				"cluster", job.ClusterName,
+				"jobID", job.JobID,
+				"containerImage", job.ContainerImage)
+		}
 
 		// Update job status based on pod phase
 		previousPhase := job.Phase
