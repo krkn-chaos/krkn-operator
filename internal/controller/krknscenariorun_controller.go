@@ -83,7 +83,7 @@ func getOwnerLabel(scenarioRun *krknv1alpha1.KrknScenarioRun) string {
 // 1. If RegistryName is set: uses saved private registry (registryURL/scenarioRepository:scenarioImage)
 // 2. If RegistryURL and ScenarioRepository are set: uses inline private registry with same format
 // 3. Otherwise: uses public Quay registry defaults from krknctl config (quay.io/krkn-chaos/krkn-hub:scenarioImage)
-func buildContainerImage(spec *krknv1alpha1.KrknScenarioRunSpec) (string, error) {
+func buildContainerImage(spec *krknv1alpha1.KrknScenarioRunSpec, config *krknctlconfig.Config) (string, error) {
 	// Case 1 & 2: Private registry (either saved or inline)
 	if spec.RegistryURL != "" && spec.ScenarioRepository != "" {
 		return fmt.Sprintf("%s/%s:%s",
@@ -94,11 +94,6 @@ func buildContainerImage(spec *krknv1alpha1.KrknScenarioRunSpec) (string, error)
 	}
 
 	// Case 3: Public Quay registry
-	config, err := krknctlconfig.LoadConfig()
-	if err != nil {
-		return "", fmt.Errorf("failed to load krknctl config: %w", err)
-	}
-
 	return fmt.Sprintf("%s/%s/%s:%s",
 		config.QuayHost,
 		config.QuayOrg,
@@ -270,10 +265,16 @@ func (r *KrknScenarioRunReconciler) createClusterJob(
 	// Generate unique job ID
 	jobID := uuid.New().String()
 
+	// Load krknctl config for defaults
+	krknctlCfg, err := krknctlconfig.LoadConfig()
+	if err != nil {
+		return fmt.Errorf("failed to load krknctl config: %w", err)
+	}
+
 	// Set default kubeconfig path if not provided
 	kubeconfigPath := scenarioRun.Spec.KubeconfigPath
 	if kubeconfigPath == "" {
-		kubeconfigPath = "/home/krkn/.kube/config"
+		kubeconfigPath = krknctlCfg.KubeconfigPath
 	}
 
 	logger.Info("getting kubeconfig for cluster",
@@ -434,7 +435,7 @@ func (r *KrknScenarioRunReconciler) createClusterJob(
 	}
 
 	// Build container image path
-	containerImage, err := buildContainerImage(&scenarioRun.Spec)
+	containerImage, err := buildContainerImage(&scenarioRun.Spec, &krknctlCfg)
 	if err != nil {
 		cleanup()
 		return fmt.Errorf("failed to build container image path: %w", err)

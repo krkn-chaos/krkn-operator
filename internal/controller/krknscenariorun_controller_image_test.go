@@ -22,15 +22,27 @@ import (
 	"testing"
 
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
+	krknctlconfig "github.com/krkn-chaos/krknctl/pkg/config"
 )
 
+func getTestConfig(t *testing.T) *krknctlconfig.Config {
+	t.Helper()
+	config, err := krknctlconfig.LoadConfig()
+	if err != nil {
+		t.Fatalf("Failed to load krknctl config: %v", err)
+	}
+	return &config
+}
+
 func TestBuildContainerImage_PublicRegistry(t *testing.T) {
+	config := getTestConfig(t)
+
 	// Test default public Quay registry
 	spec := &krknv1alpha1.KrknScenarioRunSpec{
 		ScenarioImage: "node-cpu-hog",
 	}
 
-	image, err := buildContainerImage(spec)
+	image, err := buildContainerImage(spec, config)
 	if err != nil {
 		t.Fatalf("Expected no error, got %v", err)
 	}
@@ -42,6 +54,8 @@ func TestBuildContainerImage_PublicRegistry(t *testing.T) {
 }
 
 func TestBuildContainerImage_PrivateRegistryWithName(t *testing.T) {
+	config := getTestConfig(t)
+
 	// Test private registry with RegistryName (saved registry)
 	spec := &krknv1alpha1.KrknScenarioRunSpec{
 		RegistryName:       "my-private-registry",
@@ -50,7 +64,7 @@ func TestBuildContainerImage_PrivateRegistryWithName(t *testing.T) {
 		ScenarioImage:      "node-memory-hog",
 	}
 
-	image, err := buildContainerImage(spec)
+	image, err := buildContainerImage(spec, config)
 	if err != nil {
 		t.Fatalf("Expected no error, got %v", err)
 	}
@@ -62,6 +76,8 @@ func TestBuildContainerImage_PrivateRegistryWithName(t *testing.T) {
 }
 
 func TestBuildContainerImage_PrivateRegistryInline(t *testing.T) {
+	config := getTestConfig(t)
+
 	// Test private registry with inline credentials (no RegistryName)
 	spec := &krknv1alpha1.KrknScenarioRunSpec{
 		RegistryURL:        "registry.example.com",
@@ -71,7 +87,7 @@ func TestBuildContainerImage_PrivateRegistryInline(t *testing.T) {
 		Password:           "pass",
 	}
 
-	image, err := buildContainerImage(spec)
+	image, err := buildContainerImage(spec, config)
 	if err != nil {
 		t.Fatalf("Expected no error, got %v", err)
 	}
@@ -83,6 +99,8 @@ func TestBuildContainerImage_PrivateRegistryInline(t *testing.T) {
 }
 
 func TestBuildContainerImage_PrivateRegistryWithToken(t *testing.T) {
+	config := getTestConfig(t)
+
 	// Test private registry with token
 	spec := &krknv1alpha1.KrknScenarioRunSpec{
 		RegistryURL:        "quay.io",
@@ -91,7 +109,7 @@ func TestBuildContainerImage_PrivateRegistryWithToken(t *testing.T) {
 		Token:              "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
 	}
 
-	image, err := buildContainerImage(spec)
+	image, err := buildContainerImage(spec, config)
 	if err != nil {
 		t.Fatalf("Expected no error, got %v", err)
 	}
@@ -103,6 +121,8 @@ func TestBuildContainerImage_PrivateRegistryWithToken(t *testing.T) {
 }
 
 func TestBuildContainerImage_DifferentPublicScenarios(t *testing.T) {
+	config := getTestConfig(t)
+
 	scenarios := []struct {
 		name     string
 		scenario string
@@ -131,7 +151,7 @@ func TestBuildContainerImage_DifferentPublicScenarios(t *testing.T) {
 				ScenarioImage: tc.scenario,
 			}
 
-			image, err := buildContainerImage(spec)
+			image, err := buildContainerImage(spec, config)
 			if err != nil {
 				t.Fatalf("Expected no error, got %v", err)
 			}
@@ -144,13 +164,15 @@ func TestBuildContainerImage_DifferentPublicScenarios(t *testing.T) {
 }
 
 func TestBuildContainerImage_PartialRegistryInfo(t *testing.T) {
+	config := getTestConfig(t)
+
 	// Test with only RegistryURL but no ScenarioRepository - should use public registry
 	spec := &krknv1alpha1.KrknScenarioRunSpec{
 		RegistryURL:   "quay.io",
 		ScenarioImage: "node-cpu-hog",
 	}
 
-	image, err := buildContainerImage(spec)
+	image, err := buildContainerImage(spec, config)
 	if err != nil {
 		t.Fatalf("Expected no error, got %v", err)
 	}
@@ -163,13 +185,15 @@ func TestBuildContainerImage_PartialRegistryInfo(t *testing.T) {
 }
 
 func TestBuildContainerImage_OnlyScenarioRepository(t *testing.T) {
+	config := getTestConfig(t)
+
 	// Test with only ScenarioRepository but no RegistryURL - should use public registry
 	spec := &krknv1alpha1.KrknScenarioRunSpec{
 		ScenarioRepository: "rh_ee_tsebasti/krkn-hub-private",
 		ScenarioImage:      "node-cpu-hog",
 	}
 
-	image, err := buildContainerImage(spec)
+	image, err := buildContainerImage(spec, config)
 	if err != nil {
 		t.Fatalf("Expected no error, got %v", err)
 	}
