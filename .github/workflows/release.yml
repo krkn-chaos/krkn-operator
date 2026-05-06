@@ -213,33 +213,29 @@ jobs:
           echo "Verifying data-provider manifest..."
           docker buildx imagetools inspect quay.io/krkn-chaos/krkn-operator-data-provider:$VERSION
 
+      - name: Generate Release Notes
+        id: generate
+        continue-on-error: true
+        run: |
+          python3 scripts/generate-release-notes.py \
+            --version $VERSION \
+            --repo-url https://github.com/krkn-operator-ecosystem/krkn-operator \
+            --docs-url https://krkn-chaos.dev/docs/krkn-operator/ \
+            > release-notes.md
+
+      - name: Fallback Release Notes
+        if: steps.generate.outcome == 'failure'
+        run: |
+          echo "## Release $VERSION" > release-notes.md
+          echo "" >> release-notes.md
+          echo "See commit history for changes." >> release-notes.md
+          echo "" >> release-notes.md
+          echo "---" >> release-notes.md
+          echo "" >> release-notes.md
+          echo "**Documentation**: https://krkn-chaos.dev/docs/krkn-operator/" >> release-notes.md
+
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          cat <<EOF > release-notes.md
-          ## Container Images
-
-          Multi-architecture images (linux/amd64, linux/arm64):
-
-          - \`quay.io/krkn-chaos/krkn-operator:$VERSION\`
-          - \`quay.io/krkn-chaos/krkn-operator:latest\`
-          - \`quay.io/krkn-chaos/krkn-operator-data-provider:$VERSION\`
-          - \`quay.io/krkn-chaos/krkn-operator-data-provider:latest\`
-
-          ## Helm Chart
-
-          - \`oci://quay.io/krkn-chaos/charts/krkn-operator:${VERSION#v}\`
-
-          ## Installation
-
-          \`\`\`bash
-          # Using Helm (recommended)
-          helm install krkn-operator oci://quay.io/krkn-chaos/charts/krkn-operator --version ${VERSION#v}
-
-          # Using kubectl
-          make deploy IMG=quay.io/krkn-chaos/krkn-operator:$VERSION
-          \`\`\`
-          EOF
-
           gh release create $VERSION --title "Release $VERSION" --notes-file release-notes.md
