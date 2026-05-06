@@ -403,7 +403,21 @@ func (r *KrknScenarioRunReconciler) createClusterJob(
 
 	// Handle private registry authentication
 	var imagePullSecrets []corev1.LocalObjectReference
-	if scenarioRun.Spec.RegistryURL != "" && scenarioRun.Spec.ScenarioRepository != "" {
+	var containerImage string
+
+	if scenarioRun.Spec.RegistryName != "" {
+		// Use saved private registry
+		imagePullSecrets = append(imagePullSecrets, corev1.LocalObjectReference{
+			Name: scenarioRun.Spec.RegistryName,
+		})
+
+		// Build full image path: registry.io/repo/path:tag
+		containerImage = fmt.Sprintf("%s/%s:%s",
+			scenarioRun.Spec.RegistryURL,
+			scenarioRun.Spec.ScenarioRepository,
+			scenarioRun.Spec.ScenarioImage,
+		)
+	} else if scenarioRun.Spec.RegistryURL != "" && scenarioRun.Spec.ScenarioRepository != "" {
 		imagePullSecretName = fmt.Sprintf("krkn-job-%s-registry", jobID)
 
 		// Build docker config JSON
@@ -460,6 +474,11 @@ func (r *KrknScenarioRunReconciler) createClusterJob(
 		imagePullSecrets = append(imagePullSecrets, corev1.LocalObjectReference{
 			Name: imagePullSecretName,
 		})
+
+		containerImage = scenarioRun.Spec.ScenarioImage
+	} else {
+		// No private registry, use default image
+		containerImage = scenarioRun.Spec.ScenarioImage
 	}
 
 	// Build volumes and volume mounts
@@ -564,7 +583,7 @@ func (r *KrknScenarioRunReconciler) createClusterJob(
 			Containers: []corev1.Container{
 				{
 					Name:            "scenario",
-					Image:           scenarioRun.Spec.ScenarioImage,
+					Image:           containerImage,
 					Env:             envVars,
 					VolumeMounts:    volumeMounts,
 					ImagePullPolicy: corev1.PullAlways,
