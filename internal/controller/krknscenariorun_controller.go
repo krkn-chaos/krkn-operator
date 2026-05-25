@@ -66,17 +66,17 @@ type KrknScenarioRunReconciler struct {
 
 // preparedJobResources holds all resources prepared for creating a scenario pod
 type preparedJobResources struct {
-	jobID              string
-	clusterName        string
-	clusterAPIURL      string
-	containerImage     string
-	kubeconfigPath     string
-	volumes            []corev1.Volume
-	volumeMounts       []corev1.VolumeMount
-	envVars            []corev1.EnvVar
-	imagePullSecrets   []corev1.LocalObjectReference
-	createdConfigMaps  []string // names of created ConfigMaps for cleanup
-	createdSecrets     []string // names of created Secrets for cleanup
+	jobID             string
+	clusterName       string
+	clusterAPIURL     string
+	containerImage    string
+	kubeconfigPath    string
+	volumes           []corev1.Volume
+	volumeMounts      []corev1.VolumeMount
+	envVars           []corev1.EnvVar
+	imagePullSecrets  []corev1.LocalObjectReference
+	createdConfigMaps []string // names of created ConfigMaps for cleanup
+	createdSecrets    []string // names of created Secrets for cleanup
 }
 
 // getOwnerLabel returns the sanitized owner label value for a scenario run.
@@ -265,23 +265,16 @@ func (r *KrknScenarioRunReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	return ctrl.Result{}, nil
 }
 
-// createClusterJob creates all resources needed for a single cluster scenario job
-func (r *KrknScenarioRunReconciler) createClusterJob(
+// prepareJobResources prepares all resources needed for creating a scenario pod.
+// This includes ConfigMaps, Secrets, Volumes, EnvVars, and determining the container image.
+// Returns preparedJobResources or an error if preparation fails.
+func (r *KrknScenarioRunReconciler) prepareJobResources(
 	ctx context.Context,
 	scenarioRun *krknv1alpha1.KrknScenarioRun,
 	providerName string,
 	clusterName string,
-) error {
+) (*preparedJobResources, error) {
 	logger := log.FromContext(ctx)
-
-	// Check if this is a retry case
-	existingJobIndex := -1
-	for i, job := range scenarioRun.Status.ClusterJobs {
-		if job.ClusterName == clusterName && job.Phase == "Retrying" {
-			existingJobIndex = i
-			break
-		}
-	}
 
 	// Generate unique job ID
 	jobID := uuid.New().String()
@@ -289,7 +282,7 @@ func (r *KrknScenarioRunReconciler) createClusterJob(
 	// Load krknctl config for defaults
 	krknctlCfg, err := krknctlconfig.LoadConfig()
 	if err != nil {
-		return fmt.Errorf("failed to load krknctl config: %w", err)
+		return nil, fmt.Errorf("failed to load krknctl config: %w", err)
 	}
 
 	// Set default kubeconfig path if not provided
@@ -306,13 +299,13 @@ func (r *KrknScenarioRunReconciler) createClusterJob(
 	// Get kubeconfig from managed-clusters Secret (works for ALL providers)
 	kubeconfigBase64, err := r.getKubeconfigFromProvider(ctx, scenarioRun.Spec.TargetRequestID, providerName, clusterName)
 	if err != nil {
-		return fmt.Errorf("failed to get kubeconfig from provider %s: %w", providerName, err)
+		return nil, fmt.Errorf("failed to get kubeconfig from provider %s: %w", providerName, err)
 	}
 
 	// Decode kubeconfig for ConfigMap
 	kubeconfigDecoded, err := base64.StdEncoding.DecodeString(kubeconfigBase64)
 	if err != nil {
-		return fmt.Errorf("failed to decode kubeconfig: %w", err)
+		return nil, fmt.Errorf("failed to decode kubeconfig: %w", err)
 	}
 
 	// Fetch KrknTargetRequest to extract ClusterAPIURL for permission checks
@@ -374,35 +367,34 @@ func (r *KrknScenarioRunReconciler) createClusterJob(
 
 	// Set owner reference for automatic cleanup
 	if err := controllerutil.SetControllerReference(scenarioRun, kubeconfigConfigMap, r.Scheme); err != nil {
-		return fmt.Errorf("failed to set owner reference on kubeconfig ConfigMap: %w", err)
+		return nil, fmt.Errorf("failed to set owner reference on kubeconfig ConfigMap: %w", err)
 	}
 
 	if err := r.Create(ctx, kubeconfigConfigMap); err != nil {
-		return fmt.Errorf("failed to create kubeconfig ConfigMap: %w", err)
+		return nil, fmt.Errorf("failed to create kubeconfig ConfigMap: %w", err)
 	}
 
 	// Track created resources for cleanup on error
-	var fileConfigMaps []string
-	var imagePullSecretName string
+	createdConfigMaps := []string{kubeconfigConfigMapName}
+	var createdSecrets []string
 
-	// Cleanup helper
+	// Cleanup helper (used only in this function on error)
 	cleanup := func() {
-		_ = r.Delete(ctx, kubeconfigConfigMap) // Best-effort cleanup
-		for _, cm := range fileConfigMaps {
+		for _, cmName := range createdConfigMaps {
 			_ = r.Delete(ctx, &corev1.ConfigMap{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      cm,
+					Name:      cmName,
 					Namespace: r.Namespace,
 				},
-			}) // Best-effort cleanup
+			})
 		}
-		if imagePullSecretName != "" {
+		for _, secretName := range createdSecrets {
 			_ = r.Delete(ctx, &corev1.Secret{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      imagePullSecretName,
+					Name:      secretName,
 					Namespace: r.Namespace,
 				},
-			}) // Best-effort cleanup
+			})
 		}
 	}
 
@@ -417,7 +409,7 @@ func (r *KrknScenarioRunReconciler) createClusterJob(
 		fileContent, err := base64.StdEncoding.DecodeString(file.Content)
 		if err != nil {
 			cleanup()
-			return fmt.Errorf("failed to decode file content for '%s': %w", file.Name, err)
+			return nil, fmt.Errorf("failed to decode file content for '%s': %w", file.Name, err)
 		}
 
 		fileLabels := map[string]string{
@@ -444,15 +436,15 @@ func (r *KrknScenarioRunReconciler) createClusterJob(
 		// Set owner reference
 		if err := controllerutil.SetControllerReference(scenarioRun, fileConfigMap, r.Scheme); err != nil {
 			cleanup()
-			return fmt.Errorf("failed to set owner reference on file ConfigMap: %w", err)
+			return nil, fmt.Errorf("failed to set owner reference on file ConfigMap: %w", err)
 		}
 
 		if err := r.Create(ctx, fileConfigMap); err != nil {
 			cleanup()
-			return fmt.Errorf("failed to create file ConfigMap: %w", err)
+			return nil, fmt.Errorf("failed to create file ConfigMap: %w", err)
 		}
 
-		fileConfigMaps = append(fileConfigMaps, configMapName)
+		createdConfigMaps = append(createdConfigMaps, configMapName)
 	}
 
 	// Determine container image to use
@@ -465,11 +457,10 @@ func (r *KrknScenarioRunReconciler) createClusterJob(
 		logger.V(1).Info("using complete image from graph run", "image", containerImage)
 	} else {
 		// Normal run: build image from registry configuration
-		var err error
 		containerImage, err = buildContainerImage(&scenarioRun.Spec, &krknctlCfg)
 		if err != nil {
 			cleanup()
-			return fmt.Errorf("failed to build container image path: %w", err)
+			return nil, fmt.Errorf("failed to build container image path: %w", err)
 		}
 		logger.V(1).Info("built image from registry config", "image", containerImage)
 	}
@@ -483,7 +474,7 @@ func (r *KrknScenarioRunReconciler) createClusterJob(
 			Name: scenarioRun.Spec.RegistryName,
 		})
 	} else if scenarioRun.Spec.RegistryURL != "" && scenarioRun.Spec.ScenarioRepository != "" {
-		imagePullSecretName = fmt.Sprintf("krkn-job-%s-registry", jobID)
+		imagePullSecretName := fmt.Sprintf("krkn-job-%s-registry", jobID)
 
 		// Build docker config JSON
 		authStr := ""
@@ -528,14 +519,15 @@ func (r *KrknScenarioRunReconciler) createClusterJob(
 		// Set owner reference
 		if err := controllerutil.SetControllerReference(scenarioRun, imagePullSecret, r.Scheme); err != nil {
 			cleanup()
-			return fmt.Errorf("failed to set owner reference on imagePullSecret: %w", err)
+			return nil, fmt.Errorf("failed to set owner reference on imagePullSecret: %w", err)
 		}
 
 		if err := r.Create(ctx, imagePullSecret); err != nil {
 			cleanup()
-			return fmt.Errorf("failed to create ImagePullSecret: %w", err)
+			return nil, fmt.Errorf("failed to create ImagePullSecret: %w", err)
 		}
 
+		createdSecrets = append(createdSecrets, imagePullSecretName)
 		imagePullSecrets = append(imagePullSecrets, corev1.LocalObjectReference{
 			Name: imagePullSecretName,
 		})
@@ -564,6 +556,8 @@ func (r *KrknScenarioRunReconciler) createClusterJob(
 	}
 
 	// Add file mounts
+	// Skip first ConfigMap (kubeconfig), file ConfigMaps start from index 1
+	fileConfigMaps := createdConfigMaps[1:]
 	for i, file := range scenarioRun.Spec.Files {
 		volumeName := fmt.Sprintf("file-%d", i)
 
@@ -607,24 +601,51 @@ func (r *KrknScenarioRunReconciler) createClusterJob(
 		})
 	}
 
+	return &preparedJobResources{
+		jobID:             jobID,
+		clusterName:       clusterName,
+		clusterAPIURL:     clusterAPIURL,
+		containerImage:    containerImage,
+		kubeconfigPath:    kubeconfigPath,
+		volumes:           volumes,
+		volumeMounts:      volumeMounts,
+		envVars:           envVars,
+		imagePullSecrets:  imagePullSecrets,
+		createdConfigMaps: createdConfigMaps,
+		createdSecrets:    createdSecrets,
+	}, nil
+}
+
+// executeScenarioPod creates the scenario pod using prepared resources and updates the scenario run status.
+// Takes the container image as a parameter to avoid reconstruction logic.
+func (r *KrknScenarioRunReconciler) executeScenarioPod(
+	ctx context.Context,
+	scenarioRun *krknv1alpha1.KrknScenarioRun,
+	providerName string,
+	resources *preparedJobResources,
+	existingJobIndex int,
+) error {
+	logger := log.FromContext(ctx)
+
 	// SecurityContext for running as krkn user (UID 1001)
 	var runAsUser int64 = 1001
 	var runAsGroup int64 = 1001
 	var fsGroup int64 = 1001
 
 	// Create the pod
-	podName := fmt.Sprintf("krkn-job-%s", jobID)
+	podName := fmt.Sprintf("krkn-job-%s", resources.jobID)
 	podLabels := map[string]string{
 		"app":                 "krkn-scenario",
-		"krkn-job-id":         jobID,
+		"krkn-job-id":         resources.jobID,
 		"krkn-scenario-run":   scenarioRun.Name,
 		"krkn-scenario-name":  scenarioRun.Spec.ScenarioName,
-		"krkn-cluster-name":   clusterName,
+		"krkn-cluster-name":   resources.clusterName,
 		"krkn-target-request": scenarioRun.Spec.TargetRequestID,
 	}
 	if ownerLabel := getOwnerLabel(scenarioRun); ownerLabel != "" {
 		podLabels["krkn.krkn-chaos.dev/owner-user"] = ownerLabel
 	}
+
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      podName,
@@ -634,7 +655,7 @@ func (r *KrknScenarioRunReconciler) createClusterJob(
 		Spec: corev1.PodSpec{
 			ServiceAccountName: "krkn-operator-krkn-scenario-runner",
 			RestartPolicy:      corev1.RestartPolicyNever,
-			ImagePullSecrets:   imagePullSecrets,
+			ImagePullSecrets:   resources.imagePullSecrets,
 			SecurityContext: &corev1.PodSecurityContext{
 				RunAsUser:  &runAsUser,
 				RunAsGroup: &runAsGroup,
@@ -643,24 +664,22 @@ func (r *KrknScenarioRunReconciler) createClusterJob(
 			Containers: []corev1.Container{
 				{
 					Name:            "scenario",
-					Image:           containerImage,
-					Env:             envVars,
-					VolumeMounts:    volumeMounts,
+					Image:           resources.containerImage,
+					Env:             resources.envVars,
+					VolumeMounts:    resources.volumeMounts,
 					ImagePullPolicy: corev1.PullAlways,
 				},
 			},
-			Volumes: volumes,
+			Volumes: resources.volumes,
 		},
 	}
 
 	// Set owner reference
 	if err := controllerutil.SetControllerReference(scenarioRun, pod, r.Scheme); err != nil {
-		cleanup()
 		return fmt.Errorf("failed to set owner reference on pod: %w", err)
 	}
 
 	if err := r.Create(ctx, pod); err != nil {
-		cleanup()
 		return fmt.Errorf("failed to create pod: %w", err)
 	}
 
@@ -669,27 +688,27 @@ func (r *KrknScenarioRunReconciler) createClusterJob(
 	if existingJobIndex >= 0 {
 		// Update existing entry (retry case)
 		// Preserve ClusterAPIURL - it should already be set from first attempt
-		scenarioRun.Status.ClusterJobs[existingJobIndex].JobID = jobID
+		scenarioRun.Status.ClusterJobs[existingJobIndex].JobID = resources.jobID
 		scenarioRun.Status.ClusterJobs[existingJobIndex].PodName = podName
-		scenarioRun.Status.ClusterJobs[existingJobIndex].ContainerImage = containerImage
+		scenarioRun.Status.ClusterJobs[existingJobIndex].ContainerImage = resources.containerImage
 		scenarioRun.Status.ClusterJobs[existingJobIndex].Phase = "Pending"
 		scenarioRun.Status.ClusterJobs[existingJobIndex].StartTime = &now
 		scenarioRun.Status.ClusterJobs[existingJobIndex].CompletionTime = nil
 		scenarioRun.Status.ClusterJobs[existingJobIndex].Message = ""
 
 		logger.Info("updated retry job in status",
-			"cluster", clusterName,
-			"newJobId", jobID,
+			"cluster", resources.clusterName,
+			"newJobId", resources.jobID,
 			"retryAttempt", scenarioRun.Status.ClusterJobs[existingJobIndex].RetryCount)
 	} else {
 		// New job (first attempt)
 		jobStatus := krknv1alpha1.ClusterJobStatus{
 			ProviderName:   providerName,
-			ClusterName:    clusterName,
-			ClusterAPIURL:  clusterAPIURL,
-			JobID:          jobID,
+			ClusterName:    resources.clusterName,
+			ClusterAPIURL:  resources.clusterAPIURL,
+			JobID:          resources.jobID,
 			PodName:        podName,
-			ContainerImage: containerImage,
+			ContainerImage: resources.containerImage,
 			Phase:          "Pending",
 			StartTime:      &now,
 			RetryCount:     0,
@@ -698,13 +717,40 @@ func (r *KrknScenarioRunReconciler) createClusterJob(
 		scenarioRun.Status.ClusterJobs = append(scenarioRun.Status.ClusterJobs, jobStatus)
 
 		logger.Info("created new cluster job",
-			"cluster", clusterName,
-			"jobID", jobID,
+			"cluster", resources.clusterName,
+			"jobID", resources.jobID,
 			"pod", podName,
-			"clusterAPIURL", clusterAPIURL)
+			"clusterAPIURL", resources.clusterAPIURL)
 	}
 
 	return nil
+}
+
+// createClusterJob creates all resources needed for a single cluster scenario job.
+// This method orchestrates the job creation by preparing resources and executing the pod.
+func (r *KrknScenarioRunReconciler) createClusterJob(
+	ctx context.Context,
+	scenarioRun *krknv1alpha1.KrknScenarioRun,
+	providerName string,
+	clusterName string,
+) error {
+	// Check if this is a retry case
+	existingJobIndex := -1
+	for i, job := range scenarioRun.Status.ClusterJobs {
+		if job.ClusterName == clusterName && job.Phase == "Retrying" {
+			existingJobIndex = i
+			break
+		}
+	}
+
+	// Step 1: Prepare all resources (ConfigMaps, Secrets, Volumes, EnvVars, container image)
+	resources, err := r.prepareJobResources(ctx, scenarioRun, providerName, clusterName)
+	if err != nil {
+		return err
+	}
+
+	// Step 2: Create the pod and update status
+	return r.executeScenarioPod(ctx, scenarioRun, providerName, resources, existingJobIndex)
 }
 
 // updateClusterJobStatuses updates the status of all cluster jobs by querying their pods
