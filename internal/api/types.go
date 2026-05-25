@@ -713,6 +713,11 @@ type GraphRunListItem struct {
 	CompletionTime    *metav1.Time            `json:"completionTime,omitempty"`
 }
 
+// GraphRunListResponse represents the response for GET /api/v1/graphruns
+type GraphRunListResponse struct {
+	GraphRuns []GraphRunListItem `json:"graphRuns"`
+}
+
 // GraphRunDetailResponse represents the detailed response for a single graph run
 type GraphRunDetailResponse struct {
 	Name              string                 `json:"name"`

@@ -89,7 +89,7 @@ func (h *Handler) ListGraphRuns(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	writeJSON(w, http.StatusOK, response)
+	writeJSON(w, http.StatusOK, GraphRunListResponse{GraphRuns: response})
 }
 
 // GetGraphRun handles GET /api/v1/graphruns/:name
