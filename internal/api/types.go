@@ -687,3 +687,76 @@ type ListGroupMembersResponse struct {
 	// GroupName is the group name
 	GroupName string `json:"groupName"`
 }
+
+// Graph Run API types
+
+// GraphRunCreateRequest represents the request body for POST /api/v1/graphruns
+type GraphRunCreateRequest struct {
+	// Graph is the dependency graph of scenarios to execute
+	Graph map[string]krknv1alpha1.GraphScenarioNode `json:"graph"`
+	// TargetRequestID is the reference to the KrknTargetRequest CR
+	TargetRequestID string `json:"targetRequestId"`
+	// TargetClusters is a map of provider-name to list of cluster names
+	TargetClusters map[string][]string `json:"targetClusters"`
+}
+
+// GraphRunListItem represents a single item in the graph runs list
+type GraphRunListItem struct {
+	Name              string                  `json:"name"`
+	Namespace         string                  `json:"namespace"`
+	CreationTimestamp time.Time               `json:"creationTimestamp"`
+	Phase             string                  `json:"phase"`
+	OwnerUserID       string                  `json:"ownerUserId"`
+	TargetRequestID   string                  `json:"targetRequestId"`
+	Summary           GraphRunSummaryResponse `json:"summary"`
+	StartTime         *metav1.Time            `json:"startTime,omitempty"`
+	CompletionTime    *metav1.Time            `json:"completionTime,omitempty"`
+}
+
+// GraphRunDetailResponse represents the detailed response for a single graph run
+type GraphRunDetailResponse struct {
+	Name              string                 `json:"name"`
+	Namespace         string                 `json:"namespace"`
+	CreationTimestamp time.Time              `json:"creationTimestamp"`
+	Spec              GraphRunSpecResponse   `json:"spec"`
+	Status            GraphRunStatusResponse `json:"status"`
+}
+
+// GraphRunSpecResponse represents the spec section of a graph run
+type GraphRunSpecResponse struct {
+	Graph           map[string]krknv1alpha1.GraphScenarioNode `json:"graph"`
+	TargetRequestID string                                    `json:"targetRequestId"`
+	TargetClusters  map[string][]string                       `json:"targetClusters"`
+	OwnerUserID     string                                    `json:"ownerUserId"`
+}
+
+// GraphRunStatusResponse represents the status section of a graph run
+type GraphRunStatusResponse struct {
+	Phase          string                  `json:"phase"`
+	Summary        GraphRunSummaryResponse `json:"summary"`
+	NodeStatuses   []NodeStatusResponse    `json:"nodeStatuses"`
+	ResolvedLevels [][]string              `json:"resolvedLevels"`
+	StartTime      *metav1.Time            `json:"startTime,omitempty"`
+	CompletionTime *metav1.Time            `json:"completionTime,omitempty"`
+}
+
+// GraphRunSummaryResponse represents aggregate statistics
+type GraphRunSummaryResponse struct {
+	TotalNodes     int `json:"totalNodes"`
+	CompletedNodes int `json:"completedNodes"`
+	RunningNodes   int `json:"runningNodes"`
+	FailedNodes    int `json:"failedNodes"`
+	PendingNodes   int `json:"pendingNodes"`
+}
+
+// NodeStatusResponse represents the status of a single node in the graph
+type NodeStatusResponse struct {
+	NodeID         string       `json:"nodeId"`
+	NodeName       string       `json:"nodeName"`
+	Phase          string       `json:"phase"`
+	ScenarioRunRef string       `json:"scenarioRunRef,omitempty"`
+	StartTime      *metav1.Time `json:"startTime,omitempty"`
+	CompletionTime *metav1.Time `json:"completionTime,omitempty"`
+	DependsOn      []string     `json:"dependsOn,omitempty"`
+	Message        string       `json:"message,omitempty"`
+}

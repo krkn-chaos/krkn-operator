@@ -90,3 +90,8 @@ const (
 	OperatorPath        = APIBasePath + "/operator"
 	OperatorTargetsPath = OperatorPath + "/targets"
 )
+
+// Graph Run endpoints
+const (
+	GraphRunsPath = APIBasePath + "/graphruns"
+)
