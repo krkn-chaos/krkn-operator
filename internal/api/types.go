@@ -303,6 +303,10 @@ type ScenarioRunStatusResponse struct {
 	OwnerUserID string `json:"ownerUserId,omitempty"`
 	// RegistryName is the name of the private registry used (empty for public registry)
 	RegistryName string `json:"registryName,omitempty"`
+	// GraphRunName is the name of the parent KrknGraphRun (if this scenario run is part of a graph run)
+	GraphRunName string `json:"graphRunName,omitempty"`
+	// GraphNodeID is the node ID in the graph (if this scenario run is part of a graph run)
+	GraphNodeID string `json:"graphNodeId,omitempty"`
 }
 
 // ClusterJobStatusResponse represents the status of a job for a specific cluster
@@ -355,6 +359,10 @@ type ScenarioRunListItem struct {
 	CreatedAt time.Time `json:"createdAt"`
 	// OwnerUserID is the email address of the user who created this scenario run
 	OwnerUserID string `json:"ownerUserId,omitempty"`
+	// GraphRunName is the name of the parent KrknGraphRun (if this scenario run is part of a graph run)
+	GraphRunName string `json:"graphRunName,omitempty"`
+	// GraphNodeID is the node ID in the graph (if this scenario run is part of a graph run)
+	GraphNodeID string `json:"graphNodeId,omitempty"`
 }
 
 // ScenarioRunListResponse represents the response for GET /scenarios/run
