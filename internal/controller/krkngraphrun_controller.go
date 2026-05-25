@@ -1,0 +1,535 @@
+/*
+Copyright 2025.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+
+Assisted-by: Claude Sonnet 4.5 (claude-sonnet-4-5@20250929)
+*/
+
+package controller
+
+import (
+	"context"
+	"fmt"
+	"time"
+
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/kubernetes"
+	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/log"
+
+	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
+	"github.com/krkn-chaos/krkn-operator/pkg/graph"
+)
+
+const (
+	// GraphRunLabelKey is the label key for identifying KrknScenarioRuns created by a KrknGraphRun
+	GraphRunLabelKey = "krkn.dev/graph-run"
+
+	// GraphNodeLabelKey is the label key for identifying which node a KrknScenarioRun represents
+	GraphNodeLabelKey = "krkn.dev/graph-node"
+
+	// FinalizerName is the finalizer for KrknGraphRun cleanup
+	FinalizerName = "krkn.dev/graph-run-finalizer"
+)
+
+// KrknGraphRunReconciler reconciles a KrknGraphRun object
+type KrknGraphRunReconciler struct {
+	client.Client
+	Scheme    *runtime.Scheme
+	Clientset kubernetes.Interface
+	Namespace string
+}
+
+// +kubebuilder:rbac:groups=krkn.krkn-chaos.dev,resources=krkngraphruns,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=krkn.krkn-chaos.dev,resources=krkngraphruns/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=krkn.krkn-chaos.dev,resources=krkngraphruns/finalizers,verbs=update
+// +kubebuilder:rbac:groups=krkn.krkn-chaos.dev,resources=krknscenarioruns,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=krkn.krkn-chaos.dev,resources=krknscenarioruns/status,verbs=get
+
+// Reconcile handles the reconciliation loop for KrknGraphRun
+func (r *KrknGraphRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
+
+	logger.Info("reconcile loop started", "graphRun", req.Name, "namespace", req.Namespace)
+
+	// 1. Fetch the KrknGraphRun instance
+	var graphRun krknv1alpha1.KrknGraphRun
+	if err := r.Get(ctx, req.NamespacedName, &graphRun); err != nil {
+		if apierrors.IsNotFound(err) {
+			logger.Info("graphRun not found, probably deleted", "graphRun", req.Name)
+			return ctrl.Result{}, nil
+		}
+		logger.Error(err, "unable to fetch KrknGraphRun")
+		return ctrl.Result{}, err
+	}
+
+	// 2. Handle deletion with finalizer
+	if !graphRun.DeletionTimestamp.IsZero() {
+		if controllerutil.ContainsFinalizer(&graphRun, FinalizerName) {
+			logger.Info("removing finalizer after cleanup", "graphRun", graphRun.Name)
+			controllerutil.RemoveFinalizer(&graphRun, FinalizerName)
+			if err := r.Update(ctx, &graphRun); err != nil {
+				return ctrl.Result{}, err
+			}
+		}
+		// Owner references will cascade delete KrknScenarioRuns
+		return ctrl.Result{}, nil
+	}
+
+	// Add finalizer if not present
+	if !controllerutil.ContainsFinalizer(&graphRun, FinalizerName) {
+		controllerutil.AddFinalizer(&graphRun, FinalizerName)
+		if err := r.Update(ctx, &graphRun); err != nil {
+			return ctrl.Result{}, err
+		}
+		// Requeue to continue processing with finalizer added
+		return ctrl.Result{Requeue: true}, nil
+	}
+
+	// 3. Initialize status if first reconcile
+	if graphRun.Status.Phase == "" {
+		if err := r.initializeStatus(ctx, &graphRun); err != nil {
+			logger.Error(err, "failed to initialize status")
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{Requeue: true}, nil
+	}
+
+	// 4. Resolve the dependency graph if not already done
+	if len(graphRun.Status.ResolvedLevels) == 0 {
+		if err := r.resolveGraph(ctx, &graphRun); err != nil {
+			logger.Error(err, "failed to resolve graph")
+			return r.updateStatusWithError(ctx, &graphRun, err)
+		}
+		return ctrl.Result{Requeue: true}, nil
+	}
+
+	// 5. Query existing KrknScenarioRuns for this graph
+	existingRuns, err := r.getExistingScenarioRuns(ctx, &graphRun)
+	if err != nil {
+		logger.Error(err, "failed to query existing scenario runs")
+		return ctrl.Result{}, err
+	}
+
+	// 6. Process each level in order
+	result, err := r.processLevels(ctx, &graphRun, existingRuns)
+	if err != nil {
+		logger.Error(err, "failed to process graph levels")
+		return r.updateStatusWithError(ctx, &graphRun, err)
+	}
+
+	// 7. Update global phase and summary
+	if err := r.updateGlobalStatus(ctx, &graphRun); err != nil {
+		logger.Error(err, "failed to update global status")
+		return ctrl.Result{}, err
+	}
+
+	logger.Info("reconcile loop completed",
+		"graphRun", graphRun.Name,
+		"phase", graphRun.Status.Phase,
+		"totalNodes", graphRun.Status.Summary.TotalNodes,
+		"completedNodes", graphRun.Status.Summary.CompletedNodes)
+
+	return result, nil
+}
+
+// initializeStatus initializes the GraphRun status on first reconcile
+func (r *KrknGraphRunReconciler) initializeStatus(ctx context.Context, graphRun *krknv1alpha1.KrknGraphRun) error {
+	logger := log.FromContext(ctx)
+
+	graphRun.Status.Phase = "Pending"
+	graphRun.Status.StartTime = &metav1.Time{Time: time.Now()}
+	graphRun.Status.NodeStatuses = []krknv1alpha1.NodeStatus{}
+
+	// Count total nodes
+	totalNodes := len(graphRun.Spec.Graph)
+	graphRun.Status.Summary = krknv1alpha1.GraphRunSummary{
+		TotalNodes:     totalNodes,
+		PendingNodes:   totalNodes,
+		CompletedNodes: 0,
+		RunningNodes:   0,
+		FailedNodes:    0,
+	}
+
+	logger.Info("initializing graphRun status",
+		"graphRun", graphRun.Name,
+		"totalNodes", totalNodes)
+
+	return r.Status().Update(ctx, graphRun)
+}
+
+// resolveGraph resolves the dependency graph into topological levels
+func (r *KrknGraphRunReconciler) resolveGraph(ctx context.Context, graphRun *krknv1alpha1.KrknGraphRun) error {
+	logger := log.FromContext(ctx)
+
+	logger.Info("resolving dependency graph", "graphRun", graphRun.Name)
+
+	levels, err := graph.ResolveGraph(graphRun.Spec.Graph)
+	if err != nil {
+		return fmt.Errorf("failed to resolve graph: %w", err)
+	}
+
+	graphRun.Status.ResolvedLevels = levels
+
+	// Initialize node statuses
+	nodeStatuses := make([]krknv1alpha1.NodeStatus, 0, len(graphRun.Spec.Graph))
+	for nodeID, node := range graphRun.Spec.Graph {
+		var dependsOn []string
+		if node.DependsOn != nil {
+			dependsOn = []string{*node.DependsOn}
+		}
+
+		nodeStatuses = append(nodeStatuses, krknv1alpha1.NodeStatus{
+			NodeID:    nodeID,
+			NodeName:  node.Name,
+			Phase:     "Pending",
+			DependsOn: dependsOn,
+		})
+	}
+	graphRun.Status.NodeStatuses = nodeStatuses
+
+	logger.Info("graph resolved successfully",
+		"graphRun", graphRun.Name,
+		"levels", len(levels),
+		"nodes", len(nodeStatuses))
+
+	return r.Status().Update(ctx, graphRun)
+}
+
+// getExistingScenarioRuns queries for KrknScenarioRuns created by this graph
+func (r *KrknGraphRunReconciler) getExistingScenarioRuns(ctx context.Context, graphRun *krknv1alpha1.KrknGraphRun) (map[string]*krknv1alpha1.KrknScenarioRun, error) {
+	var runList krknv1alpha1.KrknScenarioRunList
+	if err := r.List(ctx, &runList,
+		client.InNamespace(graphRun.Namespace),
+		client.MatchingLabels{GraphRunLabelKey: graphRun.Name},
+	); err != nil {
+		return nil, err
+	}
+
+	runs := make(map[string]*krknv1alpha1.KrknScenarioRun)
+	for i := range runList.Items {
+		nodeID := runList.Items[i].Labels[GraphNodeLabelKey]
+		if nodeID != "" {
+			runs[nodeID] = &runList.Items[i]
+		}
+	}
+
+	return runs, nil
+}
+
+// processLevels processes each level of the dependency graph
+func (r *KrknGraphRunReconciler) processLevels(
+	ctx context.Context,
+	graphRun *krknv1alpha1.KrknGraphRun,
+	existingRuns map[string]*krknv1alpha1.KrknScenarioRun,
+) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
+
+	for levelIdx, level := range graphRun.Status.ResolvedLevels {
+		logger.Info("processing level", "graphRun", graphRun.Name, "level", levelIdx, "nodes", level)
+
+		// Check if previous levels are complete
+		if levelIdx > 0 {
+			prevLevelComplete, hasFailures := r.checkPreviousLevel(graphRun, levelIdx-1)
+			if hasFailures {
+				// Fail-fast: mark dependent nodes as blocked
+				return r.handleFailFast(ctx, graphRun, levelIdx)
+			}
+			if !prevLevelComplete {
+				logger.Info("previous level not complete, requeuing",
+					"graphRun", graphRun.Name,
+					"level", levelIdx-1)
+				return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+			}
+		}
+
+		// Process each node in this level
+		for _, nodeID := range level {
+			if err := r.processNode(ctx, graphRun, nodeID, existingRuns); err != nil {
+				return ctrl.Result{}, err
+			}
+		}
+	}
+
+	return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+}
+
+// checkPreviousLevel checks if all nodes in the previous level are complete
+func (r *KrknGraphRunReconciler) checkPreviousLevel(graphRun *krknv1alpha1.KrknGraphRun, levelIdx int) (complete bool, hasFailures bool) {
+	if levelIdx < 0 || levelIdx >= len(graphRun.Status.ResolvedLevels) {
+		return true, false
+	}
+
+	nodesInLevel := graphRun.Status.ResolvedLevels[levelIdx]
+	allComplete := true
+	anyFailed := false
+
+	for _, nodeID := range nodesInLevel {
+		nodeStatus := r.findNodeStatus(graphRun, nodeID)
+		if nodeStatus == nil {
+			allComplete = false
+			continue
+		}
+
+		if nodeStatus.Phase == "Failed" {
+			anyFailed = true
+		}
+
+		if nodeStatus.Phase != "Completed" && nodeStatus.Phase != "Failed" {
+			allComplete = false
+		}
+	}
+
+	return allComplete, anyFailed
+}
+
+// findNodeStatus finds a node status by node ID
+func (r *KrknGraphRunReconciler) findNodeStatus(graphRun *krknv1alpha1.KrknGraphRun, nodeID string) *krknv1alpha1.NodeStatus {
+	for i := range graphRun.Status.NodeStatuses {
+		if graphRun.Status.NodeStatuses[i].NodeID == nodeID {
+			return &graphRun.Status.NodeStatuses[i]
+		}
+	}
+	return nil
+}
+
+// processNode processes a single node in the graph
+func (r *KrknGraphRunReconciler) processNode(
+	ctx context.Context,
+	graphRun *krknv1alpha1.KrknGraphRun,
+	nodeID string,
+	existingRuns map[string]*krknv1alpha1.KrknScenarioRun,
+) error {
+	// Check if scenario run already exists
+	scenarioRun, exists := existingRuns[nodeID]
+	if !exists {
+		// Create new scenario run
+		return r.createScenarioRun(ctx, graphRun, nodeID)
+	}
+
+	// Update node status from existing scenario run
+	return r.updateNodeStatusFromRun(ctx, graphRun, nodeID, scenarioRun)
+}
+
+// createScenarioRun creates a KrknScenarioRun for a graph node
+func (r *KrknGraphRunReconciler) createScenarioRun(
+	ctx context.Context,
+	graphRun *krknv1alpha1.KrknGraphRun,
+	nodeID string,
+) error {
+	logger := log.FromContext(ctx)
+
+	node, ok := graphRun.Spec.Graph[nodeID]
+	if !ok {
+		return fmt.Errorf("node %s not found in graph", nodeID)
+	}
+
+	// Map node to scenario run spec
+	spec, err := graph.MapScenarioNodeToScenarioRunSpec(
+		node,
+		node.Name,
+		graphRun.Spec.TargetRequestID,
+		graphRun.Spec.TargetClusters,
+		graphRun.Spec.OwnerUserID,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to map node to scenario run spec: %w", err)
+	}
+
+	// Create scenario run
+	scenarioRun := &krknv1alpha1.KrknScenarioRun{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      fmt.Sprintf("%s-%s", graphRun.Name, nodeID),
+			Namespace: graphRun.Namespace,
+			Labels: map[string]string{
+				GraphRunLabelKey:  graphRun.Name,
+				GraphNodeLabelKey: nodeID,
+			},
+		},
+		Spec: spec,
+	}
+
+	// Set owner reference for cascade deletion
+	if err := controllerutil.SetControllerReference(graphRun, scenarioRun, r.Scheme); err != nil {
+		return err
+	}
+
+	logger.Info("creating scenario run for node",
+		"graphRun", graphRun.Name,
+		"nodeID", nodeID,
+		"scenarioRun", scenarioRun.Name)
+
+	if err := r.Create(ctx, scenarioRun); err != nil {
+		return err
+	}
+
+	// Update node status
+	return r.updateNodeStatus(ctx, graphRun, nodeID, "Running", scenarioRun.Name, nil, nil)
+}
+
+// updateNodeStatusFromRun updates a node's status from its scenario run
+func (r *KrknGraphRunReconciler) updateNodeStatusFromRun(
+	ctx context.Context,
+	graphRun *krknv1alpha1.KrknGraphRun,
+	nodeID string,
+	scenarioRun *krknv1alpha1.KrknScenarioRun,
+) error {
+	phase := "Running"
+	var startTime, completionTime *metav1.Time
+
+	// Map scenario run phase to node phase
+	switch scenarioRun.Status.Phase {
+	case "Succeeded":
+		phase = "Completed"
+	case "Failed", "PartiallyFailed":
+		phase = "Failed"
+	case "Running":
+		phase = "Running"
+	case "Pending":
+		phase = "Pending"
+	}
+
+	// Get timing information from first cluster job (approximation)
+	if len(scenarioRun.Status.ClusterJobs) > 0 {
+		firstJob := scenarioRun.Status.ClusterJobs[0]
+		startTime = firstJob.StartTime
+		completionTime = firstJob.CompletionTime
+	}
+
+	return r.updateNodeStatus(ctx, graphRun, nodeID, phase, scenarioRun.Name, startTime, completionTime)
+}
+
+// updateNodeStatus updates a node's status in the graph run
+func (r *KrknGraphRunReconciler) updateNodeStatus(
+	ctx context.Context,
+	graphRun *krknv1alpha1.KrknGraphRun,
+	nodeID string,
+	phase string,
+	scenarioRunRef string,
+	startTime, completionTime *metav1.Time,
+) error {
+	for i := range graphRun.Status.NodeStatuses {
+		if graphRun.Status.NodeStatuses[i].NodeID == nodeID {
+			graphRun.Status.NodeStatuses[i].Phase = phase
+			graphRun.Status.NodeStatuses[i].ScenarioRunRef = scenarioRunRef
+			if startTime != nil {
+				graphRun.Status.NodeStatuses[i].StartTime = startTime
+			}
+			if completionTime != nil {
+				graphRun.Status.NodeStatuses[i].CompletionTime = completionTime
+			}
+			return r.Status().Update(ctx, graphRun)
+		}
+	}
+	return fmt.Errorf("node status not found for %s", nodeID)
+}
+
+// handleFailFast marks dependent nodes as blocked when fail-fast is triggered
+func (r *KrknGraphRunReconciler) handleFailFast(
+	ctx context.Context,
+	graphRun *krknv1alpha1.KrknGraphRun,
+	fromLevel int,
+) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
+	logger.Info("fail-fast triggered, marking dependent nodes as blocked",
+		"graphRun", graphRun.Name,
+		"fromLevel", fromLevel)
+
+	// Mark all nodes in subsequent levels as blocked
+	for levelIdx := fromLevel; levelIdx < len(graphRun.Status.ResolvedLevels); levelIdx++ {
+		for _, nodeID := range graphRun.Status.ResolvedLevels[levelIdx] {
+			_ = r.updateNodeStatus(ctx, graphRun, nodeID, "Blocked", "", nil, nil)
+		}
+	}
+
+	graphRun.Status.Phase = "Failed"
+	if err := r.Status().Update(ctx, graphRun); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	return ctrl.Result{}, nil
+}
+
+// updateGlobalStatus calculates and updates the global phase and summary
+func (r *KrknGraphRunReconciler) updateGlobalStatus(ctx context.Context, graphRun *krknv1alpha1.KrknGraphRun) error {
+	totalNodes := len(graphRun.Spec.Graph)
+	completedNodes := 0
+	runningNodes := 0
+	failedNodes := 0
+	pendingNodes := 0
+
+	for _, nodeStatus := range graphRun.Status.NodeStatuses {
+		switch nodeStatus.Phase {
+		case "Completed":
+			completedNodes++
+		case "Running":
+			runningNodes++
+		case "Failed":
+			failedNodes++
+		case "Pending", "Blocked":
+			pendingNodes++
+		}
+	}
+
+	// Calculate global phase
+	phase := "Pending"
+	if failedNodes > 0 {
+		if completedNodes > 0 {
+			phase = "PartiallyFailed"
+		} else {
+			phase = "Failed"
+		}
+	} else if completedNodes == totalNodes {
+		phase = "Completed"
+		if graphRun.Status.CompletionTime == nil {
+			graphRun.Status.CompletionTime = &metav1.Time{Time: time.Now()}
+		}
+	} else if runningNodes > 0 {
+		phase = "Running"
+	}
+
+	graphRun.Status.Phase = phase
+	graphRun.Status.Summary = krknv1alpha1.GraphRunSummary{
+		TotalNodes:     totalNodes,
+		CompletedNodes: completedNodes,
+		RunningNodes:   runningNodes,
+		FailedNodes:    failedNodes,
+		PendingNodes:   pendingNodes,
+	}
+
+	return r.Status().Update(ctx, graphRun)
+}
+
+// updateStatusWithError updates status with error and returns result
+func (r *KrknGraphRunReconciler) updateStatusWithError(
+	ctx context.Context,
+	graphRun *krknv1alpha1.KrknGraphRun,
+	err error,
+) (ctrl.Result, error) {
+	graphRun.Status.Phase = "Failed"
+	_ = r.Status().Update(ctx, graphRun)
+	return ctrl.Result{}, err
+}
+
+// SetupWithManager sets up the controller with the Manager.
+func (r *KrknGraphRunReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	return ctrl.NewControllerManagedBy(mgr).
+		For(&krknv1alpha1.KrknGraphRun{}).
+		Owns(&krknv1alpha1.KrknScenarioRun{}).
+		Complete(r)
+}
