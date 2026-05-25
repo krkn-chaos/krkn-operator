@@ -64,6 +64,21 @@ type KrknScenarioRunReconciler struct {
 // +kubebuilder:rbac:groups=krkn.krkn-chaos.dev,resources=krkntargetrequests,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=krkn.krkn-chaos.dev,resources=krknoperatortargets,verbs=get;list;watch
 
+// preparedJobResources holds all resources prepared for creating a scenario pod
+type preparedJobResources struct {
+	jobID              string
+	clusterName        string
+	clusterAPIURL      string
+	containerImage     string
+	kubeconfigPath     string
+	volumes            []corev1.Volume
+	volumeMounts       []corev1.VolumeMount
+	envVars            []corev1.EnvVar
+	imagePullSecrets   []corev1.LocalObjectReference
+	createdConfigMaps  []string // names of created ConfigMaps for cleanup
+	createdSecrets     []string // names of created Secrets for cleanup
+}
+
 // getOwnerLabel returns the sanitized owner label value for a scenario run.
 // If the scenario run has no OwnerUserID set, returns an empty string.
 // The label value is sanitized to comply with Kubernetes label requirements (RFC 1123).
@@ -440,11 +455,23 @@ func (r *KrknScenarioRunReconciler) createClusterJob(
 		fileConfigMaps = append(fileConfigMaps, configMapName)
 	}
 
-	// Build container image path
-	containerImage, err := buildContainerImage(&scenarioRun.Spec, &krknctlCfg)
-	if err != nil {
-		cleanup()
-		return fmt.Errorf("failed to build container image path: %w", err)
+	// Determine container image to use
+	// If this ScenarioRun was created by a GraphRun, use the image as-is (it's already complete)
+	// Otherwise, build the image using registry configuration
+	var containerImage string
+	if _, isGraphRun := scenarioRun.Labels["krkn.dev/graph-run"]; isGraphRun {
+		// Graph run: image is already complete (e.g., quay.io/krkn-chaos/krkn-hub:dummy-scenario)
+		containerImage = scenarioRun.Spec.ScenarioImage
+		logger.V(1).Info("using complete image from graph run", "image", containerImage)
+	} else {
+		// Normal run: build image from registry configuration
+		var err error
+		containerImage, err = buildContainerImage(&scenarioRun.Spec, &krknctlCfg)
+		if err != nil {
+			cleanup()
+			return fmt.Errorf("failed to build container image path: %w", err)
+		}
+		logger.V(1).Info("built image from registry config", "image", containerImage)
 	}
 
 	// Handle private registry authentication
