@@ -1,0 +1,138 @@
+/*
+Copyright 2025.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+
+Assisted-by: Claude Sonnet 4.5 (claude-sonnet-4-5@20250929)
+*/
+
+package graph
+
+import (
+	"fmt"
+
+	v1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
+	"github.com/krkn-chaos/krknctl/pkg/dependencygraph"
+)
+
+// ResolveGraph takes a scenario graph and resolves it into topological levels
+// using krknctl's dependency graph resolution.
+// Returns a 2D array where each inner array represents a level of nodes that can run in parallel.
+// Example: [["node1", "node2"], ["node3"], ["node4", "node5"]]
+func ResolveGraph(scenarioGraph map[string]v1alpha1.GraphScenarioNode) ([][]string, error) {
+	if len(scenarioGraph) == 0 {
+		return nil, fmt.Errorf("scenario graph is empty")
+	}
+
+	// Convert to krknctl format for graph resolution
+	krknctlScenarioSet := v1alpha1.ToKrknctlScenarioSet(scenarioGraph)
+
+	// Check if all nodes are root nodes (no dependencies)
+	// If so, return them all in a single level
+	allNodesAreRoots := true
+	for _, node := range krknctlScenarioSet {
+		if node.Parent != nil {
+			allNodesAreRoots = false
+			break
+		}
+	}
+
+	if allNodesAreRoots {
+		// All nodes can run in parallel
+		level := make([]string, 0, len(scenarioGraph))
+		for nodeID := range scenarioGraph {
+			level = append(level, nodeID)
+		}
+		return [][]string{level}, nil
+	}
+
+	// Convert ScenarioSet to map[string]ParentProvider for NewGraphFromNodes
+	nodes := make(map[string]dependencygraph.ParentProvider)
+	for nodeID, node := range krknctlScenarioSet {
+		// Create a copy of the node to avoid pointer issues
+		nodeCopy := node
+		nodes[nodeID] = &nodeCopy
+	}
+
+	// Build dependency graph using krknctl
+	// This will return an error if there are cycles
+	graph, err := dependencygraph.NewGraphFromNodes(nodes)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build dependency graph: %w", err)
+	}
+
+	// Resolve the graph into topological levels
+	// TopoSortedLayers returns only [][]string, no error
+	levels := graph.TopoSortedLayers()
+
+	return levels, nil
+}
+
+// MapScenarioNodeToScenarioRunSpec maps a GraphScenarioNode to a KrknScenarioRunSpec
+// This function creates the spec for a KrknScenarioRun that will execute a single node
+// from the dependency graph.
+func MapScenarioNodeToScenarioRunSpec(
+	node v1alpha1.GraphScenarioNode,
+	scenarioName string,
+	targetRequestID string,
+	targetClusters map[string][]string,
+	ownerUserID string,
+) (v1alpha1.KrknScenarioRunSpec, error) {
+	// Validate required fields
+	if node.Image == "" {
+		return v1alpha1.KrknScenarioRunSpec{}, fmt.Errorf("scenario node image is required")
+	}
+	if node.Name == "" {
+		return v1alpha1.KrknScenarioRunSpec{}, fmt.Errorf("scenario node name is required")
+	}
+	if scenarioName == "" {
+		return v1alpha1.KrknScenarioRunSpec{}, fmt.Errorf("scenario name is required")
+	}
+	if targetRequestID == "" {
+		return v1alpha1.KrknScenarioRunSpec{}, fmt.Errorf("target request ID is required")
+	}
+	if len(targetClusters) == 0 {
+		return v1alpha1.KrknScenarioRunSpec{}, fmt.Errorf("target clusters are required")
+	}
+
+	// Create the scenario run spec
+	spec := v1alpha1.KrknScenarioRunSpec{
+		TargetRequestID: targetRequestID,
+		TargetClusters:  targetClusters,
+		ScenarioName:    scenarioName,
+		ScenarioImage:   node.Image,
+		OwnerUserID:     ownerUserID,
+	}
+
+	// Map environment variables (direct copy)
+	if len(node.Env) > 0 {
+		spec.Environment = make(map[string]string)
+		for k, v := range node.Env {
+			spec.Environment[k] = v
+		}
+	}
+
+	// TODO: Implement volumes mapping when FileMounts support is ready
+	// The node.Volumes field contains volume mount specifications,
+	// but the current KrknScenarioRunSpec uses Files []FileMount instead.
+	// We need to define the mapping strategy:
+	// - Option 1: Convert volume mounts to file mounts (limited use case)
+	// - Option 2: Extend KrknScenarioRunSpec to support volume mounts directly
+	// - Option 3: Use a different mechanism for volume mounting in graph runs
+	if len(node.Volumes) > 0 {
+		// For now, we skip volumes - they will be addressed in a future iteration
+		// based on the chosen approach for volume mounting
+	}
+
+	return spec, nil
+}
