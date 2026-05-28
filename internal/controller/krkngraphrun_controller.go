@@ -259,8 +259,25 @@ func (r *KrknGraphRunReconciler) processLevels(
 		}
 
 		// Process each node in this level
+		levelModified := false
 		for _, nodeID := range level {
-			if err := r.processNode(ctx, graphRun, nodeID, existingRuns); err != nil {
+			modified, err := r.processNode(ctx, graphRun, nodeID, existingRuns)
+			if err != nil {
+				return ctrl.Result{}, err
+			}
+			if modified {
+				levelModified = true
+			}
+		}
+
+		// Batch update: only update status once per level if anything changed
+		if levelModified {
+			if err := r.Status().Update(ctx, graphRun); err != nil {
+				// Handle conflict by refetching and retrying
+				if apierrors.IsConflict(err) {
+					logger.Info("conflict detected, will retry on next reconcile", "level", levelIdx)
+					return ctrl.Result{Requeue: true}, nil
+				}
 				return ctrl.Result{}, err
 			}
 		}
@@ -308,13 +325,14 @@ func (r *KrknGraphRunReconciler) findNodeStatus(graphRun *krknv1alpha1.KrknGraph
 	return nil
 }
 
-// processNode processes a single node in the graph
+// processNode processes a single node in the graph.
+// Returns true if the node status was modified.
 func (r *KrknGraphRunReconciler) processNode(
 	ctx context.Context,
 	graphRun *krknv1alpha1.KrknGraphRun,
 	nodeID string,
 	existingRuns map[string]*krknv1alpha1.KrknScenarioRun,
-) error {
+) (bool, error) {
 	// Check if scenario run already exists
 	scenarioRun, exists := existingRuns[nodeID]
 	if !exists {
@@ -323,20 +341,21 @@ func (r *KrknGraphRunReconciler) processNode(
 	}
 
 	// Update node status from existing scenario run
-	return r.updateNodeStatusFromRun(ctx, graphRun, nodeID, scenarioRun)
+	return r.updateNodeStatusFromRun(graphRun, nodeID, scenarioRun)
 }
 
-// createScenarioRun creates a KrknScenarioRun for a graph node
+// createScenarioRun creates a KrknScenarioRun for a graph node.
+// Returns true if the node status was modified.
 func (r *KrknGraphRunReconciler) createScenarioRun(
 	ctx context.Context,
 	graphRun *krknv1alpha1.KrknGraphRun,
 	nodeID string,
-) error {
+) (bool, error) {
 	logger := log.FromContext(ctx)
 
 	node, ok := graphRun.Spec.Graph[nodeID]
 	if !ok {
-		return fmt.Errorf("node %s not found in graph", nodeID)
+		return false, fmt.Errorf("node %s not found in graph", nodeID)
 	}
 
 	// Map node to scenario run spec
@@ -348,7 +367,7 @@ func (r *KrknGraphRunReconciler) createScenarioRun(
 		graphRun.Spec.OwnerUserID,
 	)
 	if err != nil {
-		return fmt.Errorf("failed to map node to scenario run spec: %w", err)
+		return false, fmt.Errorf("failed to map node to scenario run spec: %w", err)
 	}
 
 	// Create scenario run
@@ -366,7 +385,7 @@ func (r *KrknGraphRunReconciler) createScenarioRun(
 
 	// Set owner reference for cascade deletion
 	if err := controllerutil.SetControllerReference(graphRun, scenarioRun, r.Scheme); err != nil {
-		return err
+		return false, err
 	}
 
 	logger.Info("creating scenario run for node",
@@ -375,20 +394,20 @@ func (r *KrknGraphRunReconciler) createScenarioRun(
 		"scenarioRun", scenarioRun.Name)
 
 	if err := r.Create(ctx, scenarioRun); err != nil {
-		return err
+		return false, err
 	}
 
-	// Update node status
-	return r.updateNodeStatus(ctx, graphRun, nodeID, "Running", scenarioRun.Name, nil, nil)
+	// Update node status in memory
+	return r.setNodeStatus(graphRun, nodeID, "Running", scenarioRun.Name, nil, nil)
 }
 
-// updateNodeStatusFromRun updates a node's status from its scenario run
+// updateNodeStatusFromRun updates a node's status from its scenario run.
+// Returns true if the node status was modified.
 func (r *KrknGraphRunReconciler) updateNodeStatusFromRun(
-	ctx context.Context,
 	graphRun *krknv1alpha1.KrknGraphRun,
 	nodeID string,
 	scenarioRun *krknv1alpha1.KrknScenarioRun,
-) error {
+) (bool, error) {
 	phase := "Running"
 	var startTime, completionTime *metav1.Time
 
@@ -411,32 +430,49 @@ func (r *KrknGraphRunReconciler) updateNodeStatusFromRun(
 		completionTime = firstJob.CompletionTime
 	}
 
-	return r.updateNodeStatus(ctx, graphRun, nodeID, phase, scenarioRun.Name, startTime, completionTime)
+	return r.setNodeStatus(graphRun, nodeID, phase, scenarioRun.Name, startTime, completionTime)
 }
 
 // updateNodeStatus updates a node's status in the graph run
-func (r *KrknGraphRunReconciler) updateNodeStatus(
-	ctx context.Context,
+// setNodeStatus updates a node's status in memory without persisting to the API server.
+// Returns true if the status was modified, false if unchanged.
+func (r *KrknGraphRunReconciler) setNodeStatus(
 	graphRun *krknv1alpha1.KrknGraphRun,
 	nodeID string,
 	phase string,
 	scenarioRunRef string,
 	startTime, completionTime *metav1.Time,
-) error {
+) (bool, error) {
 	for i := range graphRun.Status.NodeStatuses {
 		if graphRun.Status.NodeStatuses[i].NodeID == nodeID {
-			graphRun.Status.NodeStatuses[i].Phase = phase
-			graphRun.Status.NodeStatuses[i].ScenarioRunRef = scenarioRunRef
-			if startTime != nil {
+			modified := false
+
+			if graphRun.Status.NodeStatuses[i].Phase != phase {
+				graphRun.Status.NodeStatuses[i].Phase = phase
+				modified = true
+			}
+
+			if graphRun.Status.NodeStatuses[i].ScenarioRunRef != scenarioRunRef {
+				graphRun.Status.NodeStatuses[i].ScenarioRunRef = scenarioRunRef
+				modified = true
+			}
+
+			if startTime != nil && (graphRun.Status.NodeStatuses[i].StartTime == nil ||
+				!graphRun.Status.NodeStatuses[i].StartTime.Equal(startTime)) {
 				graphRun.Status.NodeStatuses[i].StartTime = startTime
+				modified = true
 			}
-			if completionTime != nil {
+
+			if completionTime != nil && (graphRun.Status.NodeStatuses[i].CompletionTime == nil ||
+				!graphRun.Status.NodeStatuses[i].CompletionTime.Equal(completionTime)) {
 				graphRun.Status.NodeStatuses[i].CompletionTime = completionTime
+				modified = true
 			}
-			return r.Status().Update(ctx, graphRun)
+
+			return modified, nil
 		}
 	}
-	return fmt.Errorf("node status not found for %s", nodeID)
+	return false, fmt.Errorf("node status not found for %s", nodeID)
 }
 
 // handleFailFast marks dependent nodes as blocked when fail-fast is triggered
@@ -450,10 +486,10 @@ func (r *KrknGraphRunReconciler) handleFailFast(
 		"graphRun", graphRun.Name,
 		"fromLevel", fromLevel)
 
-	// Mark all nodes in subsequent levels as blocked
+	// Mark all nodes in subsequent levels as blocked (batch in memory)
 	for levelIdx := fromLevel; levelIdx < len(graphRun.Status.ResolvedLevels); levelIdx++ {
 		for _, nodeID := range graphRun.Status.ResolvedLevels[levelIdx] {
-			_ = r.updateNodeStatus(ctx, graphRun, nodeID, "Blocked", "", nil, nil)
+			_, _ = r.setNodeStatus(graphRun, nodeID, "Blocked", "", nil, nil)
 		}
 	}
 
