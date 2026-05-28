@@ -21,6 +21,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -172,8 +173,14 @@ func (r *KrknGraphRunReconciler) initializeStatus(ctx context.Context, graphRun 
 	graphRun.Status.StartTime = &metav1.Time{Time: time.Now()}
 	graphRun.Status.NodeStatuses = []krknv1alpha1.NodeStatus{}
 
-	// Count total nodes
-	totalNodes := len(graphRun.Spec.Graph)
+	// Count total nodes (filter out metadata nodes starting with '_')
+	totalNodes := 0
+	for nodeID := range graphRun.Spec.Graph {
+		if !strings.HasPrefix(nodeID, "_") {
+			totalNodes++
+		}
+	}
+
 	graphRun.Status.Summary = krknv1alpha1.GraphRunSummary{
 		TotalNodes:     totalNodes,
 		PendingNodes:   totalNodes,
@@ -186,7 +193,15 @@ func (r *KrknGraphRunReconciler) initializeStatus(ctx context.Context, graphRun 
 		"graphRun", graphRun.Name,
 		"totalNodes", totalNodes)
 
-	return r.Status().Update(ctx, graphRun)
+	// Update with conflict retry
+	if err := r.Status().Update(ctx, graphRun); err != nil {
+		if apierrors.IsConflict(err) {
+			logger.Info("conflict in initializeStatus, will retry on next reconcile")
+			return fmt.Errorf("conflict updating status: %w", err)
+		}
+		return err
+	}
+	return nil
 }
 
 // resolveGraph resolves the dependency graph into topological levels
@@ -202,9 +217,14 @@ func (r *KrknGraphRunReconciler) resolveGraph(ctx context.Context, graphRun *krk
 
 	graphRun.Status.ResolvedLevels = levels
 
-	// Initialize node statuses
+	// Initialize node statuses (filter out metadata nodes starting with '_')
 	nodeStatuses := make([]krknv1alpha1.NodeStatus, 0, len(graphRun.Spec.Graph))
 	for nodeID, node := range graphRun.Spec.Graph {
+		// Skip metadata nodes (same filter as in pkg/graph/ResolveGraph)
+		if strings.HasPrefix(nodeID, "_") {
+			continue
+		}
+
 		var dependsOn []string
 		if node.DependsOn != nil {
 			dependsOn = []string{*node.DependsOn}
@@ -224,7 +244,15 @@ func (r *KrknGraphRunReconciler) resolveGraph(ctx context.Context, graphRun *krk
 		"levels", len(levels),
 		"nodes", len(nodeStatuses))
 
-	return r.Status().Update(ctx, graphRun)
+	// Update with conflict retry
+	if err := r.Status().Update(ctx, graphRun); err != nil {
+		if apierrors.IsConflict(err) {
+			logger.Info("conflict in resolveGraph, will retry on next reconcile")
+			return fmt.Errorf("conflict updating status: %w", err)
+		}
+		return err
+	}
+	return nil
 }
 
 // getExistingScenarioRuns queries for KrknScenarioRuns created by this graph
