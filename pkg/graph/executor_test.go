@@ -233,11 +233,14 @@ func TestMapScenarioNodeToScenarioRunSpec(t *testing.T) {
 				if spec.OwnerUserID != "user@example.com" {
 					t.Errorf("OwnerUserID = %s, want user@example.com", spec.OwnerUserID)
 				}
-				if len(spec.Environment) != 2 {
-					t.Errorf("Environment has %d entries, want 2", len(spec.Environment))
+				if len(spec.Environment) != 3 {
+					t.Errorf("Environment has %d entries, want 3", len(spec.Environment))
 				}
 				if spec.Environment["KEY1"] != "value1" {
 					t.Errorf("Environment[KEY1] = %s, want value1", spec.Environment["KEY1"])
+				}
+				if spec.Environment["RESILIENCY_SCORE"] != "true" {
+					t.Errorf("Environment[RESILIENCY_SCORE] = %s, want true", spec.Environment["RESILIENCY_SCORE"])
 				}
 			},
 		},
@@ -258,8 +261,12 @@ func TestMapScenarioNodeToScenarioRunSpec(t *testing.T) {
 				if spec.ScenarioName != "minimal-scenario" {
 					t.Errorf("ScenarioName = %s, want minimal-scenario", spec.ScenarioName)
 				}
-				if spec.Environment != nil && len(spec.Environment) > 0 {
-					t.Errorf("Environment should be empty, got %v", spec.Environment)
+				// Verify RESILIENCY_SCORE is always added for graph runs
+				if len(spec.Environment) != 1 {
+					t.Errorf("Environment has %d entries, want 1 (RESILIENCY_SCORE)", len(spec.Environment))
+				}
+				if spec.Environment["RESILIENCY_SCORE"] != "true" {
+					t.Errorf("Environment[RESILIENCY_SCORE] = %s, want true", spec.Environment["RESILIENCY_SCORE"])
 				}
 			},
 		},

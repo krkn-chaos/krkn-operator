@@ -127,13 +127,15 @@ func MapScenarioNodeToScenarioRunSpec(
 		OwnerUserID:     ownerUserID,
 	}
 
-	// Map environment variables (direct copy)
-	if len(node.Env) > 0 {
-		spec.Environment = make(map[string]string)
-		for k, v := range node.Env {
-			spec.Environment[k] = v
-		}
+	// Map environment variables from node
+	spec.Environment = make(map[string]string)
+	for k, v := range node.Env {
+		spec.Environment[k] = v
 	}
+
+	// Add RESILIENCY_SCORE=true for all graph run scenarios
+	// This enables resiliency scoring in the krkn-hub scenarios
+	spec.Environment["RESILIENCY_SCORE"] = "true"
 
 	// TODO: Implement volumes mapping when FileMounts support is ready
 	// The node.Volumes field contains volume mount specifications,
