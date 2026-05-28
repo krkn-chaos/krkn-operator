@@ -134,23 +134,25 @@ func (r *KrknGraphRunReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	}
 
 	// 6. Process each level in order
-	result, err := r.processLevels(ctx, &graphRun, existingRuns)
+	result, statusAlreadyUpdated, err := r.processLevels(ctx, &graphRun, existingRuns)
 	if err != nil {
 		logger.Error(err, "failed to process graph levels")
 		return r.updateStatusWithError(ctx, &graphRun, err)
 	}
 
-	// 7. Calculate global phase and summary
-	r.calculateGlobalStatus(&graphRun)
+	// 7. Calculate global phase and summary (if not already updated by fail-fast)
+	if !statusAlreadyUpdated {
+		r.calculateGlobalStatus(&graphRun)
 
-	// 8. Persist all status updates in a single call
-	if err := r.Status().Update(ctx, &graphRun); err != nil {
-		if apierrors.IsConflict(err) {
-			logger.Info("conflict on final status update, will retry on next reconcile")
-			return ctrl.Result{Requeue: true}, nil
+		// 8. Persist all status updates in a single call
+		if err := r.Status().Update(ctx, &graphRun); err != nil {
+			if apierrors.IsConflict(err) {
+				logger.Info("conflict on final status update, will retry on next reconcile")
+				return ctrl.Result{Requeue: true}, nil
+			}
+			logger.Error(err, "failed to update global status")
+			return ctrl.Result{}, err
 		}
-		logger.Error(err, "failed to update global status")
-		return ctrl.Result{}, err
 	}
 
 	logger.Info("reconcile loop completed",
@@ -246,12 +248,13 @@ func (r *KrknGraphRunReconciler) getExistingScenarioRuns(ctx context.Context, gr
 	return runs, nil
 }
 
-// processLevels processes each level of the dependency graph
+// processLevels processes each level of the dependency graph.
+// Returns (result, statusAlreadyUpdated, error).
 func (r *KrknGraphRunReconciler) processLevels(
 	ctx context.Context,
 	graphRun *krknv1alpha1.KrknGraphRun,
 	existingRuns map[string]*krknv1alpha1.KrknScenarioRun,
-) (ctrl.Result, error) {
+) (ctrl.Result, bool, error) {
 	logger := log.FromContext(ctx)
 
 	for levelIdx, level := range graphRun.Status.ResolvedLevels {
@@ -261,14 +264,14 @@ func (r *KrknGraphRunReconciler) processLevels(
 		if levelIdx > 0 {
 			prevLevelComplete, hasFailures := r.checkPreviousLevel(graphRun, levelIdx-1)
 			if hasFailures {
-				// Fail-fast: mark dependent nodes as blocked
+				// Fail-fast: mark dependent nodes as blocked (already updates status)
 				return r.handleFailFast(ctx, graphRun, levelIdx)
 			}
 			if !prevLevelComplete {
 				logger.Info("previous level not complete, requeuing",
 					"graphRun", graphRun.Name,
 					"level", levelIdx-1)
-				return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+				return ctrl.Result{RequeueAfter: 10 * time.Second}, false, nil
 			}
 		}
 
@@ -276,12 +279,12 @@ func (r *KrknGraphRunReconciler) processLevels(
 		for _, nodeID := range level {
 			_, err := r.processNode(ctx, graphRun, nodeID, existingRuns)
 			if err != nil {
-				return ctrl.Result{}, err
+				return ctrl.Result{}, false, err
 			}
 		}
 	}
 
-	return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+	return ctrl.Result{RequeueAfter: 30 * time.Second}, false, nil
 }
 
 // checkPreviousLevel checks if all nodes in the previous level are complete
@@ -473,12 +476,13 @@ func (r *KrknGraphRunReconciler) setNodeStatus(
 	return false, fmt.Errorf("node status not found for %s", nodeID)
 }
 
-// handleFailFast marks dependent nodes as blocked when fail-fast is triggered
+// handleFailFast marks dependent nodes as blocked when fail-fast is triggered.
+// Returns true to indicate it has already updated the status.
 func (r *KrknGraphRunReconciler) handleFailFast(
 	ctx context.Context,
 	graphRun *krknv1alpha1.KrknGraphRun,
 	fromLevel int,
-) (ctrl.Result, error) {
+) (ctrl.Result, bool, error) {
 	logger := log.FromContext(ctx)
 	logger.Info("fail-fast triggered, marking dependent nodes as blocked",
 		"graphRun", graphRun.Name,
@@ -491,12 +495,18 @@ func (r *KrknGraphRunReconciler) handleFailFast(
 		}
 	}
 
-	graphRun.Status.Phase = "Failed"
+	// Calculate global status before updating
+	r.calculateGlobalStatus(graphRun)
+
 	if err := r.Status().Update(ctx, graphRun); err != nil {
-		return ctrl.Result{}, err
+		if apierrors.IsConflict(err) {
+			logger.Info("conflict in handleFailFast, will retry on next reconcile")
+			return ctrl.Result{Requeue: true}, true, nil
+		}
+		return ctrl.Result{}, true, err
 	}
 
-	return ctrl.Result{}, nil
+	return ctrl.Result{}, true, nil
 }
 
 // calculateGlobalStatus calculates the global phase and summary based on node statuses.
