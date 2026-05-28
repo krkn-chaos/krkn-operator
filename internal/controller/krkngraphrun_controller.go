@@ -140,8 +140,15 @@ func (r *KrknGraphRunReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return r.updateStatusWithError(ctx, &graphRun, err)
 	}
 
-	// 7. Update global phase and summary
-	if err := r.updateGlobalStatus(ctx, &graphRun); err != nil {
+	// 7. Calculate global phase and summary
+	r.calculateGlobalStatus(&graphRun)
+
+	// 8. Persist all status updates in a single call
+	if err := r.Status().Update(ctx, &graphRun); err != nil {
+		if apierrors.IsConflict(err) {
+			logger.Info("conflict on final status update, will retry on next reconcile")
+			return ctrl.Result{Requeue: true}, nil
+		}
 		logger.Error(err, "failed to update global status")
 		return ctrl.Result{}, err
 	}
@@ -265,26 +272,10 @@ func (r *KrknGraphRunReconciler) processLevels(
 			}
 		}
 
-		// Process each node in this level
-		levelModified := false
+		// Process each node in this level (modifies status in memory)
 		for _, nodeID := range level {
-			modified, err := r.processNode(ctx, graphRun, nodeID, existingRuns)
+			_, err := r.processNode(ctx, graphRun, nodeID, existingRuns)
 			if err != nil {
-				return ctrl.Result{}, err
-			}
-			if modified {
-				levelModified = true
-			}
-		}
-
-		// Batch update: only update status once per level if anything changed
-		if levelModified {
-			if err := r.Status().Update(ctx, graphRun); err != nil {
-				// Handle conflict by refetching and retrying
-				if apierrors.IsConflict(err) {
-					logger.Info("conflict detected, will retry on next reconcile", "level", levelIdx)
-					return ctrl.Result{Requeue: true}, nil
-				}
 				return ctrl.Result{}, err
 			}
 		}
@@ -508,9 +499,11 @@ func (r *KrknGraphRunReconciler) handleFailFast(
 	return ctrl.Result{}, nil
 }
 
-// updateGlobalStatus calculates and updates the global phase and summary
-func (r *KrknGraphRunReconciler) updateGlobalStatus(ctx context.Context, graphRun *krknv1alpha1.KrknGraphRun) error {
-	totalNodes := len(graphRun.Spec.Graph)
+// calculateGlobalStatus calculates the global phase and summary based on node statuses.
+// Updates the graphRun status in memory without persisting to the API server.
+func (r *KrknGraphRunReconciler) calculateGlobalStatus(graphRun *krknv1alpha1.KrknGraphRun) {
+	// Count nodes from NodeStatuses, not Spec.Graph (which may include filtered metadata nodes)
+	totalNodes := len(graphRun.Status.NodeStatuses)
 	completedNodes := 0
 	runningNodes := 0
 	failedNodes := 0
@@ -542,7 +535,8 @@ func (r *KrknGraphRunReconciler) updateGlobalStatus(ctx context.Context, graphRu
 		if graphRun.Status.CompletionTime == nil {
 			graphRun.Status.CompletionTime = &metav1.Time{Time: time.Now()}
 		}
-	} else if runningNodes > 0 {
+	} else if runningNodes > 0 || completedNodes > 0 {
+		// If any work has started (running or completed), we're in "Running" phase
 		phase = "Running"
 	}
 
@@ -554,8 +548,6 @@ func (r *KrknGraphRunReconciler) updateGlobalStatus(ctx context.Context, graphRu
 		FailedNodes:    failedNodes,
 		PendingNodes:   pendingNodes,
 	}
-
-	return r.Status().Update(ctx, graphRun)
 }
 
 // updateStatusWithError updates status with error and returns result
