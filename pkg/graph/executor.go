@@ -20,6 +20,7 @@ package graph
 
 import (
 	"fmt"
+	"strings"
 
 	v1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
 	"github.com/krkn-chaos/krknctl/pkg/dependencygraph"
@@ -34,8 +35,20 @@ func ResolveGraph(scenarioGraph map[string]v1alpha1.GraphScenarioNode) ([][]stri
 		return nil, fmt.Errorf("scenario graph is empty")
 	}
 
+	// Filter out metadata nodes (starting with '_')
+	filteredGraph := make(map[string]v1alpha1.GraphScenarioNode)
+	for nodeID, node := range scenarioGraph {
+		if !strings.HasPrefix(nodeID, "_") {
+			filteredGraph[nodeID] = node
+		}
+	}
+
+	if len(filteredGraph) == 0 {
+		return nil, fmt.Errorf("scenario graph contains no valid nodes (all nodes are metadata)")
+	}
+
 	// Convert to krknctl format for graph resolution
-	krknctlScenarioSet := v1alpha1.ToKrknctlScenarioSet(scenarioGraph)
+	krknctlScenarioSet := v1alpha1.ToKrknctlScenarioSet(filteredGraph)
 
 	// Check if all nodes are root nodes (no dependencies)
 	// If so, return them all in a single level
@@ -49,8 +62,8 @@ func ResolveGraph(scenarioGraph map[string]v1alpha1.GraphScenarioNode) ([][]stri
 
 	if allNodesAreRoots {
 		// All nodes can run in parallel
-		level := make([]string, 0, len(scenarioGraph))
-		for nodeID := range scenarioGraph {
+		level := make([]string, 0, len(filteredGraph))
+		for nodeID := range filteredGraph {
 			level = append(level, nodeID)
 		}
 		return [][]string{level}, nil
