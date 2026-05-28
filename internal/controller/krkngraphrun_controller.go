@@ -110,7 +110,14 @@ func (r *KrknGraphRunReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{Requeue: true}, nil
 	}
 
-	// 4. Resolve the dependency graph if not already done
+	// 4. Skip reconciliation if GraphRun is in a terminal state
+	if r.isTerminalPhase(graphRun.Status.Phase) {
+		logger.V(1).Info("GraphRun is in terminal state, skipping reconciliation",
+			"phase", graphRun.Status.Phase)
+		return ctrl.Result{}, nil
+	}
+
+	// 5. Resolve the dependency graph if not already done
 	if len(graphRun.Status.ResolvedLevels) == 0 {
 		if err := r.resolveGraph(ctx, &graphRun); err != nil {
 			logger.Error(err, "failed to resolve graph")
@@ -560,6 +567,11 @@ func (r *KrknGraphRunReconciler) updateStatusWithError(
 	graphRun.Status.Phase = "Failed"
 	_ = r.Status().Update(ctx, graphRun)
 	return ctrl.Result{}, err
+}
+
+// isTerminalPhase returns true if the phase indicates the GraphRun has completed execution
+func (r *KrknGraphRunReconciler) isTerminalPhase(phase string) bool {
+	return phase == "Completed" || phase == "Failed" || phase == "PartiallyFailed"
 }
 
 // SetupWithManager sets up the controller with the Manager.
