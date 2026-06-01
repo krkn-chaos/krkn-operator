@@ -55,6 +55,9 @@ func (h *Handler) ListGraphRuns(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Filter by group permissions (admins see all, users see runs with group view permission)
+	graphRunList.Items = h.filterGraphRunsByGroupPermission(graphRunList.Items, ctx)
+
 	// Filter by owner if specified
 	var filteredRuns []krknv1alpha1.KrknGraphRun
 	for _, run := range graphRunList.Items {
@@ -127,6 +130,30 @@ func (h *Handler) GetGraphRun(w http.ResponseWriter, r *http.Request) {
 			})
 		}
 		return
+	}
+
+	// Check authorization (admins bypass, regular users need group view permission)
+	claims := auth.GetClaimsFromContext(ctx)
+	if claims != nil && !auth.IsAdmin(ctx) {
+		hasAccess, err := h.checkGraphRunGroupAccess(ctx, claims.UserID, &graphRun, groupauth.ActionView)
+		if err != nil {
+			logger.Error(err, "Failed to check graph run access", "userID", claims.UserID, "graphRunName", name)
+			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+				Error:   "internal_error",
+				Message: "Failed to validate access permissions",
+			})
+			return
+		}
+		if !hasAccess {
+			logger.Info("User attempted to access graph run without permission",
+				"userID", claims.UserID,
+				"graphRunName", name)
+			writeJSONError(w, http.StatusForbidden, ErrorResponse{
+				Error:   "forbidden",
+				Message: "You do not have permission to view this graph run",
+			})
+			return
+		}
 	}
 
 	// Build response
