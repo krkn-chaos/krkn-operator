@@ -519,7 +519,10 @@ func (r *KrknGraphRunReconciler) handleFailFast(
 	// Mark all nodes in subsequent levels as blocked (batch in memory)
 	for levelIdx := fromLevel; levelIdx < len(graphRun.Status.ResolvedLevels); levelIdx++ {
 		for _, nodeID := range graphRun.Status.ResolvedLevels[levelIdx] {
-			_, _ = r.setNodeStatus(graphRun, nodeID, "Blocked", "", nil, nil)
+			if _, err := r.setNodeStatus(graphRun, nodeID, "Blocked", "", nil, nil); err != nil {
+				logger.Error(err, "failed to set node status to blocked during fail-fast",
+					"nodeID", nodeID, "graphRun", graphRun.Name)
+			}
 		}
 	}
 
@@ -594,8 +597,13 @@ func (r *KrknGraphRunReconciler) updateStatusWithError(
 	graphRun *krknv1alpha1.KrknGraphRun,
 	err error,
 ) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
 	graphRun.Status.Phase = "Failed"
-	_ = r.Status().Update(ctx, graphRun)
+	if updateErr := r.Status().Update(ctx, graphRun); updateErr != nil {
+		logger.Error(updateErr, "failed to update status to Failed",
+			"graphRun", graphRun.Name, "originalError", err)
+		// Return the original error even if status update fails
+	}
 	return ctrl.Result{}, err
 }
 
