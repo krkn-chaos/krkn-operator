@@ -12,8 +12,8 @@ import (
 func TestKrknctlImports(t *testing.T) {
 	// Verify ScenarioSet type exists and can be initialized
 	scenarioSet := make(models.ScenarioSet)
-	if scenarioSet == nil {
-		t.Error("Failed to create ScenarioSet")
+	if len(scenarioSet) != 0 {
+		t.Error("Expected empty ScenarioSet")
 	}
 
 	// Verify ScenarioNode type exists with required fields

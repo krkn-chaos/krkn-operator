@@ -16,8 +16,8 @@ limitations under the License.
 Assisted-by: Claude Sonnet 4.5 (claude-sonnet-4-5@20250929)
 */
 
+// Package graph provides graph orchestration functionality for resolving and executing
+// scenario dependency graphs in the krkn operator.
 package graph
 
-// This file contains helper types for graph orchestration.
-// Currently, no additional types are needed beyond what's defined in the API,
-// but this file is reserved for future extensions.
+// This file is reserved for future graph-related type definitions.

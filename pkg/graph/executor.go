@@ -16,6 +16,8 @@ limitations under the License.
 Assisted-by: Claude Sonnet 4.5 (claude-sonnet-4-5@20250929)
 */
 
+// Package graph provides graph orchestration functionality for resolving and executing
+// scenario dependency graphs in the krkn operator.
 package graph
 
 import (
@@ -144,10 +146,8 @@ func MapScenarioNodeToScenarioRunSpec(
 	// - Option 1: Convert volume mounts to file mounts (limited use case)
 	// - Option 2: Extend KrknScenarioRunSpec to support volume mounts directly
 	// - Option 3: Use a different mechanism for volume mounting in graph runs
-	if len(node.Volumes) > 0 {
-		// For now, we skip volumes - they will be addressed in a future iteration
-		// based on the chosen approach for volume mounting
-	}
+	// For now, volumes are skipped and will be addressed in a future iteration
+	// based on the chosen approach for volume mounting.
 
 	return spec, nil
 }
