@@ -202,6 +202,23 @@ func (h *Handler) CreateGraphRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Create a temporary GraphRun for validation
+	tempGraphRun := &krknv1alpha1.KrknGraphRun{
+		Spec: krknv1alpha1.KrknGraphRunSpec{
+			Graph: req.Graph,
+		},
+	}
+
+	// Validate graph node IDs for collisions and invalid names
+	if err := tempGraphRun.ValidateGraph(); err != nil {
+		logger.Info("Graph validation failed", "error", err.Error())
+		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+			Error:   "bad_request",
+			Message: fmt.Sprintf("Invalid graph: %s", err.Error()),
+		})
+		return
+	}
+
 	// Validate required fields
 	if len(req.Graph) == 0 {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
