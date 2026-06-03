@@ -616,6 +616,40 @@ func (r *KrknScenarioRunReconciler) prepareJobResources(
 	}, nil
 }
 
+// cleanupPreparedResources deletes ConfigMaps and Secrets created during resource preparation.
+// This is called when executeScenarioPod fails to prevent resource leaks.
+func (r *KrknScenarioRunReconciler) cleanupPreparedResources(ctx context.Context, resources *preparedJobResources) {
+	logger := log.FromContext(ctx)
+
+	for _, cmName := range resources.createdConfigMaps {
+		if err := r.Delete(ctx, &corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      cmName,
+				Namespace: r.Namespace,
+			},
+		}); err != nil {
+			if !apierrors.IsNotFound(err) {
+				logger.Error(err, "failed to delete ConfigMap during cleanup",
+					"configMapName", cmName, "jobID", resources.jobID)
+			}
+		}
+	}
+
+	for _, secretName := range resources.createdSecrets {
+		if err := r.Delete(ctx, &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      secretName,
+				Namespace: r.Namespace,
+			},
+		}); err != nil {
+			if !apierrors.IsNotFound(err) {
+				logger.Error(err, "failed to delete Secret during cleanup",
+					"secretName", secretName, "jobID", resources.jobID)
+			}
+		}
+	}
+}
+
 // executeScenarioPod creates the scenario pod using prepared resources and updates the scenario run status.
 // Takes the container image as a parameter to avoid reconstruction logic.
 func (r *KrknScenarioRunReconciler) executeScenarioPod(
@@ -676,10 +710,14 @@ func (r *KrknScenarioRunReconciler) executeScenarioPod(
 
 	// Set owner reference
 	if err := controllerutil.SetControllerReference(scenarioRun, pod, r.Scheme); err != nil {
+		// Cleanup resources on failure
+		r.cleanupPreparedResources(ctx, resources)
 		return fmt.Errorf("failed to set owner reference on pod: %w", err)
 	}
 
 	if err := r.Create(ctx, pod); err != nil {
+		// Cleanup resources on failure
+		r.cleanupPreparedResources(ctx, resources)
 		return fmt.Errorf("failed to create pod: %w", err)
 	}
 
