@@ -46,6 +46,9 @@ const (
 
 	// FinalizerName is the finalizer for KrknGraphRun cleanup
 	FinalizerName = "krkn.dev/graph-run-finalizer"
+
+	// MaxLabelValueLength is the maximum length for Kubernetes label values (RFC 1123)
+	MaxLabelValueLength = 63
 )
 
 // KrknGraphRunReconciler reconciles a KrknGraphRun object
@@ -54,6 +57,55 @@ type KrknGraphRunReconciler struct {
 	Scheme    *runtime.Scheme
 	Clientset kubernetes.Interface
 	Namespace string
+}
+
+// sanitizeNodeID sanitizes a node ID for use in Kubernetes resource names and label values.
+// It replaces invalid characters with hyphens, converts to lowercase, truncates to 63 characters,
+// and ensures it starts and ends with an alphanumeric character.
+//
+// Kubernetes label value requirements (RFC 1123):
+// - Maximum 63 characters
+// - Only lowercase alphanumeric characters, '-', '_', or '.'
+// - Must start and end with an alphanumeric character
+func sanitizeNodeID(nodeID string) string {
+	if nodeID == "" {
+		return "empty"
+	}
+
+	// Convert to lowercase
+	sanitized := strings.ToLower(nodeID)
+
+	// Replace invalid characters with hyphens
+	// Valid: alphanumeric, '-', '_', '.'
+	var builder strings.Builder
+	builder.Grow(len(sanitized))
+	for _, r := range sanitized {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' || r == '_' || r == '.' {
+			builder.WriteRune(r)
+		} else {
+			builder.WriteRune('-')
+		}
+	}
+	sanitized = builder.String()
+
+	// Truncate to max label value length
+	if len(sanitized) > MaxLabelValueLength {
+		sanitized = sanitized[:MaxLabelValueLength]
+	}
+
+	// Ensure it starts with alphanumeric
+	sanitized = strings.TrimLeft(sanitized, "-_.")
+	if sanitized == "" {
+		return "node"
+	}
+
+	// Ensure it ends with alphanumeric
+	sanitized = strings.TrimRight(sanitized, "-_.")
+	if sanitized == "" {
+		return "node"
+	}
+
+	return sanitized
 }
 
 // +kubebuilder:rbac:groups=krkn.krkn-chaos.dev,resources=krkngraphruns,verbs=get;list;watch;create;update;patch;delete
@@ -255,7 +307,8 @@ func (r *KrknGraphRunReconciler) resolveGraph(ctx context.Context, graphRun *krk
 	return nil
 }
 
-// getExistingScenarioRuns queries for KrknScenarioRuns created by this graph
+// getExistingScenarioRuns queries for KrknScenarioRuns created by this graph.
+// Returns a map keyed by sanitized node ID (as stored in labels).
 func (r *KrknGraphRunReconciler) getExistingScenarioRuns(ctx context.Context, graphRun *krknv1alpha1.KrknGraphRun) (map[string]*krknv1alpha1.KrknScenarioRun, error) {
 	var runList krknv1alpha1.KrknScenarioRunList
 	if err := r.List(ctx, &runList,
@@ -265,11 +318,12 @@ func (r *KrknGraphRunReconciler) getExistingScenarioRuns(ctx context.Context, gr
 		return nil, err
 	}
 
+	// Map uses sanitized node IDs as keys (from labels)
 	runs := make(map[string]*krknv1alpha1.KrknScenarioRun)
 	for i := range runList.Items {
-		nodeID := runList.Items[i].Labels[GraphNodeLabelKey]
-		if nodeID != "" {
-			runs[nodeID] = &runList.Items[i]
+		sanitizedNodeID := runList.Items[i].Labels[GraphNodeLabelKey]
+		if sanitizedNodeID != "" {
+			runs[sanitizedNodeID] = &runList.Items[i]
 		}
 	}
 
@@ -362,8 +416,11 @@ func (r *KrknGraphRunReconciler) processNode(
 	nodeID string,
 	existingRuns map[string]*krknv1alpha1.KrknScenarioRun,
 ) (bool, error) {
+	// Sanitize node ID for lookup (existingRuns uses sanitized IDs as keys)
+	sanitizedNodeID := sanitizeNodeID(nodeID)
+
 	// Check if scenario run already exists
-	scenarioRun, exists := existingRuns[nodeID]
+	scenarioRun, exists := existingRuns[sanitizedNodeID]
 	if !exists {
 		// Create new scenario run
 		return r.createScenarioRun(ctx, graphRun, nodeID)
@@ -399,14 +456,17 @@ func (r *KrknGraphRunReconciler) createScenarioRun(
 		return false, fmt.Errorf("failed to map node to scenario run spec: %w", err)
 	}
 
+	// Sanitize node ID for use in Kubernetes resource names and labels
+	sanitizedNodeID := sanitizeNodeID(nodeID)
+
 	// Create scenario run
 	scenarioRun := &krknv1alpha1.KrknScenarioRun{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      fmt.Sprintf("%s-%s", graphRun.Name, nodeID),
+			Name:      fmt.Sprintf("%s-%s", graphRun.Name, sanitizedNodeID),
 			Namespace: graphRun.Namespace,
 			Labels: map[string]string{
 				GraphRunLabelKey:  graphRun.Name,
-				GraphNodeLabelKey: nodeID,
+				GraphNodeLabelKey: sanitizedNodeID,
 			},
 		},
 		Spec: spec,
