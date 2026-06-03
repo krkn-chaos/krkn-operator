@@ -120,7 +120,7 @@ func TestResolveGraph(t *testing.T) {
 			errContains: "circular",
 		},
 		{
-			name: "missing parent - krknctl does not validate parent existence",
+			name: "missing parent - now validated and returns error",
 			graph: map[string]v1alpha1.GraphScenarioNode{
 				"node1": {
 					Name:      "scenario-1",
@@ -128,13 +128,38 @@ func TestResolveGraph(t *testing.T) {
 					DependsOn: strPtr("nonexistent"),
 				},
 			},
-			// krknctl's NewGraphFromNodes does not validate that the parent exists
-			// It only creates the dependency edge, adding both parent and child to the graph
-			// This results in a "phantom" node for the missing parent
-			// The controller should validate that all nodes in the spec exist before resolution
-			wantErr:    false,
-			wantLevels: 2, // Level 0: "nonexistent" (phantom), Level 1: "node1"
-			wantNodes:  2, // node1 + phantom "nonexistent"
+			// ResolveGraph now validates that all DependsOn references exist
+			// This prevents "phantom nodes" from being created in resolved levels
+			wantErr:     true,
+			errContains: "depends on non-existent node",
+		},
+		{
+			name: "dependency on metadata node",
+			graph: map[string]v1alpha1.GraphScenarioNode{
+				"_metadata": {
+					Name:  "config",
+					Image: "config:latest",
+				},
+				"node1": {
+					Name:      "scenario-1",
+					Image:     "image1:latest",
+					DependsOn: strPtr("_metadata"),
+				},
+			},
+			wantErr:     true,
+			errContains: "metadata node",
+		},
+		{
+			name: "self-referencing dependency",
+			graph: map[string]v1alpha1.GraphScenarioNode{
+				"node1": {
+					Name:      "scenario-1",
+					Image:     "image1:latest",
+					DependsOn: strPtr("node1"),
+				},
+			},
+			wantErr:     true,
+			errContains: "self-referencing",
 		},
 		{
 			name:        "empty graph",

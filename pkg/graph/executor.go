@@ -49,6 +49,28 @@ func ResolveGraph(scenarioGraph map[string]v1alpha1.GraphScenarioNode) ([][]stri
 		return nil, fmt.Errorf("scenario graph contains no valid nodes (all nodes are metadata)")
 	}
 
+	// Validate that all DependsOn references exist in the graph
+	// This prevents "phantom nodes" from appearing in resolved levels
+	for nodeID, node := range filteredGraph {
+		if node.DependsOn != nil && *node.DependsOn != "" {
+			dependsOnID := *node.DependsOn
+
+			// Check if referenced node exists in filtered graph
+			if _, exists := filteredGraph[dependsOnID]; !exists {
+				// Check if it's a metadata node (which we filtered out)
+				if strings.HasPrefix(dependsOnID, "_") {
+					return nil, fmt.Errorf("node '%s' depends on metadata node '%s': dependencies on metadata nodes (starting with '_') are not allowed", nodeID, dependsOnID)
+				}
+				return nil, fmt.Errorf("node '%s' depends on non-existent node '%s': referenced node does not exist in graph", nodeID, dependsOnID)
+			}
+
+			// Check for self-reference
+			if dependsOnID == nodeID {
+				return nil, fmt.Errorf("node '%s' has self-referencing dependency: a node cannot depend on itself", nodeID)
+			}
+		}
+	}
+
 	// Convert to krknctl format for graph resolution
 	krknctlScenarioSet := v1alpha1.ToKrknctlScenarioSet(filteredGraph)
 
