@@ -151,6 +151,60 @@ func TestKrknGraphRun_ValidateGraph(t *testing.T) {
 			},
 			wantErr: false,
 		},
+		{
+			name: "phantom dependency - missing node",
+			graph: map[string]GraphScenarioNode{
+				"node1": {Name: "scenario1", Image: "image1", DependsOn: stringPtr("phantom-node")},
+				"node2": {Name: "scenario2", Image: "image2"},
+			},
+			wantErr: true,
+			errMsg:  "invalid DependsOn reference 'phantom-node': referenced node does not exist",
+		},
+		{
+			name: "dependency on metadata node",
+			graph: map[string]GraphScenarioNode{
+				"_config": {Name: "config", Image: "image1"},
+				"node1":   {Name: "scenario1", Image: "image2", DependsOn: stringPtr("_config")},
+			},
+			wantErr: true,
+			errMsg:  "cannot depend on metadata nodes",
+		},
+		{
+			name: "self-referencing dependency",
+			graph: map[string]GraphScenarioNode{
+				"node1": {Name: "scenario1", Image: "image1", DependsOn: stringPtr("node1")},
+			},
+			wantErr: true,
+			errMsg:  "cannot depend on itself",
+		},
+		{
+			name: "valid dependency chain",
+			graph: map[string]GraphScenarioNode{
+				"node1": {Name: "scenario1", Image: "image1"},
+				"node2": {Name: "scenario2", Image: "image2", DependsOn: stringPtr("node1")},
+				"node3": {Name: "scenario3", Image: "image3", DependsOn: stringPtr("node2")},
+			},
+			wantErr: false,
+		},
+		{
+			name: "valid parallel nodes with common dependency",
+			graph: map[string]GraphScenarioNode{
+				"root":   {Name: "root", Image: "image1"},
+				"child1": {Name: "child1", Image: "image2", DependsOn: stringPtr("root")},
+				"child2": {Name: "child2", Image: "image3", DependsOn: stringPtr("root")},
+			},
+			wantErr: false,
+		},
+		{
+			name: "phantom dependency in chain",
+			graph: map[string]GraphScenarioNode{
+				"node1": {Name: "scenario1", Image: "image1"},
+				"node2": {Name: "scenario2", Image: "image2", DependsOn: stringPtr("node1")},
+				"node3": {Name: "scenario3", Image: "image3", DependsOn: stringPtr("missing-node")},
+			},
+			wantErr: true,
+			errMsg:  "invalid DependsOn reference 'missing-node': referenced node does not exist",
+		},
 	}
 
 	for _, tt := range tests {
@@ -301,4 +355,9 @@ func TestCollisionDetection(t *testing.T) {
 			}
 		})
 	}
+}
+
+// Helper function to create string pointer
+func stringPtr(s string) *string {
+	return &s
 }

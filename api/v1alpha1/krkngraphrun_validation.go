@@ -88,6 +88,35 @@ func (r *KrknGraphRun) ValidateGraph() error {
 		}
 	}
 
+	// Validate that all DependsOn references exist in the graph
+	// This prevents "phantom nodes" that would be created in resolved levels
+	// but don't exist in spec.graph, causing controller failures
+	for nodeID, node := range r.Spec.Graph {
+		// Skip metadata nodes
+		if strings.HasPrefix(nodeID, "_") {
+			continue
+		}
+
+		if node.DependsOn != nil && *node.DependsOn != "" {
+			dependsOnID := *node.DependsOn
+
+			// Check if the referenced node exists
+			if _, exists := r.Spec.Graph[dependsOnID]; !exists {
+				return fmt.Errorf("node '%s' has invalid DependsOn reference '%s': referenced node does not exist in graph", nodeID, dependsOnID)
+			}
+
+			// Check if the referenced node is a metadata node (invalid dependency)
+			if strings.HasPrefix(dependsOnID, "_") {
+				return fmt.Errorf("node '%s' has invalid DependsOn reference '%s': cannot depend on metadata nodes (starting with '_')", nodeID, dependsOnID)
+			}
+
+			// Check for self-reference
+			if dependsOnID == nodeID {
+				return fmt.Errorf("node '%s' has invalid DependsOn reference: cannot depend on itself", nodeID)
+			}
+		}
+	}
+
 	// Return warnings as part of error message if there are any
 	// (in a real webhook, these would be admission.Warnings)
 	if len(warnings) > 0 {
