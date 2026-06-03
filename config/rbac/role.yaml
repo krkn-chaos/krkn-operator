@@ -27,42 +27,7 @@ rules:
 - apiGroups:
   - krkn.krkn-chaos.dev
   resources:
-  - krknoperatortargetproviderconfigs
-  verbs:
-  - delete
-  - get
-  - list
-  - patch
-  - update
-  - watch
-- apiGroups:
-  - krkn.krkn-chaos.dev
-  resources:
-  - krknoperatortargetproviderconfigs/status
-  - krknoperatortargetproviders/status
-  - krknoperatortargets/status
-  - krknscenarioruns/status
-  - krkntargetrequests/status
-  - krknusergroups/status
-  - krknusers/status
-  verbs:
-  - get
-  - patch
-  - update
-- apiGroups:
-  - krkn.krkn-chaos.dev
-  resources:
-  - krknoperatortargetproviders
-  verbs:
-  - create
-  - get
-  - list
-  - patch
-  - update
-  - watch
-- apiGroups:
-  - krkn.krkn-chaos.dev
-  resources:
+  - krkngraphruns
   - krknoperatortargets
   - krknscenarioruns
   - krkntargetrequests
@@ -79,6 +44,44 @@ rules:
 - apiGroups:
   - krkn.krkn-chaos.dev
   resources:
+  - krkngraphruns/finalizers
   - krknscenarioruns/finalizers
   verbs:
   - update
+- apiGroups:
+  - krkn.krkn-chaos.dev
+  resources:
+  - krkngraphruns/status
+  - krknoperatortargetproviderconfigs/status
+  - krknoperatortargetproviders/status
+  - krknoperatortargets/status
+  - krknscenarioruns/status
+  - krkntargetrequests/status
+  - krknusergroups/status
+  - krknusers/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - krkn.krkn-chaos.dev
+  resources:
+  - krknoperatortargetproviderconfigs
+  verbs:
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - krkn.krkn-chaos.dev
+  resources:
+  - krknoperatortargetproviders
+  verbs:
+  - create
+  - get
+  - list
+  - patch
+  - update
+  - watch

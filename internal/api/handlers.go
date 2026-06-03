@@ -1195,6 +1195,8 @@ func (h *Handler) GetScenarioRunStatus(w http.ResponseWriter, r *http.Request) {
 					ClusterJobs:     []ClusterJobStatusResponse{},
 					OwnerUserID:     scenarioRun.Spec.OwnerUserID,
 					RegistryName:    scenarioRun.Spec.RegistryName,
+					GraphRunName:    scenarioRun.Labels["krkn.dev/graph-run"],
+					GraphNodeID:     scenarioRun.Labels["krkn.dev/graph-node"],
 				}
 				writeJSON(w, http.StatusCreated, response)
 				return
@@ -1240,6 +1242,8 @@ func (h *Handler) GetScenarioRunStatus(w http.ResponseWriter, r *http.Request) {
 		ClusterJobs:     clusterJobs,
 		OwnerUserID:     scenarioRun.Spec.OwnerUserID,
 		RegistryName:    scenarioRun.Spec.RegistryName,
+		GraphRunName:    scenarioRun.Labels["krkn.dev/graph-run"],
+		GraphNodeID:     scenarioRun.Labels["krkn.dev/graph-node"],
 	}
 
 	writeJSON(w, http.StatusOK, response)
@@ -1733,6 +1737,8 @@ func (h *Handler) ListScenarioRuns(w http.ResponseWriter, r *http.Request) {
 			RunningJobs:     sr.Status.RunningJobs,
 			CreatedAt:       sr.CreationTimestamp.Time,
 			OwnerUserID:     sr.Spec.OwnerUserID,
+			GraphRunName:    sr.Labels["krkn.dev/graph-run"],
+			GraphNodeID:     sr.Labels["krkn.dev/graph-node"],
 		}
 
 		runs = append(runs, run)

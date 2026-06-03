@@ -139,6 +139,10 @@ func NewServer(port int, client client.Client, clientset kubernetes.Interface, n
 	mux.Handle(OperatorTargetsPath, authMw.RequireAuth(http.HandlerFunc(handler.TargetsCRUDRouter)))
 	mux.Handle(OperatorTargetsPath+"/", authMw.RequireAuth(http.HandlerFunc(handler.TargetsCRUDRouter)))
 
+	// Graph Run endpoints - user and admin access (ownership-based authorization)
+	mux.Handle(GraphRunsPath, authMw.RequireAuth(http.HandlerFunc(handler.GraphRunsRouter)))
+	mux.Handle(GraphRunsPath+"/", authMw.RequireAuth(http.HandlerFunc(handler.GraphRunsRouter)))
+
 	// Wrap mux with logging middleware
 	server := &http.Server{
 		Addr:              fmt.Sprintf(":%d", port),

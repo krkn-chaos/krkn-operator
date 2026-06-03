@@ -260,6 +260,16 @@ func main() {
 		os.Exit(1)
 	}
 
+	if err = (&controller.KrknGraphRunReconciler{
+		Client:    mgr.GetClient(),
+		Scheme:    mgr.GetScheme(),
+		Clientset: clientset,
+		Namespace: krknNamespace,
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "KrknGraphRun")
+		os.Exit(1)
+	}
+
 	if err = (&controller.KrknTargetRequestReconciler{
 		Client:            mgr.GetClient(),
 		Scheme:            mgr.GetScheme(),
