@@ -117,12 +117,10 @@ func (r *KrknGraphRun) ValidateGraph() error {
 		}
 	}
 
-	// Return warnings as part of error message if there are any
-	// (in a real webhook, these would be admission.Warnings)
-	if len(warnings) > 0 {
-		// Just log warnings, don't fail validation
-		// In the future, these could be returned as webhook warnings
-	}
+	// Note: warnings are collected but not returned yet
+	// In a future webhook implementation, these would be returned as admission.Warnings
+	// For now, we just validate without failing on warnings
+	_ = warnings
 
 	return nil
 }
