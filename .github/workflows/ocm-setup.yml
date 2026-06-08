@@ -49,17 +49,34 @@ jobs:
           echo "Initializing OCM on hub cluster..."
           clusteradm init --wait --context kind-hub
 
-          echo "Getting join token..."
-          joinCmd=$(clusteradm get token --context kind-hub | grep "clusteradm join")
-          echo "Join command: ${joinCmd}"
+          echo "Getting join token and hub info..."
+          # Extract token and hub-apiserver from clusteradm output
+          TOKEN=$(clusteradm get token --context kind-hub | grep token | awk -F'=' '{print $2}' | tr -d ' ')
+          HUB_APISERVER=$(kubectl config view --context kind-hub --minify -o jsonpath='{.clusters[0].cluster.server}')
 
-          echo "Creating and joining cluster1..."
+          echo "Hub API Server: ${HUB_APISERVER}"
+
+          echo "Creating cluster1..."
           kind create cluster --name cluster1
-          eval "${joinCmd} --cluster-name cluster1 --context kind-cluster1 --wait"
 
-          echo "Creating and joining cluster2..."
+          echo "Joining cluster1 to hub..."
+          clusteradm join \
+            --hub-token ${TOKEN} \
+            --hub-apiserver ${HUB_APISERVER} \
+            --cluster-name cluster1 \
+            --context kind-cluster1 \
+            --wait
+
+          echo "Creating cluster2..."
           kind create cluster --name cluster2
-          eval "${joinCmd} --cluster-name cluster2 --context kind-cluster2 --wait"
+
+          echo "Joining cluster2 to hub..."
+          clusteradm join \
+            --hub-token ${TOKEN} \
+            --hub-apiserver ${HUB_APISERVER} \
+            --cluster-name cluster2 \
+            --context kind-cluster2 \
+            --wait
 
           echo "Accepting managed clusters..."
           kubectl config use-context kind-hub
