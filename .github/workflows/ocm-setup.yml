@@ -56,6 +56,7 @@ jobs:
 
           echo "Hub API Server: ${HUB_APISERVER}"
 
+          echo "=== Setting up cluster1 ==="
           echo "Creating cluster1..."
           kind create cluster --name cluster1
 
@@ -67,6 +68,17 @@ jobs:
             --context kind-cluster1 \
             --force-internal-endpoint-lookup
 
+          echo "Waiting for cluster1 CSR to be created..."
+          sleep 10
+
+          echo "Accepting cluster1..."
+          kubectl config use-context kind-hub
+          clusteradm accept --clusters cluster1 --context kind-hub
+
+          echo "Waiting for cluster1 to be available..."
+          kubectl wait --for=condition=ManagedClusterConditionAvailable managedcluster/cluster1 --timeout=300s --context kind-hub
+
+          echo "=== Setting up cluster2 ==="
           echo "Creating cluster2..."
           kind create cluster --name cluster2
 
@@ -78,19 +90,17 @@ jobs:
             --context kind-cluster2 \
             --force-internal-endpoint-lookup
 
-          echo "Waiting for CSR to be created..."
+          echo "Waiting for cluster2 CSR to be created..."
           sleep 10
 
-          echo "Accepting managed clusters..."
+          echo "Accepting cluster2..."
           kubectl config use-context kind-hub
-          clusteradm accept --clusters cluster1 --context kind-hub
           clusteradm accept --clusters cluster2 --context kind-hub
 
-          echo "Waiting for clusters to be ready..."
-          kubectl wait --for=condition=ManagedClusterConditionAvailable managedcluster/cluster1 --timeout=300s --context kind-hub
+          echo "Waiting for cluster2 to be available..."
           kubectl wait --for=condition=ManagedClusterConditionAvailable managedcluster/cluster2 --timeout=300s --context kind-hub
 
-          echo "Listing managed clusters..."
+          echo "=== All clusters ready ==="
           kubectl get managedclusters --context kind-hub
 
       - name: Install ManagedServiceAccount Addon
