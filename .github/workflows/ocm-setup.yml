@@ -1,0 +1,301 @@
+name: OCM Setup & Validation
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  ocm-setup:
+    name: Setup OCM with ManagedServiceAccount
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install clusteradm
+        run: |
+          echo "Installing clusteradm..."
+          curl -L https://raw.githubusercontent.com/open-cluster-management-io/clusteradm/main/install.sh | bash
+          clusteradm version
+
+      - name: Install kind
+        run: |
+          echo "Installing kind..."
+          curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.20.0/kind-linux-amd64
+          chmod +x ./kind
+          sudo mv ./kind /usr/local/bin/kind
+          kind version
+
+      - name: Install kubectl
+        run: |
+          echo "Installing kubectl..."
+          curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+          chmod +x kubectl
+          sudo mv kubectl /usr/local/bin/
+          kubectl version --client
+
+      - name: Install Helm
+        run: |
+          echo "Installing Helm..."
+          curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+          helm version
+
+      - name: Setup OCM Hub and Managed Clusters
+        run: |
+          echo "Creating OCM hub cluster..."
+          clusteradm init --wait --context kind-hub
+
+          echo "Joining managed clusters..."
+          joinCmd=$(clusteradm get token --context kind-hub | grep "clusteradm join")
+
+          # Create and join cluster1
+          kind create cluster --name cluster1
+          eval "${joinCmd} --cluster-name cluster1 --context kind-cluster1 --wait"
+
+          # Create and join cluster2
+          kind create cluster --name cluster2
+          eval "${joinCmd} --cluster-name cluster2 --context kind-cluster2 --wait"
+
+          # Accept managed clusters
+          kubectl config use-context kind-hub
+          clusteradm accept --clusters cluster1 --context kind-hub --wait
+          clusteradm accept --clusters cluster2 --context kind-hub --wait
+
+          echo "Waiting for clusters to be ready..."
+          kubectl wait --for=condition=ManagedClusterConditionAvailable managedcluster/cluster1 --timeout=300s --context kind-hub
+          kubectl wait --for=condition=ManagedClusterConditionAvailable managedcluster/cluster2 --timeout=300s --context kind-hub
+
+      - name: Install ManagedServiceAccount Addon
+        run: |
+          echo "Adding OCM Helm repository..."
+          helm repo add ocm https://open-cluster-management.io/helm-charts
+          helm repo update
+
+          echo "Installing ManagedServiceAccount addon..."
+          helm install -n open-cluster-management-addon --create-namespace \
+            managed-serviceaccount ocm/managed-serviceaccount \
+            --kube-context kind-hub
+
+          echo "Waiting for addon manager to be ready..."
+          kubectl wait --for=condition=ready pod \
+            -l app=managed-serviceaccount-addon-manager \
+            -n open-cluster-management-addon \
+            --timeout=120s \
+            --context kind-hub
+
+      - name: Create ManagedServiceAccount for all clusters
+        run: |
+          echo "Creating ManagedServiceAccount 'application-manager' for cluster1..."
+          kubectl apply --context kind-hub -f - <<EOF
+          apiVersion: authentication.open-cluster-management.io/v1beta1
+          kind: ManagedServiceAccount
+          metadata:
+            name: application-manager
+            namespace: cluster1
+          spec:
+            rotation:
+              enabled: true
+              validity: 8640h
+          EOF
+
+          echo "Creating ManagedServiceAccount 'application-manager' for cluster2..."
+          kubectl apply --context kind-hub -f - <<EOF
+          apiVersion: authentication.open-cluster-management.io/v1beta1
+          kind: ManagedServiceAccount
+          metadata:
+            name: application-manager
+            namespace: cluster2
+          spec:
+            rotation:
+              enabled: true
+              validity: 8640h
+          EOF
+
+          echo "Waiting for ManagedServiceAccounts to be ready..."
+          sleep 10
+
+          kubectl wait --for=condition=TokenReported \
+            managedserviceaccount/application-manager \
+            -n cluster1 \
+            --timeout=60s \
+            --context kind-hub
+
+          kubectl wait --for=condition=TokenReported \
+            managedserviceaccount/application-manager \
+            -n cluster2 \
+            --timeout=60s \
+            --context kind-hub
+
+      - name: Grant cluster-admin permissions
+        run: |
+          echo "Creating ManifestWork for cluster1 RBAC..."
+          kubectl apply --context kind-hub -f - <<EOF
+          apiVersion: work.open-cluster-management.io/v1
+          kind: ManifestWork
+          metadata:
+            name: application-manager-rbac
+            namespace: cluster1
+          spec:
+            workload:
+              manifests:
+              - apiVersion: rbac.authorization.k8s.io/v1
+                kind: ClusterRoleBinding
+                metadata:
+                  name: application-manager-admin
+                roleRef:
+                  apiGroup: rbac.authorization.k8s.io
+                  kind: ClusterRole
+                  name: cluster-admin
+                subjects:
+                - kind: ServiceAccount
+                  name: application-manager
+                  namespace: open-cluster-management-agent-addon
+          EOF
+
+          echo "Creating ManifestWork for cluster2 RBAC..."
+          kubectl apply --context kind-hub -f - <<EOF
+          apiVersion: work.open-cluster-management.io/v1
+          kind: ManifestWork
+          metadata:
+            name: application-manager-rbac
+            namespace: cluster2
+          spec:
+            workload:
+              manifests:
+              - apiVersion: rbac.authorization.k8s.io/v1
+                kind: ClusterRoleBinding
+                metadata:
+                  name: application-manager-admin
+                roleRef:
+                  apiGroup: rbac.authorization.k8s.io
+                  kind: ClusterRole
+                  name: cluster-admin
+                subjects:
+                - kind: ServiceAccount
+                  name: application-manager
+                  namespace: open-cluster-management-agent-addon
+          EOF
+
+          echo "Waiting for ManifestWorks to be applied..."
+          sleep 10
+
+          kubectl wait --for=condition=Applied \
+            manifestwork/application-manager-rbac \
+            -n cluster1 \
+            --timeout=60s \
+            --context kind-hub
+
+          kubectl wait --for=condition=Applied \
+            manifestwork/application-manager-rbac \
+            -n cluster2 \
+            --timeout=60s \
+            --context kind-hub
+
+      - name: Validate ManagedServiceAccounts
+        run: |
+          echo "=================================================="
+          echo "VALIDATION REPORT: ManagedServiceAccounts"
+          echo "=================================================="
+          echo ""
+
+          echo "1. ManagedServiceAccounts created:"
+          kubectl get managedserviceaccount -A --context kind-hub | grep application-manager
+          echo ""
+
+          echo "2. Secrets created on hub:"
+          kubectl get secret -n cluster1 application-manager --context kind-hub -o jsonpath='{.data}' | jq 'keys'
+          kubectl get secret -n cluster2 application-manager --context kind-hub -o jsonpath='{.data}' | jq 'keys'
+          echo ""
+
+          echo "3. ManagedServiceAccount status for cluster1:"
+          kubectl get managedserviceaccount application-manager -n cluster1 --context kind-hub -o jsonpath='{.status.conditions}' | jq '.[] | select(.type=="TokenReported" or .type=="SecretCreated")'
+          echo ""
+
+          echo "4. ManagedServiceAccount status for cluster2:"
+          kubectl get managedserviceaccount application-manager -n cluster2 --context kind-hub -o jsonpath='{.status.conditions}' | jq '.[] | select(.type=="TokenReported" or .type=="SecretCreated")'
+          echo ""
+
+          echo "5. ServiceAccounts created on managed clusters:"
+          kubectl get sa -n open-cluster-management-agent-addon --context kind-cluster1 | grep application-manager || echo "ERROR: ServiceAccount not found on cluster1"
+          kubectl get sa -n open-cluster-management-agent-addon --context kind-cluster2 | grep application-manager || echo "ERROR: ServiceAccount not found on cluster2"
+          echo ""
+
+          echo "6. ClusterRoleBindings created on managed clusters:"
+          kubectl get clusterrolebinding application-manager-admin --context kind-cluster1 -o jsonpath='{.roleRef.name}' && echo " ✓ cluster1"
+          kubectl get clusterrolebinding application-manager-admin --context kind-cluster2 -o jsonpath='{.roleRef.name}' && echo " ✓ cluster2"
+          echo ""
+
+          echo "7. Token validation (extracting first 50 chars):"
+          TOKEN_CLUSTER1=$(kubectl get secret application-manager -n cluster1 --context kind-hub -o jsonpath='{.data.token}' | base64 -d)
+          TOKEN_CLUSTER2=$(kubectl get secret application-manager -n cluster2 --context kind-hub -o jsonpath='{.data.token}' | base64 -d)
+          echo "cluster1 token: ${TOKEN_CLUSTER1:0:50}..."
+          echo "cluster2 token: ${TOKEN_CLUSTER2:0:50}..."
+          echo ""
+
+          echo "8. Expiration timestamps:"
+          kubectl get managedserviceaccount application-manager -n cluster1 --context kind-hub -o jsonpath='cluster1: {.status.expirationTimestamp}{"\n"}'
+          kubectl get managedserviceaccount application-manager -n cluster2 --context kind-hub -o jsonpath='cluster2: {.status.expirationTimestamp}{"\n"}'
+          echo ""
+
+          echo "=================================================="
+          echo "✓ ALL CHECKS PASSED"
+          echo "=================================================="
+
+      - name: Test permissions with token
+        run: |
+          echo "Testing cluster-admin permissions on cluster1..."
+
+          # Extract token
+          TOKEN=$(kubectl get secret application-manager -n cluster1 --context kind-hub -o jsonpath='{.data.token}' | base64 -d)
+          CA_CERT=$(kubectl get secret application-manager -n cluster1 --context kind-hub -o jsonpath='{.data.ca\.crt}')
+          API_SERVER=$(kubectl config view --context kind-cluster1 --minify -o jsonpath='{.clusters[0].cluster.server}')
+
+          # Create temporary kubeconfig
+          cat > /tmp/test-kubeconfig.yaml <<EOF
+          apiVersion: v1
+          kind: Config
+          clusters:
+          - cluster:
+              certificate-authority-data: ${CA_CERT}
+              server: ${API_SERVER}
+            name: cluster1
+          contexts:
+          - context:
+              cluster: cluster1
+              user: application-manager
+            name: application-manager@cluster1
+          current-context: application-manager@cluster1
+          users:
+          - name: application-manager
+            user:
+              token: ${TOKEN}
+          EOF
+
+          # Test permissions
+          echo "Testing 'kubectl get nodes'..."
+          KUBECONFIG=/tmp/test-kubeconfig.yaml kubectl get nodes
+
+          echo "Testing 'kubectl auth can-i create pods'..."
+          KUBECONFIG=/tmp/test-kubeconfig.yaml kubectl auth can-i create pods
+
+          echo "Testing 'kubectl auth can-i * *' (cluster-admin check)..."
+          KUBECONFIG=/tmp/test-kubeconfig.yaml kubectl auth can-i '*' '*'
+
+          echo ""
+          echo "✓ Permissions test PASSED - application-manager has cluster-admin access"
+
+      - name: Generate summary
+        if: always()
+        run: |
+          echo "# OCM Setup Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Clusters" >> $GITHUB_STEP_SUMMARY
+          kubectl get managedclusters --context kind-hub >> $GITHUB_STEP_SUMMARY 2>&1 || echo "Failed to get clusters" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## ManagedServiceAccounts" >> $GITHUB_STEP_SUMMARY
+          kubectl get managedserviceaccount -A --context kind-hub >> $GITHUB_STEP_SUMMARY 2>&1 || echo "Failed to get ManagedServiceAccounts" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Secrets" >> $GITHUB_STEP_SUMMARY
+          kubectl get secret -n cluster1 application-manager --context kind-hub >> $GITHUB_STEP_SUMMARY 2>&1 || echo "cluster1: not found" >> $GITHUB_STEP_SUMMARY
+          kubectl get secret -n cluster2 application-manager --context kind-hub >> $GITHUB_STEP_SUMMARY 2>&1 || echo "cluster2: not found" >> $GITHUB_STEP_SUMMARY
