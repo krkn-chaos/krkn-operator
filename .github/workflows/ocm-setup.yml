@@ -142,10 +142,28 @@ jobs:
             managed-serviceaccount ocm/managed-serviceaccount \
             --kube-context kind-hub
 
+          echo "Waiting for addon manager pod to be created..."
+          timeout=60
+          while [ $timeout -gt 0 ]; do
+            if kubectl get pods -n open-cluster-management-addon --context kind-hub 2>/dev/null | grep -q managed-serviceaccount; then
+              echo "✓ ManagedServiceAccount addon pod created"
+              break
+            fi
+            echo "Waiting for pod... ($timeout seconds left)"
+            sleep 5
+            timeout=$((timeout - 5))
+          done
+
+          if [ $timeout -le 0 ]; then
+            echo "ERROR: Timeout waiting for addon pod"
+            kubectl get pods -n open-cluster-management-addon --context kind-hub
+            exit 1
+          fi
+
           echo "Waiting for addon manager to be ready..."
           kubectl wait --for=condition=ready pod \
-            -l app=managed-serviceaccount-addon-manager \
             -n open-cluster-management-addon \
+            --all \
             --timeout=120s \
             --context kind-hub
 
