@@ -43,21 +43,25 @@ jobs:
 
       - name: Setup OCM Hub and Managed Clusters
         run: |
-          echo "Creating OCM hub cluster..."
+          echo "Creating kind hub cluster..."
+          kind create cluster --name hub
+
+          echo "Initializing OCM on hub cluster..."
           clusteradm init --wait --context kind-hub
 
-          echo "Joining managed clusters..."
+          echo "Getting join token..."
           joinCmd=$(clusteradm get token --context kind-hub | grep "clusteradm join")
+          echo "Join command: ${joinCmd}"
 
-          # Create and join cluster1
+          echo "Creating and joining cluster1..."
           kind create cluster --name cluster1
           eval "${joinCmd} --cluster-name cluster1 --context kind-cluster1 --wait"
 
-          # Create and join cluster2
+          echo "Creating and joining cluster2..."
           kind create cluster --name cluster2
           eval "${joinCmd} --cluster-name cluster2 --context kind-cluster2 --wait"
 
-          # Accept managed clusters
+          echo "Accepting managed clusters..."
           kubectl config use-context kind-hub
           clusteradm accept --clusters cluster1 --context kind-hub --wait
           clusteradm accept --clusters cluster2 --context kind-hub --wait
@@ -65,6 +69,9 @@ jobs:
           echo "Waiting for clusters to be ready..."
           kubectl wait --for=condition=ManagedClusterConditionAvailable managedcluster/cluster1 --timeout=300s --context kind-hub
           kubectl wait --for=condition=ManagedClusterConditionAvailable managedcluster/cluster2 --timeout=300s --context kind-hub
+
+          echo "Listing managed clusters..."
+          kubectl get managedclusters --context kind-hub
 
       - name: Install ManagedServiceAccount Addon
         run: |
