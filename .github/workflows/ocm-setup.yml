@@ -376,8 +376,7 @@ jobs:
           helm install krkn-operator ./charts/krkn-operator \
             --namespace krkn-operator \
             --create-namespace \
-            --set image.repository=ghcr.io/krkn-chaos/krkn-operator \
-            --set image.tag=latest \
+            --set images.operator.image=quay.io/krkn-chaos/krkn-operator:latest \
             --wait \
             --timeout 5m
 
@@ -455,6 +454,12 @@ jobs:
           if [ "$HTTP_CODE" != "201" ]; then
             echo "ERROR: Failed to register admin user. HTTP $HTTP_CODE"
             echo "Response: $BODY"
+            echo ""
+            echo "=== Operator logs (last 50 lines) ==="
+            kubectl logs -n krkn-operator \
+              -l app.kubernetes.io/component=operator \
+              --tail=50 \
+              --context kind-hub
             exit 1
           fi
 
