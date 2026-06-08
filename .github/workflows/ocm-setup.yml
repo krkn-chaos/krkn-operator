@@ -65,7 +65,7 @@ jobs:
             --hub-apiserver ${HUB_APISERVER} \
             --cluster-name cluster1 \
             --context kind-cluster1 \
-            --wait
+            --force-internal-endpoint-lookup
 
           echo "Creating cluster2..."
           kind create cluster --name cluster2
@@ -76,12 +76,15 @@ jobs:
             --hub-apiserver ${HUB_APISERVER} \
             --cluster-name cluster2 \
             --context kind-cluster2 \
-            --wait
+            --force-internal-endpoint-lookup
+
+          echo "Waiting for CSR to be created..."
+          sleep 10
 
           echo "Accepting managed clusters..."
           kubectl config use-context kind-hub
-          clusteradm accept --clusters cluster1 --context kind-hub --wait
-          clusteradm accept --clusters cluster2 --context kind-hub --wait
+          clusteradm accept --clusters cluster1 --context kind-hub
+          clusteradm accept --clusters cluster2 --context kind-hub
 
           echo "Waiting for clusters to be ready..."
           kubectl wait --for=condition=ManagedClusterConditionAvailable managedcluster/cluster1 --timeout=300s --context kind-hub
