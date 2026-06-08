@@ -68,11 +68,25 @@ jobs:
             --context kind-cluster1 \
             --force-internal-endpoint-lookup
 
-          echo "Waiting for cluster1 CSR to be created..."
-          sleep 10
+          echo "Waiting for cluster1 ManagedCluster to be created..."
+          kubectl config use-context kind-hub
+          timeout=60
+          while [ $timeout -gt 0 ]; do
+            if kubectl get managedcluster cluster1 --context kind-hub >/dev/null 2>&1; then
+              echo "✓ ManagedCluster cluster1 created"
+              break
+            fi
+            echo "Waiting for ManagedCluster cluster1... ($timeout seconds left)"
+            sleep 5
+            timeout=$((timeout - 5))
+          done
+
+          if [ $timeout -le 0 ]; then
+            echo "ERROR: Timeout waiting for ManagedCluster cluster1"
+            exit 1
+          fi
 
           echo "Accepting cluster1..."
-          kubectl config use-context kind-hub
           clusteradm accept --clusters cluster1 --context kind-hub
 
           echo "Waiting for cluster1 to be available..."
@@ -90,11 +104,25 @@ jobs:
             --context kind-cluster2 \
             --force-internal-endpoint-lookup
 
-          echo "Waiting for cluster2 CSR to be created..."
-          sleep 10
+          echo "Waiting for cluster2 ManagedCluster to be created..."
+          kubectl config use-context kind-hub
+          timeout=60
+          while [ $timeout -gt 0 ]; do
+            if kubectl get managedcluster cluster2 --context kind-hub >/dev/null 2>&1; then
+              echo "✓ ManagedCluster cluster2 created"
+              break
+            fi
+            echo "Waiting for ManagedCluster cluster2... ($timeout seconds left)"
+            sleep 5
+            timeout=$((timeout - 5))
+          done
+
+          if [ $timeout -le 0 ]; then
+            echo "ERROR: Timeout waiting for ManagedCluster cluster2"
+            exit 1
+          fi
 
           echo "Accepting cluster2..."
-          kubectl config use-context kind-hub
           clusteradm accept --clusters cluster2 --context kind-hub
 
           echo "Waiting for cluster2 to be available..."
