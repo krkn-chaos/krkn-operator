@@ -56,6 +56,7 @@ rules:
 - apiGroups:
   - krkn.krkn-chaos.dev
   resources:
+  - krkngraphruns
   - krknoperatortargetproviderconfigs
   - krknoperatortargetproviders
   - krknoperatortargets
@@ -74,6 +75,7 @@ rules:
 - apiGroups:
   - krkn.krkn-chaos.dev
   resources:
+  - krkngraphruns/status
   - krknoperatortargetproviderconfigs/status
   - krknoperatortargetproviders/status
   - krknoperatortargets/status
@@ -123,6 +125,7 @@ rules:
 - apiGroups:
   - krkn.krkn-chaos.dev
   resources:
+  - krkngraphruns
   - krknoperatortargetproviderconfigs
   - krknoperatortargetproviders
   - krknoperatortargets
@@ -141,6 +144,7 @@ rules:
 - apiGroups:
   - krkn.krkn-chaos.dev
   resources:
+  - krkngraphruns/status
   - krknoperatortargetproviderconfigs/status
   - krknoperatortargetproviders/status
   - krknoperatortargets/status
@@ -155,6 +159,7 @@ rules:
 - apiGroups:
   - krkn.krkn-chaos.dev
   resources:
+  - krkngraphruns/finalizers
   - krknoperatortargetproviderconfigs/finalizers
   - krknoperatortargetproviders/finalizers
   - krknoperatortargets/finalizers
