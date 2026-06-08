@@ -231,7 +231,7 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Create password secret
-	secretName := fmt.Sprintf("krknuser-password-%s", strings.ReplaceAll(strings.ToLower(req.UserID), "@", "-"))
+	secretName := fmt.Sprintf("krknuser-password-%s", sanitizeResourceName(req.UserID))
 	secret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      secretName,
@@ -281,7 +281,7 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Create KrknUser CRD
-	userName := fmt.Sprintf("krknuser-%s", strings.ReplaceAll(strings.ToLower(req.UserID), "@", "-"))
+	userName := fmt.Sprintf("krknuser-%s", sanitizeResourceName(req.UserID))
 	user := &krknv1alpha1.KrknUser{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      userName,

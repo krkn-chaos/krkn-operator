@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -49,6 +50,43 @@ import (
 	"github.com/krkn-chaos/krkn-operator/pkg/registry"
 	pb "github.com/krkn-chaos/krkn-operator/proto/dataprovider"
 )
+
+// sanitizeResourceName converts an email or identifier into a valid Kubernetes resource name.
+// Kubernetes resource names must follow RFC 1123 subdomain rules:
+// - Contain only lowercase alphanumeric characters, '-' or '.'
+// - Start and end with an alphanumeric character
+// - Maximum length of 253 characters
+//
+// This function:
+// 1. Converts to lowercase
+// 2. Replaces @ and . with -
+// 3. Replaces any other invalid characters with -
+// 4. Ensures it starts and ends with alphanumeric
+//
+// Example: "[email protected]" -> "admin-example-com"
+func sanitizeResourceName(name string) string {
+	// Convert to lowercase
+	sanitized := strings.ToLower(name)
+
+	// Replace @ and . with -
+	sanitized = strings.ReplaceAll(sanitized, "@", "-")
+	sanitized = strings.ReplaceAll(sanitized, ".", "-")
+
+	// Replace any other invalid characters with -
+	reg := regexp.MustCompile(`[^a-z0-9-]`)
+	sanitized = reg.ReplaceAllString(sanitized, "-")
+
+	// Remove leading/trailing dashes
+	sanitized = strings.Trim(sanitized, "-")
+
+	// Ensure maximum length (Kubernetes limit is 253, but we'll be conservative)
+	if len(sanitized) > 63 {
+		sanitized = sanitized[:63]
+		sanitized = strings.TrimRight(sanitized, "-")
+	}
+
+	return sanitized
+}
 
 // Handler contains the dependencies for API handlers
 type Handler struct {

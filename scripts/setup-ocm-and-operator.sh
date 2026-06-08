@@ -273,7 +273,7 @@ echo "3. Register first admin user:"
 echo '   curl -X POST http://localhost:8080/api/v1/auth/register \'
 echo '     -H "Content-Type: application/json" \'
 echo '     -d '"'"'{'
-echo '       "userId": "[email protected]",'
+echo '       "userId": "admin@krkn-chaos.local",'
 echo '       "password": "AdminPassword123!",'
 echo '       "name": "Admin",'
 echo '       "surname": "User",'
@@ -285,7 +285,7 @@ echo "4. Login:"
 echo '   curl -X POST http://localhost:8080/api/v1/auth/login \'
 echo '     -H "Content-Type: application/json" \'
 echo '     -d '"'"'{'
-echo '       "userId": "[email protected]",'
+echo '       "userId": "admin@krkn-chaos.local",'
 echo '       "password": "AdminPassword123!"'
 echo '     }'"'"' | jq'
 echo ""

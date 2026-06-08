@@ -440,7 +440,7 @@ jobs:
           RESPONSE=$(curl -s -w "\n%{http_code}" -X POST http://localhost:8080/api/v1/auth/register \
             -H "Content-Type: application/json" \
             -d '{
-              "userId": "[email protected]",
+              "userId": "admin@krkn-chaos.local",
               "password": "AdminPassword123!",
               "name": "Admin",
               "surname": "User",
@@ -472,7 +472,7 @@ jobs:
           RESPONSE=$(curl -s -w "\n%{http_code}" -X POST http://localhost:8080/api/v1/auth/login \
             -H "Content-Type: application/json" \
             -d '{
-              "userId": "[email protected]",
+              "userId": "admin@krkn-chaos.local",
               "password": "AdminPassword123!"
             }')
 
