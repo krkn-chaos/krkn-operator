@@ -3,31 +3,39 @@
 # test-api.sh - Test krkn-operator API endpoints
 #
 # This script tests the krkn-operator REST API by:
-# 1. Checking registration status
-# 2. Registering first admin user (if needed)
-# 3. Logging in and obtaining JWT token
-# 4. Making authenticated API calls
-# 5. Testing cluster discovery (placeholder)
+# 1. Setting up port-forward to operator service (optional)
+# 2. Checking registration status
+# 3. Registering first admin user (if needed)
+# 4. Logging in and obtaining JWT token
+# 5. Making authenticated API calls
+# 6. Testing cluster discovery (placeholder)
 #
 # Prerequisites:
-# - krkn-operator running and accessible
-# - Port-forward or direct access to API (default: http://localhost:8080)
+# - krkn-operator running in Kubernetes cluster
+# - kubectl configured with access to cluster
 #
 # Usage:
 #   ./scripts/test-api.sh
 #
 # Environment Variables:
-#   API_URL         - API endpoint (default: http://localhost:8080)
-#   ADMIN_EMAIL     - Admin email (default: [email protected])
-#   ADMIN_PASSWORD  - Admin password (default: AdminPassword123!)
-#   ADMIN_NAME      - Admin first name (default: Admin)
-#   ADMIN_SURNAME   - Admin last name (default: User)
-#   ADMIN_ORG       - Admin organization (default: Krkn Chaos)
+#   SETUP_PORT_FORWARD - Setup port-forward automatically (default: true)
+#   KUBE_CONTEXT       - kubectl context (default: kind-hub)
+#   OPERATOR_NAMESPACE - Operator namespace (default: krkn-operator)
+#   LOCAL_PORT         - Local port for port-forward (default: 8080)
+#   SERVICE_PORT       - Service port (default: 8080)
+#   API_URL            - API endpoint (default: http://localhost:${LOCAL_PORT})
+#   ADMIN_EMAIL        - Admin email (default: [email protected])
+#   ADMIN_PASSWORD     - Admin password (default: AdminPassword123!)
+#   ADMIN_NAME         - Admin first name (default: Admin)
+#   ADMIN_SURNAME      - Admin last name (default: User)
+#   ADMIN_ORG          - Admin organization (default: Krkn Chaos)
 #
 # Example:
-#   API_URL=http://krkn-operator.example.com \
-#   ADMIN_EMAIL=[email protected] \
-#   ./scripts/test-api.sh
+#   # Use existing port-forward or remote API
+#   SETUP_PORT_FORWARD=false API_URL=http://krkn-operator.example.com ./scripts/test-api.sh
+#
+#   # Custom namespace and context
+#   KUBE_CONTEXT=my-cluster OPERATOR_NAMESPACE=custom-ns ./scripts/test-api.sh
 #
 set -e
 
@@ -39,7 +47,12 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # Configuration
-API_URL="${API_URL:-http://localhost:8080}"
+SETUP_PORT_FORWARD="${SETUP_PORT_FORWARD:-true}"
+KUBE_CONTEXT="${KUBE_CONTEXT:-kind-hub}"
+OPERATOR_NAMESPACE="${OPERATOR_NAMESPACE:-krkn-operator}"
+LOCAL_PORT="${LOCAL_PORT:-8080}"
+SERVICE_PORT="${SERVICE_PORT:-8080}"
+API_URL="${API_URL:-http://localhost:${LOCAL_PORT}}"
 ADMIN_EMAIL="${ADMIN_EMAIL:-[email protected]}"
 ADMIN_PASSWORD="${ADMIN_PASSWORD:-AdminPassword123!}"
 ADMIN_NAME="${ADMIN_NAME:-Admin}"
@@ -47,11 +60,33 @@ ADMIN_SURNAME="${ADMIN_SURNAME:-User}"
 ADMIN_ORG="${ADMIN_ORG:-Krkn Chaos}"
 
 TOKEN_FILE="/tmp/krkn-jwt-token"
+PORT_FORWARD_PID=""
+
+# Cleanup function
+cleanup() {
+    if [ -n "$PORT_FORWARD_PID" ]; then
+        log_info "Stopping port-forward (PID: $PORT_FORWARD_PID)..."
+        kill $PORT_FORWARD_PID 2>/dev/null || true
+        wait $PORT_FORWARD_PID 2>/dev/null || true
+        log_info "Port-forward stopped"
+    fi
+}
+
+# Setup trap for cleanup
+trap cleanup EXIT INT TERM
 
 echo -e "${GREEN}========================================${NC}"
 echo -e "${GREEN}krkn-operator API Test Script${NC}"
 echo -e "${GREEN}========================================${NC}"
 echo ""
+if [ "$SETUP_PORT_FORWARD" = "true" ]; then
+    echo "Port-forward: ENABLED"
+    echo "Kubernetes context: $KUBE_CONTEXT"
+    echo "Operator namespace: $OPERATOR_NAMESPACE"
+    echo "Local port: $LOCAL_PORT"
+else
+    echo "Port-forward: DISABLED"
+fi
 echo "API URL: $API_URL"
 echo "Admin email: $ADMIN_EMAIL"
 echo ""
@@ -103,6 +138,57 @@ extract_http_code() {
 extract_body() {
     echo "$1" | sed '$d'
 }
+
+setup_port_forward() {
+    log_step "Setting up port-forward to krkn-operator service..."
+
+    # Check if port is already in use
+    if lsof -Pi :${LOCAL_PORT} -sTCP:LISTEN -t >/dev/null 2>&1; then
+        log_warn "Port $LOCAL_PORT is already in use"
+        read -p "Use existing port-forward? (y/n) " -n 1 -r
+        echo
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            log_info "Using existing port-forward on port $LOCAL_PORT"
+            return 0
+        else
+            log_error "Port $LOCAL_PORT is in use. Please free the port or use a different LOCAL_PORT."
+            exit 1
+        fi
+    fi
+
+    # Start port-forward
+    log_info "Starting port-forward: $OPERATOR_NAMESPACE/svc/krkn-operator-operator ${LOCAL_PORT}:${SERVICE_PORT}"
+    kubectl port-forward -n "$OPERATOR_NAMESPACE" \
+        svc/krkn-operator-operator \
+        ${LOCAL_PORT}:${SERVICE_PORT} \
+        --context "$KUBE_CONTEXT" \
+        >/dev/null 2>&1 &
+
+    PORT_FORWARD_PID=$!
+    log_info "Port-forward started (PID: $PORT_FORWARD_PID)"
+
+    # Wait for port-forward to be ready
+    log_info "Waiting for port-forward to be ready..."
+    local timeout=30
+    local elapsed=0
+    while [ $elapsed -lt $timeout ]; do
+        if curl -s http://localhost:${LOCAL_PORT}/api/v1/health >/dev/null 2>&1; then
+            log_success "Port-forward is ready"
+            return 0
+        fi
+        sleep 2
+        elapsed=$((elapsed + 2))
+    done
+
+    log_error "Timeout waiting for port-forward to be ready"
+    return 1
+}
+
+# Setup port-forward if enabled
+if [ "$SETUP_PORT_FORWARD" = "true" ]; then
+    setup_port_forward
+    echo ""
+fi
 
 # Test 1: Check API health (unauthenticated endpoint)
 log_step "Test 1: Checking API health..."
@@ -284,10 +370,25 @@ echo "  - API is accessible and responding"
 echo "  - Admin user registered: $USER_ID"
 echo "  - Authentication working"
 echo "  - JWT token obtained and saved"
+if [ -n "$PORT_FORWARD_PID" ]; then
+    echo "  - Port-forward running (PID: $PORT_FORWARD_PID)"
+fi
 echo ""
 echo "Saved token: $TOKEN_FILE"
 echo "Token content (first 50 chars): ${TOKEN:0:50}..."
 echo ""
+if [ -n "$PORT_FORWARD_PID" ]; then
+    echo "Port-forward info:"
+    echo "  - Local: http://localhost:$LOCAL_PORT"
+    echo "  - Service: $OPERATOR_NAMESPACE/krkn-operator-operator:$SERVICE_PORT"
+    echo "  - Context: $KUBE_CONTEXT"
+    echo "  - PID: $PORT_FORWARD_PID"
+    echo ""
+    echo "Note: Port-forward will be stopped when this script exits."
+    echo "      To keep it running, start it manually:"
+    echo "      kubectl port-forward -n $OPERATOR_NAMESPACE svc/krkn-operator-operator $LOCAL_PORT:$SERVICE_PORT --context $KUBE_CONTEXT"
+    echo ""
+fi
 echo "Next steps:"
 echo "1. Use the token for further API calls:"
 echo "   TOKEN=\$(cat $TOKEN_FILE)"
