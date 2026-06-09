@@ -377,6 +377,7 @@ jobs:
             --namespace krkn-operator \
             --create-namespace \
             --set images.operator.image=quay.io/krkn-chaos/krkn-operator:latest \
+            --set acm.enabled=true \
             --wait \
             --timeout 5m
 
