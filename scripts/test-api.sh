@@ -323,51 +323,113 @@ else
 fi
 echo ""
 
-# Test 6: List available target clusters
-log_step "Test 6: Listing available target clusters..."
+# Test 6: Discover available target clusters via async polling
+log_step "Test 6: Discovering available target clusters (async flow)..."
 
-# Give the operator some time to discover OCM clusters if needed
-log_info "Waiting 10 seconds for operator to discover OCM ManagedClusters..."
-sleep 10
-
-RESPONSE=$(api_call GET "/api/v1/operator/targets" "" "$TOKEN")
+# Step 1: Create target request (POST /api/v1/targets)
+log_info "Step 1: Creating target request..."
+RESPONSE=$(api_call POST "/api/v1/targets" "" "$TOKEN")
 HTTP_CODE=$(extract_http_code "$RESPONSE")
 BODY=$(extract_body "$RESPONSE")
 
 if [ "$HTTP_CODE" != "200" ]; then
-    log_error "Failed to list targets: HTTP $HTTP_CODE"
+    log_error "Failed to create target request: HTTP $HTTP_CODE"
     echo "$BODY" | jq '.' 2>/dev/null || echo "$BODY"
     exit 1
 fi
 
-log_success "Targets endpoint accessible"
+TARGET_UUID=$(echo "$BODY" | jq -r '.uuid')
+if [ -z "$TARGET_UUID" ] || [ "$TARGET_UUID" = "null" ]; then
+    log_error "Failed to extract UUID from target request"
+    echo "$BODY"
+    exit 1
+fi
+
+log_success "Target request created with UUID: $TARGET_UUID"
+echo ""
+
+# Step 2: Poll target status until ready (GET /api/v1/targets/{uuid})
+log_info "Step 2: Polling target status (max 60 seconds)..."
+MAX_POLLS=30
+POLL_INTERVAL=2
+poll_count=0
+
+while [ $poll_count -lt $MAX_POLLS ]; do
+    RESPONSE=$(api_call GET "/api/v1/targets/$TARGET_UUID" "" "$TOKEN")
+    HTTP_CODE=$(extract_http_code "$RESPONSE")
+
+    if [ "$HTTP_CODE" = "200" ]; then
+        log_success "Target request completed (status: 200)"
+        break
+    elif [ "$HTTP_CODE" = "202" ]; then
+        poll_count=$((poll_count + 1))
+        log_info "Target pending... (attempt $poll_count/$MAX_POLLS, status: 202)"
+        sleep $POLL_INTERVAL
+    else
+        log_error "Unexpected status code: $HTTP_CODE"
+        BODY=$(extract_body "$RESPONSE")
+        echo "$BODY" | jq '.' 2>/dev/null || echo "$BODY"
+        exit 1
+    fi
+done
+
+if [ $poll_count -ge $MAX_POLLS ]; then
+    log_error "Timeout: Target request did not complete after $MAX_POLLS attempts"
+    exit 1
+fi
+
+echo ""
+
+# Step 3: Get clusters list (GET /api/v1/clusters?id={uuid})
+log_info "Step 3: Fetching discovered clusters..."
+RESPONSE=$(api_call GET "/api/v1/clusters?id=$TARGET_UUID" "" "$TOKEN")
+HTTP_CODE=$(extract_http_code "$RESPONSE")
+BODY=$(extract_body "$RESPONSE")
+
+if [ "$HTTP_CODE" != "200" ]; then
+    log_error "Failed to get clusters: HTTP $HTTP_CODE"
+    echo "$BODY" | jq '.' 2>/dev/null || echo "$BODY"
+    exit 1
+fi
+
+log_success "Clusters retrieved successfully"
 log_info "Response:"
 echo "$BODY" | jq '.'
+echo ""
 
-# Parse and validate clusters
-CLUSTER_COUNT=$(echo "$BODY" | jq -r '.targets | length')
-log_info "Found $CLUSTER_COUNT clusters"
+# Parse and validate clusters from targetData
+# Response format: { "status": "Completed", "targetData": { "operator-name": [{ "cluster-name": "...", "cluster-api-url": "..." }] } }
+TARGET_DATA=$(echo "$BODY" | jq -r '.targetData')
+if [ "$TARGET_DATA" = "null" ] || [ -z "$TARGET_DATA" ]; then
+    log_error "No targetData in response"
+    exit 1
+fi
+
+# Flatten all clusters from all operators
+ALL_CLUSTERS=$(echo "$TARGET_DATA" | jq -r '.[].[] | ."cluster-name"' | sort)
+CLUSTER_COUNT=$(echo "$ALL_CLUSTERS" | wc -l | tr -d ' ')
+
+log_info "Found $CLUSTER_COUNT clusters across all operators"
 
 if [ "$CLUSTER_COUNT" != "3" ]; then
     log_error "ASSERTION FAILED: Expected 3 clusters, found $CLUSTER_COUNT"
     echo "Clusters found:"
-    echo "$BODY" | jq -r '.targets[] | .clusterName'
+    echo "$ALL_CLUSTERS"
     exit 1
 fi
 
 log_success "✓ ASSERTION PASSED: Found exactly 3 clusters"
-
-# Extract cluster names
-CLUSTER_NAMES=$(echo "$BODY" | jq -r '.targets[] | .clusterName' | sort)
-log_info "Cluster names (sorted):"
-echo "$CLUSTER_NAMES"
+echo ""
 
 # Verify expected cluster names
+log_info "Cluster names (sorted):"
+echo "$ALL_CLUSTERS"
+
 EXPECTED_CLUSTERS="cluster1
 cluster2
 local-cluster"
 
-if [ "$CLUSTER_NAMES" = "$EXPECTED_CLUSTERS" ]; then
+if [ "$ALL_CLUSTERS" = "$EXPECTED_CLUSTERS" ]; then
     log_success "✓ ASSERTION PASSED: All expected clusters found (local-cluster, cluster1, cluster2)"
 else
     log_error "ASSERTION FAILED: Cluster names do not match expected"
@@ -375,14 +437,14 @@ else
     echo "$EXPECTED_CLUSTERS"
     echo ""
     echo "Found:"
-    echo "$CLUSTER_NAMES"
+    echo "$ALL_CLUSTERS"
     exit 1
 fi
 
-# Show detailed cluster information
+# Show detailed cluster information grouped by operator
 echo ""
-log_info "Cluster details:"
-echo "$BODY" | jq -r '.targets[] | "  - \(.clusterName): \(.clusterAPIURL)"'
+log_info "Cluster details (grouped by operator):"
+echo "$TARGET_DATA" | jq -r 'to_entries[] | "  Operator: \(.key)" as $op | .value[] | "    - \(."cluster-name"): \(."cluster-api-url")"'
 echo ""
 
 # Final summary
