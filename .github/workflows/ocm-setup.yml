@@ -432,4 +432,4 @@ jobs:
           echo "- ✅ krkn-operator deployed and running" >> $GITHUB_STEP_SUMMARY
           echo "- ✅ Admin user registered successfully" >> $GITHUB_STEP_SUMMARY
           echo "- ✅ JWT authentication working" >> $GITHUB_STEP_SUMMARY
-          echo "- ✅ Target clusters discovered: 3 (local-cluster, cluster1, cluster2)" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Target clusters discovered: 2 (cluster1, cluster2)" >> $GITHUB_STEP_SUMMARY

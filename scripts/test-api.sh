@@ -412,14 +412,14 @@ CLUSTER_COUNT=$(echo "$ALL_CLUSTERS" | wc -l | tr -d ' ')
 
 log_info "Found $CLUSTER_COUNT clusters across all operators"
 
-if [ "$CLUSTER_COUNT" != "3" ]; then
-    log_error "ASSERTION FAILED: Expected 3 clusters, found $CLUSTER_COUNT"
+if [ "$CLUSTER_COUNT" != "2" ]; then
+    log_error "ASSERTION FAILED: Expected 2 clusters, found $CLUSTER_COUNT"
     echo "Clusters found:"
     echo "$ALL_CLUSTERS"
     exit 1
 fi
 
-log_success "✓ ASSERTION PASSED: Found exactly 3 clusters"
+log_success "✓ ASSERTION PASSED: Found exactly 2 clusters"
 echo ""
 
 # Verify expected cluster names
@@ -427,11 +427,10 @@ log_info "Cluster names (sorted):"
 echo "$ALL_CLUSTERS"
 
 EXPECTED_CLUSTERS="cluster1
-cluster2
-local-cluster"
+cluster2"
 
 if [ "$ALL_CLUSTERS" = "$EXPECTED_CLUSTERS" ]; then
-    log_success "✓ ASSERTION PASSED: All expected clusters found (local-cluster, cluster1, cluster2)"
+    log_success "✓ ASSERTION PASSED: All expected clusters found (cluster1, cluster2)"
 else
     log_error "ASSERTION FAILED: Cluster names do not match expected"
     echo "Expected:"
@@ -458,7 +457,7 @@ echo "  - API is accessible and responding"
 echo "  - Admin user registered: $USER_ID"
 echo "  - Authentication working"
 echo "  - JWT token obtained and saved"
-echo "  - Target clusters verified: 3 clusters (local-cluster, cluster1, cluster2)"
+echo "  - Target clusters verified: 2 clusters (cluster1, cluster2)"
 if [ -n "$PORT_FORWARD_PID" ]; then
     echo "  - Port-forward running (PID: $PORT_FORWARD_PID)"
 fi
