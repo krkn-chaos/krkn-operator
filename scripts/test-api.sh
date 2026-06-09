@@ -332,7 +332,8 @@ RESPONSE=$(api_call POST "/api/v1/targets" "" "$TOKEN")
 HTTP_CODE=$(extract_http_code "$RESPONSE")
 BODY=$(extract_body "$RESPONSE")
 
-if [ "$HTTP_CODE" != "200" ]; then
+# POST /targets returns 202 Accepted (async operation) or 200 OK
+if [ "$HTTP_CODE" != "200" ] && [ "$HTTP_CODE" != "202" ]; then
     log_error "Failed to create target request: HTTP $HTTP_CODE"
     echo "$BODY" | jq '.' 2>/dev/null || echo "$BODY"
     exit 1
@@ -345,7 +346,7 @@ if [ -z "$TARGET_UUID" ] || [ "$TARGET_UUID" = "null" ]; then
     exit 1
 fi
 
-log_success "Target request created with UUID: $TARGET_UUID"
+log_success "Target request created with UUID: $TARGET_UUID (status: $HTTP_CODE)"
 echo ""
 
 # Step 2: Poll target status until ready (GET /api/v1/targets/{uuid})
