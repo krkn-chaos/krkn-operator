@@ -323,41 +323,66 @@ else
 fi
 echo ""
 
-# Test 6: Create target request to discover clusters
-log_step "Test 6: Creating target request to discover OCM clusters..."
+# Test 6: List available target clusters
+log_step "Test 6: Listing available target clusters..."
 
-# First, we need to create a target request
-# The operator should auto-discover OCM ManagedClusters
-REQUEST_ID="test-discovery-$(date +%s)"
+# Give the operator some time to discover OCM clusters if needed
+log_info "Waiting 10 seconds for operator to discover OCM ManagedClusters..."
+sleep 10
 
-# Note: The actual endpoint for creating target requests might differ
-# This is a placeholder - adjust based on actual API
-log_info "Request ID: $REQUEST_ID"
-
-# Give the operator some time to discover OCM clusters if it hasn't already
-log_info "Waiting 5 seconds for operator to initialize providers..."
-sleep 5
-
-# For now, we'll just verify we can make authenticated requests
-# The actual cluster discovery API needs to be implemented
-log_warn "Cluster discovery API endpoint needs to be verified"
-log_info "Expected: GET /api/v1/clusters should return hub, cluster1, cluster2"
-echo ""
-
-# Test 7: List available providers (if endpoint exists)
-log_step "Test 7: Testing provider endpoints..."
-RESPONSE=$(api_call GET "/api/v1/providers" "" "$TOKEN")
+RESPONSE=$(api_call GET "/api/v1/operator/targets" "" "$TOKEN")
 HTTP_CODE=$(extract_http_code "$RESPONSE")
 BODY=$(extract_body "$RESPONSE")
 
-if [ "$HTTP_CODE" = "200" ]; then
-    log_success "Providers endpoint accessible"
+if [ "$HTTP_CODE" != "200" ]; then
+    log_error "Failed to list targets: HTTP $HTTP_CODE"
     echo "$BODY" | jq '.' 2>/dev/null || echo "$BODY"
-elif [ "$HTTP_CODE" = "404" ]; then
-    log_warn "Providers endpoint not found (might not be implemented yet)"
-else
-    log_info "Providers endpoint returned HTTP $HTTP_CODE"
+    exit 1
 fi
+
+log_success "Targets endpoint accessible"
+log_info "Response:"
+echo "$BODY" | jq '.'
+
+# Parse and validate clusters
+CLUSTER_COUNT=$(echo "$BODY" | jq -r '.targets | length')
+log_info "Found $CLUSTER_COUNT clusters"
+
+if [ "$CLUSTER_COUNT" != "3" ]; then
+    log_error "ASSERTION FAILED: Expected 3 clusters, found $CLUSTER_COUNT"
+    echo "Clusters found:"
+    echo "$BODY" | jq -r '.targets[] | .clusterName'
+    exit 1
+fi
+
+log_success "✓ ASSERTION PASSED: Found exactly 3 clusters"
+
+# Extract cluster names
+CLUSTER_NAMES=$(echo "$BODY" | jq -r '.targets[] | .clusterName' | sort)
+log_info "Cluster names (sorted):"
+echo "$CLUSTER_NAMES"
+
+# Verify expected cluster names
+EXPECTED_CLUSTERS="cluster1
+cluster2
+local-cluster"
+
+if [ "$CLUSTER_NAMES" = "$EXPECTED_CLUSTERS" ]; then
+    log_success "✓ ASSERTION PASSED: All expected clusters found (local-cluster, cluster1, cluster2)"
+else
+    log_error "ASSERTION FAILED: Cluster names do not match expected"
+    echo "Expected:"
+    echo "$EXPECTED_CLUSTERS"
+    echo ""
+    echo "Found:"
+    echo "$CLUSTER_NAMES"
+    exit 1
+fi
+
+# Show detailed cluster information
+echo ""
+log_info "Cluster details:"
+echo "$BODY" | jq -r '.targets[] | "  - \(.clusterName): \(.clusterAPIURL)"'
 echo ""
 
 # Final summary
@@ -370,6 +395,7 @@ echo "  - API is accessible and responding"
 echo "  - Admin user registered: $USER_ID"
 echo "  - Authentication working"
 echo "  - JWT token obtained and saved"
+echo "  - Target clusters verified: 3 clusters (local-cluster, cluster1, cluster2)"
 if [ -n "$PORT_FORWARD_PID" ]; then
     echo "  - Port-forward running (PID: $PORT_FORWARD_PID)"
 fi
@@ -392,8 +418,8 @@ fi
 echo "Next steps:"
 echo "1. Use the token for further API calls:"
 echo "   TOKEN=\$(cat $TOKEN_FILE)"
-echo '   curl -H "Authorization: Bearer $TOKEN" '$API_URL'/api/v1/health | jq'
+echo '   curl -H "Authorization: Bearer $TOKEN" '$API_URL'/api/v1/operator/targets | jq'
 echo ""
-echo "2. Implement and test cluster discovery endpoints"
-echo "3. Test scenario execution"
+echo "2. Create and run chaos scenarios on discovered clusters"
+echo "3. Test scenario execution and monitoring"
 echo ""

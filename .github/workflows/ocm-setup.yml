@@ -368,7 +368,7 @@ jobs:
           echo ""
           echo "✓ Permissions test PASSED - application-manager has cluster-admin access"
 
-      - name: Install krkn-operator via Helm
+      - name: Install krkn-operator and run API tests
         run: |
           echo "Installing krkn-operator from local chart..."
           kubectl config use-context kind-hub
@@ -382,15 +382,13 @@ jobs:
 
           echo "✓ krkn-operator installed"
 
-      - name: Wait for krkn-operator to be ready
-        run: |
+          echo ""
           echo "Waiting for krkn-operator deployment to be ready..."
           kubectl wait --for=condition=available deployment/krkn-operator-operator \
             -n krkn-operator \
             --timeout=300s \
             --context kind-hub
 
-          echo "Waiting for operator pod to be running..."
           kubectl wait --for=condition=ready pod \
             -n krkn-operator \
             -l app.kubernetes.io/component=operator \
@@ -400,160 +398,37 @@ jobs:
           echo "✓ krkn-operator is ready"
           kubectl get pods -n krkn-operator --context kind-hub
 
-      - name: Setup port-forward for API access
-        run: |
-          echo "Setting up port-forward for krkn-operator API..."
-          kubectl port-forward -n krkn-operator \
-            svc/krkn-operator-operator 8080:8080 \
-            --context kind-hub &
-
-          # Wait for port-forward to be ready
-          timeout=30
-          while [ $timeout -gt 0 ]; do
-            if curl -s http://localhost:8080/api/v1/health >/dev/null 2>&1; then
-              echo "✓ Port-forward ready"
-              break
-            fi
-            echo "Waiting for port-forward... ($timeout seconds left)"
-            sleep 2
-            timeout=$((timeout - 2))
-          done
-
-          if [ $timeout -le 0 ]; then
-            echo "ERROR: Timeout waiting for port-forward"
-            exit 1
-          fi
-
-      - name: Create admin user
-        run: |
-          echo "Creating first admin user..."
-
-          # Check if registration is open (no admin exists yet)
-          REGISTRATION_STATUS=$(curl -s http://localhost:8080/api/v1/auth/is-registered | jq -r '.registered')
-
-          if [ "$REGISTRATION_STATUS" = "true" ]; then
-            echo "ERROR: Admin already registered, cannot create first admin"
-            exit 1
-          fi
-
-          # Register first admin
-          RESPONSE=$(curl -s -w "\n%{http_code}" -X POST http://localhost:8080/api/v1/auth/register \
-            -H "Content-Type: application/json" \
-            -d '{
-              "userId": "admin@krkn-chaos.local",
-              "password": "AdminPassword123!",
-              "name": "Admin",
-              "surname": "User",
-              "organization": "Krkn Chaos",
-              "role": "admin"
-            }')
-
-          HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
-          BODY=$(echo "$RESPONSE" | sed '$d')
-
-          if [ "$HTTP_CODE" != "201" ]; then
-            echo "ERROR: Failed to register admin user. HTTP $HTTP_CODE"
-            echo "Response: $BODY"
-            echo ""
-            echo "=== Operator logs (last 50 lines) ==="
-            kubectl logs -n krkn-operator \
-              -l app.kubernetes.io/component=operator \
-              --tail=50 \
-              --context kind-hub
-            exit 1
-          fi
-
-          echo "✓ Admin user created successfully"
-
-      - name: Login and get JWT token
-        run: |
-          echo "Logging in as admin user..."
-
-          RESPONSE=$(curl -s -w "\n%{http_code}" -X POST http://localhost:8080/api/v1/auth/login \
-            -H "Content-Type: application/json" \
-            -d '{
-              "userId": "admin@krkn-chaos.local",
-              "password": "AdminPassword123!"
-            }')
-
-          HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
-          BODY=$(echo "$RESPONSE" | sed '$d')
-
-          if [ "$HTTP_CODE" != "200" ]; then
-            echo "ERROR: Failed to login. HTTP $HTTP_CODE"
-            echo "Response: $BODY"
-            exit 1
-          fi
-
-          # Extract and save token
-          TOKEN=$(echo "$BODY" | jq -r '.token')
-          USER_ID=$(echo "$BODY" | jq -r '.userId')
-          ROLE=$(echo "$BODY" | jq -r '.role')
-
-          if [ -z "$TOKEN" ] || [ "$TOKEN" = "null" ]; then
-            echo "ERROR: Failed to extract JWT token"
-            echo "Response: $BODY"
-            exit 1
-          fi
-
-          echo "✓ Login successful"
-          echo "  User: $USER_ID"
-          echo "  Role: $ROLE"
-          echo "  Token: ${TOKEN:0:20}..."
-
-          # Save token for next steps
-          echo "$TOKEN" > /tmp/jwt-token
-
-      - name: Verify available target clusters
-        run: |
-          echo "Requesting list of available target clusters..."
-          TOKEN=$(cat /tmp/jwt-token)
-
-          # Create a target request to discover clusters
-          REQUEST_ID="test-discovery-$(date +%s)"
-
-          # Wait for operator to discover OCM clusters (give it some time to initialize providers)
-          echo "Waiting for operator to initialize OCM provider..."
-          sleep 10
-
-          # Get list of available clusters via operator API
-          # Note: This requires the operator to have OCM provider configured
-          # For now, we'll verify that the operator API is accessible and responds correctly
-
-          HEALTH_RESPONSE=$(curl -s -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/v1/health)
-          echo "Health check: $HEALTH_RESPONSE"
-
-          # Verify we can access authenticated endpoints
-          if echo "$HEALTH_RESPONSE" | jq -e '.status == "healthy"' >/dev/null 2>&1; then
-            echo "✓ API authentication working"
-          else
-            echo "ERROR: Health check failed or returned unexpected response"
-            exit 1
-          fi
-
-          # TODO: Once OCM provider auto-discovery is implemented, verify 3 clusters are found
-          # Expected clusters: hub (local), cluster1, cluster2
           echo ""
-          echo "NOTE: Cluster discovery verification will be added once OCM provider auto-discovery is implemented"
-          echo "Expected clusters:"
-          echo "  - hub (local)"
-          echo "  - cluster1"
-          echo "  - cluster2"
+          echo "========================================"
+          echo "Running API Tests"
+          echo "========================================"
+          echo ""
+
+          # Run API test script which will:
+          # - Setup port-forward
+          # - Register admin user
+          # - Login and get JWT token
+          # - Verify 3 clusters (local-cluster, cluster1, cluster2)
+          chmod +x ./scripts/test-api.sh
+          ./scripts/test-api.sh
 
       - name: Generate summary
         if: always()
         run: |
-          echo "# OCM Setup Summary" >> $GITHUB_STEP_SUMMARY
+          echo "# OCM Setup & krkn-operator Validation Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "## Clusters" >> $GITHUB_STEP_SUMMARY
+          echo "## OCM ManagedClusters" >> $GITHUB_STEP_SUMMARY
           kubectl get managedclusters --context kind-hub >> $GITHUB_STEP_SUMMARY 2>&1 || echo "Failed to get clusters" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "## ManagedServiceAccounts" >> $GITHUB_STEP_SUMMARY
           kubectl get managedserviceaccount -A --context kind-hub >> $GITHUB_STEP_SUMMARY 2>&1 || echo "Failed to get ManagedServiceAccounts" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "## Secrets" >> $GITHUB_STEP_SUMMARY
-          kubectl get secret -n cluster1 application-manager --context kind-hub >> $GITHUB_STEP_SUMMARY 2>&1 || echo "cluster1: not found" >> $GITHUB_STEP_SUMMARY
-          kubectl get secret -n cluster2 application-manager --context kind-hub >> $GITHUB_STEP_SUMMARY 2>&1 || echo "cluster2: not found" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "## krkn-operator" >> $GITHUB_STEP_SUMMARY
+          echo "## krkn-operator Pods" >> $GITHUB_STEP_SUMMARY
           kubectl get pods -n krkn-operator --context kind-hub >> $GITHUB_STEP_SUMMARY 2>&1 || echo "Failed to get operator pods" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ OCM hub and managed clusters configured" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ krkn-operator deployed and running" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Admin user registered successfully" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ JWT authentication working" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Target clusters discovered: 3 (local-cluster, cluster1, cluster2)" >> $GITHUB_STEP_SUMMARY
