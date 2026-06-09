@@ -79,6 +79,12 @@ const (
 	RegistriesAvailablePath = RegistriesPath + "/available"
 )
 
+// File management endpoints
+const (
+	FilesPath          = APIBasePath + "/files"
+	FilesAvailablePath = FilesPath + "/available"
+)
+
 // Provider endpoints
 const (
 	ProvidersPath      = APIBasePath + "/providers"
