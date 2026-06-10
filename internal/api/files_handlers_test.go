@@ -638,10 +638,10 @@ func TestListAvailableFiles(t *testing.T) {
 			},
 		},
 		Spec: krknv1alpha1.KrknUserSpec{
-			UserID: "admin@test.example",
-			Name:   "Test",
+			UserID:  "admin@test.example",
+			Name:    "Test",
 			Surname: "User",
-			Role:   "user",
+			Role:    "user",
 		},
 	}
 	_ = handler.client.Create(context.Background(), user)

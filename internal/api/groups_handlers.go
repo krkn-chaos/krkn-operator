@@ -78,18 +78,13 @@ func (h *Handler) cleanupDiscoveryTargetRequest(ctx context.Context, discoveryUU
 
 // ListUserGroups handles GET /api/v1/groups
 // Lists all user groups (admin only)
+// ListUserGroups handles GET /api/v1/groups
+// Returns all groups for admin, or only user's groups for non-admin
 func (h *Handler) ListUserGroups(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	logger := log.FromContext(ctx).WithName("list-user-groups")
 
-	// Check admin privileges
-	if !auth.IsAdmin(r.Context()) {
-		writeJSONError(w, http.StatusForbidden, ErrorResponse{
-			Error:   "forbidden",
-			Message: "This operation requires admin privileges",
-		})
-		return
-	}
+	isAdmin := auth.IsAdmin(ctx)
 
 	// List all KrknUserGroup CRDs
 	var groups krknv1alpha1.KrknUserGroupList
@@ -102,13 +97,54 @@ func (h *Handler) ListUserGroups(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var filteredGroups []krknv1alpha1.KrknUserGroup
+
+	if isAdmin {
+		// Admin sees all groups
+		filteredGroups = groups.Items
+	} else {
+		// Non-admin users see only their groups
+		claims := auth.GetClaimsFromContext(ctx)
+		if claims == nil {
+			writeJSONError(w, http.StatusUnauthorized, ErrorResponse{
+				Error:   "unauthorized",
+				Message: "Authentication required",
+			})
+			return
+		}
+
+		// Get user's groups
+		userGroups, err := groupauth.GetUserGroups(ctx, h.client, claims.UserID, h.namespace)
+		if err != nil {
+			logger.Error(err, "Failed to get user groups", "userID", claims.UserID)
+			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+				Error:   "internal_error",
+				Message: "Failed to get user groups",
+			})
+			return
+		}
+
+		// Create a map of user's group names for fast lookup
+		userGroupNames := make(map[string]bool)
+		for _, ug := range userGroups {
+			userGroupNames[ug.Name] = true
+		}
+
+		// Filter groups to only include user's groups
+		for _, group := range groups.Items {
+			if userGroupNames[group.Name] {
+				filteredGroups = append(filteredGroups, group)
+			}
+		}
+	}
+
 	// Convert to response format
-	groupResponses := make([]UserGroupResponse, len(groups.Items))
-	for i, group := range groups.Items {
+	groupResponses := make([]UserGroupResponse, len(filteredGroups))
+	for i, group := range filteredGroups {
 		groupResponses[i] = buildUserGroupResponse(ctx, h.client, &group, h.namespace)
 	}
 
-	logger.Info("Listed user groups", "total", len(groupResponses))
+	logger.Info("Listed user groups", "total", len(groupResponses), "isAdmin", isAdmin)
 
 	writeJSON(w, http.StatusOK, ListUserGroupsResponse{
 		Groups: groupResponses,

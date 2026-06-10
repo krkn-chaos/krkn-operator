@@ -129,6 +129,10 @@ func NewServer(port int, client client.Client, clientset kubernetes.Interface, n
 	mux.Handle(FilesPath+"/", authMw.RequireAuth(http.HandlerFunc(handler.FilesRouter)))
 	mux.Handle(FilesAvailablePath, authMw.RequireAuth(http.HandlerFunc(handler.ListAvailableFiles)))
 
+	// File type management endpoints - all users can list/get, admin can CRUD
+	mux.Handle(FileTypesPath, authMw.RequireAuth(http.HandlerFunc(handler.FileTypesRouter)))
+	mux.Handle(FileTypesPath+"/", authMw.RequireAuth(http.HandlerFunc(handler.FileTypesRouter)))
+
 	// Provider config endpoints - admin only (POST), user and admin (GET)
 	// Note: handler.ProviderConfigHandler internally handles method-based authorization
 	mux.Handle(ProviderConfigPath, authMw.RequireAuth(http.HandlerFunc(handler.ProviderConfigHandler)))

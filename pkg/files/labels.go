@@ -20,6 +20,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/krkn-chaos/krkn-operator/pkg/filetypes"
 	"github.com/krkn-chaos/krkn-operator/pkg/groupauth"
 )
 
@@ -53,10 +54,16 @@ const (
 )
 
 // BuildFileLabels creates the labels map for a file ConfigMap
-func BuildFileLabels(groups []string, availableToAll bool) map[string]string {
+func BuildFileLabels(fileType string, groups []string, availableToAll bool) map[string]string {
 	labels := map[string]string{
 		AppNameLabel:      AppName,
 		AppComponentLabel: ComponentFile,
+	}
+
+	// Add file type label if specified
+	if fileType != "" {
+		typeLabel := filetypes.BuildFileTypeLabel(fileType)
+		labels[typeLabel] = "true"
 	}
 
 	// Add available-to-all label if specified
@@ -132,4 +139,10 @@ func ExtractGroupsFromLabels(labels map[string]string) []string {
 	}
 
 	return groups
+}
+
+// ExtractFileTypeFromLabels extracts the file type from file ConfigMap labels
+// Returns empty string if no file type label is found
+func ExtractFileTypeFromLabels(labels map[string]string) string {
+	return filetypes.ExtractFileTypeFromLabels(labels)
 }

@@ -28,6 +28,8 @@ type CreateFileRequest struct {
 	MountPath string `json:"mountPath"`
 	// Description is an optional description of the file
 	Description string `json:"description,omitempty"`
+	// FileType is an optional file type category (e.g., "config", "script")
+	FileType string `json:"fileType,omitempty"`
 	// Groups is a list of group names that can access this file
 	Groups []string `json:"groups,omitempty"`
 	// AvailableToAll makes the file accessible to all users
@@ -50,6 +52,8 @@ type UpdateFileRequest struct {
 	MountPath string `json:"mountPath"`
 	// Description is an optional description of the file
 	Description string `json:"description,omitempty"`
+	// FileType is an optional file type category (e.g., "config", "script")
+	FileType string `json:"fileType,omitempty"`
 	// Groups is a list of group names that can access this file
 	Groups []string `json:"groups,omitempty"`
 	// AvailableToAll makes the file accessible to all users
@@ -74,6 +78,7 @@ type FileResponse struct {
 	Content        string   `json:"content"`
 	MountPath      string   `json:"mountPath"`
 	Description    string   `json:"description,omitempty"`
+	FileType       string   `json:"fileType,omitempty"`
 	Groups         []string `json:"groups,omitempty"`
 	AvailableToAll bool     `json:"availableToAll"`
 	CreatedAt      string   `json:"createdAt,omitempty"`
@@ -88,6 +93,7 @@ type FileInfo struct {
 	FileName    string `json:"fileName"`
 	MountPath   string `json:"mountPath"`
 	Description string `json:"description,omitempty"`
+	FileType    string `json:"fileType,omitempty"`
 }
 
 // ListFilesResponse is the response for list files requests

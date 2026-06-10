@@ -24,12 +24,14 @@ import (
 func TestBuildFileLabels(t *testing.T) {
 	tests := []struct {
 		name           string
+		fileType       string
 		groups         []string
 		availableToAll bool
 		want           map[string]string
 	}{
 		{
 			name:           "with groups",
+			fileType:       "",
 			groups:         []string{"dev-team", "qa-team"},
 			availableToAll: false,
 			want: map[string]string{
@@ -41,6 +43,7 @@ func TestBuildFileLabels(t *testing.T) {
 		},
 		{
 			name:           "available to all",
+			fileType:       "",
 			groups:         []string{},
 			availableToAll: true,
 			want: map[string]string{
@@ -51,6 +54,7 @@ func TestBuildFileLabels(t *testing.T) {
 		},
 		{
 			name:           "no groups, not public",
+			fileType:       "",
 			groups:         []string{},
 			availableToAll: false,
 			want: map[string]string{
@@ -60,6 +64,7 @@ func TestBuildFileLabels(t *testing.T) {
 		},
 		{
 			name:           "single group",
+			fileType:       "",
 			groups:         []string{"ops-team"},
 			availableToAll: false,
 			want: map[string]string{
@@ -68,11 +73,34 @@ func TestBuildFileLabels(t *testing.T) {
 				"group.krkn.krkn-chaos.dev/ops-team": "true",
 			},
 		},
+		{
+			name:           "with file type",
+			fileType:       "config",
+			groups:         []string{},
+			availableToAll: false,
+			want: map[string]string{
+				AppNameLabel:                           AppName,
+				AppComponentLabel:                      ComponentFile,
+				"file-type.krkn.krkn-chaos.dev/config": "true",
+			},
+		},
+		{
+			name:           "with file type and groups",
+			fileType:       "script",
+			groups:         []string{"dev-team"},
+			availableToAll: false,
+			want: map[string]string{
+				AppNameLabel:                           AppName,
+				AppComponentLabel:                      ComponentFile,
+				"file-type.krkn.krkn-chaos.dev/script": "true",
+				"group.krkn.krkn-chaos.dev/dev-team":   "true",
+			},
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := BuildFileLabels(tt.groups, tt.availableToAll)
+			got := BuildFileLabels(tt.fileType, tt.groups, tt.availableToAll)
 
 			// Check all expected labels are present
 			for key, wantValue := range tt.want {

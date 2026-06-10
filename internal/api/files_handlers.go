@@ -61,8 +61,19 @@ func (h *Handler) CreateFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Get current user info
+	claims := auth.GetClaimsFromContext(ctx)
+	if claims == nil {
+		writeJSONError(w, http.StatusUnauthorized, ErrorResponse{
+			Error:   "unauthorized",
+			Message: "Authentication required",
+		})
+		return
+	}
+	isAdmin := auth.IsAdmin(ctx)
+
 	// Validate request
-	if err := validateCreateFileRequest(ctx, h.client, &req, h.namespace); err != nil {
+	if err := validateCreateFileRequest(ctx, h.client, &req, h.namespace, isAdmin, claims.UserID); err != nil {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
 			Error:   "bad_request",
 			Message: err.Error(),
@@ -80,14 +91,18 @@ func (h *Handler) CreateFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get current user for audit trail
-	claims := auth.GetClaimsFromContext(ctx)
-	createdBy := ""
-	if claims != nil {
-		createdBy = claims.UserID
+	createdBy := claims.UserID
+
+	// Auto-create file type if specified and doesn't exist
+	if req.FileType != "" {
+		if err := h.ensureFileTypeExists(ctx, req.FileType, createdBy); err != nil {
+			logger.Error(err, "Failed to ensure file type exists", "fileType", req.FileType)
+			// Continue anyway - file type is optional metadata
+		}
 	}
 
 	// Build labels and annotations
-	labels := files.BuildFileLabels(req.Groups, req.AvailableToAll)
+	labels := files.BuildFileLabels(req.FileType, req.Groups, req.AvailableToAll)
 	annotations := files.BuildFileAnnotations(
 		req.MountPath,
 		req.Description,
@@ -173,18 +188,11 @@ func (h *Handler) ListFiles(w http.ResponseWriter, r *http.Request) {
 
 // GetFile handles GET /api/v1/files/{name}
 // Returns a single file (admin only)
+// GetFile handles GET /api/v1/files/{name}
+// Gets a single file (authenticated users with access)
 func (h *Handler) GetFile(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	logger := log.FromContext(ctx).WithName("get-file")
-
-	// Check admin privileges
-	if !auth.IsAdmin(ctx) {
-		writeJSONError(w, http.StatusForbidden, ErrorResponse{
-			Error:   "forbidden",
-			Message: "This operation requires admin privileges",
-		})
-		return
-	}
 
 	// Extract file name from path
 	fileName, err := extractPathSuffix(r.URL.Path, FilesPath+"/")
@@ -212,6 +220,18 @@ func (h *Handler) GetFile(w http.ResponseWriter, r *http.Request) {
 			})
 		}
 		return
+	}
+
+	// Check access permissions
+	// Admin can read any file, users can only read files they have access to
+	if !auth.IsAdmin(ctx) {
+		if !h.canAccessFile(ctx, configMap) {
+			writeJSONError(w, http.StatusForbidden, ErrorResponse{
+				Error:   "forbidden",
+				Message: "You do not have access to this file",
+			})
+			return
+		}
 	}
 
 	logger.Info("Retrieved file", "fileName", fileName)
@@ -253,8 +273,19 @@ func (h *Handler) UpdateFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Get current user info
+	claims := auth.GetClaimsFromContext(ctx)
+	if claims == nil {
+		writeJSONError(w, http.StatusUnauthorized, ErrorResponse{
+			Error:   "unauthorized",
+			Message: "Authentication required",
+		})
+		return
+	}
+	isAdmin := auth.IsAdmin(ctx)
+
 	// Validate request
-	if err := validateUpdateFileRequest(ctx, h.client, &req, h.namespace); err != nil {
+	if err := validateUpdateFileRequest(ctx, h.client, &req, h.namespace, isAdmin, claims.UserID); err != nil {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
 			Error:   "bad_request",
 			Message: err.Error(),
@@ -281,14 +312,18 @@ func (h *Handler) UpdateFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get current user for audit trail
-	claims := auth.GetClaimsFromContext(ctx)
-	updatedBy := ""
-	if claims != nil {
-		updatedBy = claims.UserID
+	updatedBy := claims.UserID
+
+	// Auto-create file type if specified and doesn't exist
+	if req.FileType != "" {
+		if err := h.ensureFileTypeExists(ctx, req.FileType, updatedBy); err != nil {
+			logger.Error(err, "Failed to ensure file type exists", "fileType", req.FileType)
+			// Continue anyway - file type is optional metadata
+		}
 	}
 
 	// Update labels and annotations
-	configMap.Labels = files.BuildFileLabels(req.Groups, req.AvailableToAll)
+	configMap.Labels = files.BuildFileLabels(req.FileType, req.Groups, req.AvailableToAll)
 	configMap.Annotations = files.UpdateFileAnnotations(
 		configMap.Annotations,
 		req.MountPath,
@@ -622,6 +657,7 @@ func buildFileResponse(configMap *corev1.ConfigMap) files.FileResponse {
 		Content:        content,
 		MountPath:      configMap.Annotations[files.MountPathAnnotation],
 		Description:    configMap.Annotations[files.DescriptionAnnotation],
+		FileType:       files.ExtractFileTypeFromLabels(configMap.Labels),
 		Groups:         files.ExtractGroupsFromLabels(configMap.Labels),
 		AvailableToAll: configMap.Labels[files.AvailableToAllLabel] == "true",
 		CreatedAt:      configMap.Annotations[files.CreatedAtAnnotation],
@@ -645,11 +681,12 @@ func buildFileInfo(configMap *corev1.ConfigMap) files.FileInfo {
 		FileName:    fileName,
 		MountPath:   configMap.Annotations[files.MountPathAnnotation],
 		Description: configMap.Annotations[files.DescriptionAnnotation],
+		FileType:    files.ExtractFileTypeFromLabels(configMap.Labels),
 	}
 }
 
 // validateCreateFileRequest validates a CreateFileRequest
-func validateCreateFileRequest(ctx context.Context, k8sClient client.Client, req *files.CreateFileRequest, namespace string) error {
+func validateCreateFileRequest(ctx context.Context, k8sClient client.Client, req *files.CreateFileRequest, namespace string, isAdmin bool, userID string) error {
 	// Validate name (RFC 1123 subdomain)
 	if req.Name == "" {
 		return fmt.Errorf("name is required")
@@ -660,14 +697,41 @@ func validateCreateFileRequest(ctx context.Context, k8sClient client.Client, req
 		return fmt.Errorf("fileName is required")
 	}
 
-	// Validate content
+	// Validate content is not empty
 	if req.Content == "" {
 		return fmt.Errorf("content is required")
+	}
+
+	// Validate content is valid JSON or YAML
+	if err := files.ValidateFileContent(req.Content); err != nil {
+		return err
 	}
 
 	// Validate mount path
 	if req.MountPath == "" {
 		return fmt.Errorf("mountPath is required")
+	}
+
+	// Validate file groups (max 1, mutually exclusive with availableToAll)
+	if err := files.ValidateFileGroups(req.Groups, req.AvailableToAll); err != nil {
+		return err
+	}
+
+	// Get user's groups for permission validation
+	userGroupsObjs, err := groupauth.GetUserGroups(ctx, k8sClient, userID, namespace)
+	if err != nil {
+		return fmt.Errorf("failed to get user groups: %w", err)
+	}
+
+	// Extract group names
+	userGroups := make([]string, len(userGroupsObjs))
+	for i, ug := range userGroupsObjs {
+		userGroups[i] = ug.Name
+	}
+
+	// Validate user permissions (non-admin can assign to their own group or make public)
+	if err := files.ValidateUserFilePermissions(isAdmin, req.Groups, req.AvailableToAll, userGroups); err != nil {
+		return err
 	}
 
 	// Validate groups exist
@@ -689,20 +753,47 @@ func validateCreateFileRequest(ctx context.Context, k8sClient client.Client, req
 }
 
 // validateUpdateFileRequest validates an UpdateFileRequest
-func validateUpdateFileRequest(ctx context.Context, k8sClient client.Client, req *files.UpdateFileRequest, namespace string) error {
+func validateUpdateFileRequest(ctx context.Context, k8sClient client.Client, req *files.UpdateFileRequest, namespace string, isAdmin bool, userID string) error {
 	// Validate file name
 	if req.FileName == "" {
 		return fmt.Errorf("fileName is required")
 	}
 
-	// Validate content
+	// Validate content is not empty
 	if req.Content == "" {
 		return fmt.Errorf("content is required")
+	}
+
+	// Validate content is valid JSON or YAML
+	if err := files.ValidateFileContent(req.Content); err != nil {
+		return err
 	}
 
 	// Validate mount path
 	if req.MountPath == "" {
 		return fmt.Errorf("mountPath is required")
+	}
+
+	// Validate file groups (max 1, mutually exclusive with availableToAll)
+	if err := files.ValidateFileGroups(req.Groups, req.AvailableToAll); err != nil {
+		return err
+	}
+
+	// Get user's groups for permission validation
+	userGroupsObjs, err := groupauth.GetUserGroups(ctx, k8sClient, userID, namespace)
+	if err != nil {
+		return fmt.Errorf("failed to get user groups: %w", err)
+	}
+
+	// Extract group names
+	userGroups := make([]string, len(userGroupsObjs))
+	for i, ug := range userGroupsObjs {
+		userGroups[i] = ug.Name
+	}
+
+	// Validate user permissions (non-admin can assign to their own group or make public)
+	if err := files.ValidateUserFilePermissions(isAdmin, req.Groups, req.AvailableToAll, userGroups); err != nil {
+		return err
 	}
 
 	// Validate groups exist
@@ -720,5 +811,46 @@ func validateUpdateFileRequest(ctx context.Context, k8sClient client.Client, req
 		}
 	}
 
+	return nil
+}
+
+// ensureFileTypeExists creates a KrknFileType if it doesn't exist (auto-creation pattern).
+// This allows users to use file types without having to create them explicitly first.
+// If the type already exists, this is a no-op.
+func (h *Handler) ensureFileTypeExists(ctx context.Context, typeName, createdBy string) error {
+	logger := log.FromContext(ctx).WithName("ensure-file-type")
+
+	var fileType krknv1alpha1.KrknFileType
+	err := h.client.Get(ctx, client.ObjectKey{
+		Name:      typeName,
+		Namespace: h.namespace,
+	}, &fileType)
+
+	if err == nil {
+		// Already exists
+		return nil
+	}
+
+	if !apierrors.IsNotFound(err) {
+		return fmt.Errorf("failed to check file type existence: %w", err)
+	}
+
+	// Create new file type with defaults (empty color = UI will use defaults)
+	newType := &krknv1alpha1.KrknFileType{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      typeName,
+			Namespace: h.namespace,
+		},
+		Spec: krknv1alpha1.KrknFileTypeSpec{
+			Name:  typeName,
+			Color: "", // Empty = use UI default
+		},
+	}
+
+	if err := h.client.Create(ctx, newType); err != nil {
+		return fmt.Errorf("failed to auto-create file type: %w", err)
+	}
+
+	logger.Info("Auto-created file type", "typeName", typeName, "createdBy", createdBy)
 	return nil
 }
