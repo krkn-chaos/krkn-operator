@@ -114,14 +114,30 @@ func TestListUserGroups_Forbidden(t *testing.T) {
 	fakeClientset := fake.NewSimpleClientset()
 	handler := NewTestHandler(fakeClient, fakeClientset, "default", "localhost:50051")
 
+	// Create KrknUser for the test (required for GetUserGroups)
+	user := &krknv1alpha1.KrknUser{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "krknuser-user-example-com",
+			Namespace: "default",
+		},
+		Spec: krknv1alpha1.KrknUserSpec{
+			UserID:  "user@example.com",
+			Name:    "Test",
+			Surname: "User",
+			Role:    "user",
+		},
+	}
+	_ = fakeClient.Create(context.Background(), user)
+
 	req := httptest.NewRequest("GET", GroupsPath, nil)
 	req = req.WithContext(createUserContext("user@example.com")) // Non-admin user
 	w := httptest.NewRecorder()
 
 	handler.ListUserGroups(w, req)
 
-	if w.Code != http.StatusForbidden {
-		t.Errorf("Expected status %d, got %d", http.StatusForbidden, w.Code)
+	// Non-admin users now get filtered results (their own groups), not forbidden
+	if w.Code != http.StatusOK {
+		t.Errorf("Expected status %d, got %d. Body: %s", http.StatusOK, w.Code, w.Body.String())
 	}
 }
 

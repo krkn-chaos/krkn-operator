@@ -79,25 +79,29 @@ func TestCreateFile(t *testing.T) {
 	handler := setupFilesTestHandler()
 
 	tests := []struct {
-		name         string
-		request      files.CreateFileRequest
-		setupGroups  []string
-		expectStatus int
-		expectInDB   bool
-		isAdmin      bool
+		name           string
+		request        files.CreateFileRequest
+		setupGroups    []string
+		userGroups     []string // Groups the test user belongs to
+		userID         string
+		expectStatus   int
+		expectInDB     bool
+		isAdmin        bool
 	}{
 		{
 			name: "create file successfully",
 			request: files.CreateFileRequest{
 				Name:           "test-config",
 				FileName:       "app.conf",
-				Content:        "server=localhost\nport=8080",
+				Content:        "{\"server\": \"localhost\", \"port\": 8080}",
 				MountPath:      "/etc/app/config",
 				Description:    "Application configuration",
 				Groups:         []string{},
 				AvailableToAll: true,
 			},
 			setupGroups:  []string{},
+			userGroups:   []string{},
+			userID:       "admin@test.example",
 			expectStatus: http.StatusCreated,
 			expectInDB:   true,
 			isAdmin:      true,
@@ -119,16 +123,16 @@ func TestCreateFile(t *testing.T) {
 			isAdmin:      true,
 		},
 		{
-			name: "fail for non-admin",
+			name: "user can create public file",
 			request: files.CreateFileRequest{
 				Name:           "user-config",
-				FileName:       "config.txt",
-				Content:        "data",
+				FileName:       "config.yaml",
+				Content:        "{\"key\": \"value\"}",
 				MountPath:      "/tmp/config",
 				AvailableToAll: true,
 			},
-			expectStatus: http.StatusForbidden,
-			expectInDB:   false,
+			expectStatus: http.StatusCreated,
+			expectInDB:   true,
 			isAdmin:      false,
 		},
 		{
@@ -180,9 +184,64 @@ func TestCreateFile(t *testing.T) {
 				Groups:         []string{"non-existent-group"},
 				AvailableToAll: false,
 			},
+			setupGroups:  []string{},
+			userGroups:   []string{},
+			userID:       "admin@test.example",
 			expectStatus: http.StatusBadRequest,
 			expectInDB:   false,
 			isAdmin:      true,
+		},
+		{
+			name: "user can create file for own group",
+			request: files.CreateFileRequest{
+				Name:           "team-file",
+				FileName:       "team.yaml",
+				Content:        "{\"team\": \"data\"}",
+				MountPath:      "/var/team",
+				Description:    "Team file",
+				Groups:         []string{"dev-team"},
+				AvailableToAll: false,
+			},
+			setupGroups:  []string{"dev-team"},
+			userGroups:   []string{"dev-team"},
+			userID:       "user@test.example",
+			expectStatus: http.StatusCreated,
+			expectInDB:   true,
+			isAdmin:      false,
+		},
+		{
+			name: "user cannot create file for other group",
+			request: files.CreateFileRequest{
+				Name:           "other-file",
+				FileName:       "other.yaml",
+				Content:        "{\"data\": \"value\"}",
+				MountPath:      "/var/other",
+				Groups:         []string{"ops-team"},
+				AvailableToAll: false,
+			},
+			setupGroups:  []string{"dev-team", "ops-team"},
+			userGroups:   []string{"dev-team"},
+			userID:       "user@test.example",
+			expectStatus: http.StatusBadRequest, // Validation fails
+			expectInDB:   false,
+			isAdmin:      false,
+		},
+		{
+			name: "user can create public file",
+			request: files.CreateFileRequest{
+				Name:           "public-file",
+				FileName:       "public.json",
+				Content:        "[1, 2, 3]",
+				MountPath:      "/var/public",
+				Description:    "Public file",
+				AvailableToAll: true,
+			},
+			setupGroups:  []string{},
+			userGroups:   []string{"dev-team"},
+			userID:       "user@test.example",
+			expectStatus: http.StatusCreated,
+			expectInDB:   true,
+			isAdmin:      false,
 		},
 	}
 
@@ -203,12 +262,46 @@ func TestCreateFile(t *testing.T) {
 				_ = handler.client.Create(context.Background(), group)
 			}
 
+			// Setup user (always create user for validation)
+			if tt.userID != "" {
+				// Create KrknUser with group labels
+				userLabels := map[string]string{}
+				for _, groupName := range tt.userGroups {
+					labelKey := "group.krkn.krkn-chaos.dev/" + groupName
+					userLabels[labelKey] = "true"
+				}
+
+				userName := "krknuser-" + sanitizeUserID(tt.userID)
+				role := "user"
+				if tt.isAdmin {
+					role = "admin"
+				}
+				user := &krknv1alpha1.KrknUser{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      userName,
+						Namespace: handler.namespace,
+						Labels:    userLabels,
+					},
+					Spec: krknv1alpha1.KrknUserSpec{
+						UserID:  tt.userID,
+						Name:    "Test",
+						Surname: "User",
+						Role:    role,
+					},
+				}
+				_ = handler.client.Create(context.Background(), user)
+			}
+
 			body, _ := json.Marshal(tt.request)
 			req := httptest.NewRequest(http.MethodPost, FilesPath, bytes.NewReader(body))
+			userID := tt.userID
+			if userID == "" {
+				userID = "admin@test.example"
+			}
 			if tt.isAdmin {
 				req = addAdminContext(req)
 			} else {
-				req = addUserContext(req, "admin@test.example")
+				req = addUserContext(req, userID)
 			}
 			w := httptest.NewRecorder()
 
@@ -450,7 +543,7 @@ func TestUpdateFile(t *testing.T) {
 
 	updateReq := files.UpdateFileRequest{
 		FileName:       "new.yaml",
-		Content:        "new content",
+		Content:        "{\"updated\": true}",
 		MountPath:      "/new/path",
 		Description:    "Updated file",
 		AvailableToAll: true,
@@ -460,13 +553,18 @@ func TestUpdateFile(t *testing.T) {
 		name         string
 		fileName     string
 		request      files.UpdateFileRequest
+		setupFile    *corev1.ConfigMap
+		userGroups   []string
+		userID       string
 		isAdmin      bool
 		expectStatus int
 	}{
 		{
-			name:         "update file successfully",
+			name:         "update file successfully as admin",
 			fileName:     "test-file",
 			request:      updateReq,
+			userGroups:   []string{},
+			userID:       "admin@test.example",
 			isAdmin:      true,
 			expectStatus: http.StatusOK,
 		},
@@ -474,26 +572,143 @@ func TestUpdateFile(t *testing.T) {
 			name:         "update non-existent file",
 			fileName:     "non-existent",
 			request:      updateReq,
+			userGroups:   []string{},
+			userID:       "admin@test.example",
 			isAdmin:      true,
 			expectStatus: http.StatusNotFound,
 		},
 		{
-			name:         "non-admin forbidden",
-			fileName:     "test-file",
-			request:      updateReq,
+			name:     "user can update file from own group",
+			fileName: "team-file",
+			request:  updateReq,
+			setupFile: &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "team-file",
+					Namespace: handler.namespace,
+					Labels: map[string]string{
+						files.AppNameLabel:      files.AppName,
+						files.AppComponentLabel: files.ComponentFile,
+						"group.krkn.krkn-chaos.dev/dev-team": "true",
+					},
+				},
+				Data: map[string]string{
+					"old.txt": "old content",
+				},
+			},
+			userGroups:   []string{"dev-team"},
+			userID:       "user@test.example",
+			isAdmin:      false,
+			expectStatus: http.StatusOK,
+		},
+		{
+			name:     "user cannot update file from other group",
+			fileName: "ops-file",
+			request:  updateReq,
+			setupFile: &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "ops-file",
+					Namespace: handler.namespace,
+					Labels: map[string]string{
+						files.AppNameLabel:      files.AppName,
+						files.AppComponentLabel: files.ComponentFile,
+						"group.krkn.krkn-chaos.dev/ops-team": "true",
+					},
+				},
+				Data: map[string]string{
+					"old.txt": "old content",
+				},
+			},
+			userGroups:   []string{"dev-team"},
+			userID:       "user@test.example",
 			isAdmin:      false,
 			expectStatus: http.StatusForbidden,
+		},
+		{
+			name:     "user can update public file",
+			fileName: "public-file",
+			request:  updateReq,
+			setupFile: &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "public-file",
+					Namespace: handler.namespace,
+					Labels: map[string]string{
+						files.AppNameLabel:          files.AppName,
+						files.AppComponentLabel:     files.ComponentFile,
+						files.AvailableToAllLabel:   "true",
+					},
+				},
+				Data: map[string]string{
+					"old.txt": "old content",
+				},
+			},
+			userGroups:   []string{"dev-team"},
+			userID:       "user@test.example",
+			isAdmin:      false,
+			expectStatus: http.StatusOK,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			// Setup custom file if specified
+			if tt.setupFile != nil {
+				_ = handler.client.Create(context.Background(), tt.setupFile)
+			}
+
+			// Setup user groups and user (always create user for validation)
+			if tt.userID != "" {
+				// Create groups
+				for _, groupName := range tt.userGroups {
+					group := &krknv1alpha1.KrknUserGroup{
+						ObjectMeta: metav1.ObjectMeta{
+							Name:      groupName,
+							Namespace: handler.namespace,
+						},
+						Spec: krknv1alpha1.KrknUserGroupSpec{
+							Name: groupName,
+						},
+					}
+					_ = handler.client.Create(context.Background(), group)
+				}
+
+				// Create user with group labels
+				userLabels := map[string]string{}
+				for _, groupName := range tt.userGroups {
+					labelKey := "group.krkn.krkn-chaos.dev/" + groupName
+					userLabels[labelKey] = "true"
+				}
+
+				userName := "krknuser-" + sanitizeUserID(tt.userID)
+				role := "user"
+				if tt.isAdmin {
+					role = "admin"
+				}
+				user := &krknv1alpha1.KrknUser{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      userName,
+						Namespace: handler.namespace,
+						Labels:    userLabels,
+					},
+					Spec: krknv1alpha1.KrknUserSpec{
+						UserID:  tt.userID,
+						Name:    "Test",
+						Surname: "User",
+						Role:    role,
+					},
+				}
+				_ = handler.client.Create(context.Background(), user)
+			}
+
 			body, _ := json.Marshal(tt.request)
 			req := httptest.NewRequest(http.MethodPut, FilesPath+"/"+tt.fileName, bytes.NewReader(body))
+			userID := tt.userID
+			if userID == "" {
+				userID = "admin@test.example"
+			}
 			if tt.isAdmin {
 				req = addAdminContext(req)
 			} else {
-				req = addUserContext(req, "admin@test.example")
+				req = addUserContext(req, userID)
 			}
 			w := httptest.NewRecorder()
 
@@ -554,36 +769,156 @@ func TestDeleteFile(t *testing.T) {
 	tests := []struct {
 		name         string
 		fileName     string
+		setupFile    *corev1.ConfigMap
+		userGroups   []string
+		userID       string
 		isAdmin      bool
 		expectStatus int
 	}{
 		{
-			name:         "delete file successfully",
+			name:         "delete file successfully as admin",
 			fileName:     "delete-me",
+			userGroups:   []string{},
+			userID:       "admin@test.example",
 			isAdmin:      true,
 			expectStatus: http.StatusOK,
 		},
 		{
 			name:         "delete non-existent file",
 			fileName:     "non-existent",
+			userGroups:   []string{},
+			userID:       "admin@test.example",
 			isAdmin:      true,
 			expectStatus: http.StatusNotFound,
 		},
 		{
-			name:         "non-admin forbidden",
-			fileName:     "delete-me",
+			name:     "user can delete file from own group",
+			fileName: "team-file",
+			setupFile: &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "team-file",
+					Namespace: handler.namespace,
+					Labels: map[string]string{
+						files.AppNameLabel:      files.AppName,
+						files.AppComponentLabel: files.ComponentFile,
+						"group.krkn.krkn-chaos.dev/dev-team": "true",
+					},
+				},
+				Data: map[string]string{
+					"file.txt": "content",
+				},
+			},
+			userGroups:   []string{"dev-team"},
+			userID:       "user@test.example",
+			isAdmin:      false,
+			expectStatus: http.StatusOK,
+		},
+		{
+			name:     "user cannot delete file from other group",
+			fileName: "ops-file",
+			setupFile: &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "ops-file",
+					Namespace: handler.namespace,
+					Labels: map[string]string{
+						files.AppNameLabel:      files.AppName,
+						files.AppComponentLabel: files.ComponentFile,
+						"group.krkn.krkn-chaos.dev/ops-team": "true",
+					},
+				},
+				Data: map[string]string{
+					"file.txt": "content",
+				},
+			},
+			userGroups:   []string{"dev-team"},
+			userID:       "user@test.example",
 			isAdmin:      false,
 			expectStatus: http.StatusForbidden,
+		},
+		{
+			name:     "user can delete public file",
+			fileName: "public-file",
+			setupFile: &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "public-file",
+					Namespace: handler.namespace,
+					Labels: map[string]string{
+						files.AppNameLabel:        files.AppName,
+						files.AppComponentLabel:   files.ComponentFile,
+						files.AvailableToAllLabel: "true",
+					},
+				},
+				Data: map[string]string{
+					"file.txt": "content",
+				},
+			},
+			userGroups:   []string{"dev-team"},
+			userID:       "user@test.example",
+			isAdmin:      false,
+			expectStatus: http.StatusOK,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			// Setup custom file if specified
+			if tt.setupFile != nil {
+				_ = handler.client.Create(context.Background(), tt.setupFile)
+			}
+
+			// Setup user groups and user (always create user for validation)
+			if tt.userID != "" {
+				// Create groups
+				for _, groupName := range tt.userGroups {
+					group := &krknv1alpha1.KrknUserGroup{
+						ObjectMeta: metav1.ObjectMeta{
+							Name:      groupName,
+							Namespace: handler.namespace,
+						},
+						Spec: krknv1alpha1.KrknUserGroupSpec{
+							Name: groupName,
+						},
+					}
+					_ = handler.client.Create(context.Background(), group)
+				}
+
+				// Create user with group labels
+				userLabels := map[string]string{}
+				for _, groupName := range tt.userGroups {
+					labelKey := "group.krkn.krkn-chaos.dev/" + groupName
+					userLabels[labelKey] = "true"
+				}
+
+				userName := "krknuser-" + sanitizeUserID(tt.userID)
+				role := "user"
+				if tt.isAdmin {
+					role = "admin"
+				}
+				user := &krknv1alpha1.KrknUser{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      userName,
+						Namespace: handler.namespace,
+						Labels:    userLabels,
+					},
+					Spec: krknv1alpha1.KrknUserSpec{
+						UserID:  tt.userID,
+						Name:    "Test",
+						Surname: "User",
+						Role:    role,
+					},
+				}
+				_ = handler.client.Create(context.Background(), user)
+			}
+
 			req := httptest.NewRequest(http.MethodDelete, FilesPath+"/"+tt.fileName, nil)
+			userID := tt.userID
+			if userID == "" {
+				userID = "admin@test.example"
+			}
 			if tt.isAdmin {
 				req = addAdminContext(req)
 			} else {
-				req = addUserContext(req, "admin@test.example")
+				req = addUserContext(req, userID)
 			}
 			w := httptest.NewRecorder()
 

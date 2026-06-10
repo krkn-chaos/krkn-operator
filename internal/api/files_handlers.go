@@ -37,19 +37,12 @@ import (
 )
 
 // CreateFile handles POST /api/v1/files
-// Creates a new file ConfigMap (admin only)
+// Creates a new file ConfigMap (authenticated users)
+// Users can create files for their own groups or public files
+// Admins can create files for any group
 func (h *Handler) CreateFile(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	logger := log.FromContext(ctx).WithName("create-file")
-
-	// Check admin privileges
-	if !auth.IsAdmin(ctx) {
-		writeJSONError(w, http.StatusForbidden, ErrorResponse{
-			Error:   "forbidden",
-			Message: "This operation requires admin privileges",
-		})
-		return
-	}
 
 	// Parse request body
 	var req files.CreateFileRequest
@@ -239,19 +232,12 @@ func (h *Handler) GetFile(w http.ResponseWriter, r *http.Request) {
 }
 
 // UpdateFile handles PUT /api/v1/files/{name}
-// Updates a file (admin only)
+// Updates a file (authenticated users with access)
+// Users can update files from their own groups
+// Admins can update any file
 func (h *Handler) UpdateFile(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	logger := log.FromContext(ctx).WithName("update-file")
-
-	// Check admin privileges
-	if !auth.IsAdmin(ctx) {
-		writeJSONError(w, http.StatusForbidden, ErrorResponse{
-			Error:   "forbidden",
-			Message: "This operation requires admin privileges",
-		})
-		return
-	}
 
 	// Extract file name from path
 	fileName, err := extractPathSuffix(r.URL.Path, FilesPath+"/")
@@ -311,6 +297,17 @@ func (h *Handler) UpdateFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Check access permissions - users can only update files they have access to
+	if !isAdmin {
+		if !h.canAccessFile(ctx, configMap) {
+			writeJSONError(w, http.StatusForbidden, ErrorResponse{
+				Error:   "forbidden",
+				Message: "You do not have access to this file",
+			})
+			return
+		}
+	}
+
 	// Get current user for audit trail
 	updatedBy := claims.UserID
 
@@ -354,19 +351,12 @@ func (h *Handler) UpdateFile(w http.ResponseWriter, r *http.Request) {
 }
 
 // DeleteFile handles DELETE /api/v1/files/{name}
-// Deletes a file (admin only)
+// Deletes a file (authenticated users with access)
+// Users can delete files from their own groups
+// Admins can delete any file
 func (h *Handler) DeleteFile(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	logger := log.FromContext(ctx).WithName("delete-file")
-
-	// Check admin privileges
-	if !auth.IsAdmin(ctx) {
-		writeJSONError(w, http.StatusForbidden, ErrorResponse{
-			Error:   "forbidden",
-			Message: "This operation requires admin privileges",
-		})
-		return
-	}
 
 	// Extract file name from path
 	fileName, err := extractPathSuffix(r.URL.Path, FilesPath+"/")
@@ -394,6 +384,18 @@ func (h *Handler) DeleteFile(w http.ResponseWriter, r *http.Request) {
 			})
 		}
 		return
+	}
+
+	// Check access permissions - users can only delete files they have access to
+	isAdmin := auth.IsAdmin(ctx)
+	if !isAdmin {
+		if !h.canAccessFile(ctx, configMap) {
+			writeJSONError(w, http.StatusForbidden, ErrorResponse{
+				Error:   "forbidden",
+				Message: "You do not have access to this file",
+			})
+			return
+		}
 	}
 
 	// Delete ConfigMap
