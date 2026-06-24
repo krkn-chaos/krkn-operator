@@ -125,25 +125,21 @@ func TestBuildFileLabels(t *testing.T) {
 func TestBuildFileAnnotations(t *testing.T) {
 	tests := []struct {
 		name        string
-		mountPath   string
 		description string
 		createdBy   string
 	}{
 		{
 			name:        "full configuration",
-			mountPath:   "/etc/config/app.conf",
 			description: "Application configuration file",
 			createdBy:   "admin@example.com",
 		},
 		{
 			name:        "minimal configuration",
-			mountPath:   "/tmp/data.txt",
 			description: "",
 			createdBy:   "user@example.com",
 		},
 		{
 			name:        "with description",
-			mountPath:   "/var/lib/app/settings.yaml",
 			description: "Service settings",
 			createdBy:   "ops@example.com",
 		},
@@ -152,15 +148,11 @@ func TestBuildFileAnnotations(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := BuildFileAnnotations(
-				tt.mountPath,
 				tt.description,
 				tt.createdBy,
 			)
 
 			// Check required annotations
-			if got[MountPathAnnotation] != tt.mountPath {
-				t.Errorf("MountPathAnnotation = %v, want %v", got[MountPathAnnotation], tt.mountPath)
-			}
 			if got[CreatedByAnnotation] != tt.createdBy {
 				t.Errorf("CreatedByAnnotation = %v, want %v", got[CreatedByAnnotation], tt.createdBy)
 			}
@@ -192,7 +184,6 @@ func TestBuildFileAnnotations(t *testing.T) {
 
 func TestUpdateFileAnnotations(t *testing.T) {
 	existing := map[string]string{
-		MountPathAnnotation:   "/old/path/file.txt",
 		DescriptionAnnotation: "Old description",
 		CreatedByAnnotation:   "admin@example.com",
 		CreatedAtAnnotation:   "2025-01-01T00:00:00Z",
@@ -201,28 +192,24 @@ func TestUpdateFileAnnotations(t *testing.T) {
 	tests := []struct {
 		name        string
 		existing    map[string]string
-		mountPath   string
 		description string
 		updatedBy   string
 	}{
 		{
 			name:        "update all fields",
 			existing:    existing,
-			mountPath:   "/new/path/file.txt",
 			description: "New description",
 			updatedBy:   "user@example.com",
 		},
 		{
 			name:        "remove description",
 			existing:    existing,
-			mountPath:   "/another/path/config.yaml",
 			description: "",
 			updatedBy:   "admin@example.com",
 		},
 		{
-			name:        "update mount path only",
+			name:        "update description only",
 			existing:    existing,
-			mountPath:   "/updated/file.conf",
 			description: "Same description",
 			updatedBy:   "ops@example.com",
 		},
@@ -232,15 +219,11 @@ func TestUpdateFileAnnotations(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			got := UpdateFileAnnotations(
 				tt.existing,
-				tt.mountPath,
 				tt.description,
 				tt.updatedBy,
 			)
 
 			// Check updated fields
-			if got[MountPathAnnotation] != tt.mountPath {
-				t.Errorf("MountPathAnnotation = %v, want %v", got[MountPathAnnotation], tt.mountPath)
-			}
 			if got[UpdatedByAnnotation] != tt.updatedBy {
 				t.Errorf("UpdatedByAnnotation = %v, want %v", got[UpdatedByAnnotation], tt.updatedBy)
 			}

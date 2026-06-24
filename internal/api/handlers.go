@@ -521,7 +521,6 @@ func convertInputFields(fields []typing.InputField) []InputFieldResponse {
 			Separator:         field.Separator,
 			AllowedValues:     field.AllowedValues,
 			Required:          field.Required,
-			MountPath:         field.MountPath,
 			Requires:          field.Requires,
 			MutuallyExcludes:  field.MutuallyExcludes,
 			Secret:            field.Secret,

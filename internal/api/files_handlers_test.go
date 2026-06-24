@@ -79,14 +79,14 @@ func TestCreateFile(t *testing.T) {
 	handler := setupFilesTestHandler()
 
 	tests := []struct {
-		name           string
-		request        files.CreateFileRequest
-		setupGroups    []string
-		userGroups     []string // Groups the test user belongs to
-		userID         string
-		expectStatus   int
-		expectInDB     bool
-		isAdmin        bool
+		name         string
+		request      files.CreateFileRequest
+		setupGroups  []string
+		userGroups   []string // Groups the test user belongs to
+		userID       string
+		expectStatus int
+		expectInDB   bool
+		isAdmin      bool
 	}{
 		{
 			name: "create file successfully",
@@ -94,7 +94,6 @@ func TestCreateFile(t *testing.T) {
 				Name:           "test-config",
 				FileName:       "app.conf",
 				Content:        "{\"server\": \"localhost\", \"port\": 8080}",
-				MountPath:      "/etc/app/config",
 				Description:    "Application configuration",
 				Groups:         []string{},
 				AvailableToAll: true,
@@ -112,7 +111,6 @@ func TestCreateFile(t *testing.T) {
 				Name:           "team-config",
 				FileName:       "settings.yaml",
 				Content:        "key: value",
-				MountPath:      "/var/lib/settings",
 				Description:    "Team settings",
 				Groups:         []string{"dev-team"},
 				AvailableToAll: false,
@@ -128,7 +126,6 @@ func TestCreateFile(t *testing.T) {
 				Name:           "user-config",
 				FileName:       "config.yaml",
 				Content:        "{\"key\": \"value\"}",
-				MountPath:      "/tmp/config",
 				AvailableToAll: true,
 			},
 			expectStatus: http.StatusCreated,
@@ -141,7 +138,6 @@ func TestCreateFile(t *testing.T) {
 				Name:           "",
 				FileName:       "file.txt",
 				Content:        "content",
-				MountPath:      "/path",
 				AvailableToAll: true,
 			},
 			expectStatus: http.StatusBadRequest,
@@ -154,7 +150,6 @@ func TestCreateFile(t *testing.T) {
 				Name:           "test-file",
 				FileName:       "",
 				Content:        "content",
-				MountPath:      "/path",
 				AvailableToAll: true,
 			},
 			expectStatus: http.StatusBadRequest,
@@ -167,7 +162,6 @@ func TestCreateFile(t *testing.T) {
 				Name:           "test-file",
 				FileName:       "file.txt",
 				Content:        "",
-				MountPath:      "/path",
 				AvailableToAll: true,
 			},
 			expectStatus: http.StatusBadRequest,
@@ -180,7 +174,6 @@ func TestCreateFile(t *testing.T) {
 				Name:           "test-file",
 				FileName:       "file.txt",
 				Content:        "content",
-				MountPath:      "/path",
 				Groups:         []string{"non-existent-group"},
 				AvailableToAll: false,
 			},
@@ -197,7 +190,6 @@ func TestCreateFile(t *testing.T) {
 				Name:           "team-file",
 				FileName:       "team.yaml",
 				Content:        "{\"team\": \"data\"}",
-				MountPath:      "/var/team",
 				Description:    "Team file",
 				Groups:         []string{"dev-team"},
 				AvailableToAll: false,
@@ -215,7 +207,6 @@ func TestCreateFile(t *testing.T) {
 				Name:           "other-file",
 				FileName:       "other.yaml",
 				Content:        "{\"data\": \"value\"}",
-				MountPath:      "/var/other",
 				Groups:         []string{"ops-team"},
 				AvailableToAll: false,
 			},
@@ -232,7 +223,6 @@ func TestCreateFile(t *testing.T) {
 				Name:           "public-file",
 				FileName:       "public.json",
 				Content:        "[1, 2, 3]",
-				MountPath:      "/var/public",
 				Description:    "Public file",
 				AvailableToAll: true,
 			},
@@ -340,11 +330,6 @@ func TestCreateFile(t *testing.T) {
 					t.Errorf("Expected content '%s', got '%s'", tt.request.Content, content)
 				}
 
-				// Verify annotations
-				if configMap.Annotations[files.MountPathAnnotation] != tt.request.MountPath {
-					t.Errorf("Expected mountPath '%s', got '%s'",
-						tt.request.MountPath, configMap.Annotations[files.MountPathAnnotation])
-				}
 			}
 		})
 	}
@@ -362,9 +347,7 @@ func TestListFiles(t *testing.T) {
 				files.AppNameLabel:      files.AppName,
 				files.AppComponentLabel: files.ComponentFile,
 			},
-			Annotations: map[string]string{
-				files.MountPathAnnotation: "/etc/config1",
-			},
+			Annotations: map[string]string{},
 		},
 		Data: map[string]string{
 			"config.txt": "content1",
@@ -378,9 +361,7 @@ func TestListFiles(t *testing.T) {
 				files.AppNameLabel:      files.AppName,
 				files.AppComponentLabel: files.ComponentFile,
 			},
-			Annotations: map[string]string{
-				files.MountPathAnnotation: "/etc/config2",
-			},
+			Annotations: map[string]string{},
 		},
 		Data: map[string]string{
 			"data.yaml": "content2",
@@ -453,7 +434,6 @@ func TestGetFile(t *testing.T) {
 				files.AppComponentLabel: files.ComponentFile,
 			},
 			Annotations: map[string]string{
-				files.MountPathAnnotation:   "/etc/config",
 				files.DescriptionAnnotation: "Test file",
 			},
 		},
@@ -531,9 +511,7 @@ func TestUpdateFile(t *testing.T) {
 				files.AppNameLabel:      files.AppName,
 				files.AppComponentLabel: files.ComponentFile,
 			},
-			Annotations: map[string]string{
-				files.MountPathAnnotation: "/old/path",
-			},
+			Annotations: map[string]string{},
 		},
 		Data: map[string]string{
 			"old.txt": "old content",
@@ -544,7 +522,6 @@ func TestUpdateFile(t *testing.T) {
 	updateReq := files.UpdateFileRequest{
 		FileName:       "new.yaml",
 		Content:        "{\"updated\": true}",
-		MountPath:      "/new/path",
 		Description:    "Updated file",
 		AvailableToAll: true,
 	}
@@ -586,8 +563,8 @@ func TestUpdateFile(t *testing.T) {
 					Name:      "team-file",
 					Namespace: handler.namespace,
 					Labels: map[string]string{
-						files.AppNameLabel:      files.AppName,
-						files.AppComponentLabel: files.ComponentFile,
+						files.AppNameLabel:                   files.AppName,
+						files.AppComponentLabel:              files.ComponentFile,
 						"group.krkn.krkn-chaos.dev/dev-team": "true",
 					},
 				},
@@ -609,8 +586,8 @@ func TestUpdateFile(t *testing.T) {
 					Name:      "ops-file",
 					Namespace: handler.namespace,
 					Labels: map[string]string{
-						files.AppNameLabel:      files.AppName,
-						files.AppComponentLabel: files.ComponentFile,
+						files.AppNameLabel:                   files.AppName,
+						files.AppComponentLabel:              files.ComponentFile,
 						"group.krkn.krkn-chaos.dev/ops-team": "true",
 					},
 				},
@@ -632,9 +609,9 @@ func TestUpdateFile(t *testing.T) {
 					Name:      "public-file",
 					Namespace: handler.namespace,
 					Labels: map[string]string{
-						files.AppNameLabel:          files.AppName,
-						files.AppComponentLabel:     files.ComponentFile,
-						files.AvailableToAllLabel:   "true",
+						files.AppNameLabel:        files.AppName,
+						files.AppComponentLabel:   files.ComponentFile,
+						files.AvailableToAllLabel: "true",
 					},
 				},
 				Data: map[string]string{
@@ -737,11 +714,6 @@ func TestUpdateFile(t *testing.T) {
 					t.Errorf("Expected content '%s', got '%s'", tt.request.Content, content)
 				}
 
-				// Verify updated annotations
-				if configMap.Annotations[files.MountPathAnnotation] != tt.request.MountPath {
-					t.Errorf("Expected mountPath '%s', got '%s'",
-						tt.request.MountPath, configMap.Annotations[files.MountPathAnnotation])
-				}
 			}
 		})
 	}
@@ -799,8 +771,8 @@ func TestDeleteFile(t *testing.T) {
 					Name:      "team-file",
 					Namespace: handler.namespace,
 					Labels: map[string]string{
-						files.AppNameLabel:      files.AppName,
-						files.AppComponentLabel: files.ComponentFile,
+						files.AppNameLabel:                   files.AppName,
+						files.AppComponentLabel:              files.ComponentFile,
 						"group.krkn.krkn-chaos.dev/dev-team": "true",
 					},
 				},
@@ -821,8 +793,8 @@ func TestDeleteFile(t *testing.T) {
 					Name:      "ops-file",
 					Namespace: handler.namespace,
 					Labels: map[string]string{
-						files.AppNameLabel:      files.AppName,
-						files.AppComponentLabel: files.ComponentFile,
+						files.AppNameLabel:                   files.AppName,
+						files.AppComponentLabel:              files.ComponentFile,
 						"group.krkn.krkn-chaos.dev/ops-team": "true",
 					},
 				},

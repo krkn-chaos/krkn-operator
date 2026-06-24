@@ -34,8 +34,6 @@ const (
 	// AvailableToAllLabel marks files accessible by all users
 	AvailableToAllLabel = "files.krkn.krkn-chaos.dev/available-to-all"
 
-	// MountPathAnnotation stores the path where the file should be mounted
-	MountPathAnnotation = "files.krkn.krkn-chaos.dev/mount-path"
 	// DescriptionAnnotation stores the file description
 	DescriptionAnnotation = "files.krkn.krkn-chaos.dev/description"
 	// CreatedByAnnotation stores the email of the admin who created the file
@@ -82,12 +80,10 @@ func BuildFileLabels(fileType string, groups []string, availableToAll bool) map[
 
 // BuildFileAnnotations creates the annotations map for a file ConfigMap
 func BuildFileAnnotations(
-	mountPath string,
 	description string,
 	createdBy string,
 ) map[string]string {
 	annotations := map[string]string{
-		MountPathAnnotation: mountPath,
 		CreatedByAnnotation: createdBy,
 		CreatedAtAnnotation: time.Now().UTC().Format(time.RFC3339),
 	}
@@ -102,7 +98,6 @@ func BuildFileAnnotations(
 // UpdateFileAnnotations updates the annotations for a file ConfigMap
 func UpdateFileAnnotations(
 	existing map[string]string,
-	mountPath string,
 	description string,
 	updatedBy string,
 ) map[string]string {
@@ -112,7 +107,6 @@ func UpdateFileAnnotations(
 		updated[k] = v
 	}
 
-	updated[MountPathAnnotation] = mountPath
 	updated[UpdatedByAnnotation] = updatedBy
 	updated[UpdatedAtAnnotation] = time.Now().UTC().Format(time.RFC3339)
 

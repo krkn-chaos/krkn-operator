@@ -97,7 +97,6 @@ func (h *Handler) CreateFile(w http.ResponseWriter, r *http.Request) {
 	// Build labels and annotations
 	labels := files.BuildFileLabels(req.FileType, req.Groups, req.AvailableToAll)
 	annotations := files.BuildFileAnnotations(
-		req.MountPath,
 		req.Description,
 		createdBy,
 	)
@@ -323,7 +322,6 @@ func (h *Handler) UpdateFile(w http.ResponseWriter, r *http.Request) {
 	configMap.Labels = files.BuildFileLabels(req.FileType, req.Groups, req.AvailableToAll)
 	configMap.Annotations = files.UpdateFileAnnotations(
 		configMap.Annotations,
-		req.MountPath,
 		req.Description,
 		updatedBy,
 	)
@@ -657,7 +655,6 @@ func buildFileResponse(configMap *corev1.ConfigMap) files.FileResponse {
 		Name:           configMap.Name,
 		FileName:       fileName,
 		Content:        content,
-		MountPath:      configMap.Annotations[files.MountPathAnnotation],
 		Description:    configMap.Annotations[files.DescriptionAnnotation],
 		FileType:       files.ExtractFileTypeFromLabels(configMap.Labels),
 		Groups:         files.ExtractGroupsFromLabels(configMap.Labels),
@@ -681,7 +678,6 @@ func buildFileInfo(configMap *corev1.ConfigMap) files.FileInfo {
 	return files.FileInfo{
 		Name:        configMap.Name,
 		FileName:    fileName,
-		MountPath:   configMap.Annotations[files.MountPathAnnotation],
 		Description: configMap.Annotations[files.DescriptionAnnotation],
 		FileType:    files.ExtractFileTypeFromLabels(configMap.Labels),
 	}
@@ -707,11 +703,6 @@ func validateCreateFileRequest(ctx context.Context, k8sClient client.Client, req
 	// Validate content is valid JSON or YAML
 	if err := files.ValidateFileContent(req.Content); err != nil {
 		return err
-	}
-
-	// Validate mount path
-	if req.MountPath == "" {
-		return fmt.Errorf("mountPath is required")
 	}
 
 	// Validate file groups (max 1, mutually exclusive with availableToAll)
@@ -769,11 +760,6 @@ func validateUpdateFileRequest(ctx context.Context, k8sClient client.Client, req
 	// Validate content is valid JSON or YAML
 	if err := files.ValidateFileContent(req.Content); err != nil {
 		return err
-	}
-
-	// Validate mount path
-	if req.MountPath == "" {
-		return fmt.Errorf("mountPath is required")
 	}
 
 	// Validate file groups (max 1, mutually exclusive with availableToAll)

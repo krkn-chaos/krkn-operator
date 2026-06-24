@@ -24,8 +24,6 @@ type CreateFileRequest struct {
 	FileName string `json:"fileName"`
 	// Content is the file content
 	Content string `json:"content"`
-	// MountPath is the path where the file should be mounted in pods
-	MountPath string `json:"mountPath"`
 	// Description is an optional description of the file
 	Description string `json:"description,omitempty"`
 	// FileType is an optional file type category (e.g., "config", "script")
@@ -48,8 +46,6 @@ type UpdateFileRequest struct {
 	FileName string `json:"fileName"`
 	// Content is the file content
 	Content string `json:"content"`
-	// MountPath is the path where the file should be mounted in pods
-	MountPath string `json:"mountPath"`
 	// Description is an optional description of the file
 	Description string `json:"description,omitempty"`
 	// FileType is an optional file type category (e.g., "config", "script")
@@ -76,7 +72,6 @@ type FileResponse struct {
 	Name           string   `json:"name"`
 	FileName       string   `json:"fileName"`
 	Content        string   `json:"content"`
-	MountPath      string   `json:"mountPath"`
 	Description    string   `json:"description,omitempty"`
 	FileType       string   `json:"fileType,omitempty"`
 	Groups         []string `json:"groups,omitempty"`
@@ -91,7 +86,6 @@ type FileResponse struct {
 type FileInfo struct {
 	Name        string `json:"name"`
 	FileName    string `json:"fileName"`
-	MountPath   string `json:"mountPath"`
 	Description string `json:"description,omitempty"`
 	FileType    string `json:"fileType,omitempty"`
 }
