@@ -68,6 +68,9 @@ func (r *KrknGraphRunReconciler) calculateResiliencyScore(
 	clusterAggs := make(map[string]*clusterAggregation)
 
 	for _, nodeStatus := range graphRun.Status.NodeStatuses {
+		if graphRun.Spec.Graph[nodeStatus.NodeID].NodeType == "trigger" {
+			continue
+		}
 		if nodeStatus.Phase != "Completed" {
 			logger.V(1).Info("skipping node - not completed",
 				"nodeID", nodeStatus.NodeID,

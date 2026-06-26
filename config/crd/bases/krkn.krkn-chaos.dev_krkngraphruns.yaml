@@ -95,6 +95,13 @@ spec:
                         Name is the legacy scenario identity field. When Scenario is absent, the
                         API translates it into a public ScenarioReference.
                       type: string
+                    nodeType:
+                      description: NodeType selects a built-in non-scenario graph
+                        node implementation.
+                      enum:
+                      - scenario
+                      - trigger
+                      type: string
                     registryName:
                       description: |-
                         RegistryName is the legacy private registry identity field. Image remains

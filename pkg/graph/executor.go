@@ -145,6 +145,7 @@ func MapScenarioNodeToScenarioRunSpec(
 
 	// Create the scenario run spec
 	spec := v1alpha1.KrknScenarioRunSpec{
+		NodeType:        node.NodeType,
 		TargetRequestID: targetRequestID,
 		TargetClusters:  targetClusters,
 		Scenario:        node.Scenario,
