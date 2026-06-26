@@ -115,10 +115,15 @@ type ScenariosResponse struct {
 // InputFieldResponse represents a scenario input field with Type as string
 // This is a wrapper around krknctl typing.InputField to ensure Type is serialized as string
 type InputFieldResponse struct {
-	Name              *string `json:"name"`
-	ShortDescription  *string `json:"short_description,omitempty"`
-	Description       *string `json:"description,omitempty"`
-	Variable          *string `json:"variable"`
+	Name             *string `json:"name"`
+	ShortDescription *string `json:"short_description,omitempty"`
+	Description      *string `json:"description,omitempty"`
+	Variable         *string `json:"variable"`
+	TriggerType      *string `json:"trigger_type,omitempty"`
+	// Requires is retained for compatibility with older scenario metadata.
+	// New trigger fields use TriggerType instead.
+	// Deprecated: This field is not used to configure trigger node fields.
+	Requires          *string `json:"requires,omitempty"`
 	Type              string  `json:"type"` // String representation instead of int64 enum
 	Default           *string `json:"default,omitempty"`
 	Validator         *string `json:"validator,omitempty"`
@@ -833,6 +838,8 @@ type UserGroupResponse struct {
 	ID string `json:"id"`
 	// Name is the human-readable display name
 	Name string `json:"name"`
+	// ID is the canonical Kubernetes-safe group identifier used by access labels.
+	ID string `json:"id"`
 	// Description is the group description (optional)
 	Description string `json:"description,omitempty"`
 	// ClusterPermissions is a map of clusterAPIURL to permitted actions

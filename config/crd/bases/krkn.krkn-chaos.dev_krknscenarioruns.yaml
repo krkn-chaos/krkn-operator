@@ -110,6 +110,13 @@ spec:
                   jobs
                 minimum: 0
                 type: integer
+              nodeType:
+                description: NodeType selects a built-in non-scenario execution image
+                  when set.
+                enum:
+                - scenario
+                - trigger
+                type: string
               ownerUserId:
                 description: OwnerUserID is the email address of the user who created
                   this scenario run

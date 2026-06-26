@@ -19,6 +19,8 @@ Assisted-by: Claude Sonnet 4.5 (claude-sonnet-4-5@20250929)
 package v1alpha1
 
 import (
+	"fmt"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 )
@@ -59,6 +61,11 @@ type GraphScenario struct {
 // GraphScenarioNode represents a node in the scenario dependency graph
 // This mirrors krknctl's ScenarioNode struct but with explicit JSON tags for Kubernetes compatibility
 type GraphScenarioNode struct {
+	// NodeType selects a built-in non-scenario graph node implementation.
+	// +optional
+	// +kubebuilder:validation:Enum=scenario;trigger
+	NodeType string `json:"nodeType,omitempty"`
+
 	// Comment is an optional comment describing the scenario
 	// +optional
 	Comment string `json:"_comment,omitempty"`
@@ -112,6 +119,33 @@ type GraphScenarioNode struct {
 	// CloudCredentialRef overrides the graph-level cloud credential for this specific node
 	// +optional
 	CloudCredentialRef string `json:"cloudCredentialRef,omitempty"`
+}
+
+const (
+	GraphNodeTypeScenario = "scenario"
+	GraphNodeTypeTrigger  = "trigger"
+)
+
+// ValidateNodeType validates the built-in node type and, for trigger nodes,
+// enforces the public trigger scenario identity used by the operator.
+func (n GraphScenarioNode) ValidateNodeType(nodeID string) error {
+	return ValidateNodeType(n.NodeType, n.Scenario, nodeID)
+}
+
+// ValidateNodeType checks the supported node types and binds trigger nodes to
+// the public trigger scenario identity across graph and direct scenario runs.
+func ValidateNodeType(nodeType string, scenario ScenarioReference, nodeID string) error {
+	switch nodeType {
+	case "", GraphNodeTypeScenario:
+		return nil
+	case GraphNodeTypeTrigger:
+		if scenario.Name != GraphNodeTypeTrigger || scenario.Private == nil || *scenario.Private || scenario.RegistryName != "" {
+			return fmt.Errorf("node '%s' trigger node must use public scenario identity 'trigger'", nodeID)
+		}
+		return nil
+	default:
+		return fmt.Errorf("node '%s' has unsupported nodeType %q", nodeID, nodeType)
+	}
 }
 
 // NodeStatus represents the status of a single node in the dependency graph
