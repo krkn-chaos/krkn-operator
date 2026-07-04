@@ -31,6 +31,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -1064,6 +1065,78 @@ func (r *KrknScenarioRunReconciler) calculateOverallStatus(scenarioRun *krknv1al
 		// Some succeeded, some failed
 		scenarioRun.Status.Phase = "PartiallyFailed"
 	}
+
+	// Populate status conditions derived from the overall phase so that
+	// `kubectl describe` and clients can observe the run state. The conditions
+	// are written onto the same status object that gets persisted, so the
+	// existing statusEqual diff prevents update loops.
+	setStatusConditions(scenarioRun)
+}
+
+// setStatusConditions derives the Ready/Progressing/Failed conditions from the
+// overall phase and job counters and applies them to the scenario run's status
+// via meta.SetStatusCondition (which preserves LastTransitionTime when a
+// condition's status is unchanged).
+func setStatusConditions(scenarioRun *krknv1alpha1.KrknScenarioRun) {
+	for _, condition := range buildStatusConditions(scenarioRun) {
+		meta.SetStatusCondition(&scenarioRun.Status.Conditions, condition)
+	}
+}
+
+// buildStatusConditions is a pure helper that computes the set of conditions
+// for the current status. It is kept side-effect free so it can be unit tested
+// without a cluster.
+func buildStatusConditions(scenarioRun *krknv1alpha1.KrknScenarioRun) []metav1.Condition {
+	status := &scenarioRun.Status
+	phase := status.Phase
+	generation := scenarioRun.Generation
+
+	countsMessage := fmt.Sprintf("%d succeeded, %d failed, %d running out of %d job(s)",
+		status.SuccessfulJobs, status.FailedJobs, status.RunningJobs, len(status.ClusterJobs))
+
+	// Ready is True only once every job has succeeded.
+	ready := metav1.Condition{
+		Type:               "Ready",
+		Status:             metav1.ConditionFalse,
+		Reason:             "JobsIncomplete",
+		Message:            countsMessage,
+		ObservedGeneration: generation,
+	}
+	if phase == "Succeeded" {
+		ready.Status = metav1.ConditionTrue
+		ready.Reason = "AllJobsSucceeded"
+	}
+
+	// Progressing is True while the run is still pending or actively running.
+	progressing := metav1.Condition{
+		Type:               "Progressing",
+		Status:             metav1.ConditionFalse,
+		Reason:             "RunComplete",
+		Message:            countsMessage,
+		ObservedGeneration: generation,
+	}
+	if phase == "Pending" || phase == "Running" {
+		progressing.Status = metav1.ConditionTrue
+		progressing.Reason = "JobsInProgress"
+	}
+
+	// Failed is True when the run finished with at least one failed job.
+	failed := metav1.Condition{
+		Type:               "Failed",
+		Status:             metav1.ConditionFalse,
+		Reason:             "NoJobFailures",
+		Message:            countsMessage,
+		ObservedGeneration: generation,
+	}
+	if phase == "Failed" {
+		failed.Status = metav1.ConditionTrue
+		failed.Reason = "AllJobsFailed"
+	} else if phase == "PartiallyFailed" {
+		failed.Status = metav1.ConditionTrue
+		failed.Reason = "SomeJobsFailed"
+	}
+
+	return []metav1.Condition{ready, progressing, failed}
 }
 
 // getKubeconfigFromProvider retrieves kubeconfig from a provider-specific Secret
