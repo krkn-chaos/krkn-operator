@@ -54,6 +54,25 @@ type KrknScenarioRunReconciler struct {
 	Namespace string
 }
 
+// durationToActiveDeadline converts a Go duration string (e.g., "30s", "5m")
+// into a pod activeDeadlineSeconds value. An empty string yields a nil result,
+// meaning no deadline should be applied. A non-empty value must parse as a
+// positive duration; zero or negative durations are rejected.
+func durationToActiveDeadline(d string) (*int64, error) {
+	if d == "" {
+		return nil, nil
+	}
+	parsed, err := time.ParseDuration(d)
+	if err != nil {
+		return nil, fmt.Errorf("invalid duration %q: %w", d, err)
+	}
+	if parsed <= 0 {
+		return nil, fmt.Errorf("duration %q must be greater than zero", d)
+	}
+	seconds := int64(parsed.Seconds())
+	return &seconds, nil
+}
+
 // +kubebuilder:rbac:groups=krkn.krkn-chaos.dev,resources=krknscenarioruns,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=krkn.krkn-chaos.dev,resources=krknscenarioruns/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=krkn.krkn-chaos.dev,resources=krknscenarioruns/finalizers,verbs=update
@@ -624,6 +643,16 @@ func (r *KrknScenarioRunReconciler) createClusterJob(
 			},
 			Volumes: volumes,
 		},
+	}
+
+	// Bound the pod's runtime if a duration was requested. On parse error we log
+	// and skip setting the deadline rather than failing the reconcile; the CRD
+	// pattern already validates the value so this is defensive.
+	if deadline, err := durationToActiveDeadline(scenarioRun.Spec.Duration); err != nil {
+		logger.Error(err, "invalid spec.duration, running pod without a deadline",
+			"duration", scenarioRun.Spec.Duration)
+	} else if deadline != nil {
+		pod.Spec.ActiveDeadlineSeconds = deadline
 	}
 
 	// Set owner reference

@@ -147,6 +147,14 @@ type KrknScenarioRunSpec struct {
 	// +optional
 	// +kubebuilder:default="10s"
 	RetryDelay string `json:"retryDelay,omitempty"`
+
+	// Duration bounds how long a scenario pod is allowed to run before it is
+	// auto-terminated. It is expressed as a Go duration (e.g., "30s", "5m", "1h")
+	// and maps to the pod's activeDeadlineSeconds. An empty value means no
+	// deadline is applied and the pod runs unbounded.
+	// +optional
+	// +kubebuilder:validation:Pattern=`^([0-9]+(\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$`
+	Duration string `json:"duration,omitempty"`
 }
 
 // KrknScenarioRunStatus defines the observed state of KrknScenarioRun
