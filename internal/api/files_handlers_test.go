@@ -558,8 +558,8 @@ func TestUpdateFile(t *testing.T) {
 			expectStatus: http.StatusNotFound,
 		},
 		{
-			name:   "user can update file from own group",
-			fileID: "550e8400-e29b-41d4-a716-446655440005",
+			name:    "user can update file from own group",
+			fileID:  "550e8400-e29b-41d4-a716-446655440005",
 			request: updateReq,
 			setupFile: &corev1.ConfigMap{
 				ObjectMeta: metav1.ObjectMeta{
@@ -582,8 +582,8 @@ func TestUpdateFile(t *testing.T) {
 			expectStatus: http.StatusOK,
 		},
 		{
-			name:   "user cannot update file from other group",
-			fileID: "550e8400-e29b-41d4-a716-446655440006",
+			name:    "user cannot update file from other group",
+			fileID:  "550e8400-e29b-41d4-a716-446655440006",
 			request: updateReq,
 			setupFile: &corev1.ConfigMap{
 				ObjectMeta: metav1.ObjectMeta{
@@ -606,8 +606,8 @@ func TestUpdateFile(t *testing.T) {
 			expectStatus: http.StatusForbidden,
 		},
 		{
-			name:   "user can update public file",
-			fileID: "550e8400-e29b-41d4-a716-446655440007",
+			name:    "user can update public file",
+			fileID:  "550e8400-e29b-41d4-a716-446655440007",
 			request: updateReq,
 			setupFile: &corev1.ConfigMap{
 				ObjectMeta: metav1.ObjectMeta{
