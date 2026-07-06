@@ -20,10 +20,12 @@ package controller
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"strings"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -444,6 +446,16 @@ func (r *KrknGraphRunReconciler) createScenarioRun(
 		return false, fmt.Errorf("node %s not found in graph", nodeID)
 	}
 
+	// Translate Volumes (file UUID -> mount path) to FileMount objects
+	// Volumes format: {"<file-uuid>": "/mount/path"}
+	fileMounts, err := r.translateVolumesToFileMounts(ctx, node.Volumes)
+	if err != nil {
+		logger.Error(err, "failed to translate volumes to file mounts",
+			"nodeID", nodeID,
+			"volumes", node.Volumes)
+		return false, fmt.Errorf("failed to translate volumes: %w", err)
+	}
+
 	// Map node to scenario run spec
 	spec, err := graph.MapScenarioNodeToScenarioRunSpec(
 		node,
@@ -454,6 +466,14 @@ func (r *KrknGraphRunReconciler) createScenarioRun(
 	)
 	if err != nil {
 		return false, fmt.Errorf("failed to map node to scenario run spec: %w", err)
+	}
+
+	// Add translated file mounts to spec
+	if len(fileMounts) > 0 {
+		spec.Files = fileMounts
+		logger.V(1).Info("added file mounts to scenario run spec",
+			"nodeID", nodeID,
+			"fileCount", len(fileMounts))
 	}
 
 	// Sanitize node ID for use in Kubernetes resource names and labels
@@ -670,6 +690,93 @@ func (r *KrknGraphRunReconciler) updateStatusWithError(
 // isTerminalPhase returns true if the phase indicates the GraphRun has completed execution
 func (r *KrknGraphRunReconciler) isTerminalPhase(phase string) bool {
 	return phase == "Completed" || phase == "Failed" || phase == "PartiallyFailed"
+}
+
+// translateVolumesToFileMounts translates GraphScenarioNode.Volumes (UUID->mountPath) to FileMount objects.
+// Volumes format: {"<file-uuid>": "/mount/path"}
+// This function loads file ConfigMaps by UUID and encodes content as base64 for FileMount.
+func (r *KrknGraphRunReconciler) translateVolumesToFileMounts(
+	ctx context.Context,
+	volumes map[string]string,
+) ([]krknv1alpha1.FileMount, error) {
+	logger := log.FromContext(ctx)
+
+	if len(volumes) == 0 {
+		return nil, nil
+	}
+
+	fileMounts := make([]krknv1alpha1.FileMount, 0, len(volumes))
+
+	for fileID, mountPath := range volumes {
+		// Load file ConfigMap by UUID
+		fileConfigMap, err := r.loadFileConfigMapByID(ctx, fileID)
+		if err != nil {
+			if apierrors.IsNotFound(err) {
+				return nil, fmt.Errorf("file with ID '%s' not found", fileID)
+			}
+			return nil, fmt.Errorf("failed to load file ConfigMap '%s': %w", fileID, err)
+		}
+
+		// Extract file content from ConfigMap (first data key)
+		var fileName, content string
+		for k, v := range fileConfigMap.Data {
+			fileName = k
+			content = v
+			break
+		}
+
+		if fileName == "" {
+			return nil, fmt.Errorf("file ConfigMap '%s' has no data", fileID)
+		}
+
+		// Base64 encode content for FileMount
+		encodedContent := base64.StdEncoding.EncodeToString([]byte(content))
+
+		// Create FileMount
+		fileMounts = append(fileMounts, krknv1alpha1.FileMount{
+			Name:      fileName,
+			Content:   encodedContent,
+			MountPath: mountPath,
+		})
+
+		logger.V(1).Info("translated volume to file mount",
+			"fileID", fileID,
+			"fileName", fileName,
+			"mountPath", mountPath)
+	}
+
+	return fileMounts, nil
+}
+
+// loadFileConfigMapByID loads a file ConfigMap by file ID (UUID) using label selector.
+// Returns error if not found or if multiple ConfigMaps have the same file ID.
+func (r *KrknGraphRunReconciler) loadFileConfigMapByID(
+	ctx context.Context,
+	fileID string,
+) (*corev1.ConfigMap, error) {
+	// List ConfigMaps with the file ID label
+	var configMapList corev1.ConfigMapList
+	err := r.List(ctx, &configMapList,
+		client.MatchingLabels{
+			"app.kubernetes.io/name":            "krkn-operator",
+			"app.kubernetes.io/component":       "file",
+			"files.krkn.krkn-chaos.dev/file-id": fileID,
+		},
+	)
+
+	if err != nil {
+		return nil, err
+	}
+
+	if len(configMapList.Items) == 0 {
+		return nil, apierrors.NewNotFound(corev1.Resource("configmap"), fileID)
+	}
+
+	if len(configMapList.Items) > 1 {
+		return nil, fmt.Errorf("multiple ConfigMaps found with file ID '%s'", fileID)
+	}
+
+	return &configMapList.Items[0], nil
 }
 
 // SetupWithManager sets up the controller with the Manager.
