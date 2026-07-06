@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -91,7 +92,6 @@ func TestCreateFile(t *testing.T) {
 		{
 			name: "create file successfully",
 			request: files.CreateFileRequest{
-				Name:           "test-config",
 				FileName:       "app.conf",
 				Content:        "{\"server\": \"localhost\", \"port\": 8080}",
 				Description:    "Application configuration",
@@ -108,7 +108,6 @@ func TestCreateFile(t *testing.T) {
 		{
 			name: "create file with groups",
 			request: files.CreateFileRequest{
-				Name:           "team-config",
 				FileName:       "settings.yaml",
 				Content:        "key: value",
 				Description:    "Team settings",
@@ -123,7 +122,6 @@ func TestCreateFile(t *testing.T) {
 		{
 			name: "user can create public file",
 			request: files.CreateFileRequest{
-				Name:           "user-config",
 				FileName:       "config.yaml",
 				Content:        "{\"key\": \"value\"}",
 				AvailableToAll: true,
@@ -133,21 +131,8 @@ func TestCreateFile(t *testing.T) {
 			isAdmin:      false,
 		},
 		{
-			name: "fail for missing name",
-			request: files.CreateFileRequest{
-				Name:           "",
-				FileName:       "file.txt",
-				Content:        "content",
-				AvailableToAll: true,
-			},
-			expectStatus: http.StatusBadRequest,
-			expectInDB:   false,
-			isAdmin:      true,
-		},
-		{
 			name: "fail for missing fileName",
 			request: files.CreateFileRequest{
-				Name:           "test-file",
 				FileName:       "",
 				Content:        "content",
 				AvailableToAll: true,
@@ -159,7 +144,6 @@ func TestCreateFile(t *testing.T) {
 		{
 			name: "fail for missing content",
 			request: files.CreateFileRequest{
-				Name:           "test-file",
 				FileName:       "file.txt",
 				Content:        "",
 				AvailableToAll: true,
@@ -171,7 +155,6 @@ func TestCreateFile(t *testing.T) {
 		{
 			name: "fail for non-existent group",
 			request: files.CreateFileRequest{
-				Name:           "test-file",
 				FileName:       "file.txt",
 				Content:        "content",
 				Groups:         []string{"non-existent-group"},
@@ -187,7 +170,6 @@ func TestCreateFile(t *testing.T) {
 		{
 			name: "user can create file for own group",
 			request: files.CreateFileRequest{
-				Name:           "team-file",
 				FileName:       "team.yaml",
 				Content:        "{\"team\": \"data\"}",
 				Description:    "Team file",
@@ -204,7 +186,6 @@ func TestCreateFile(t *testing.T) {
 		{
 			name: "user cannot create file for other group",
 			request: files.CreateFileRequest{
-				Name:           "other-file",
 				FileName:       "other.yaml",
 				Content:        "{\"data\": \"value\"}",
 				Groups:         []string{"ops-team"},
@@ -220,7 +201,6 @@ func TestCreateFile(t *testing.T) {
 		{
 			name: "user can create public file",
 			request: files.CreateFileRequest{
-				Name:           "public-file",
 				FileName:       "public.json",
 				Content:        "[1, 2, 3]",
 				Description:    "Public file",
@@ -307,10 +287,19 @@ func TestCreateFile(t *testing.T) {
 					t.Fatalf("Failed to unmarshal response: %v", err)
 				}
 
-				// Verify ConfigMap was created
+				// Verify FileID is returned and is a valid UUID
+				if response.FileID == "" {
+					t.Errorf("Expected FileID to be returned")
+				}
+				if len(response.FileID) != 36 || !strings.Contains(response.FileID, "-") {
+					t.Errorf("Expected FileID to be a valid UUID, got '%s'", response.FileID)
+				}
+
+				// Verify ConfigMap was created with name file-<UUID>
+				expectedConfigMapName := "file-" + response.FileID
 				var configMap corev1.ConfigMap
 				err := handler.client.Get(context.Background(), client.ObjectKey{
-					Name:      response.Name,
+					Name:      expectedConfigMapName,
 					Namespace: handler.namespace,
 				}, &configMap)
 
@@ -321,6 +310,11 @@ func TestCreateFile(t *testing.T) {
 				// Verify labels
 				if configMap.Labels[files.AppComponentLabel] != files.ComponentFile {
 					t.Errorf("Expected component label 'file', got '%s'", configMap.Labels[files.AppComponentLabel])
+				}
+
+				// Verify FileID label matches the returned FileID
+				if configMap.Labels[files.FileIDLabel] != response.FileID {
+					t.Errorf("Expected file-id label '%s', got '%s'", response.FileID, configMap.Labels[files.FileIDLabel])
 				}
 
 				// Verify data
@@ -338,14 +332,16 @@ func TestCreateFile(t *testing.T) {
 func TestListFiles(t *testing.T) {
 	handler := setupFilesTestHandler()
 
-	// Create test files
+	// Create test files with UUID-based naming
+	fileID1 := "550e8400-e29b-41d4-a716-446655440001"
 	files1 := &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "file1",
+			Name:      "file-" + fileID1,
 			Namespace: handler.namespace,
 			Labels: map[string]string{
 				files.AppNameLabel:      files.AppName,
 				files.AppComponentLabel: files.ComponentFile,
+				files.FileIDLabel:       fileID1,
 			},
 			Annotations: map[string]string{},
 		},
@@ -353,13 +349,16 @@ func TestListFiles(t *testing.T) {
 			"config.txt": "content1",
 		},
 	}
+
+	fileID2 := "550e8400-e29b-41d4-a716-446655440002"
 	files2 := &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "file2",
+			Name:      "file-" + fileID2,
 			Namespace: handler.namespace,
 			Labels: map[string]string{
 				files.AppNameLabel:      files.AppName,
 				files.AppComponentLabel: files.ComponentFile,
+				files.FileIDLabel:       fileID2,
 			},
 			Annotations: map[string]string{},
 		},
@@ -424,14 +423,16 @@ func TestListFiles(t *testing.T) {
 func TestGetFile(t *testing.T) {
 	handler := setupFilesTestHandler()
 
-	// Create test file
+	// Create test file with UUID-based naming
+	fileID := "550e8400-e29b-41d4-a716-446655440003"
 	testFile := &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-file",
+			Name:      "file-" + fileID,
 			Namespace: handler.namespace,
 			Labels: map[string]string{
 				files.AppNameLabel:      files.AppName,
 				files.AppComponentLabel: files.ComponentFile,
+				files.FileIDLabel:       fileID,
 			},
 			Annotations: map[string]string{
 				files.DescriptionAnnotation: "Test file",
@@ -445,25 +446,25 @@ func TestGetFile(t *testing.T) {
 
 	tests := []struct {
 		name         string
-		fileName     string
+		fileID       string
 		isAdmin      bool
 		expectStatus int
 	}{
 		{
 			name:         "get existing file",
-			fileName:     "test-file",
+			fileID:       fileID,
 			isAdmin:      true,
 			expectStatus: http.StatusOK,
 		},
 		{
 			name:         "get non-existent file",
-			fileName:     "non-existent",
+			fileID:       "550e8400-e29b-41d4-a716-446655440099",
 			isAdmin:      true,
 			expectStatus: http.StatusNotFound,
 		},
 		{
 			name:         "non-admin forbidden",
-			fileName:     "test-file",
+			fileID:       fileID,
 			isAdmin:      false,
 			expectStatus: http.StatusForbidden,
 		},
@@ -471,7 +472,7 @@ func TestGetFile(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodGet, FilesPath+"/"+tt.fileName, nil)
+			req := httptest.NewRequest(http.MethodGet, FilesPath+"/"+tt.fileID, nil)
 			if tt.isAdmin {
 				req = addAdminContext(req)
 			} else {
@@ -491,8 +492,8 @@ func TestGetFile(t *testing.T) {
 					t.Fatalf("Failed to unmarshal response: %v", err)
 				}
 
-				if response.Name != tt.fileName {
-					t.Errorf("Expected file name '%s', got '%s'", tt.fileName, response.Name)
+				if response.FileID != tt.fileID {
+					t.Errorf("Expected file ID '%s', got '%s'", tt.fileID, response.FileID)
 				}
 			}
 		})
@@ -502,14 +503,16 @@ func TestGetFile(t *testing.T) {
 func TestUpdateFile(t *testing.T) {
 	handler := setupFilesTestHandler()
 
-	// Create test file
+	// Create test file with UUID-based naming
+	fileID := "550e8400-e29b-41d4-a716-446655440004"
 	testFile := &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-file",
+			Name:      "file-" + fileID,
 			Namespace: handler.namespace,
 			Labels: map[string]string{
 				files.AppNameLabel:      files.AppName,
 				files.AppComponentLabel: files.ComponentFile,
+				files.FileIDLabel:       fileID,
 			},
 			Annotations: map[string]string{},
 		},
@@ -528,7 +531,7 @@ func TestUpdateFile(t *testing.T) {
 
 	tests := []struct {
 		name         string
-		fileName     string
+		fileID       string
 		request      files.UpdateFileRequest
 		setupFile    *corev1.ConfigMap
 		userGroups   []string
@@ -538,7 +541,7 @@ func TestUpdateFile(t *testing.T) {
 	}{
 		{
 			name:         "update file successfully as admin",
-			fileName:     "test-file",
+			fileID:       fileID,
 			request:      updateReq,
 			userGroups:   []string{},
 			userID:       "admin@test.example",
@@ -547,7 +550,7 @@ func TestUpdateFile(t *testing.T) {
 		},
 		{
 			name:         "update non-existent file",
-			fileName:     "non-existent",
+			fileID:       "550e8400-e29b-41d4-a716-446655440099",
 			request:      updateReq,
 			userGroups:   []string{},
 			userID:       "admin@test.example",
@@ -555,16 +558,17 @@ func TestUpdateFile(t *testing.T) {
 			expectStatus: http.StatusNotFound,
 		},
 		{
-			name:     "user can update file from own group",
-			fileName: "team-file",
-			request:  updateReq,
+			name:   "user can update file from own group",
+			fileID: "550e8400-e29b-41d4-a716-446655440005",
+			request: updateReq,
 			setupFile: &corev1.ConfigMap{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      "team-file",
+					Name:      "file-550e8400-e29b-41d4-a716-446655440005",
 					Namespace: handler.namespace,
 					Labels: map[string]string{
 						files.AppNameLabel:                   files.AppName,
 						files.AppComponentLabel:              files.ComponentFile,
+						files.FileIDLabel:                    "550e8400-e29b-41d4-a716-446655440005",
 						"group.krkn.krkn-chaos.dev/dev-team": "true",
 					},
 				},
@@ -578,16 +582,17 @@ func TestUpdateFile(t *testing.T) {
 			expectStatus: http.StatusOK,
 		},
 		{
-			name:     "user cannot update file from other group",
-			fileName: "ops-file",
-			request:  updateReq,
+			name:   "user cannot update file from other group",
+			fileID: "550e8400-e29b-41d4-a716-446655440006",
+			request: updateReq,
 			setupFile: &corev1.ConfigMap{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      "ops-file",
+					Name:      "file-550e8400-e29b-41d4-a716-446655440006",
 					Namespace: handler.namespace,
 					Labels: map[string]string{
 						files.AppNameLabel:                   files.AppName,
 						files.AppComponentLabel:              files.ComponentFile,
+						files.FileIDLabel:                    "550e8400-e29b-41d4-a716-446655440006",
 						"group.krkn.krkn-chaos.dev/ops-team": "true",
 					},
 				},
@@ -601,16 +606,17 @@ func TestUpdateFile(t *testing.T) {
 			expectStatus: http.StatusForbidden,
 		},
 		{
-			name:     "user can update public file",
-			fileName: "public-file",
-			request:  updateReq,
+			name:   "user can update public file",
+			fileID: "550e8400-e29b-41d4-a716-446655440007",
+			request: updateReq,
 			setupFile: &corev1.ConfigMap{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      "public-file",
+					Name:      "file-550e8400-e29b-41d4-a716-446655440007",
 					Namespace: handler.namespace,
 					Labels: map[string]string{
 						files.AppNameLabel:        files.AppName,
 						files.AppComponentLabel:   files.ComponentFile,
+						files.FileIDLabel:         "550e8400-e29b-41d4-a716-446655440007",
 						files.AvailableToAllLabel: "true",
 					},
 				},
@@ -677,7 +683,7 @@ func TestUpdateFile(t *testing.T) {
 			}
 
 			body, _ := json.Marshal(tt.request)
-			req := httptest.NewRequest(http.MethodPut, FilesPath+"/"+tt.fileName, bytes.NewReader(body))
+			req := httptest.NewRequest(http.MethodPut, FilesPath+"/"+tt.fileID, bytes.NewReader(body))
 			userID := tt.userID
 			if userID == "" {
 				userID = "admin@test.example"
@@ -697,9 +703,10 @@ func TestUpdateFile(t *testing.T) {
 
 			if tt.expectStatus == http.StatusOK {
 				// Verify ConfigMap was updated
+				expectedConfigMapName := "file-" + tt.fileID
 				var configMap corev1.ConfigMap
 				err := handler.client.Get(context.Background(), client.ObjectKey{
-					Name:      tt.fileName,
+					Name:      expectedConfigMapName,
 					Namespace: handler.namespace,
 				}, &configMap)
 
@@ -722,14 +729,16 @@ func TestUpdateFile(t *testing.T) {
 func TestDeleteFile(t *testing.T) {
 	handler := setupFilesTestHandler()
 
-	// Create test file for deletion
+	// Create test file for deletion with UUID-based naming
+	fileID := "550e8400-e29b-41d4-a716-446655440008"
 	testFile := &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "delete-me",
+			Name:      "file-" + fileID,
 			Namespace: handler.namespace,
 			Labels: map[string]string{
 				files.AppNameLabel:      files.AppName,
 				files.AppComponentLabel: files.ComponentFile,
+				files.FileIDLabel:       fileID,
 			},
 		},
 		Data: map[string]string{
@@ -740,7 +749,7 @@ func TestDeleteFile(t *testing.T) {
 
 	tests := []struct {
 		name         string
-		fileName     string
+		fileID       string
 		setupFile    *corev1.ConfigMap
 		userGroups   []string
 		userID       string
@@ -749,7 +758,7 @@ func TestDeleteFile(t *testing.T) {
 	}{
 		{
 			name:         "delete file successfully as admin",
-			fileName:     "delete-me",
+			fileID:       fileID,
 			userGroups:   []string{},
 			userID:       "admin@test.example",
 			isAdmin:      true,
@@ -757,22 +766,23 @@ func TestDeleteFile(t *testing.T) {
 		},
 		{
 			name:         "delete non-existent file",
-			fileName:     "non-existent",
+			fileID:       "550e8400-e29b-41d4-a716-446655440099",
 			userGroups:   []string{},
 			userID:       "admin@test.example",
 			isAdmin:      true,
 			expectStatus: http.StatusNotFound,
 		},
 		{
-			name:     "user can delete file from own group",
-			fileName: "team-file",
+			name:   "user can delete file from own group",
+			fileID: "550e8400-e29b-41d4-a716-446655440009",
 			setupFile: &corev1.ConfigMap{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      "team-file",
+					Name:      "file-550e8400-e29b-41d4-a716-446655440009",
 					Namespace: handler.namespace,
 					Labels: map[string]string{
 						files.AppNameLabel:                   files.AppName,
 						files.AppComponentLabel:              files.ComponentFile,
+						files.FileIDLabel:                    "550e8400-e29b-41d4-a716-446655440009",
 						"group.krkn.krkn-chaos.dev/dev-team": "true",
 					},
 				},
@@ -786,15 +796,16 @@ func TestDeleteFile(t *testing.T) {
 			expectStatus: http.StatusOK,
 		},
 		{
-			name:     "user cannot delete file from other group",
-			fileName: "ops-file",
+			name:   "user cannot delete file from other group",
+			fileID: "550e8400-e29b-41d4-a716-446655440010",
 			setupFile: &corev1.ConfigMap{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      "ops-file",
+					Name:      "file-550e8400-e29b-41d4-a716-446655440010",
 					Namespace: handler.namespace,
 					Labels: map[string]string{
 						files.AppNameLabel:                   files.AppName,
 						files.AppComponentLabel:              files.ComponentFile,
+						files.FileIDLabel:                    "550e8400-e29b-41d4-a716-446655440010",
 						"group.krkn.krkn-chaos.dev/ops-team": "true",
 					},
 				},
@@ -808,15 +819,16 @@ func TestDeleteFile(t *testing.T) {
 			expectStatus: http.StatusForbidden,
 		},
 		{
-			name:     "user can delete public file",
-			fileName: "public-file",
+			name:   "user can delete public file",
+			fileID: "550e8400-e29b-41d4-a716-446655440011",
 			setupFile: &corev1.ConfigMap{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      "public-file",
+					Name:      "file-550e8400-e29b-41d4-a716-446655440011",
 					Namespace: handler.namespace,
 					Labels: map[string]string{
 						files.AppNameLabel:        files.AppName,
 						files.AppComponentLabel:   files.ComponentFile,
+						files.FileIDLabel:         "550e8400-e29b-41d4-a716-446655440011",
 						files.AvailableToAllLabel: "true",
 					},
 				},
@@ -882,7 +894,7 @@ func TestDeleteFile(t *testing.T) {
 				_ = handler.client.Create(context.Background(), user)
 			}
 
-			req := httptest.NewRequest(http.MethodDelete, FilesPath+"/"+tt.fileName, nil)
+			req := httptest.NewRequest(http.MethodDelete, FilesPath+"/"+tt.fileID, nil)
 			userID := tt.userID
 			if userID == "" {
 				userID = "admin@test.example"
@@ -900,11 +912,12 @@ func TestDeleteFile(t *testing.T) {
 				t.Errorf("Expected status %d, got %d", tt.expectStatus, w.Code)
 			}
 
-			if tt.expectStatus == http.StatusOK && tt.fileName == "delete-me" {
+			if tt.expectStatus == http.StatusOK && tt.fileID == fileID {
 				// Verify ConfigMap was deleted
+				expectedConfigMapName := "file-" + tt.fileID
 				var configMap corev1.ConfigMap
 				err := handler.client.Get(context.Background(), client.ObjectKey{
-					Name:      tt.fileName,
+					Name:      expectedConfigMapName,
 					Namespace: handler.namespace,
 				}, &configMap)
 
@@ -953,14 +966,16 @@ func TestListAvailableFiles(t *testing.T) {
 	}
 	_ = handler.client.Create(context.Background(), user)
 
-	// Create public file
+	// Create public file with UUID-based naming
+	publicFileID := "550e8400-e29b-41d4-a716-446655440012"
 	publicFile := &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "public-file",
+			Name:      "file-" + publicFileID,
 			Namespace: handler.namespace,
 			Labels: map[string]string{
 				files.AppNameLabel:        files.AppName,
 				files.AppComponentLabel:   files.ComponentFile,
+				files.FileIDLabel:         publicFileID,
 				files.AvailableToAllLabel: "true",
 			},
 		},
@@ -970,14 +985,16 @@ func TestListAvailableFiles(t *testing.T) {
 	}
 	_ = handler.client.Create(context.Background(), publicFile)
 
-	// Create group file
+	// Create group file with UUID-based naming
+	groupFileID := "550e8400-e29b-41d4-a716-446655440013"
 	groupFile := &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "group-file",
+			Name:      "file-" + groupFileID,
 			Namespace: handler.namespace,
 			Labels: map[string]string{
 				files.AppNameLabel:                   files.AppName,
 				files.AppComponentLabel:              files.ComponentFile,
+				files.FileIDLabel:                    groupFileID,
 				"group.krkn.krkn-chaos.dev/dev-team": "true",
 			},
 		},
@@ -987,14 +1004,16 @@ func TestListAvailableFiles(t *testing.T) {
 	}
 	_ = handler.client.Create(context.Background(), groupFile)
 
-	// Create private file (no access)
+	// Create private file (no access) with UUID-based naming
+	privateFileID := "550e8400-e29b-41d4-a716-446655440014"
 	privateFile := &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "private-file",
+			Name:      "file-" + privateFileID,
 			Namespace: handler.namespace,
 			Labels: map[string]string{
 				files.AppNameLabel:                   files.AppName,
 				files.AppComponentLabel:              files.ComponentFile,
+				files.FileIDLabel:                    privateFileID,
 				"group.krkn.krkn-chaos.dev/ops-team": "true",
 			},
 		},

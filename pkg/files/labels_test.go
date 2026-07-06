@@ -22,8 +22,11 @@ import (
 )
 
 func TestBuildFileLabels(t *testing.T) {
+	testFileID := "550e8400-e29b-41d4-a716-446655440000"
+
 	tests := []struct {
 		name           string
+		fileID         string
 		fileType       string
 		groups         []string
 		availableToAll bool
@@ -31,67 +34,79 @@ func TestBuildFileLabels(t *testing.T) {
 	}{
 		{
 			name:           "with groups",
+			fileID:         testFileID,
 			fileType:       "",
 			groups:         []string{"dev-team", "qa-team"},
 			availableToAll: false,
 			want: map[string]string{
 				AppNameLabel:                         AppName,
 				AppComponentLabel:                    ComponentFile,
+				FileIDLabel:                          testFileID,
 				"group.krkn.krkn-chaos.dev/dev-team": "true",
 				"group.krkn.krkn-chaos.dev/qa-team":  "true",
 			},
 		},
 		{
 			name:           "available to all",
+			fileID:         testFileID,
 			fileType:       "",
 			groups:         []string{},
 			availableToAll: true,
 			want: map[string]string{
 				AppNameLabel:        AppName,
 				AppComponentLabel:   ComponentFile,
+				FileIDLabel:         testFileID,
 				AvailableToAllLabel: "true",
 			},
 		},
 		{
 			name:           "no groups, not public",
+			fileID:         testFileID,
 			fileType:       "",
 			groups:         []string{},
 			availableToAll: false,
 			want: map[string]string{
 				AppNameLabel:      AppName,
 				AppComponentLabel: ComponentFile,
+				FileIDLabel:       testFileID,
 			},
 		},
 		{
 			name:           "single group",
+			fileID:         testFileID,
 			fileType:       "",
 			groups:         []string{"ops-team"},
 			availableToAll: false,
 			want: map[string]string{
 				AppNameLabel:                         AppName,
 				AppComponentLabel:                    ComponentFile,
+				FileIDLabel:                          testFileID,
 				"group.krkn.krkn-chaos.dev/ops-team": "true",
 			},
 		},
 		{
 			name:           "with file type",
+			fileID:         testFileID,
 			fileType:       "config",
 			groups:         []string{},
 			availableToAll: false,
 			want: map[string]string{
 				AppNameLabel:                           AppName,
 				AppComponentLabel:                      ComponentFile,
+				FileIDLabel:                            testFileID,
 				"file-type.krkn.krkn-chaos.dev/config": "true",
 			},
 		},
 		{
 			name:           "with file type and groups",
+			fileID:         testFileID,
 			fileType:       "script",
 			groups:         []string{"dev-team"},
 			availableToAll: false,
 			want: map[string]string{
 				AppNameLabel:                           AppName,
 				AppComponentLabel:                      ComponentFile,
+				FileIDLabel:                            testFileID,
 				"file-type.krkn.krkn-chaos.dev/script": "true",
 				"group.krkn.krkn-chaos.dev/dev-team":   "true",
 			},
@@ -100,7 +115,7 @@ func TestBuildFileLabels(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := BuildFileLabels(tt.fileType, tt.groups, tt.availableToAll)
+			got := BuildFileLabels(tt.fileID, tt.fileType, tt.groups, tt.availableToAll)
 
 			// Check all expected labels are present
 			for key, wantValue := range tt.want {
@@ -117,6 +132,45 @@ func TestBuildFileLabels(t *testing.T) {
 			// Check no extra labels
 			if len(got) != len(tt.want) {
 				t.Errorf("BuildFileLabels() has %d labels, want %d", len(got), len(tt.want))
+			}
+		})
+	}
+}
+
+func TestExtractFileIDFromLabels(t *testing.T) {
+	tests := []struct {
+		name   string
+		labels map[string]string
+		want   string
+	}{
+		{
+			name: "file ID present",
+			labels: map[string]string{
+				FileIDLabel: "550e8400-e29b-41d4-a716-446655440001",
+			},
+			want: "550e8400-e29b-41d4-a716-446655440001",
+		},
+		{
+			name:   "file ID missing",
+			labels: map[string]string{},
+			want:   "",
+		},
+		{
+			name: "file ID with other labels",
+			labels: map[string]string{
+				AppNameLabel:      AppName,
+				AppComponentLabel: ComponentFile,
+				FileIDLabel:       "550e8400-e29b-41d4-a716-446655440002",
+			},
+			want: "550e8400-e29b-41d4-a716-446655440002",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ExtractFileIDFromLabels(tt.labels)
+			if got != tt.want {
+				t.Errorf("ExtractFileIDFromLabels() = %v, want %v", got, tt.want)
 			}
 		})
 	}

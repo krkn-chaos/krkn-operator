@@ -18,8 +18,6 @@ package files
 
 // CreateFileRequest represents a request to create a new file ConfigMap
 type CreateFileRequest struct {
-	// Name is the ConfigMap name (must be unique, RFC 1123 compliant)
-	Name string `json:"name"`
 	// FileName is the key in the ConfigMap data (the actual file name)
 	FileName string `json:"fileName"`
 	// Content is the file content
@@ -37,7 +35,8 @@ type CreateFileRequest struct {
 // CreateFileResponse is the response for create file requests
 type CreateFileResponse struct {
 	Message string `json:"message"`
-	Name    string `json:"name"`
+	// FileID is the generated UUID for this file (used for retrieval)
+	FileID string `json:"fileId"`
 }
 
 // UpdateFileRequest represents a request to update a file ConfigMap
@@ -59,7 +58,8 @@ type UpdateFileRequest struct {
 // UpdateFileResponse is the response for update file requests
 type UpdateFileResponse struct {
 	Message string `json:"message"`
-	Name    string `json:"name"`
+	// FileID is the UUID for this file
+	FileID string `json:"fileId"`
 }
 
 // DeleteFileResponse is the response for delete file requests
@@ -69,7 +69,8 @@ type DeleteFileResponse struct {
 
 // FileResponse represents a file ConfigMap in API responses
 type FileResponse struct {
-	Name           string   `json:"name"`
+	// FileID is the UUID identifier for this file
+	FileID         string   `json:"fileId"`
 	FileName       string   `json:"fileName"`
 	Content        string   `json:"content"`
 	Description    string   `json:"description,omitempty"`
@@ -84,7 +85,8 @@ type FileResponse struct {
 
 // FileInfo represents minimal file information for user-facing lists
 type FileInfo struct {
-	Name        string `json:"name"`
+	// FileID is the UUID identifier for this file
+	FileID      string `json:"fileId"`
 	FileName    string `json:"fileName"`
 	Description string `json:"description,omitempty"`
 	FileType    string `json:"fileType,omitempty"`

@@ -23,6 +23,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/krkn-chaos/krkn-operator/pkg/auth"
 	"github.com/krkn-chaos/krkn-operator/pkg/files"
 	"github.com/krkn-chaos/krkn-operator/pkg/groupauth"
@@ -74,14 +75,11 @@ func (h *Handler) CreateFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check if file already exists
-	if h.fileExists(ctx, req.Name) {
-		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
-			Error:   "bad_request",
-			Message: fmt.Sprintf("File '%s' already exists", req.Name),
-		})
-		return
-	}
+	// Generate unique file ID (UUID)
+	fileID := uuid.New().String()
+
+	// Generate ConfigMap name from file ID
+	configMapName := fmt.Sprintf("file-%s", fileID)
 
 	// Get current user for audit trail
 	createdBy := claims.UserID
@@ -95,7 +93,7 @@ func (h *Handler) CreateFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Build labels and annotations
-	labels := files.BuildFileLabels(req.FileType, req.Groups, req.AvailableToAll)
+	labels := files.BuildFileLabels(fileID, req.FileType, req.Groups, req.AvailableToAll)
 	annotations := files.BuildFileAnnotations(
 		req.Description,
 		createdBy,
@@ -104,7 +102,7 @@ func (h *Handler) CreateFile(w http.ResponseWriter, r *http.Request) {
 	// Create ConfigMap
 	configMap := &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:        req.Name,
+			Name:        configMapName,
 			Namespace:   h.namespace,
 			Labels:      labels,
 			Annotations: annotations,
@@ -115,7 +113,7 @@ func (h *Handler) CreateFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.client.Create(ctx, configMap); err != nil {
-		logger.Error(err, "Failed to create file ConfigMap", "fileName", req.Name)
+		logger.Error(err, "Failed to create file ConfigMap", "fileID", fileID, "configMapName", configMapName)
 		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
 			Error:   "internal_error",
 			Message: "Failed to create file",
@@ -123,11 +121,11 @@ func (h *Handler) CreateFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	logger.Info("Created file", "fileName", req.Name, "createdBy", createdBy)
+	logger.Info("Created file", "fileID", fileID, "fileName", req.FileName, "createdBy", createdBy)
 
 	writeJSON(w, http.StatusCreated, files.CreateFileResponse{
 		Message: "File created successfully",
-		Name:    req.Name,
+		FileID:  fileID,
 	})
 }
 
@@ -178,34 +176,32 @@ func (h *Handler) ListFiles(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// GetFile handles GET /api/v1/files/{name}
-// Returns a single file (admin only)
-// GetFile handles GET /api/v1/files/{name}
-// Gets a single file (authenticated users with access)
+// GetFile handles GET /api/v1/files/{fileId}
+// Gets a single file by UUID (authenticated users with access)
 func (h *Handler) GetFile(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	logger := log.FromContext(ctx).WithName("get-file")
 
-	// Extract file name from path
-	fileName, err := extractPathSuffix(r.URL.Path, FilesPath+"/")
+	// Extract file ID from path
+	fileID, err := extractPathSuffix(r.URL.Path, FilesPath+"/")
 	if err != nil {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
 			Error:   "bad_request",
-			Message: "Invalid file name in path",
+			Message: "Invalid file ID in path",
 		})
 		return
 	}
 
-	// Load ConfigMap
-	configMap, err := h.loadFileConfigMap(ctx, fileName)
+	// Load ConfigMap by file ID
+	configMap, err := h.loadFileConfigMapByID(ctx, fileID)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			writeJSONError(w, http.StatusNotFound, ErrorResponse{
 				Error:   "not_found",
-				Message: fmt.Sprintf("File '%s' not found", fileName),
+				Message: fmt.Sprintf("File with ID '%s' not found", fileID),
 			})
 		} else {
-			logger.Error(err, "Failed to get file", "fileName", fileName)
+			logger.Error(err, "Failed to get file", "fileID", fileID)
 			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
 				Error:   "internal_error",
 				Message: "Failed to get file",
@@ -226,24 +222,24 @@ func (h *Handler) GetFile(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	logger.Info("Retrieved file", "fileName", fileName)
+	logger.Info("Retrieved file", "fileID", fileID)
 	writeJSON(w, http.StatusOK, buildFileResponse(configMap))
 }
 
-// UpdateFile handles PUT /api/v1/files/{name}
-// Updates a file (authenticated users with access)
+// UpdateFile handles PUT /api/v1/files/{fileId}
+// Updates a file by UUID (authenticated users with access)
 // Users can update files from their own groups
 // Admins can update any file
 func (h *Handler) UpdateFile(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	logger := log.FromContext(ctx).WithName("update-file")
 
-	// Extract file name from path
-	fileName, err := extractPathSuffix(r.URL.Path, FilesPath+"/")
+	// Extract file ID from path
+	fileID, err := extractPathSuffix(r.URL.Path, FilesPath+"/")
 	if err != nil {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
 			Error:   "bad_request",
-			Message: "Invalid file name in path",
+			Message: "Invalid file ID in path",
 		})
 		return
 	}
@@ -278,16 +274,16 @@ func (h *Handler) UpdateFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Load existing ConfigMap
-	configMap, err := h.loadFileConfigMap(ctx, fileName)
+	// Load existing ConfigMap by file ID
+	configMap, err := h.loadFileConfigMapByID(ctx, fileID)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			writeJSONError(w, http.StatusNotFound, ErrorResponse{
 				Error:   "not_found",
-				Message: fmt.Sprintf("File '%s' not found", fileName),
+				Message: fmt.Sprintf("File with ID '%s' not found", fileID),
 			})
 		} else {
-			logger.Error(err, "Failed to get file", "fileName", fileName)
+			logger.Error(err, "Failed to get file", "fileID", fileID)
 			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
 				Error:   "internal_error",
 				Message: "Failed to get file",
@@ -318,8 +314,8 @@ func (h *Handler) UpdateFile(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Update labels and annotations
-	configMap.Labels = files.BuildFileLabels(req.FileType, req.Groups, req.AvailableToAll)
+	// Update labels and annotations (preserve existing file ID)
+	configMap.Labels = files.BuildFileLabels(fileID, req.FileType, req.Groups, req.AvailableToAll)
 	configMap.Annotations = files.UpdateFileAnnotations(
 		configMap.Annotations,
 		req.Description,
@@ -332,7 +328,7 @@ func (h *Handler) UpdateFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.client.Update(ctx, configMap); err != nil {
-		logger.Error(err, "Failed to update file", "fileName", fileName)
+		logger.Error(err, "Failed to update file", "fileID", fileID)
 		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
 			Error:   "internal_error",
 			Message: "Failed to update file",
@@ -340,42 +336,42 @@ func (h *Handler) UpdateFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	logger.Info("Updated file", "fileName", fileName, "updatedBy", updatedBy)
+	logger.Info("Updated file", "fileID", fileID, "updatedBy", updatedBy)
 
 	writeJSON(w, http.StatusOK, files.UpdateFileResponse{
 		Message: "File updated successfully",
-		Name:    fileName,
+		FileID:  fileID,
 	})
 }
 
-// DeleteFile handles DELETE /api/v1/files/{name}
-// Deletes a file (authenticated users with access)
+// DeleteFile handles DELETE /api/v1/files/{fileId}
+// Deletes a file by UUID (authenticated users with access)
 // Users can delete files from their own groups
 // Admins can delete any file
 func (h *Handler) DeleteFile(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	logger := log.FromContext(ctx).WithName("delete-file")
 
-	// Extract file name from path
-	fileName, err := extractPathSuffix(r.URL.Path, FilesPath+"/")
+	// Extract file ID from path
+	fileID, err := extractPathSuffix(r.URL.Path, FilesPath+"/")
 	if err != nil {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
 			Error:   "bad_request",
-			Message: "Invalid file name in path",
+			Message: "Invalid file ID in path",
 		})
 		return
 	}
 
-	// Load ConfigMap (to verify it exists and is a file)
-	configMap, err := h.loadFileConfigMap(ctx, fileName)
+	// Load ConfigMap by file ID (to verify it exists and is a file)
+	configMap, err := h.loadFileConfigMapByID(ctx, fileID)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			writeJSONError(w, http.StatusNotFound, ErrorResponse{
 				Error:   "not_found",
-				Message: fmt.Sprintf("File '%s' not found", fileName),
+				Message: fmt.Sprintf("File with ID '%s' not found", fileID),
 			})
 		} else {
-			logger.Error(err, "Failed to get file", "fileName", fileName)
+			logger.Error(err, "Failed to get file", "fileID", fileID)
 			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
 				Error:   "internal_error",
 				Message: "Failed to get file",
@@ -398,7 +394,7 @@ func (h *Handler) DeleteFile(w http.ResponseWriter, r *http.Request) {
 
 	// Delete ConfigMap
 	if err := h.client.Delete(ctx, configMap); err != nil {
-		logger.Error(err, "Failed to delete file", "fileName", fileName)
+		logger.Error(err, "Failed to delete file", "fileID", fileID)
 		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
 			Error:   "internal_error",
 			Message: "Failed to delete file",
@@ -406,7 +402,7 @@ func (h *Handler) DeleteFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	logger.Info("Deleted file", "fileName", fileName)
+	logger.Info("Deleted file", "fileID", fileID)
 
 	writeJSON(w, http.StatusOK, files.DeleteFileResponse{
 		Message: "File deleted successfully",
@@ -532,7 +528,7 @@ func (h *Handler) FilesRouter(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// File-specific endpoints: /api/v1/files/{name}
+	// File-specific endpoints: /api/v1/files/{fileId}
 	if strings.HasPrefix(path, FilesPath+"/") {
 		if r.Method == http.MethodGet {
 			h.GetFile(w, r)
@@ -564,40 +560,32 @@ func (h *Handler) FilesRouter(w http.ResponseWriter, r *http.Request) {
 
 // Helper functions
 
-// fileExists checks if a file ConfigMap with the given name already exists
-func (h *Handler) fileExists(ctx context.Context, name string) bool {
-	var configMap corev1.ConfigMap
-	err := h.client.Get(ctx, types.NamespacedName{
-		Name:      name,
-		Namespace: h.namespace,
-	}, &configMap)
-
-	if err != nil {
-		return false
-	}
-
-	// Verify it's a file ConfigMap
-	return configMap.Labels[files.AppComponentLabel] == files.ComponentFile
-}
-
-// loadFileConfigMap loads a file ConfigMap by name
-func (h *Handler) loadFileConfigMap(ctx context.Context, name string) (*corev1.ConfigMap, error) {
-	var configMap corev1.ConfigMap
-	err := h.client.Get(ctx, types.NamespacedName{
-		Name:      name,
-		Namespace: h.namespace,
-	}, &configMap)
+// loadFileConfigMapByID loads a file ConfigMap by file ID (UUID)
+func (h *Handler) loadFileConfigMapByID(ctx context.Context, fileID string) (*corev1.ConfigMap, error) {
+	// List ConfigMaps with the file ID label
+	var configMapList corev1.ConfigMapList
+	err := h.client.List(ctx, &configMapList,
+		client.InNamespace(h.namespace),
+		client.MatchingLabels{
+			files.AppNameLabel:      files.AppName,
+			files.AppComponentLabel: files.ComponentFile,
+			files.FileIDLabel:       fileID,
+		},
+	)
 
 	if err != nil {
 		return nil, err
 	}
 
-	// Validate it's a file ConfigMap
-	if configMap.Labels[files.AppComponentLabel] != files.ComponentFile {
-		return nil, fmt.Errorf("ConfigMap is not a file ConfigMap")
+	if len(configMapList.Items) == 0 {
+		return nil, apierrors.NewNotFound(corev1.Resource("configmap"), fileID)
 	}
 
-	return &configMap, nil
+	if len(configMapList.Items) > 1 {
+		return nil, fmt.Errorf("multiple ConfigMaps found with file ID '%s'", fileID)
+	}
+
+	return &configMapList.Items[0], nil
 }
 
 // canAccessFile checks if the current user can access a file
@@ -652,7 +640,7 @@ func buildFileResponse(configMap *corev1.ConfigMap) files.FileResponse {
 	}
 
 	return files.FileResponse{
-		Name:           configMap.Name,
+		FileID:         files.ExtractFileIDFromLabels(configMap.Labels),
 		FileName:       fileName,
 		Content:        content,
 		Description:    configMap.Annotations[files.DescriptionAnnotation],
@@ -676,7 +664,7 @@ func buildFileInfo(configMap *corev1.ConfigMap) files.FileInfo {
 	}
 
 	return files.FileInfo{
-		Name:        configMap.Name,
+		FileID:      files.ExtractFileIDFromLabels(configMap.Labels),
 		FileName:    fileName,
 		Description: configMap.Annotations[files.DescriptionAnnotation],
 		FileType:    files.ExtractFileTypeFromLabels(configMap.Labels),
@@ -685,11 +673,6 @@ func buildFileInfo(configMap *corev1.ConfigMap) files.FileInfo {
 
 // validateCreateFileRequest validates a CreateFileRequest
 func validateCreateFileRequest(ctx context.Context, k8sClient client.Client, req *files.CreateFileRequest, namespace string, isAdmin bool, userID string) error {
-	// Validate name (RFC 1123 subdomain)
-	if req.Name == "" {
-		return fmt.Errorf("name is required")
-	}
-
 	// Validate file name
 	if req.FileName == "" {
 		return fmt.Errorf("fileName is required")

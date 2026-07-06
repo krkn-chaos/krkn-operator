@@ -33,6 +33,8 @@ const (
 
 	// AvailableToAllLabel marks files accessible by all users
 	AvailableToAllLabel = "files.krkn.krkn-chaos.dev/available-to-all"
+	// FileIDLabel stores the UUID identifier for the file
+	FileIDLabel = "files.krkn.krkn-chaos.dev/file-id"
 
 	// DescriptionAnnotation stores the file description
 	DescriptionAnnotation = "files.krkn.krkn-chaos.dev/description"
@@ -52,10 +54,11 @@ const (
 )
 
 // BuildFileLabels creates the labels map for a file ConfigMap
-func BuildFileLabels(fileType string, groups []string, availableToAll bool) map[string]string {
+func BuildFileLabels(fileID, fileType string, groups []string, availableToAll bool) map[string]string {
 	labels := map[string]string{
 		AppNameLabel:      AppName,
 		AppComponentLabel: ComponentFile,
+		FileIDLabel:       fileID,
 	}
 
 	// Add file type label if specified
@@ -76,6 +79,11 @@ func BuildFileLabels(fileType string, groups []string, availableToAll bool) map[
 	}
 
 	return labels
+}
+
+// ExtractFileIDFromLabels extracts the file ID from file ConfigMap labels
+func ExtractFileIDFromLabels(labels map[string]string) string {
+	return labels[FileIDLabel]
 }
 
 // BuildFileAnnotations creates the annotations map for a file ConfigMap
