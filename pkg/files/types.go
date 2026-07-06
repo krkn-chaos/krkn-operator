@@ -102,3 +102,11 @@ type ListFilesResponse struct {
 type AvailableFilesResponse struct {
 	Files []FileInfo `json:"files"`
 }
+
+// FileReference represents a reference to a managed file to mount in scenario pod
+type FileReference struct {
+	// FileID is the UUID of the file to mount
+	FileID string `json:"fileId"`
+	// MountPath is the absolute path where the file should be mounted
+	MountPath string `json:"mountPath"`
+}

@@ -22,6 +22,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
+	"github.com/krkn-chaos/krkn-operator/pkg/files"
 )
 
 // ClustersResponse represents the response for GET /clusters endpoint
@@ -140,8 +141,10 @@ type ScenarioRunRequest struct {
 	KubeconfigPath string `json:"kubeconfigPath,omitempty"`
 	// Environment is a map of environment variables to pass to the container (optional)
 	Environment map[string]string `json:"environment,omitempty"`
-	// Files is an array of file objects to mount in the container (optional)
+	// Files is an array of file objects to mount in the container (optional, legacy inline file mount)
 	Files []FileMount `json:"files,omitempty"`
+	// FileReferences are references to centrally-managed files by UUID (optional)
+	FileReferences []files.FileReference `json:"fileReferences,omitempty"`
 	// Private registry configuration (optional)
 	ScenariosRequest
 }

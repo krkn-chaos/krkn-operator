@@ -19,9 +19,11 @@ package api
 import (
 	"bufio"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -37,6 +39,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
@@ -1008,6 +1011,84 @@ func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
 		)
 	}
 
+	// Process file references: validate access and translate to FileMount
+	translatedFiles := make([]krknv1alpha1.FileMount, 0, len(req.FileReferences))
+
+	for _, fileRef := range req.FileReferences {
+		// Validate mount path is absolute
+		if !filepath.IsAbs(fileRef.MountPath) {
+			writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+				Error:   "bad_request",
+				Message: fmt.Sprintf("mount path must be absolute: %s", fileRef.MountPath),
+			})
+			return
+		}
+
+		// Load file ConfigMap by UUID
+		fileConfigMap, err := h.loadFileConfigMapByID(ctx, fileRef.FileID)
+		if err != nil {
+			if apierrors.IsNotFound(err) {
+				writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+					Error:   "bad_request",
+					Message: fmt.Sprintf("file with ID '%s' not found", fileRef.FileID),
+				})
+			} else {
+				logger.Error(err, "Failed to load file ConfigMap", "fileID", fileRef.FileID)
+				writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+					Error:   "internal_error",
+					Message: "Failed to load file",
+				})
+			}
+			return
+		}
+
+		// Validate user has access to this file
+		if !h.canAccessFile(ctx, fileConfigMap) {
+			writeJSONError(w, http.StatusForbidden, ErrorResponse{
+				Error:   "forbidden",
+				Message: fmt.Sprintf("You do not have access to file '%s'", fileRef.FileID),
+			})
+			return
+		}
+
+		// Extract file content from ConfigMap (first data key)
+		var fileName, content string
+		for k, v := range fileConfigMap.Data {
+			fileName = k
+			content = v
+			break
+		}
+
+		// Base64 encode content for FileMount
+		encodedContent := base64.StdEncoding.EncodeToString([]byte(content))
+
+		// Translate to FileMount
+		translatedFiles = append(translatedFiles, krknv1alpha1.FileMount{
+			Name:      fileName,
+			Content:   encodedContent,
+			MountPath: fileRef.MountPath,
+		})
+
+		logger.V(1).Info("Translated file reference",
+			"fileID", fileRef.FileID,
+			"fileName", fileName,
+			"mountPath", fileRef.MountPath,
+		)
+	}
+
+	// Convert inline Files from API type to CRD type
+	inlineFiles := make([]krknv1alpha1.FileMount, 0, len(req.Files))
+	for _, f := range req.Files {
+		inlineFiles = append(inlineFiles, krknv1alpha1.FileMount{
+			Name:      f.Name,
+			Content:   f.Content,
+			MountPath: f.MountPath,
+		})
+	}
+
+	// Merge inline Files with translated FileReferences
+	allFiles := append(inlineFiles, translatedFiles...)
+
 	// Load registry configuration if specified
 	var registryConfig *models.RegistryV2
 	if req.RegistryName != nil && *req.RegistryName != "" {
@@ -1090,10 +1171,10 @@ func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Convert FileMount from API type to CRD type
-	if len(req.Files) > 0 {
-		scenarioRun.Spec.Files = make([]krknv1alpha1.FileMount, len(req.Files))
-		for i, f := range req.Files {
+	// Convert FileMount from API type to CRD type (merged from inline Files and translated FileReferences)
+	if len(allFiles) > 0 {
+		scenarioRun.Spec.Files = make([]krknv1alpha1.FileMount, len(allFiles))
+		for i, f := range allFiles {
 			scenarioRun.Spec.Files[i] = krknv1alpha1.FileMount{
 				Name:      f.Name,
 				Content:   f.Content,
