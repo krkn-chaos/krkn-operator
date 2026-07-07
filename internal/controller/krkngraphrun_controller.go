@@ -210,6 +210,16 @@ func (r *KrknGraphRunReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	if !statusAlreadyUpdated {
 		r.calculateGlobalStatus(&graphRun)
 
+		// 7.1. Calculate resiliency score if enabled and GraphRun is in terminal state
+		if graphRun.Spec.ResiliencyScoreEnabled &&
+		   r.isTerminalPhase(graphRun.Status.Phase) &&
+		   graphRun.Status.ResiliencyScore == nil {
+			if err := r.calculateResiliencyScore(ctx, &graphRun, existingRuns); err != nil {
+				logger.Error(err, "failed to calculate resiliency score", "graphRun", graphRun.Name)
+				// Don't fail the reconcile, just log the error
+			}
+		}
+
 		// 8. Persist all status updates in a single call
 		if err := r.Status().Update(ctx, &graphRun); err != nil {
 			if apierrors.IsConflict(err) {
@@ -488,6 +498,11 @@ func (r *KrknGraphRunReconciler) createScenarioRun(
 	}
 
 	// Add resiliency score environment variables if enabled
+	logger.Info("checking resiliency score configuration",
+		"nodeID", nodeID,
+		"resiliencyScoreEnabled", graphRun.Spec.ResiliencyScoreEnabled,
+		"resiliencyMountPath", graphRun.Spec.ResiliencyMountPath)
+
 	if graphRun.Spec.ResiliencyScoreEnabled {
 		// Initialize environment map if nil
 		if spec.Environment == nil {
@@ -496,6 +511,9 @@ func (r *KrknGraphRunReconciler) createScenarioRun(
 
 		// Set RESILIENCY_SCORE=true to enable resiliency scoring in the scenario pod
 		spec.Environment["RESILIENCY_SCORE"] = "true"
+		logger.Info("added RESILIENCY_SCORE environment variable",
+			"nodeID", nodeID,
+			"value", "true")
 
 		// If a resiliency mount path is specified, check if this node has a file mounted at that path
 		if graphRun.Spec.ResiliencyMountPath != "" {
