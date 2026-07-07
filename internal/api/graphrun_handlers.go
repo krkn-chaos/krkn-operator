@@ -25,6 +25,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -305,6 +306,52 @@ func (h *Handler) CreateGraphRun(w http.ResponseWriter, r *http.Request) {
 				Message: err.Error(),
 			})
 			return
+		}
+	}
+
+	// Validate file access for Volumes references in graph nodes
+	// Volumes format: {"<file-uuid>": "/mount/path"}
+	for nodeID, node := range req.Graph {
+		for fileID := range node.Volumes {
+			// Load file ConfigMap by UUID
+			fileConfigMap, err := h.loadFileConfigMapByID(ctx, fileID)
+			if err != nil {
+				if apierrors.IsNotFound(err) {
+					writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+						Error:   "bad_request",
+						Message: fmt.Sprintf("File with ID '%s' (referenced in node '%s') not found", fileID, nodeID),
+					})
+				} else {
+					logger.Error(err, "Failed to load file ConfigMap", "fileID", fileID, "nodeID", nodeID)
+					writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+						Error:   "internal_error",
+						Message: "Failed to validate file access",
+					})
+				}
+				return
+			}
+
+			// Validate user has access to this file
+			hasAccess, err := h.canAccessFile(ctx, fileConfigMap)
+			if err != nil {
+				logger.Error(err, "Failed to check file access", "fileID", fileID, "nodeID", nodeID)
+				writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+					Error:   "internal_error",
+					Message: "Failed to validate file access permissions",
+				})
+				return
+			}
+			if !hasAccess {
+				writeJSONError(w, http.StatusForbidden, ErrorResponse{
+					Error:   "forbidden",
+					Message: fmt.Sprintf("You do not have access to file '%s' (referenced in node '%s')", fileID, nodeID),
+				})
+				return
+			}
+
+			logger.V(1).Info("Validated file access for graph node",
+				"nodeID", nodeID,
+				"fileID", fileID)
 		}
 	}
 
