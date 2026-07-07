@@ -423,16 +423,30 @@ func TestListFiles(t *testing.T) {
 func TestGetFile(t *testing.T) {
 	handler := setupFilesTestHandler()
 
-	// Create test file with UUID-based naming
+	// Create KrknUser for non-admin test
+	testUser := &krknv1alpha1.KrknUser{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "krknuser-admin-test-example",
+			Namespace: handler.namespace,
+		},
+		Spec: krknv1alpha1.KrknUserSpec{
+			UserID: "admin@test.example",
+			Role:   "user",
+		},
+	}
+	_ = handler.client.Create(context.Background(), testUser)
+
+	// Create test file with UUID-based naming (restricted to specific group)
 	fileID := "550e8400-e29b-41d4-a716-446655440003"
 	testFile := &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "file-" + fileID,
 			Namespace: handler.namespace,
 			Labels: map[string]string{
-				files.AppNameLabel:      files.AppName,
-				files.AppComponentLabel: files.ComponentFile,
-				files.FileIDLabel:       fileID,
+				files.AppNameLabel:         files.AppName,
+				files.AppComponentLabel:    files.ComponentFile,
+				files.FileIDLabel:          fileID,
+				"groups.krkn.krkn-chaos.dev/restricted-group": "true",
 			},
 			Annotations: map[string]string{
 				files.DescriptionAnnotation: "Test file",
