@@ -77,12 +77,12 @@ func (h *Handler) ListGraphRuns(w http.ResponseWriter, r *http.Request) {
 	for i := range filteredRuns {
 		run := &filteredRuns[i]
 		response = append(response, GraphRunListItem{
-			Name:              run.Name,
-			Namespace:         run.Namespace,
-			CreationTimestamp: run.CreationTimestamp.Time,
-			Phase:             run.Status.Phase,
-			OwnerUserID:       run.Spec.OwnerUserID,
-			TargetRequestID:   run.Spec.TargetRequestID,
+			Name:                    run.Name,
+			Namespace:               run.Namespace,
+			CreationTimestamp:       run.CreationTimestamp.Time,
+			Phase:                   run.Status.Phase,
+			OwnerUserID:             run.Spec.OwnerUserID,
+			TargetRequestID:         run.Spec.TargetRequestID,
 			Summary: GraphRunSummaryResponse{
 				TotalNodes:     run.Status.Summary.TotalNodes,
 				CompletedNodes: run.Status.Summary.CompletedNodes,
@@ -90,8 +90,11 @@ func (h *Handler) ListGraphRuns(w http.ResponseWriter, r *http.Request) {
 				FailedNodes:    run.Status.Summary.FailedNodes,
 				PendingNodes:   run.Status.Summary.PendingNodes,
 			},
-			StartTime:      run.Status.StartTime,
-			CompletionTime: run.Status.CompletionTime,
+			StartTime:               run.Status.StartTime,
+			CompletionTime:          run.Status.CompletionTime,
+			ResiliencyScoreEnabled:  run.Spec.ResiliencyScoreEnabled,
+			ResiliencyScoreBaseline: run.Spec.ResiliencyScoreBaseline,
+			ResiliencyScore:         convertResiliencyScore(run.Status.ResiliencyScore),
 		})
 	}
 
@@ -165,10 +168,13 @@ func (h *Handler) GetGraphRun(w http.ResponseWriter, r *http.Request) {
 		Namespace:         graphRun.Namespace,
 		CreationTimestamp: graphRun.CreationTimestamp.Time,
 		Spec: GraphRunSpecResponse{
-			Graph:           graphRun.Spec.Graph,
-			TargetRequestID: graphRun.Spec.TargetRequestID,
-			TargetClusters:  graphRun.Spec.TargetClusters,
-			OwnerUserID:     graphRun.Spec.OwnerUserID,
+			Graph:                   graphRun.Spec.Graph,
+			TargetRequestID:         graphRun.Spec.TargetRequestID,
+			TargetClusters:          graphRun.Spec.TargetClusters,
+			OwnerUserID:             graphRun.Spec.OwnerUserID,
+			ResiliencyScoreEnabled:  graphRun.Spec.ResiliencyScoreEnabled,
+			ResiliencyMountPath:     graphRun.Spec.ResiliencyMountPath,
+			ResiliencyScoreBaseline: graphRun.Spec.ResiliencyScoreBaseline,
 		},
 		Status: GraphRunStatusResponse{
 			Phase: graphRun.Status.Phase,
@@ -446,10 +452,13 @@ func (h *Handler) CreateGraphRun(w http.ResponseWriter, r *http.Request) {
 		Namespace:         graphRun.Namespace,
 		CreationTimestamp: graphRun.CreationTimestamp.Time,
 		Spec: GraphRunSpecResponse{
-			Graph:           graphRun.Spec.Graph,
-			TargetRequestID: graphRun.Spec.TargetRequestID,
-			TargetClusters:  graphRun.Spec.TargetClusters,
-			OwnerUserID:     graphRun.Spec.OwnerUserID,
+			Graph:                   graphRun.Spec.Graph,
+			TargetRequestID:         graphRun.Spec.TargetRequestID,
+			TargetClusters:          graphRun.Spec.TargetClusters,
+			OwnerUserID:             graphRun.Spec.OwnerUserID,
+			ResiliencyScoreEnabled:  graphRun.Spec.ResiliencyScoreEnabled,
+			ResiliencyMountPath:     graphRun.Spec.ResiliencyMountPath,
+			ResiliencyScoreBaseline: graphRun.Spec.ResiliencyScoreBaseline,
 		},
 		Status: GraphRunStatusResponse{
 			Phase: graphRun.Status.Phase,

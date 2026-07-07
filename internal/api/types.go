@@ -712,15 +712,18 @@ type GraphRunCreateRequest struct {
 
 // GraphRunListItem represents a single item in the graph runs list
 type GraphRunListItem struct {
-	Name              string                  `json:"name"`
-	Namespace         string                  `json:"namespace"`
-	CreationTimestamp time.Time               `json:"creationTimestamp"`
-	Phase             string                  `json:"phase"`
-	OwnerUserID       string                  `json:"ownerUserId"`
-	TargetRequestID   string                  `json:"targetRequestId"`
-	Summary           GraphRunSummaryResponse `json:"summary"`
-	StartTime         *metav1.Time            `json:"startTime,omitempty"`
-	CompletionTime    *metav1.Time            `json:"completionTime,omitempty"`
+	Name                    string                   `json:"name"`
+	Namespace               string                   `json:"namespace"`
+	CreationTimestamp       time.Time                `json:"creationTimestamp"`
+	Phase                   string                   `json:"phase"`
+	OwnerUserID             string                   `json:"ownerUserId"`
+	TargetRequestID         string                   `json:"targetRequestId"`
+	Summary                 GraphRunSummaryResponse  `json:"summary"`
+	StartTime               *metav1.Time             `json:"startTime,omitempty"`
+	CompletionTime          *metav1.Time             `json:"completionTime,omitempty"`
+	ResiliencyScoreEnabled  bool                     `json:"resiliencyScoreEnabled,omitempty"`
+	ResiliencyScoreBaseline *float64                 `json:"resiliencyScoreBaseline,omitempty"`
+	ResiliencyScore         *ResiliencyScoreResponse `json:"resiliencyScore,omitempty"`
 }
 
 // GraphRunListResponse represents the response for GET /api/v1/graphruns
@@ -739,10 +742,13 @@ type GraphRunDetailResponse struct {
 
 // GraphRunSpecResponse represents the spec section of a graph run
 type GraphRunSpecResponse struct {
-	Graph           map[string]krknv1alpha1.GraphScenarioNode `json:"graph"`
-	TargetRequestID string                                    `json:"targetRequestId"`
-	TargetClusters  map[string][]string                       `json:"targetClusters"`
-	OwnerUserID     string                                    `json:"ownerUserId"`
+	Graph                   map[string]krknv1alpha1.GraphScenarioNode `json:"graph"`
+	TargetRequestID         string                                    `json:"targetRequestId"`
+	TargetClusters          map[string][]string                       `json:"targetClusters"`
+	OwnerUserID             string                                    `json:"ownerUserId"`
+	ResiliencyScoreEnabled  bool                                      `json:"resiliencyScoreEnabled,omitempty"`
+	ResiliencyMountPath     string                                    `json:"resiliencyMountPath,omitempty"`
+	ResiliencyScoreBaseline *float64                                  `json:"resiliencyScoreBaseline,omitempty"`
 }
 
 // GraphRunStatusResponse represents the status section of a graph run
