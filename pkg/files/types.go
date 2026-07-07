@@ -14,6 +14,9 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+// Package files provides types and utilities for file management in the krkn-operator.
+// It includes request/response types for file CRUD operations, file references for scenario runs,
+// and validation utilities for file content and metadata.
 package files
 
 // CreateFileRequest represents a request to create a new file ConfigMap
