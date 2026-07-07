@@ -161,6 +161,10 @@ func (r *KrknGraphRunReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	if graphRun.Status.Phase == "" {
 		if err := r.initializeStatus(ctx, &graphRun); err != nil {
 			logger.Error(err, "failed to initialize status")
+			// If it's a conflict error, just requeue - the object was modified concurrently
+			if apierrors.IsConflict(err) {
+				return ctrl.Result{Requeue: true}, nil
+			}
 			return ctrl.Result{}, err
 		}
 		return ctrl.Result{Requeue: true}, nil
@@ -177,6 +181,12 @@ func (r *KrknGraphRunReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	if len(graphRun.Status.ResolvedLevels) == 0 {
 		if err := r.resolveGraph(ctx, &graphRun); err != nil {
 			logger.Error(err, "failed to resolve graph")
+			// If it's a conflict error, just requeue - the object was modified concurrently
+			// and will be re-fetched on next reconcile with fresh data
+			if apierrors.IsConflict(err) {
+				return ctrl.Result{Requeue: true}, nil
+			}
+			// For other errors, mark as Failed
 			return r.updateStatusWithError(ctx, &graphRun, err)
 		}
 		return ctrl.Result{Requeue: true}, nil
