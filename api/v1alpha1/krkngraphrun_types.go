@@ -125,6 +125,32 @@ type GraphRunSummary struct {
 	PendingNodes int `json:"pendingNodes"`
 }
 
+// ResiliencyScoreResult contains the calculated resiliency score and comparison with baseline.
+// This is IMMUTABLE - calculated once when the GraphRun completes and never recalculated.
+// Each run represents an invariant result over time for historical comparison and trend analysis.
+type ResiliencyScoreResult struct {
+	// Calculated is the final computed resiliency score
+	// This value is calculated by aggregating metrics from all nodes in the graph run
+	Calculated float64 `json:"calculated"`
+
+	// Baseline is the user-defined minimum acceptable score (from Spec.ResiliencyScoreBaseline)
+	// Used for pass/fail determination
+	// +optional
+	Baseline *float64 `json:"baseline,omitempty"`
+
+	// Status indicates whether the run met the baseline requirements
+	// Possible values:
+	// - "pass": calculated score >= baseline
+	// - "fail": calculated score < baseline
+	// - "no-baseline": no baseline was specified, score calculated but not compared
+	Status string `json:"status"`
+
+	// Message provides a human-readable description of the result
+	// Example: "Score 8.5 is below baseline 9.0"
+	// +optional
+	Message string `json:"message,omitempty"`
+}
+
 // KrknGraphRunSpec defines the desired state of KrknGraphRun
 type KrknGraphRunSpec struct {
 	// Graph is the dependency graph of scenarios to execute
@@ -145,6 +171,55 @@ type KrknGraphRunSpec struct {
 	// OwnerUserID is the email address of the user who created this graph run
 	// +optional
 	OwnerUserID string `json:"ownerUserId,omitempty"`
+
+	// ResiliencyScoreEnabled enables resiliency score calculation for this graph run.
+	// When enabled:
+	// 1. RESILIENCY_SCORE=true environment variable is set in all scenario pods
+	// 2. If ResiliencyMountPath is specified, the controller identifies the resiliency metrics file
+	//    by matching the mount path in node.Volumes and sets RESILIENCY_FILE=<path> env var
+	// 3. Upon completion, the controller calculates the final score and stores it in Status.ResiliencyScore
+	//
+	// Populated from HTTP header: X-Resiliency-Score
+	// When enabled, X-Resiliency-Baseline header is REQUIRED
+	// +optional
+	ResiliencyScoreEnabled bool `json:"resiliencyScoreEnabled,omitempty"`
+
+	// ResiliencyMountPath is the absolute path where resiliency metrics files are mounted.
+	// This path is used to identify which file in each node's Volumes map contains resiliency metrics.
+	//
+	// File Identification Convention:
+	// The resiliency metrics file is identified by its MOUNT PATH, not by file UUID.
+	// Each node can use a different file UUID in its Volumes map, but they must all mount
+	// to the same path specified here for proper detection.
+	//
+	// Example:
+	//   ResiliencyMountPath: "/etc/kraken/metrics.yaml"
+	//   node-1.Volumes: {"uuid-A": "/etc/kraken/metrics.yaml", "uuid-B": "/config.yaml"}
+	//   node-2.Volumes: {"uuid-C": "/etc/kraken/metrics.yaml"}  // Different UUID, same path - OK!
+	//
+	// When a matching mount path is found, the controller sets RESILIENCY_FILE environment variable
+	// to this path in the scenario pod.
+	//
+	// If not specified, pods will only have RESILIENCY_SCORE=true and krkn will use its internal
+	// default metrics collection.
+	//
+	// Populated from HTTP header: X-Resiliency-Mount-Path
+	// Must be an absolute path if specified
+	// +optional
+	ResiliencyMountPath string `json:"resiliencyMountPath,omitempty"`
+
+	// ResiliencyScoreBaseline is the user-defined minimum acceptable resiliency score.
+	// After the graph run completes, the calculated score is compared against this baseline:
+	// - calculated >= baseline: Status = "pass"
+	// - calculated < baseline: Status = "fail"
+	// - no baseline: Status = "no-baseline"
+	//
+	// This value is REQUIRED when ResiliencyScoreEnabled is true.
+	//
+	// Populated from HTTP header: X-Resiliency-Baseline
+	// Must be a non-negative number
+	// +optional
+	ResiliencyScoreBaseline *float64 `json:"resiliencyScoreBaseline,omitempty"`
 }
 
 // KrknGraphRunStatus defines the observed state of KrknGraphRun
@@ -174,6 +249,16 @@ type KrknGraphRunStatus struct {
 	// Example: [["node1", "node2"], ["node3"], ["node4", "node5"]]
 	// +optional
 	ResolvedLevels [][]string `json:"resolvedLevels,omitempty"`
+
+	// ResiliencyScore contains the calculated resiliency score and baseline comparison.
+	// This field is populated by the controller when:
+	// 1. Spec.ResiliencyScoreEnabled is true
+	// 2. The GraphRun has reached a terminal phase (Completed, Failed, or PartiallyFailed)
+	//
+	// The score is calculated ONCE and is IMMUTABLE to preserve historical accuracy.
+	// Each run represents an invariant result that can be compared over time.
+	// +optional
+	ResiliencyScore *ResiliencyScoreResult `json:"resiliencyScore,omitempty"`
 
 	// Conditions represent the latest available observations of the graph run's state
 	// +optional

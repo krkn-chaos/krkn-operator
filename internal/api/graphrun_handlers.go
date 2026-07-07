@@ -22,6 +22,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/google/uuid"
@@ -203,6 +205,54 @@ func (h *Handler) CreateGraphRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Parse and validate resiliency score headers
+	resiliencyEnabled := r.Header.Get("X-Resiliency-Score") == "true"
+	var resiliencyBaseline *float64
+	var resiliencyMountPath string
+
+	if resiliencyEnabled {
+		// Baseline is REQUIRED when resiliency score is enabled
+		baselineStr := r.Header.Get("X-Resiliency-Baseline")
+		if baselineStr == "" {
+			writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+				Error:   "bad_request",
+				Message: "X-Resiliency-Baseline header is required when X-Resiliency-Score is enabled",
+			})
+			return
+		}
+
+		baseline, err := strconv.ParseFloat(baselineStr, 64)
+		if err != nil {
+			writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+				Error:   "bad_request",
+				Message: "X-Resiliency-Baseline must be a valid number",
+			})
+			return
+		}
+
+		if baseline < 0 {
+			writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+				Error:   "bad_request",
+				Message: "X-Resiliency-Baseline must be a non-negative number",
+			})
+			return
+		}
+
+		resiliencyBaseline = &baseline
+
+		// Mount path is OPTIONAL but must be absolute if provided
+		resiliencyMountPath = r.Header.Get("X-Resiliency-Mount-Path")
+		if resiliencyMountPath != "" {
+			if !filepath.IsAbs(resiliencyMountPath) {
+				writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+					Error:   "bad_request",
+					Message: "X-Resiliency-Mount-Path must be an absolute path",
+				})
+				return
+			}
+		}
+	}
+
 	// Create a temporary GraphRun for validation
 	tempGraphRun := &krknv1alpha1.KrknGraphRun{
 		Spec: krknv1alpha1.KrknGraphRunSpec{
@@ -365,10 +415,13 @@ func (h *Handler) CreateGraphRun(w http.ResponseWriter, r *http.Request) {
 			Namespace: h.namespace,
 		},
 		Spec: krknv1alpha1.KrknGraphRunSpec{
-			Graph:           req.Graph,
-			TargetRequestID: req.TargetRequestID,
-			TargetClusters:  req.TargetClusters,
-			OwnerUserID:     userClaims.UserID,
+			Graph:                   req.Graph,
+			TargetRequestID:         req.TargetRequestID,
+			TargetClusters:          req.TargetClusters,
+			OwnerUserID:             userClaims.UserID,
+			ResiliencyScoreEnabled:  resiliencyEnabled,
+			ResiliencyMountPath:     resiliencyMountPath,
+			ResiliencyScoreBaseline: resiliencyBaseline,
 		},
 	}
 
