@@ -152,14 +152,13 @@ func MapScenarioNodeToScenarioRunSpec(
 	}
 
 	// Map environment variables from node
+	// Note: Only copy user-defined env vars from the node.
+	// Resiliency score env vars (RESILIENCY_SCORE, RESILIENCY_FILE) are added
+	// by the controller based on GraphRun.Spec.ResiliencyScoreEnabled
 	spec.Environment = make(map[string]string)
 	for k, v := range node.Env {
 		spec.Environment[k] = v
 	}
-
-	// Add RESILIENCY_SCORE=true for all graph run scenarios
-	// This enables resiliency scoring in the krkn-hub scenarios
-	spec.Environment["RESILIENCY_SCORE"] = "true"
 
 	// TODO: Implement volumes mapping when FileMounts support is ready
 	// The node.Volumes field contains volume mount specifications,
