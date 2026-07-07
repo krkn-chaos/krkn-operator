@@ -477,6 +477,37 @@ func (r *KrknGraphRunReconciler) createScenarioRun(
 			"fileCount", len(fileMounts))
 	}
 
+	// Add resiliency score environment variables if enabled
+	if graphRun.Spec.ResiliencyScoreEnabled {
+		// Initialize environment map if nil
+		if spec.Environment == nil {
+			spec.Environment = make(map[string]string)
+		}
+
+		// Set RESILIENCY_SCORE=true to enable resiliency scoring in the scenario pod
+		spec.Environment["RESILIENCY_SCORE"] = "true"
+
+		// If a resiliency mount path is specified, check if this node has a file mounted at that path
+		if graphRun.Spec.ResiliencyMountPath != "" {
+			// Search for a file mount matching the resiliency mount path
+			for _, fileMount := range fileMounts {
+				if fileMount.MountPath == graphRun.Spec.ResiliencyMountPath {
+					// Found the resiliency metrics file - set RESILIENCY_FILE env var
+					spec.Environment["RESILIENCY_FILE"] = graphRun.Spec.ResiliencyMountPath
+					logger.V(1).Info("configured resiliency file for node",
+						"nodeID", nodeID,
+						"resiliencyFile", graphRun.Spec.ResiliencyMountPath)
+					break
+				}
+			}
+		}
+
+		logger.V(1).Info("enabled resiliency score for node",
+			"nodeID", nodeID,
+			"resiliencyEnabled", true,
+			"resiliencyFile", spec.Environment["RESILIENCY_FILE"])
+	}
+
 	// Sanitize node ID for use in Kubernetes resource names and labels
 	sanitizedNodeID := sanitizeNodeID(nodeID)
 

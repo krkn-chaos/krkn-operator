@@ -179,10 +179,11 @@ func (h *Handler) GetGraphRun(w http.ResponseWriter, r *http.Request) {
 				FailedNodes:    graphRun.Status.Summary.FailedNodes,
 				PendingNodes:   graphRun.Status.Summary.PendingNodes,
 			},
-			NodeStatuses:   convertNodeStatuses(graphRun.Status.NodeStatuses),
-			ResolvedLevels: graphRun.Status.ResolvedLevels,
-			StartTime:      graphRun.Status.StartTime,
-			CompletionTime: graphRun.Status.CompletionTime,
+			NodeStatuses:    convertNodeStatuses(graphRun.Status.NodeStatuses),
+			ResolvedLevels:  graphRun.Status.ResolvedLevels,
+			StartTime:       graphRun.Status.StartTime,
+			CompletionTime:  graphRun.Status.CompletionTime,
+			ResiliencyScore: convertResiliencyScore(graphRun.Status.ResiliencyScore),
 		},
 	}
 
@@ -537,6 +538,20 @@ func (h *Handler) DeleteGraphRun(w http.ResponseWriter, r *http.Request) {
 }
 
 // Helper functions
+
+// convertResiliencyScore converts ResiliencyScoreResult to API response format
+func convertResiliencyScore(score *krknv1alpha1.ResiliencyScoreResult) *ResiliencyScoreResponse {
+	if score == nil {
+		return nil
+	}
+
+	return &ResiliencyScoreResponse{
+		Calculated: score.Calculated,
+		Baseline:   score.Baseline,
+		Status:     score.Status,
+		Message:    score.Message,
+	}
+}
 
 // convertNodeStatuses converts Kubernetes NodeStatus to API response format
 func convertNodeStatuses(nodeStatuses []krknv1alpha1.NodeStatus) []NodeStatusResponse {
