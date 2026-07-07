@@ -332,7 +332,16 @@ func (h *Handler) CreateGraphRun(w http.ResponseWriter, r *http.Request) {
 			}
 
 			// Validate user has access to this file
-			if !h.canAccessFile(ctx, fileConfigMap) {
+			hasAccess, err := h.canAccessFile(ctx, fileConfigMap)
+			if err != nil {
+				logger.Error(err, "Failed to check file access", "fileID", fileID, "nodeID", nodeID)
+				writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+					Error:   "internal_error",
+					Message: "Failed to validate file access permissions",
+				})
+				return
+			}
+			if !hasAccess {
 				writeJSONError(w, http.StatusForbidden, ErrorResponse{
 					Error:   "forbidden",
 					Message: fmt.Sprintf("You do not have access to file '%s' (referenced in node '%s')", fileID, nodeID),

@@ -708,6 +708,11 @@ func (r *KrknGraphRunReconciler) translateVolumesToFileMounts(
 	fileMounts := make([]krknv1alpha1.FileMount, 0, len(volumes))
 
 	for fileID, mountPath := range volumes {
+		// Validate mount path is absolute
+		if !filepath.IsAbs(mountPath) {
+			return nil, fmt.Errorf("mount path '%s' for file '%s' must be absolute", mountPath, fileID)
+		}
+
 		// Load file ConfigMap by UUID
 		fileConfigMap, err := r.loadFileConfigMapByID(ctx, fileID)
 		if err != nil {

@@ -1188,7 +1188,10 @@ func TestCanAccessFile(t *testing.T) {
 				ctx = context.WithValue(ctx, auth.UserClaimsKey, claims)
 			}
 
-			canAccess := handler.canAccessFile(ctx, tt.configMap)
+			canAccess, err := handler.canAccessFile(ctx, tt.configMap)
+			if err != nil {
+				t.Fatalf("Unexpected error: %v", err)
+			}
 			if canAccess != tt.expectAccess {
 				t.Errorf("Expected access %v, got %v", tt.expectAccess, canAccess)
 			}

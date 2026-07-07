@@ -213,7 +213,16 @@ func (h *Handler) GetFile(w http.ResponseWriter, r *http.Request) {
 	// Check access permissions
 	// Admin can read any file, users can only read files they have access to
 	if !auth.IsAdmin(ctx) {
-		if !h.canAccessFile(ctx, configMap) {
+		hasAccess, err := h.canAccessFile(ctx, configMap)
+		if err != nil {
+			logger.Error(err, "Failed to check file access", "fileID", fileID)
+			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+				Error:   "internal_error",
+				Message: "Failed to validate file access permissions",
+			})
+			return
+		}
+		if !hasAccess {
 			writeJSONError(w, http.StatusForbidden, ErrorResponse{
 				Error:   "forbidden",
 				Message: "You do not have access to this file",
@@ -294,7 +303,16 @@ func (h *Handler) UpdateFile(w http.ResponseWriter, r *http.Request) {
 
 	// Check access permissions - users can only update files they have access to
 	if !isAdmin {
-		if !h.canAccessFile(ctx, configMap) {
+		hasAccess, err := h.canAccessFile(ctx, configMap)
+		if err != nil {
+			logger.Error(err, "Failed to check file access", "fileID", fileID)
+			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+				Error:   "internal_error",
+				Message: "Failed to validate file access permissions",
+			})
+			return
+		}
+		if !hasAccess {
 			writeJSONError(w, http.StatusForbidden, ErrorResponse{
 				Error:   "forbidden",
 				Message: "You do not have access to this file",
@@ -383,7 +401,16 @@ func (h *Handler) DeleteFile(w http.ResponseWriter, r *http.Request) {
 	// Check access permissions - users can only delete files they have access to
 	isAdmin := auth.IsAdmin(ctx)
 	if !isAdmin {
-		if !h.canAccessFile(ctx, configMap) {
+		hasAccess, err := h.canAccessFile(ctx, configMap)
+		if err != nil {
+			logger.Error(err, "Failed to check file access", "fileID", fileID)
+			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+				Error:   "internal_error",
+				Message: "Failed to validate file access permissions",
+			})
+			return
+		}
+		if !hasAccess {
 			writeJSONError(w, http.StatusForbidden, ErrorResponse{
 				Error:   "forbidden",
 				Message: "You do not have access to this file",
@@ -476,7 +503,13 @@ func (h *Handler) ListAvailableFiles(w http.ResponseWriter, r *http.Request) {
 	// Filter files by access
 	available := []files.FileInfo{}
 	for _, cm := range configMapList.Items {
-		if h.canAccessFile(ctx, &cm) {
+		hasAccess, err := h.canAccessFile(ctx, &cm)
+		if err != nil {
+			logger.Error(err, "Failed to check file access", "fileID", files.ExtractFileIDFromLabels(cm.Labels))
+			// Skip files we can't validate access for
+			continue
+		}
+		if hasAccess {
 			available = append(available, buildFileInfo(&cm))
 		}
 	}
@@ -589,26 +622,26 @@ func (h *Handler) loadFileConfigMapByID(ctx context.Context, fileID string) (*co
 }
 
 // canAccessFile checks if the current user can access a file
-func (h *Handler) canAccessFile(ctx context.Context, configMap *corev1.ConfigMap) bool {
+func (h *Handler) canAccessFile(ctx context.Context, configMap *corev1.ConfigMap) (bool, error) {
 	claims := auth.GetClaimsFromContext(ctx)
 	if claims == nil {
-		return false
+		return false, nil
 	}
 
 	// Admins can access all files
 	if auth.IsAdmin(ctx) {
-		return true
+		return true, nil
 	}
 
 	// Check available-to-all flag
 	if configMap.Labels[files.AvailableToAllLabel] == "true" {
-		return true
+		return true, nil
 	}
 
 	// Check group membership
 	userGroups, err := groupauth.GetUserGroups(ctx, h.client, claims.UserID, h.namespace)
 	if err != nil {
-		return false
+		return false, fmt.Errorf("failed to get user groups: %w", err)
 	}
 
 	configMapGroups := files.ExtractGroupsFromLabels(configMap.Labels)
@@ -621,11 +654,11 @@ func (h *Handler) canAccessFile(ctx context.Context, configMap *corev1.ConfigMap
 
 	for _, sg := range configMapGroups {
 		if userGroupNames[sg] {
-			return true
+			return true, nil
 		}
 	}
 
-	return false
+	return false, nil
 }
 
 // buildFileResponse builds a FileResponse from a ConfigMap
@@ -672,10 +705,31 @@ func buildFileInfo(configMap *corev1.ConfigMap) files.FileInfo {
 }
 
 // validateCreateFileRequest validates a CreateFileRequest
+// isValidConfigMapKey checks if a string is a valid ConfigMap data key
+// ConfigMap keys must consist of alphanumeric characters, '-', '_' or '.'
+func isValidConfigMapKey(key string) bool {
+	if key == "" {
+		return false
+	}
+	for _, ch := range key {
+		if !((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||
+			(ch >= '0' && ch <= '9') || ch == '-' || ch == '_' || ch == '.') {
+			return false
+		}
+	}
+	return true
+}
+
 func validateCreateFileRequest(ctx context.Context, k8sClient client.Client, req *files.CreateFileRequest, namespace string, isAdmin bool, userID string) error {
 	// Validate file name
 	if req.FileName == "" {
 		return fmt.Errorf("fileName is required")
+	}
+
+	// Validate fileName is a valid ConfigMap key (alphanumeric, -, _, .)
+	// ConfigMap keys must match: [a-zA-Z0-9._-]+
+	if !isValidConfigMapKey(req.FileName) {
+		return fmt.Errorf("fileName contains invalid characters (allowed: alphanumeric, -, _, .)")
 	}
 
 	// Validate content is not empty
@@ -733,6 +787,11 @@ func validateUpdateFileRequest(ctx context.Context, k8sClient client.Client, req
 	// Validate file name
 	if req.FileName == "" {
 		return fmt.Errorf("fileName is required")
+	}
+
+	// Validate fileName is a valid ConfigMap key (alphanumeric, -, _, .)
+	if !isValidConfigMapKey(req.FileName) {
+		return fmt.Errorf("fileName contains invalid characters (allowed: alphanumeric, -, _, .)")
 	}
 
 	// Validate content is not empty
