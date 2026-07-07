@@ -73,36 +73,52 @@ type DeleteFileResponse struct {
 // FileResponse represents a file ConfigMap in API responses
 type FileResponse struct {
 	// FileID is the UUID identifier for this file
-	FileID         string   `json:"fileId"`
-	FileName       string   `json:"fileName"`
-	Content        string   `json:"content"`
-	Description    string   `json:"description,omitempty"`
-	FileType       string   `json:"fileType,omitempty"`
-	Groups         []string `json:"groups,omitempty"`
-	AvailableToAll bool     `json:"availableToAll"`
-	CreatedAt      string   `json:"createdAt,omitempty"`
-	CreatedBy      string   `json:"createdBy,omitempty"`
-	UpdatedAt      string   `json:"updatedAt,omitempty"`
-	UpdatedBy      string   `json:"updatedBy,omitempty"`
+	FileID string `json:"fileId"`
+	// FileName is the key in the ConfigMap data (the actual file name)
+	FileName string `json:"fileName"`
+	// Content is the file content
+	Content string `json:"content"`
+	// Description is an optional description of the file
+	Description string `json:"description,omitempty"`
+	// FileType is an optional file type category (e.g., "config", "script")
+	FileType string `json:"fileType,omitempty"`
+	// Groups is a list of group names that can access this file
+	Groups []string `json:"groups,omitempty"`
+	// AvailableToAll makes the file accessible to all users
+	AvailableToAll bool `json:"availableToAll"`
+	// CreatedAt is the timestamp when the file was created
+	CreatedAt string `json:"createdAt,omitempty"`
+	// CreatedBy is the email of the user who created the file
+	CreatedBy string `json:"createdBy,omitempty"`
+	// UpdatedAt is the timestamp when the file was last updated
+	UpdatedAt string `json:"updatedAt,omitempty"`
+	// UpdatedBy is the email of the user who last updated the file
+	UpdatedBy string `json:"updatedBy,omitempty"`
 }
 
 // FileInfo represents minimal file information for user-facing lists
 type FileInfo struct {
 	// FileID is the UUID identifier for this file
-	FileID      string `json:"fileId"`
-	FileName    string `json:"fileName"`
+	FileID string `json:"fileId"`
+	// FileName is the key in the ConfigMap data (the actual file name)
+	FileName string `json:"fileName"`
+	// Description is an optional description of the file
 	Description string `json:"description,omitempty"`
-	FileType    string `json:"fileType,omitempty"`
+	// FileType is an optional file type category (e.g., "config", "script")
+	FileType string `json:"fileType,omitempty"`
 }
 
 // ListFilesResponse is the response for list files requests
 type ListFilesResponse struct {
+	// Files is the list of file ConfigMaps
 	Files []FileResponse `json:"files"`
-	Total int            `json:"total"`
+	// Total is the total number of files returned
+	Total int `json:"total"`
 }
 
 // AvailableFilesResponse is the response for available files requests
 type AvailableFilesResponse struct {
+	// Files is the list of files available to the current user
 	Files []FileInfo `json:"files"`
 }
 
