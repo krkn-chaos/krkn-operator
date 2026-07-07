@@ -754,9 +754,10 @@ func (r *KrknGraphRunReconciler) loadFileConfigMapByID(
 	ctx context.Context,
 	fileID string,
 ) (*corev1.ConfigMap, error) {
-	// List ConfigMaps with the file ID label
+	// List ConfigMaps with the file ID label in the operator's namespace
 	var configMapList corev1.ConfigMapList
 	err := r.List(ctx, &configMapList,
+		client.InNamespace(r.Namespace),
 		client.MatchingLabels{
 			"app.kubernetes.io/name":            "krkn-operator",
 			"app.kubernetes.io/component":       "file",
