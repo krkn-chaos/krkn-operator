@@ -25,6 +25,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"math"
 	"reflect"
 	"strings"
 	"time"
@@ -58,6 +59,12 @@ type KrknScenarioRunReconciler struct {
 // into a pod activeDeadlineSeconds value. An empty string yields a nil result,
 // meaning no deadline should be applied. A non-empty value must parse as a
 // positive duration; zero or negative durations are rejected.
+//
+// activeDeadlineSeconds is second-granular, so the parsed duration is rounded
+// UP to the nearest whole second. Rounding up (rather than truncating) ensures
+// any positive duration yields at least 1 second: truncation would turn e.g.
+// "500ms" or "1.9s" into 0/1 seconds, and a value of 0 is rejected by the
+// Kubernetes API, breaking pod creation entirely.
 func durationToActiveDeadline(d string) (*int64, error) {
 	if d == "" {
 		return nil, nil
@@ -69,7 +76,7 @@ func durationToActiveDeadline(d string) (*int64, error) {
 	if parsed <= 0 {
 		return nil, fmt.Errorf("duration %q must be greater than zero", d)
 	}
-	seconds := int64(parsed.Seconds())
+	seconds := int64(math.Ceil(parsed.Seconds()))
 	return &seconds, nil
 }
 
@@ -277,6 +284,15 @@ func (r *KrknScenarioRunReconciler) createClusterJob(
 	clusterName string,
 ) error {
 	logger := log.FromContext(ctx)
+
+	// Validate the requested runtime bound up front. Failing here (before any
+	// resources are created) means an invalid duration produces no orphaned
+	// ConfigMaps/Secrets and, crucially, no unbounded pod: we refuse to launch
+	// a scenario that silently ignores the deadline the user asked for.
+	activeDeadline, err := durationToActiveDeadline(scenarioRun.Spec.Duration)
+	if err != nil {
+		return fmt.Errorf("invalid spec.duration %q: %w", scenarioRun.Spec.Duration, err)
+	}
 
 	// Check if this is a retry case
 	existingJobIndex := -1
@@ -645,14 +661,10 @@ func (r *KrknScenarioRunReconciler) createClusterJob(
 		},
 	}
 
-	// Bound the pod's runtime if a duration was requested. On parse error we log
-	// and skip setting the deadline rather than failing the reconcile; the CRD
-	// pattern already validates the value so this is defensive.
-	if deadline, err := durationToActiveDeadline(scenarioRun.Spec.Duration); err != nil {
-		logger.Error(err, "invalid spec.duration, running pod without a deadline",
-			"duration", scenarioRun.Spec.Duration)
-	} else if deadline != nil {
-		pod.Spec.ActiveDeadlineSeconds = deadline
+	// Bound the pod's runtime if a duration was requested (validated at the top
+	// of this function). A nil value means no deadline was configured.
+	if activeDeadline != nil {
+		pod.Spec.ActiveDeadlineSeconds = activeDeadline
 	}
 
 	// Set owner reference
@@ -840,6 +852,24 @@ func (r *KrknScenarioRunReconciler) updateClusterJobStatuses(
 			job.Message = r.extractPodErrorMessage(&pod)
 			job.FailureReason = r.extractFailureReason(&pod)
 			r.setCompletionTime(job)
+
+			// A pod killed for exceeding spec.duration (activeDeadlineSeconds) is
+			// a deliberate, terminal outcome. Retrying would just run the same
+			// scenario again and hit the same deadline, so we stop here and
+			// surface the deadline as the failure reason. Kubernetes sets the
+			// pod-level Reason to "DeadlineExceeded"; prefer its message over the
+			// container-derived one since no container error actually occurred.
+			if pod.Status.Reason == "DeadlineExceeded" {
+				job.FailureReason = "DeadlineExceeded"
+				if pod.Status.Message != "" {
+					job.Message = pod.Status.Message
+				}
+				logger.Info("job terminated by spec.duration deadline, not retrying",
+					"cluster", job.ClusterName,
+					"jobID", job.JobID,
+					"duration", scenarioRun.Spec.Duration)
+				continue
+			}
 
 			// Retry logic
 			logger.Info("pod failed, checking retry eligibility",

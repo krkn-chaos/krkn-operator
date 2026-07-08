@@ -152,8 +152,12 @@ type KrknScenarioRunSpec struct {
 	// auto-terminated. It is expressed as a Go duration (e.g., "30s", "5m", "1h")
 	// and maps to the pod's activeDeadlineSeconds. An empty value means no
 	// deadline is applied and the pod runs unbounded.
+	//
+	// activeDeadlineSeconds is second-granular, so sub-second units are not
+	// accepted and any fractional second is rounded up to the next whole second
+	// (minimum effective bound is 1s). "0s" is rejected during reconciliation.
 	// +optional
-	// +kubebuilder:validation:Pattern=`^([0-9]+(\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$`
+	// +kubebuilder:validation:Pattern=`^([0-9]+(\.[0-9]+)?(s|m|h))+$`
 	Duration string `json:"duration,omitempty"`
 }
 

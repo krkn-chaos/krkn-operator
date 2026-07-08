@@ -29,6 +29,11 @@ func TestDurationToActiveDeadline(t *testing.T) {
 		{name: "seconds", duration: "30s", wantSeconds: ptrInt64(30), wantErr: false},
 		{name: "minutes", duration: "5m", wantSeconds: ptrInt64(300), wantErr: false},
 		{name: "compound", duration: "1h30m", wantSeconds: ptrInt64(5400), wantErr: false},
+		// Sub-second and fractional durations must round UP, never truncate to 0
+		// (a 0 activeDeadlineSeconds is rejected by the Kubernetes API).
+		{name: "sub-second rounds up to 1", duration: "500ms", wantSeconds: ptrInt64(1), wantErr: false},
+		{name: "tiny value rounds up to 1", duration: "1ns", wantSeconds: ptrInt64(1), wantErr: false},
+		{name: "fractional seconds round up", duration: "1.9s", wantSeconds: ptrInt64(2), wantErr: false},
 		{name: "invalid", duration: "notaduration", wantSeconds: nil, wantErr: true},
 		{name: "zero", duration: "0s", wantSeconds: nil, wantErr: true},
 		{name: "negative", duration: "-5m", wantSeconds: nil, wantErr: true},
