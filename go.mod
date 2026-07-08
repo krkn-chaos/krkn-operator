@@ -119,5 +119,7 @@ require (
 )
 
 // Replace NVIDIA go-nvml with stub implementation to avoid CGO dependency
-// The operator doesn't use NVIDIA GPU features, but krknctl has this as a transitive dependency
+// This stub is provided by krknctl for consumers without GPU hardware
+// Source: https://github.com/krkn-chaos/krknctl/tree/main/hack/stub-nvml
+// Documentation: https://github.com/krkn-chaos/krknctl/blob/main/hack/README.md
 replace github.com/NVIDIA/go-nvml => ./hack/stub-nvml
