@@ -22,6 +22,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
+	"github.com/krkn-chaos/krkn-operator/pkg/files"
 )
 
 // ClustersResponse represents the response for GET /clusters endpoint
@@ -84,7 +85,6 @@ type InputFieldResponse struct {
 	Separator         *string `json:"separator,omitempty"`
 	AllowedValues     *string `json:"allowed_values,omitempty"`
 	Required          bool    `json:"required,omitempty"`
-	MountPath         *string `json:"mount_path,omitempty"`
 	Requires          *string `json:"requires,omitempty"`
 	MutuallyExcludes  *string `json:"mutually_excludes,omitempty"`
 	Secret            bool    `json:"secret,omitempty"`
@@ -141,8 +141,10 @@ type ScenarioRunRequest struct {
 	KubeconfigPath string `json:"kubeconfigPath,omitempty"`
 	// Environment is a map of environment variables to pass to the container (optional)
 	Environment map[string]string `json:"environment,omitempty"`
-	// Files is an array of file objects to mount in the container (optional)
+	// Files is an array of file objects to mount in the container (optional, legacy inline file mount)
 	Files []FileMount `json:"files,omitempty"`
+	// FileReferences are references to centrally-managed files by UUID (optional)
+	FileReferences []files.FileReference `json:"fileReferences,omitempty"`
 	// Private registry configuration (optional)
 	ScenariosRequest
 }
@@ -303,6 +305,10 @@ type ScenarioRunStatusResponse struct {
 	OwnerUserID string `json:"ownerUserId,omitempty"`
 	// RegistryName is the name of the private registry used (empty for public registry)
 	RegistryName string `json:"registryName,omitempty"`
+	// GraphRunName is the name of the parent KrknGraphRun (if this scenario run is part of a graph run)
+	GraphRunName string `json:"graphRunName,omitempty"`
+	// GraphNodeID is the node ID in the graph (if this scenario run is part of a graph run)
+	GraphNodeID string `json:"graphNodeId,omitempty"`
 }
 
 // ClusterJobStatusResponse represents the status of a job for a specific cluster
@@ -355,6 +361,10 @@ type ScenarioRunListItem struct {
 	CreatedAt time.Time `json:"createdAt"`
 	// OwnerUserID is the email address of the user who created this scenario run
 	OwnerUserID string `json:"ownerUserId,omitempty"`
+	// GraphRunName is the name of the parent KrknGraphRun (if this scenario run is part of a graph run)
+	GraphRunName string `json:"graphRunName,omitempty"`
+	// GraphNodeID is the node ID in the graph (if this scenario run is part of a graph run)
+	GraphNodeID string `json:"graphNodeId,omitempty"`
 }
 
 // ScenarioRunListResponse represents the response for GET /scenarios/run
@@ -686,4 +696,82 @@ type ListGroupMembersResponse struct {
 	Total int `json:"total"`
 	// GroupName is the group name
 	GroupName string `json:"groupName"`
+}
+
+// Graph Run API types
+
+// GraphRunCreateRequest represents the request body for POST /api/v1/graphruns
+type GraphRunCreateRequest struct {
+	// Graph is the dependency graph of scenarios to execute
+	Graph map[string]krknv1alpha1.GraphScenarioNode `json:"graph"`
+	// TargetRequestID is the reference to the KrknTargetRequest CR
+	TargetRequestID string `json:"targetRequestId"`
+	// TargetClusters is a map of provider-name to list of cluster names
+	TargetClusters map[string][]string `json:"targetClusters"`
+}
+
+// GraphRunListItem represents a single item in the graph runs list
+type GraphRunListItem struct {
+	Name              string                  `json:"name"`
+	Namespace         string                  `json:"namespace"`
+	CreationTimestamp time.Time               `json:"creationTimestamp"`
+	Phase             string                  `json:"phase"`
+	OwnerUserID       string                  `json:"ownerUserId"`
+	TargetRequestID   string                  `json:"targetRequestId"`
+	Summary           GraphRunSummaryResponse `json:"summary"`
+	StartTime         *metav1.Time            `json:"startTime,omitempty"`
+	CompletionTime    *metav1.Time            `json:"completionTime,omitempty"`
+}
+
+// GraphRunListResponse represents the response for GET /api/v1/graphruns
+type GraphRunListResponse struct {
+	GraphRuns []GraphRunListItem `json:"graphRuns"`
+}
+
+// GraphRunDetailResponse represents the detailed response for a single graph run
+type GraphRunDetailResponse struct {
+	Name              string                 `json:"name"`
+	Namespace         string                 `json:"namespace"`
+	CreationTimestamp time.Time              `json:"creationTimestamp"`
+	Spec              GraphRunSpecResponse   `json:"spec"`
+	Status            GraphRunStatusResponse `json:"status"`
+}
+
+// GraphRunSpecResponse represents the spec section of a graph run
+type GraphRunSpecResponse struct {
+	Graph           map[string]krknv1alpha1.GraphScenarioNode `json:"graph"`
+	TargetRequestID string                                    `json:"targetRequestId"`
+	TargetClusters  map[string][]string                       `json:"targetClusters"`
+	OwnerUserID     string                                    `json:"ownerUserId"`
+}
+
+// GraphRunStatusResponse represents the status section of a graph run
+type GraphRunStatusResponse struct {
+	Phase          string                  `json:"phase"`
+	Summary        GraphRunSummaryResponse `json:"summary"`
+	NodeStatuses   []NodeStatusResponse    `json:"nodeStatuses"`
+	ResolvedLevels [][]string              `json:"resolvedLevels"`
+	StartTime      *metav1.Time            `json:"startTime,omitempty"`
+	CompletionTime *metav1.Time            `json:"completionTime,omitempty"`
+}
+
+// GraphRunSummaryResponse represents aggregate statistics
+type GraphRunSummaryResponse struct {
+	TotalNodes     int `json:"totalNodes"`
+	CompletedNodes int `json:"completedNodes"`
+	RunningNodes   int `json:"runningNodes"`
+	FailedNodes    int `json:"failedNodes"`
+	PendingNodes   int `json:"pendingNodes"`
+}
+
+// NodeStatusResponse represents the status of a single node in the graph
+type NodeStatusResponse struct {
+	NodeID         string       `json:"nodeId"`
+	NodeName       string       `json:"nodeName"`
+	Phase          string       `json:"phase"`
+	ScenarioRunRef string       `json:"scenarioRunRef,omitempty"`
+	StartTime      *metav1.Time `json:"startTime,omitempty"`
+	CompletionTime *metav1.Time `json:"completionTime,omitempty"`
+	DependsOn      []string     `json:"dependsOn,omitempty"`
+	Message        string       `json:"message,omitempty"`
 }

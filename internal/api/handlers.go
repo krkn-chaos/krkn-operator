@@ -19,9 +19,12 @@ package api
 import (
 	"bufio"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -36,6 +39,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
@@ -49,6 +53,43 @@ import (
 	"github.com/krkn-chaos/krkn-operator/pkg/registry"
 	pb "github.com/krkn-chaos/krkn-operator/proto/dataprovider"
 )
+
+// sanitizeResourceName converts an email or identifier into a valid Kubernetes resource name.
+// Kubernetes resource names must follow RFC 1123 subdomain rules:
+// - Contain only lowercase alphanumeric characters, '-' or '.'
+// - Start and end with an alphanumeric character
+// - Maximum length of 253 characters
+//
+// This function:
+// 1. Converts to lowercase
+// 2. Replaces @ and . with -
+// 3. Replaces any other invalid characters with -
+// 4. Ensures it starts and ends with alphanumeric
+//
+// Example: "[email protected]" -> "admin-example-com"
+func sanitizeResourceName(name string) string {
+	// Convert to lowercase
+	sanitized := strings.ToLower(name)
+
+	// Replace @ and . with -
+	sanitized = strings.ReplaceAll(sanitized, "@", "-")
+	sanitized = strings.ReplaceAll(sanitized, ".", "-")
+
+	// Replace any other invalid characters with -
+	reg := regexp.MustCompile(`[^a-z0-9-]`)
+	sanitized = reg.ReplaceAllString(sanitized, "-")
+
+	// Remove leading/trailing dashes
+	sanitized = strings.Trim(sanitized, "-")
+
+	// Ensure maximum length (Kubernetes limit is 253, but we'll be conservative)
+	if len(sanitized) > 63 {
+		sanitized = sanitized[:63]
+		sanitized = strings.TrimRight(sanitized, "-")
+	}
+
+	return sanitized
+}
 
 // Handler contains the dependencies for API handlers
 type Handler struct {
@@ -483,7 +524,6 @@ func convertInputFields(fields []typing.InputField) []InputFieldResponse {
 			Separator:         field.Separator,
 			AllowedValues:     field.AllowedValues,
 			Required:          field.Required,
-			MountPath:         field.MountPath,
 			Requires:          field.Requires,
 			MutuallyExcludes:  field.MutuallyExcludes,
 			Secret:            field.Secret,
@@ -971,6 +1011,93 @@ func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
 		)
 	}
 
+	// Process file references: validate access and translate to FileMount
+	translatedFiles := make([]krknv1alpha1.FileMount, 0, len(req.FileReferences))
+
+	for _, fileRef := range req.FileReferences {
+		// Validate mount path is absolute
+		if !filepath.IsAbs(fileRef.MountPath) {
+			writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+				Error:   "bad_request",
+				Message: fmt.Sprintf("mount path must be absolute: %s", fileRef.MountPath),
+			})
+			return
+		}
+
+		// Load file ConfigMap by UUID
+		fileConfigMap, err := h.loadFileConfigMapByID(ctx, fileRef.FileID)
+		if err != nil {
+			if apierrors.IsNotFound(err) {
+				writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+					Error:   "bad_request",
+					Message: fmt.Sprintf("file with ID '%s' not found", fileRef.FileID),
+				})
+			} else {
+				logger.Error(err, "Failed to load file ConfigMap", "fileID", fileRef.FileID)
+				writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+					Error:   "internal_error",
+					Message: "Failed to load file",
+				})
+			}
+			return
+		}
+
+		// Validate user has access to this file
+		hasAccess, err := h.canAccessFile(ctx, fileConfigMap)
+		if err != nil {
+			logger.Error(err, "Failed to check file access", "fileID", fileRef.FileID)
+			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+				Error:   "internal_error",
+				Message: "Failed to validate file access permissions",
+			})
+			return
+		}
+		if !hasAccess {
+			writeJSONError(w, http.StatusForbidden, ErrorResponse{
+				Error:   "forbidden",
+				Message: fmt.Sprintf("You do not have access to file '%s'", fileRef.FileID),
+			})
+			return
+		}
+
+		// Extract file content from ConfigMap (first data key)
+		var fileName, content string
+		for k, v := range fileConfigMap.Data {
+			fileName = k
+			content = v
+			break
+		}
+
+		// Base64 encode content for FileMount
+		encodedContent := base64.StdEncoding.EncodeToString([]byte(content))
+
+		// Translate to FileMount
+		translatedFiles = append(translatedFiles, krknv1alpha1.FileMount{
+			Name:      fileName,
+			Content:   encodedContent,
+			MountPath: fileRef.MountPath,
+		})
+
+		logger.V(1).Info("Translated file reference",
+			"fileID", fileRef.FileID,
+			"fileName", fileName,
+			"mountPath", fileRef.MountPath,
+		)
+	}
+
+	// Convert inline Files from API type to CRD type
+	inlineFiles := make([]krknv1alpha1.FileMount, 0, len(req.Files))
+	for _, f := range req.Files {
+		inlineFiles = append(inlineFiles, krknv1alpha1.FileMount{
+			Name:      f.Name,
+			Content:   f.Content,
+			MountPath: f.MountPath,
+		})
+	}
+
+	// Merge inline Files with translated FileReferences
+	allFiles := append(inlineFiles, translatedFiles...)
+
 	// Load registry configuration if specified
 	var registryConfig *models.RegistryV2
 	if req.RegistryName != nil && *req.RegistryName != "" {
@@ -1053,10 +1180,10 @@ func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Convert FileMount from API type to CRD type
-	if len(req.Files) > 0 {
-		scenarioRun.Spec.Files = make([]krknv1alpha1.FileMount, len(req.Files))
-		for i, f := range req.Files {
+	// Convert FileMount from API type to CRD type (merged from inline Files and translated FileReferences)
+	if len(allFiles) > 0 {
+		scenarioRun.Spec.Files = make([]krknv1alpha1.FileMount, len(allFiles))
+		for i, f := range allFiles {
 			scenarioRun.Spec.Files[i] = krknv1alpha1.FileMount{
 				Name:      f.Name,
 				Content:   f.Content,
@@ -1195,6 +1322,8 @@ func (h *Handler) GetScenarioRunStatus(w http.ResponseWriter, r *http.Request) {
 					ClusterJobs:     []ClusterJobStatusResponse{},
 					OwnerUserID:     scenarioRun.Spec.OwnerUserID,
 					RegistryName:    scenarioRun.Spec.RegistryName,
+					GraphRunName:    scenarioRun.Labels["krkn.dev/graph-run"],
+					GraphNodeID:     scenarioRun.Labels["krkn.dev/graph-node"],
 				}
 				writeJSON(w, http.StatusCreated, response)
 				return
@@ -1240,6 +1369,8 @@ func (h *Handler) GetScenarioRunStatus(w http.ResponseWriter, r *http.Request) {
 		ClusterJobs:     clusterJobs,
 		OwnerUserID:     scenarioRun.Spec.OwnerUserID,
 		RegistryName:    scenarioRun.Spec.RegistryName,
+		GraphRunName:    scenarioRun.Labels["krkn.dev/graph-run"],
+		GraphNodeID:     scenarioRun.Labels["krkn.dev/graph-node"],
 	}
 
 	writeJSON(w, http.StatusOK, response)
@@ -1733,6 +1864,8 @@ func (h *Handler) ListScenarioRuns(w http.ResponseWriter, r *http.Request) {
 			RunningJobs:     sr.Status.RunningJobs,
 			CreatedAt:       sr.CreationTimestamp.Time,
 			OwnerUserID:     sr.Spec.OwnerUserID,
+			GraphRunName:    sr.Labels["krkn.dev/graph-run"],
+			GraphNodeID:     sr.Labels["krkn.dev/graph-node"],
 		}
 
 		runs = append(runs, run)

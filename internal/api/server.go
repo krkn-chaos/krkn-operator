@@ -124,6 +124,15 @@ func NewServer(port int, client client.Client, clientset kubernetes.Interface, n
 	mux.Handle(RegistriesPath+"/", authMw.RequireAuth(http.HandlerFunc(handler.RegistriesRouter)))
 	mux.Handle(RegistriesAvailablePath, authMw.RequireAuth(http.HandlerFunc(handler.ListAvailableRegistries)))
 
+	// File management endpoints - CRUD: admin only, available: all users
+	mux.Handle(FilesPath, authMw.RequireAuth(http.HandlerFunc(handler.FilesRouter)))
+	mux.Handle(FilesPath+"/", authMw.RequireAuth(http.HandlerFunc(handler.FilesRouter)))
+	mux.Handle(FilesAvailablePath, authMw.RequireAuth(http.HandlerFunc(handler.ListAvailableFiles)))
+
+	// File type management endpoints - all users can list/get, admin can CRUD
+	mux.Handle(FileTypesPath, authMw.RequireAuth(http.HandlerFunc(handler.FileTypesRouter)))
+	mux.Handle(FileTypesPath+"/", authMw.RequireAuth(http.HandlerFunc(handler.FileTypesRouter)))
+
 	// Provider config endpoints - admin only (POST), user and admin (GET)
 	// Note: handler.ProviderConfigHandler internally handles method-based authorization
 	mux.Handle(ProviderConfigPath, authMw.RequireAuth(http.HandlerFunc(handler.ProviderConfigHandler)))
@@ -138,6 +147,10 @@ func NewServer(port int, client client.Client, clientset kubernetes.Interface, n
 	// Note: handler.TargetsCRUDRouter internally handles method-based authorization
 	mux.Handle(OperatorTargetsPath, authMw.RequireAuth(http.HandlerFunc(handler.TargetsCRUDRouter)))
 	mux.Handle(OperatorTargetsPath+"/", authMw.RequireAuth(http.HandlerFunc(handler.TargetsCRUDRouter)))
+
+	// Graph Run endpoints - user and admin access (ownership-based authorization)
+	mux.Handle(GraphRunsPath, authMw.RequireAuth(http.HandlerFunc(handler.GraphRunsRouter)))
+	mux.Handle(GraphRunsPath+"/", authMw.RequireAuth(http.HandlerFunc(handler.GraphRunsRouter)))
 
 	// Wrap mux with logging middleware
 	server := &http.Server{

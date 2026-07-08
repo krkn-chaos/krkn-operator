@@ -79,6 +79,13 @@ const (
 	RegistriesAvailablePath = RegistriesPath + "/available"
 )
 
+// File management endpoints
+const (
+	FilesPath          = APIBasePath + "/files"
+	FilesAvailablePath = FilesPath + "/available"
+	FileTypesPath      = APIBasePath + "/file-types"
+)
+
 // Provider endpoints
 const (
 	ProvidersPath      = APIBasePath + "/providers"
@@ -89,4 +96,9 @@ const (
 const (
 	OperatorPath        = APIBasePath + "/operator"
 	OperatorTargetsPath = OperatorPath + "/targets"
+)
+
+// Graph Run endpoints
+const (
+	GraphRunsPath = APIBasePath + "/graphruns"
 )

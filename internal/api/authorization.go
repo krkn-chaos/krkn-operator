@@ -27,6 +27,7 @@ import (
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
 	"github.com/krkn-chaos/krkn-operator/pkg/auth"
 	"github.com/krkn-chaos/krkn-operator/pkg/groupauth"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
@@ -391,4 +392,111 @@ func (h *Handler) checkJobAccess(
 	}
 
 	return true
+}
+
+// checkGraphRunGroupAccess verifies if a user has permission to access a graph run
+// based on group permissions for the target clusters.
+//
+// A user has access if they have the required permission on AT LEAST ONE target cluster.
+func (h *Handler) checkGraphRunGroupAccess(
+	ctx context.Context,
+	userID string,
+	graphRun *krknv1alpha1.KrknGraphRun,
+	requiredAction groupauth.Action,
+) (bool, error) {
+	// Fetch user groups
+	userGroups, err := groupauth.GetUserGroups(ctx, h.client, userID, h.namespace)
+	if err != nil {
+		return false, err
+	}
+
+	if len(userGroups) == 0 {
+		return false, nil // No groups = no access
+	}
+
+	// Fetch the target request to get cluster API URLs
+	var targetRequest krknv1alpha1.KrknTargetRequest
+	if err := h.client.Get(ctx, client.ObjectKey{
+		Name:      graphRun.Spec.TargetRequestID,
+		Namespace: h.namespace,
+	}, &targetRequest); err != nil {
+		return false, fmt.Errorf("failed to fetch target request: %w", err)
+	}
+
+	// Check if user has permission on ANY target cluster
+	for providerName, clusterNames := range graphRun.Spec.TargetClusters {
+		for _, clusterName := range clusterNames {
+			// Find the cluster in the target request to get its API URL
+			// TargetData is map[string][]ClusterTarget (operator-name -> clusters)
+			if targets, ok := targetRequest.Status.TargetData[providerName]; ok {
+				for _, cluster := range targets {
+					if cluster.ClusterName == clusterName {
+						if groupauth.CanPerformAction(userGroups, cluster.ClusterAPIURL, requiredAction) {
+							return true, nil // User has access to at least one cluster
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return false, nil // No permission on any target cluster
+}
+
+// filterGraphRunsByGroupPermission filters graph runs based on group permissions.
+//
+// Filtering rules:
+// - If no claims in context (e.g., tests), return all runs
+// - Admins see all runs
+// - Regular users see only runs where they have 'view' permission on AT LEAST ONE target cluster
+//
+// Parameters:
+//   - runs: The list of graph runs to filter
+//   - ctx: The request context containing user claims
+//
+// Returns a filtered list of graph runs the user is authorized to see
+func (h *Handler) filterGraphRunsByGroupPermission(
+	runs []krknv1alpha1.KrknGraphRun,
+	ctx context.Context,
+) []krknv1alpha1.KrknGraphRun {
+	claims := auth.GetClaimsFromContext(ctx)
+
+	// Defensive check - if no claims (e.g., in tests), return all runs unfiltered
+	if claims == nil {
+		return runs
+	}
+
+	// Admins see all runs
+	if claims.Role == string(auth.RoleAdmin) {
+		return runs
+	}
+
+	// Regular users: filter by group permissions on target clusters
+	filtered := make([]krknv1alpha1.KrknGraphRun, 0)
+
+	for _, run := range runs {
+		// Check if user has 'view' permission on ANY target cluster in this run
+		hasAccess, err := h.checkGraphRunGroupAccess(
+			ctx,
+			claims.UserID,
+			&run,
+			groupauth.ActionView,
+		)
+
+		if err != nil {
+			// Log error but continue processing other runs
+			log.FromContext(ctx).V(1).Info("Failed to check access for graph run, excluding",
+				"runName", run.Name,
+				"userID", claims.UserID,
+				"error", err.Error(),
+			)
+			continue
+		}
+
+		if hasAccess {
+			filtered = append(filtered, run)
+		}
+	}
+
+	return filtered
 }
