@@ -118,8 +118,7 @@ require (
 	sigs.k8s.io/yaml v1.6.0 // indirect
 )
 
-// Replace NVIDIA go-nvml with stub from krknctl to avoid CGO dependency
-// Temporarily using relative path to krknctl during development
-// After krknctl release, switch to: github.com/krkn-chaos/krknctl/hack/stub-nvml v0.12.0
-// Documentation: https://github.com/krkn-chaos/krknctl/blob/main/hack/README.md
+// NVML stub from krknctl: operator imports krknctl -> krknctl imports go-nvml -> go-nvml needs CGO.
+// Operator doesn't need GPU detection, so we use krknctl's stub that compiles without CGO.
+// Current: local path (dev). After krknctl v0.12.0: versioned github.com/krkn-chaos/krknctl/hack/stub-nvml
 replace github.com/NVIDIA/go-nvml => ../../krknctl/hack/stub-nvml
