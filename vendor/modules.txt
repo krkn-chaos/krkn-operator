@@ -4,9 +4,8 @@ cel.dev/expr
 # github.com/Masterminds/semver/v3 v3.4.0
 ## explicit; go 1.21
 github.com/Masterminds/semver/v3
-# github.com/NVIDIA/go-nvml v0.13.2-0
-## explicit; go 1.20
-github.com/NVIDIA/go-nvml/pkg/dl
+# github.com/NVIDIA/go-nvml v0.13.2-0 => ./hack/stub-nvml
+## explicit; go 1.26.2
 github.com/NVIDIA/go-nvml/pkg/nvml
 # github.com/antlr4-go/antlr/v4 v4.13.0
 ## explicit; go 1.20
@@ -1243,3 +1242,4 @@ sigs.k8s.io/structured-merge-diff/v4/value
 ## explicit; go 1.22
 sigs.k8s.io/yaml
 sigs.k8s.io/yaml/goyaml.v2
+# github.com/NVIDIA/go-nvml => ./hack/stub-nvml

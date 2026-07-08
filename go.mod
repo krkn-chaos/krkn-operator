@@ -117,3 +117,7 @@ require (
 	sigs.k8s.io/structured-merge-diff/v4 v4.6.0 // indirect
 	sigs.k8s.io/yaml v1.6.0 // indirect
 )
+
+// Replace NVIDIA go-nvml with stub implementation to avoid CGO dependency
+// The operator doesn't use NVIDIA GPU features, but krknctl has this as a transitive dependency
+replace github.com/NVIDIA/go-nvml => ./hack/stub-nvml
