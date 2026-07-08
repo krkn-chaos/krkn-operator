@@ -1,5 +1,5 @@
 # oc build
-FROM golang:1.26.2 AS oc-build
+FROM golang:1.26 AS oc-build
 RUN apt-get update && apt-get install -y --no-install-recommends libkrb5-dev
 WORKDIR /tmp
 # oc build
