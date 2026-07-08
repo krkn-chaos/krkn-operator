@@ -213,7 +213,8 @@ func (h *Handler) CreateGraphRun(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Parse and validate resiliency score headers
-	resiliencyEnabled := r.Header.Get("X-Resiliency-Score") == "true"
+	// Accept common boolean representations: true/True/TRUE/1/yes/Yes/YES
+	resiliencyEnabled := parseBoolHeader(r.Header.Get("X-Resiliency-Score"))
 	var resiliencyBaseline *float64
 	var resiliencyMountPath string
 
@@ -616,4 +617,16 @@ func (h *Handler) GraphRunsRouter(w http.ResponseWriter, r *http.Request) {
 	}
 
 	http.Error(w, "Not found", http.StatusNotFound)
+}
+
+// parseBoolHeader parses a header value as a boolean, accepting common representations.
+// Accepts: "true", "True", "TRUE", "1", "yes", "Yes", "YES"
+// Rejects: "false", "False", "FALSE", "0", "no", "No", "NO", empty string, anything else
+func parseBoolHeader(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "true", "1", "yes":
+		return true
+	default:
+		return false
+	}
 }

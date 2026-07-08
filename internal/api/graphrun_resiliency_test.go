@@ -126,6 +126,89 @@ func TestCreateGraphRun_ResiliencyScore(t *testing.T) {
 			},
 		},
 		{
+			name:    "resiliency score enabled with uppercase TRUE",
+			request: baseRequest,
+			headers: map[string]string{
+				"X-Resiliency-Score":    "TRUE",
+				"X-Resiliency-Baseline": "7.5",
+			},
+			expectStatus: http.StatusCreated,
+			validateResult: func(t *testing.T, graphRun *krknv1alpha1.KrknGraphRun) {
+				if !graphRun.Spec.ResiliencyScoreEnabled {
+					t.Error("ResiliencyScoreEnabled should be true when header is 'TRUE'")
+				}
+				if graphRun.Spec.ResiliencyScoreBaseline == nil || *graphRun.Spec.ResiliencyScoreBaseline != 7.5 {
+					t.Errorf("Expected baseline 7.5, got %v", graphRun.Spec.ResiliencyScoreBaseline)
+				}
+			},
+		},
+		{
+			name:    "resiliency score enabled with digit 1",
+			request: baseRequest,
+			headers: map[string]string{
+				"X-Resiliency-Score":    "1",
+				"X-Resiliency-Baseline": "6.0",
+			},
+			expectStatus: http.StatusCreated,
+			validateResult: func(t *testing.T, graphRun *krknv1alpha1.KrknGraphRun) {
+				if !graphRun.Spec.ResiliencyScoreEnabled {
+					t.Error("ResiliencyScoreEnabled should be true when header is '1'")
+				}
+				if graphRun.Spec.ResiliencyScoreBaseline == nil || *graphRun.Spec.ResiliencyScoreBaseline != 6.0 {
+					t.Errorf("Expected baseline 6.0, got %v", graphRun.Spec.ResiliencyScoreBaseline)
+				}
+			},
+		},
+		{
+			name:    "resiliency score enabled with yes",
+			request: baseRequest,
+			headers: map[string]string{
+				"X-Resiliency-Score":    "yes",
+				"X-Resiliency-Baseline": "5.5",
+			},
+			expectStatus: http.StatusCreated,
+			validateResult: func(t *testing.T, graphRun *krknv1alpha1.KrknGraphRun) {
+				if !graphRun.Spec.ResiliencyScoreEnabled {
+					t.Error("ResiliencyScoreEnabled should be true when header is 'yes'")
+				}
+				if graphRun.Spec.ResiliencyScoreBaseline == nil || *graphRun.Spec.ResiliencyScoreBaseline != 5.5 {
+					t.Errorf("Expected baseline 5.5, got %v", graphRun.Spec.ResiliencyScoreBaseline)
+				}
+			},
+		},
+		{
+			name:    "resiliency score disabled with false",
+			request: baseRequest,
+			headers: map[string]string{
+				"X-Resiliency-Score": "false",
+			},
+			expectStatus: http.StatusCreated,
+			validateResult: func(t *testing.T, graphRun *krknv1alpha1.KrknGraphRun) {
+				if graphRun.Spec.ResiliencyScoreEnabled {
+					t.Error("ResiliencyScoreEnabled should be false when header is 'false'")
+				}
+				if graphRun.Spec.ResiliencyScoreBaseline != nil {
+					t.Error("ResiliencyScoreBaseline should be nil when disabled")
+				}
+			},
+		},
+		{
+			name:    "resiliency score disabled with invalid value",
+			request: baseRequest,
+			headers: map[string]string{
+				"X-Resiliency-Score": "random",
+			},
+			expectStatus: http.StatusCreated,
+			validateResult: func(t *testing.T, graphRun *krknv1alpha1.KrknGraphRun) {
+				if graphRun.Spec.ResiliencyScoreEnabled {
+					t.Error("ResiliencyScoreEnabled should be false when header is invalid")
+				}
+				if graphRun.Spec.ResiliencyScoreBaseline != nil {
+					t.Error("ResiliencyScoreBaseline should be nil when disabled")
+				}
+			},
+		},
+		{
 			name:    "resiliency score enabled but baseline missing - error",
 			request: baseRequest,
 			headers: map[string]string{
@@ -286,6 +369,57 @@ func TestCreateGraphRun_ResiliencyScore(t *testing.T) {
 				}
 
 				tt.validateResult(t, &graphRunList.Items[0])
+			}
+		})
+	}
+}
+
+func TestParseBoolHeader(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+		want  bool
+	}{
+		// True cases - lowercase
+		{"lowercase true", "true", true},
+		{"lowercase yes", "yes", true},
+		{"digit one", "1", true},
+
+		// True cases - uppercase
+		{"uppercase TRUE", "TRUE", true},
+		{"uppercase YES", "YES", true},
+
+		// True cases - mixed case
+		{"mixed True", "True", true},
+		{"mixed Yes", "Yes", true},
+
+		// True cases - with whitespace
+		{"true with leading space", "  true", true},
+		{"true with trailing space", "true  ", true},
+		{"true with both spaces", "  true  ", true},
+
+		// False cases - explicit false values
+		{"lowercase false", "false", false},
+		{"uppercase FALSE", "FALSE", false},
+		{"mixed False", "False", false},
+		{"lowercase no", "no", false},
+		{"uppercase NO", "NO", false},
+		{"digit zero", "0", false},
+
+		// False cases - invalid/empty values
+		{"empty string", "", false},
+		{"random string", "random", false},
+		{"on", "on", false}, // Common bool representation but not accepted
+		{"off", "off", false},
+		{"y", "y", false}, // Ambiguous single letter
+		{"t", "t", false}, // Ambiguous single letter
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := parseBoolHeader(tt.value)
+			if got != tt.want {
+				t.Errorf("parseBoolHeader(%q) = %v, want %v", tt.value, got, tt.want)
 			}
 		})
 	}
