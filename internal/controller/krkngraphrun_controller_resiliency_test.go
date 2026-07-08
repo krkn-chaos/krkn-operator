@@ -254,6 +254,71 @@ func TestCreateScenarioRun_ResiliencyScore(t *testing.T) {
 				"RESILIENCY_FILE":  "/etc/kraken/metrics.yaml",
 			},
 		},
+		{
+			name: "user-provided resiliency env vars stripped when disabled",
+			graphRun: &krknv1alpha1.KrknGraphRun{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-graphrun-6",
+					Namespace: "default",
+				},
+				Spec: krknv1alpha1.KrknGraphRunSpec{
+					Graph: map[string]krknv1alpha1.GraphScenarioNode{
+						"node-1": {
+							Name:  "test-scenario",
+							Image: "quay.io/krkn-chaos/krkn-hub:dummy-scenario",
+							// User tries to inject reserved env vars
+							Env: map[string]string{
+								"RESILIENCY_SCORE": "true",
+								"RESILIENCY_FILE":  "/malicious/path",
+								"CUSTOM_VAR":       "custom-value",
+							},
+						},
+					},
+					TargetRequestID:         "test-target",
+					TargetClusters:          map[string][]string{"local": {"cluster1"}},
+					ResiliencyScoreEnabled:  false, // Disabled at GraphRun level
+					ResiliencyScoreBaseline: nil,
+				},
+			},
+			nodeID: "node-1",
+			expectEnvVars: map[string]string{
+				"CUSTOM_VAR": "custom-value", // User vars preserved
+			},
+			expectNoEnvVars: []string{"RESILIENCY_SCORE", "RESILIENCY_FILE"}, // Reserved vars stripped
+		},
+		{
+			name: "user-provided resiliency env vars overridden when enabled",
+			graphRun: &krknv1alpha1.KrknGraphRun{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-graphrun-7",
+					Namespace: "default",
+				},
+				Spec: krknv1alpha1.KrknGraphRunSpec{
+					Graph: map[string]krknv1alpha1.GraphScenarioNode{
+						"node-1": {
+							Name:  "test-scenario",
+							Image: "quay.io/krkn-chaos/krkn-hub:dummy-scenario",
+							// User tries to inject wrong values
+							Env: map[string]string{
+								"RESILIENCY_SCORE": "false", // Wrong value
+								"RESILIENCY_FILE":  "/wrong/path",
+								"CUSTOM_VAR":       "custom-value",
+							},
+						},
+					},
+					TargetRequestID:         "test-target",
+					TargetClusters:          map[string][]string{"local": {"cluster1"}},
+					ResiliencyScoreEnabled:  true, // Enabled - controller should override
+					ResiliencyScoreBaseline: &baselineValue,
+				},
+			},
+			nodeID: "node-1",
+			expectEnvVars: map[string]string{
+				"RESILIENCY_SCORE": "true",       // Controller value (not "false")
+				"CUSTOM_VAR":       "custom-value", // User var preserved
+			},
+			expectNoEnvVars: []string{"RESILIENCY_FILE"}, // No file mount, so not set
+		},
 	}
 
 	for _, tt := range tests {

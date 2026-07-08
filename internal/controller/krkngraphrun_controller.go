@@ -497,18 +497,25 @@ func (r *KrknGraphRunReconciler) createScenarioRun(
 			"fileCount", len(fileMounts))
 	}
 
-	// Add resiliency score environment variables if enabled
+	// Handle resiliency score environment variables (controller-reserved)
+	// These env vars are exclusively managed by the controller and should never
+	// come from user-defined node.Env. Strip them first to prevent leakage.
 	logger.Info("checking resiliency score configuration",
 		"nodeID", nodeID,
 		"resiliencyScoreEnabled", graphRun.Spec.ResiliencyScoreEnabled,
 		"resiliencyMountPath", graphRun.Spec.ResiliencyMountPath)
 
-	if graphRun.Spec.ResiliencyScoreEnabled {
-		// Initialize environment map if nil
-		if spec.Environment == nil {
-			spec.Environment = make(map[string]string)
-		}
+	// Initialize environment map if nil
+	if spec.Environment == nil {
+		spec.Environment = make(map[string]string)
+	}
 
+	// Remove any user-provided RESILIENCY_* env vars (reserved by controller)
+	delete(spec.Environment, "RESILIENCY_SCORE")
+	delete(spec.Environment, "RESILIENCY_FILE")
+
+	// Add resiliency env vars ONLY if enabled
+	if graphRun.Spec.ResiliencyScoreEnabled {
 		// Set RESILIENCY_SCORE=true to enable resiliency scoring in the scenario pod
 		spec.Environment["RESILIENCY_SCORE"] = "true"
 		logger.Info("added RESILIENCY_SCORE environment variable",
