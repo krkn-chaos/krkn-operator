@@ -1,11 +1,11 @@
 # oc build
-FROM golang:1.25.10 AS oc-build
+FROM golang:1.26.2 AS oc-build
 RUN apt-get update && apt-get install -y --no-install-recommends libkrb5-dev
 WORKDIR /tmp
 # oc build
 RUN git clone --branch release-4.18 https://github.com/openshift/oc.git
 WORKDIR /tmp/oc
-RUN go mod edit -go 1.25.10 &&\
+RUN go mod edit -go 1.26.2 &&\
     go mod edit -require github.com/moby/buildkit@v0.12.5 &&\
     go mod edit -require github.com/containerd/containerd@v1.7.29&&\
     go mod edit -require github.com/docker/docker@v27.5.1+incompatible&&\
