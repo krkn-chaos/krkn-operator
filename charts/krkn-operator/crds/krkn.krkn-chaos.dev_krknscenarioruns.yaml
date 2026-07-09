@@ -102,6 +102,10 @@ spec:
               password:
                 description: Password is the password for registry authentication
                 type: string
+              registryName:
+                description: RegistryName is the name of the saved private registry
+                  to use
+                type: string
               registryURL:
                 description: RegistryURL is the URL of the container registry
                 type: string
@@ -176,6 +180,10 @@ spec:
                     completionTime:
                       description: CompletionTime is when the job completed
                       format: date-time
+                      type: string
+                    containerImage:
+                      description: ContainerImage is the full container image path
+                        (registry/repository:tag) being run
                       type: string
                     failureReason:
                       description: FailureReason contains a categorized failure reason

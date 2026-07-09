@@ -321,6 +321,7 @@ spec:
                       - "pass": calculated score >= baseline
                       - "fail": calculated score < baseline
                       - "no-baseline": no baseline was specified, score calculated but not compared
+                      - "error": score calculation failed (e.g., pod logs unavailable, no reports found)
                     type: string
                 required:
                 - calculated
