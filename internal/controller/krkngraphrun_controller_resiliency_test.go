@@ -39,12 +39,12 @@ func TestCreateScenarioRun_ResiliencyScore(t *testing.T) {
 	baselineValue := 9.0
 
 	tests := []struct {
-		name              string
-		graphRun          *krknv1alpha1.KrknGraphRun
-		nodeID            string
-		setupFiles        []*corev1.ConfigMap
-		expectEnvVars     map[string]string
-		expectNoEnvVars   []string
+		name            string
+		graphRun        *krknv1alpha1.KrknGraphRun
+		nodeID          string
+		setupFiles      []*corev1.ConfigMap
+		expectEnvVars   map[string]string
+		expectNoEnvVars []string
 	}{
 		{
 			name: "resiliency score enabled without mount path - only RESILIENCY_SCORE",
@@ -198,7 +198,7 @@ func TestCreateScenarioRun_ResiliencyScore(t *testing.T) {
 					ResiliencyScoreEnabled: false,
 				},
 			},
-			nodeID: "node-1",
+			nodeID:          "node-1",
 			expectNoEnvVars: []string{"RESILIENCY_SCORE", "RESILIENCY_FILE"},
 		},
 		{
@@ -314,7 +314,7 @@ func TestCreateScenarioRun_ResiliencyScore(t *testing.T) {
 			},
 			nodeID: "node-1",
 			expectEnvVars: map[string]string{
-				"RESILIENCY_SCORE": "true",       // Controller value (not "false")
+				"RESILIENCY_SCORE": "true",         // Controller value (not "false")
 				"CUSTOM_VAR":       "custom-value", // User var preserved
 			},
 			expectNoEnvVars: []string{"RESILIENCY_FILE"}, // No file mount, so not set

@@ -753,13 +753,13 @@ type GraphRunSpecResponse struct {
 
 // GraphRunStatusResponse represents the status section of a graph run
 type GraphRunStatusResponse struct {
-	Phase           string                      `json:"phase"`
-	Summary         GraphRunSummaryResponse     `json:"summary"`
-	NodeStatuses    []NodeStatusResponse        `json:"nodeStatuses"`
-	ResolvedLevels  [][]string                  `json:"resolvedLevels"`
-	StartTime       *metav1.Time                `json:"startTime,omitempty"`
-	CompletionTime  *metav1.Time                `json:"completionTime,omitempty"`
-	ResiliencyScore *ResiliencyScoreResponse    `json:"resiliencyScore,omitempty"`
+	Phase           string                   `json:"phase"`
+	Summary         GraphRunSummaryResponse  `json:"summary"`
+	NodeStatuses    []NodeStatusResponse     `json:"nodeStatuses"`
+	ResolvedLevels  [][]string               `json:"resolvedLevels"`
+	StartTime       *metav1.Time             `json:"startTime,omitempty"`
+	CompletionTime  *metav1.Time             `json:"completionTime,omitempty"`
+	ResiliencyScore *ResiliencyScoreResponse `json:"resiliencyScore,omitempty"`
 }
 
 // GraphRunSummaryResponse represents aggregate statistics

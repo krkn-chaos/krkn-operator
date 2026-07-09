@@ -77,12 +77,12 @@ func (h *Handler) ListGraphRuns(w http.ResponseWriter, r *http.Request) {
 	for i := range filteredRuns {
 		run := &filteredRuns[i]
 		response = append(response, GraphRunListItem{
-			Name:                    run.Name,
-			Namespace:               run.Namespace,
-			CreationTimestamp:       run.CreationTimestamp.Time,
-			Phase:                   run.Status.Phase,
-			OwnerUserID:             run.Spec.OwnerUserID,
-			TargetRequestID:         run.Spec.TargetRequestID,
+			Name:              run.Name,
+			Namespace:         run.Namespace,
+			CreationTimestamp: run.CreationTimestamp.Time,
+			Phase:             run.Status.Phase,
+			OwnerUserID:       run.Spec.OwnerUserID,
+			TargetRequestID:   run.Spec.TargetRequestID,
 			Summary: GraphRunSummaryResponse{
 				TotalNodes:     run.Status.Summary.TotalNodes,
 				CompletedNodes: run.Status.Summary.CompletedNodes,
