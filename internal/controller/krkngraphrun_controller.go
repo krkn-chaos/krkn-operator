@@ -212,11 +212,19 @@ func (r *KrknGraphRunReconciler) Reconcile(ctx context.Context, req ctrl.Request
 
 		// 7.1. Calculate resiliency score if enabled and GraphRun is in terminal state
 		if graphRun.Spec.ResiliencyScoreEnabled &&
-		   r.isTerminalPhase(graphRun.Status.Phase) &&
-		   graphRun.Status.ResiliencyScore == nil {
+			r.isTerminalPhase(graphRun.Status.Phase) &&
+			graphRun.Status.ResiliencyScore == nil {
 			if err := r.calculateResiliencyScore(ctx, &graphRun, existingRuns); err != nil {
 				logger.Error(err, "failed to calculate resiliency score", "graphRun", graphRun.Name)
-				// Don't fail the reconcile, just log the error
+
+				// Set sentinel value to prevent retries and preserve immutability
+				// Once we attempt calculation, we never retry to ensure score consistency
+				graphRun.Status.ResiliencyScore = &krknv1alpha1.ResiliencyScoreResult{
+					Calculated: 0,
+					Baseline:   graphRun.Spec.ResiliencyScoreBaseline,
+					Status:     "error",
+					Message:    fmt.Sprintf("Failed to calculate resiliency score: %v", err),
+				}
 			}
 		}
 

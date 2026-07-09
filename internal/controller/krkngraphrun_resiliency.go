@@ -22,8 +22,10 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
@@ -165,8 +167,13 @@ func (r *KrknGraphRunReconciler) calculateResiliencyScore(
 	return nil
 }
 
-// fetchPodLogs fetches logs from a specific pod.
+// fetchPodLogs fetches logs from a specific pod with exponential backoff retry.
 // Returns the full log content as bytes for parsing by krknctl.
+//
+// Retry strategy:
+// - 3 attempts with exponential backoff (1s, 2s, 4s)
+// - Total max wait time: ~7 seconds
+// - Handles transient API failures (e.g., pod logs not yet available)
 func (r *KrknGraphRunReconciler) fetchPodLogs(ctx context.Context, namespace, podName string) ([]byte, error) {
 	logger := log.FromContext(ctx).WithName("fetch-pod-logs")
 
@@ -174,26 +181,46 @@ func (r *KrknGraphRunReconciler) fetchPodLogs(ctx context.Context, namespace, po
 		"pod", podName,
 		"namespace", namespace)
 
-	// Get pod logs
-	req := r.Clientset.CoreV1().Pods(namespace).GetLogs(podName, &corev1.PodLogOptions{
-		Container: "scenario", // krkn scenario container name
+	var logBytes []byte
+
+	// Retry with exponential backoff
+	retryErr := wait.ExponentialBackoff(wait.Backoff{
+		Duration: 1 * time.Second,
+		Factor:   2.0,
+		Steps:    3,
+		Cap:      10 * time.Second,
+	}, func() (bool, error) {
+		// Get pod logs request
+		req := r.Clientset.CoreV1().Pods(namespace).GetLogs(podName, &corev1.PodLogOptions{
+			Container: "scenario", // krkn scenario container name
+		})
+
+		podLogs, err := req.Stream(ctx)
+		if err != nil {
+			logger.V(1).Info("pod logs not yet available, will retry",
+				"pod", podName,
+				"error", err.Error())
+			return false, nil // Retry on stream error
+		}
+		defer podLogs.Close()
+
+		// Read all logs into memory
+		logBytes, err = io.ReadAll(podLogs)
+		if err != nil {
+			// Terminal error on read failure
+			return false, fmt.Errorf("failed to read logs: %w", err)
+		}
+
+		logger.V(1).Info("successfully fetched pod logs",
+			"pod", podName,
+			"logSize", len(logBytes))
+
+		return true, nil // Success
 	})
 
-	podLogs, err := req.Stream(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to stream logs for pod %s: %w", podName, err)
+	if retryErr != nil {
+		return nil, fmt.Errorf("failed to fetch logs for pod %s after retries: %w", podName, retryErr)
 	}
-	defer podLogs.Close()
-
-	// Read all logs into memory
-	logBytes, err := io.ReadAll(podLogs)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read logs for pod %s: %w", podName, err)
-	}
-
-	logger.V(1).Info("fetched pod logs",
-		"pod", podName,
-		"logSize", len(logBytes))
 
 	return logBytes, nil
 }

@@ -143,6 +143,7 @@ type ResiliencyScoreResult struct {
 	// - "pass": calculated score >= baseline
 	// - "fail": calculated score < baseline
 	// - "no-baseline": no baseline was specified, score calculated but not compared
+	// - "error": score calculation failed (e.g., pod logs unavailable, no reports found)
 	Status string `json:"status"`
 
 	// Message provides a human-readable description of the result
