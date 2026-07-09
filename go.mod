@@ -120,5 +120,10 @@ require (
 
 // NVML stub from krknctl: operator imports krknctl -> krknctl imports go-nvml -> go-nvml needs CGO.
 // Operator doesn't need GPU detection, so we use krknctl's stub that compiles without CGO.
-// Current: local path (dev). After krknctl v0.12.0: versioned github.com/krkn-chaos/krknctl/hack/stub-nvml
-replace github.com/NVIDIA/go-nvml => ../../krknctl/hack/stub-nvml
+//
+// Pseudo-version explanation:
+// Go submodules in subdirectories (hack/stub-nvml) need tags like "hack/stub-nvml/v0.12.0-beta".
+// Since krknctl only has "v0.12.0-beta" tag at repo root, we use a pseudo-version that points
+// to the exact commit (96ac88f3f7a6) of v0.12.0-beta with proper timestamp (20260709102702).
+// This allows go mod to fetch the stub package from GitHub without needing local krknctl checkout.
+replace github.com/NVIDIA/go-nvml => github.com/krkn-chaos/krknctl/hack/stub-nvml v0.0.0-20260709102702-96ac88f3f7a6
