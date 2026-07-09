@@ -68,6 +68,12 @@ func (h *Handler) CreateFile(w http.ResponseWriter, r *http.Request) {
 
 	// Validate request
 	if err := validateCreateFileRequest(ctx, h.client, &req, h.namespace, isAdmin, claims.UserID); err != nil {
+		logger.Info("File validation failed",
+			"fileName", req.FileName,
+			"fileType", req.FileType,
+			"groups", req.Groups,
+			"availableToAll", req.AvailableToAll,
+			"error", err.Error())
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
 			Error:   "bad_request",
 			Message: err.Error(),
@@ -276,6 +282,13 @@ func (h *Handler) UpdateFile(w http.ResponseWriter, r *http.Request) {
 
 	// Validate request
 	if err := validateUpdateFileRequest(ctx, h.client, &req, h.namespace, isAdmin, claims.UserID); err != nil {
+		logger.Info("File update validation failed",
+			"fileID", fileID,
+			"fileName", req.FileName,
+			"fileType", req.FileType,
+			"groups", req.Groups,
+			"availableToAll", req.AvailableToAll,
+			"error", err.Error())
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
 			Error:   "bad_request",
 			Message: err.Error(),

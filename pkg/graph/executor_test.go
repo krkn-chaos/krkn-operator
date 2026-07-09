@@ -258,14 +258,16 @@ func TestMapScenarioNodeToScenarioRunSpec(t *testing.T) {
 				if spec.OwnerUserID != "user@example.com" {
 					t.Errorf("OwnerUserID = %s, want user@example.com", spec.OwnerUserID)
 				}
-				if len(spec.Environment) != 3 {
-					t.Errorf("Environment has %d entries, want 3", len(spec.Environment))
+				// Environment should only contain user-defined env vars from node
+				// RESILIENCY_SCORE is added by controller, not by MapScenarioNodeToScenarioRunSpec
+				if len(spec.Environment) != 2 {
+					t.Errorf("Environment has %d entries, want 2 (KEY1, KEY2)", len(spec.Environment))
 				}
 				if spec.Environment["KEY1"] != "value1" {
 					t.Errorf("Environment[KEY1] = %s, want value1", spec.Environment["KEY1"])
 				}
-				if spec.Environment["RESILIENCY_SCORE"] != "true" {
-					t.Errorf("Environment[RESILIENCY_SCORE] = %s, want true", spec.Environment["RESILIENCY_SCORE"])
+				if spec.Environment["KEY2"] != "value2" {
+					t.Errorf("Environment[KEY2] = %s, want value2", spec.Environment["KEY2"])
 				}
 			},
 		},
@@ -286,12 +288,11 @@ func TestMapScenarioNodeToScenarioRunSpec(t *testing.T) {
 				if spec.ScenarioName != "minimal-scenario" {
 					t.Errorf("ScenarioName = %s, want minimal-scenario", spec.ScenarioName)
 				}
-				// Verify RESILIENCY_SCORE is always added for graph runs
-				if len(spec.Environment) != 1 {
-					t.Errorf("Environment has %d entries, want 1 (RESILIENCY_SCORE)", len(spec.Environment))
-				}
-				if spec.Environment["RESILIENCY_SCORE"] != "true" {
-					t.Errorf("Environment[RESILIENCY_SCORE] = %s, want true", spec.Environment["RESILIENCY_SCORE"])
+				// Node has no env vars, so Environment should be empty
+				// RESILIENCY_SCORE is added by controller based on GraphRun.Spec.ResiliencyScoreEnabled,
+				// not by MapScenarioNodeToScenarioRunSpec
+				if len(spec.Environment) != 0 {
+					t.Errorf("Environment has %d entries, want 0 (no env vars in node)", len(spec.Environment))
 				}
 			},
 		},

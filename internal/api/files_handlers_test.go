@@ -443,9 +443,9 @@ func TestGetFile(t *testing.T) {
 			Name:      "file-" + fileID,
 			Namespace: handler.namespace,
 			Labels: map[string]string{
-				files.AppNameLabel:         files.AppName,
-				files.AppComponentLabel:    files.ComponentFile,
-				files.FileIDLabel:          fileID,
+				files.AppNameLabel:                            files.AppName,
+				files.AppComponentLabel:                       files.ComponentFile,
+				files.FileIDLabel:                             fileID,
 				"groups.krkn.krkn-chaos.dev/restricted-group": "true",
 			},
 			Annotations: map[string]string{

@@ -1,5 +1,5 @@
 # Build the manager binary
-FROM docker.io/library/golang:1.25.10 AS builder
+FROM docker.io/library/golang:1.26 AS builder
 ARG TARGETOS
 ARG TARGETARCH
 
@@ -9,7 +9,8 @@ COPY go.mod go.mod
 COPY go.sum go.sum
 # cache deps before building and copying source so that we don't need to re-download as much
 # and so that source changes don't invalidate our downloaded layer
-RUN go mod download
+# Disable CGO to avoid building C dependencies (NVIDIA nvml, etc.) that aren't needed
+RUN CGO_ENABLED=0 go mod download
 
 # Copy the go source
 COPY cmd/main.go cmd/main.go

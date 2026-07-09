@@ -46,9 +46,9 @@ func TestTranslateVolumesToFileMounts(t *testing.T) {
 		validateMount func(t *testing.T, mounts []krknv1alpha1.FileMount)
 	}{
 		{
-			name:    "empty volumes",
-			volumes: nil,
-			setupFiles: []*corev1.ConfigMap{},
+			name:        "empty volumes",
+			volumes:     nil,
+			setupFiles:  []*corev1.ConfigMap{},
 			expectError: false,
 			expectCount: 0,
 		},

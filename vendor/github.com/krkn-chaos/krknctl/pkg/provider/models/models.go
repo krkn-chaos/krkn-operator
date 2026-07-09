@@ -105,10 +105,12 @@ func (r *RegistryV2) ToDockerV2AuthString() (*string, error) {
 	authConfig := registry.AuthConfig{}
 	if r.Token != nil {
 		authConfig.RegistryToken = *r.Token
+		authConfig.ServerAddress = r.RegistryURL
 	} else {
 		if r.Username != nil {
 			authConfig.Username = *r.Username
 			authConfig.Password = *r.Password
+			authConfig.ServerAddress = r.RegistryURL
 		} else {
 			return nil, nil
 		}
@@ -134,6 +136,8 @@ type ScenarioDetail struct {
 	ScenarioTag
 	Title       string              `json:"title"`
 	Description string              `json:"description"`
+	IsAScenario bool                `json:"is_a_scenario"`
+	HasRollback bool                `json:"has_rollback"`
 	Fields      []typing.InputField `json:"fields"`
 }
 

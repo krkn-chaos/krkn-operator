@@ -22,6 +22,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/google/uuid"
@@ -88,8 +90,11 @@ func (h *Handler) ListGraphRuns(w http.ResponseWriter, r *http.Request) {
 				FailedNodes:    run.Status.Summary.FailedNodes,
 				PendingNodes:   run.Status.Summary.PendingNodes,
 			},
-			StartTime:      run.Status.StartTime,
-			CompletionTime: run.Status.CompletionTime,
+			StartTime:               run.Status.StartTime,
+			CompletionTime:          run.Status.CompletionTime,
+			ResiliencyScoreEnabled:  run.Spec.ResiliencyScoreEnabled,
+			ResiliencyScoreBaseline: run.Spec.ResiliencyScoreBaseline,
+			ResiliencyScore:         convertResiliencyScore(run.Status.ResiliencyScore),
 		})
 	}
 
@@ -163,10 +168,13 @@ func (h *Handler) GetGraphRun(w http.ResponseWriter, r *http.Request) {
 		Namespace:         graphRun.Namespace,
 		CreationTimestamp: graphRun.CreationTimestamp.Time,
 		Spec: GraphRunSpecResponse{
-			Graph:           graphRun.Spec.Graph,
-			TargetRequestID: graphRun.Spec.TargetRequestID,
-			TargetClusters:  graphRun.Spec.TargetClusters,
-			OwnerUserID:     graphRun.Spec.OwnerUserID,
+			Graph:                   graphRun.Spec.Graph,
+			TargetRequestID:         graphRun.Spec.TargetRequestID,
+			TargetClusters:          graphRun.Spec.TargetClusters,
+			OwnerUserID:             graphRun.Spec.OwnerUserID,
+			ResiliencyScoreEnabled:  graphRun.Spec.ResiliencyScoreEnabled,
+			ResiliencyMountPath:     graphRun.Spec.ResiliencyMountPath,
+			ResiliencyScoreBaseline: graphRun.Spec.ResiliencyScoreBaseline,
 		},
 		Status: GraphRunStatusResponse{
 			Phase: graphRun.Status.Phase,
@@ -177,10 +185,11 @@ func (h *Handler) GetGraphRun(w http.ResponseWriter, r *http.Request) {
 				FailedNodes:    graphRun.Status.Summary.FailedNodes,
 				PendingNodes:   graphRun.Status.Summary.PendingNodes,
 			},
-			NodeStatuses:   convertNodeStatuses(graphRun.Status.NodeStatuses),
-			ResolvedLevels: graphRun.Status.ResolvedLevels,
-			StartTime:      graphRun.Status.StartTime,
-			CompletionTime: graphRun.Status.CompletionTime,
+			NodeStatuses:    convertNodeStatuses(graphRun.Status.NodeStatuses),
+			ResolvedLevels:  graphRun.Status.ResolvedLevels,
+			StartTime:       graphRun.Status.StartTime,
+			CompletionTime:  graphRun.Status.CompletionTime,
+			ResiliencyScore: convertResiliencyScore(graphRun.Status.ResiliencyScore),
 		},
 	}
 
@@ -201,6 +210,55 @@ func (h *Handler) CreateGraphRun(w http.ResponseWriter, r *http.Request) {
 			Message: "Invalid request body: " + err.Error(),
 		})
 		return
+	}
+
+	// Parse and validate resiliency score headers
+	// Accept common boolean representations: true/True/TRUE/1/yes/Yes/YES
+	resiliencyEnabled := parseBoolHeader(r.Header.Get("X-Resiliency-Score"))
+	var resiliencyBaseline *float64
+	var resiliencyMountPath string
+
+	if resiliencyEnabled {
+		// Baseline is REQUIRED when resiliency score is enabled
+		baselineStr := r.Header.Get("X-Resiliency-Baseline")
+		if baselineStr == "" {
+			writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+				Error:   "bad_request",
+				Message: "X-Resiliency-Baseline header is required when X-Resiliency-Score is enabled",
+			})
+			return
+		}
+
+		baseline, err := strconv.ParseFloat(baselineStr, 64)
+		if err != nil {
+			writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+				Error:   "bad_request",
+				Message: "X-Resiliency-Baseline must be a valid number",
+			})
+			return
+		}
+
+		if baseline < 0 {
+			writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+				Error:   "bad_request",
+				Message: "X-Resiliency-Baseline must be a non-negative number",
+			})
+			return
+		}
+
+		resiliencyBaseline = &baseline
+
+		// Mount path is OPTIONAL but must be absolute if provided
+		resiliencyMountPath = r.Header.Get("X-Resiliency-Mount-Path")
+		if resiliencyMountPath != "" {
+			if !filepath.IsAbs(resiliencyMountPath) {
+				writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+					Error:   "bad_request",
+					Message: "X-Resiliency-Mount-Path must be an absolute path",
+				})
+				return
+			}
+		}
 	}
 
 	// Create a temporary GraphRun for validation
@@ -365,10 +423,13 @@ func (h *Handler) CreateGraphRun(w http.ResponseWriter, r *http.Request) {
 			Namespace: h.namespace,
 		},
 		Spec: krknv1alpha1.KrknGraphRunSpec{
-			Graph:           req.Graph,
-			TargetRequestID: req.TargetRequestID,
-			TargetClusters:  req.TargetClusters,
-			OwnerUserID:     userClaims.UserID,
+			Graph:                   req.Graph,
+			TargetRequestID:         req.TargetRequestID,
+			TargetClusters:          req.TargetClusters,
+			OwnerUserID:             userClaims.UserID,
+			ResiliencyScoreEnabled:  resiliencyEnabled,
+			ResiliencyMountPath:     resiliencyMountPath,
+			ResiliencyScoreBaseline: resiliencyBaseline,
 		},
 	}
 
@@ -392,10 +453,13 @@ func (h *Handler) CreateGraphRun(w http.ResponseWriter, r *http.Request) {
 		Namespace:         graphRun.Namespace,
 		CreationTimestamp: graphRun.CreationTimestamp.Time,
 		Spec: GraphRunSpecResponse{
-			Graph:           graphRun.Spec.Graph,
-			TargetRequestID: graphRun.Spec.TargetRequestID,
-			TargetClusters:  graphRun.Spec.TargetClusters,
-			OwnerUserID:     graphRun.Spec.OwnerUserID,
+			Graph:                   graphRun.Spec.Graph,
+			TargetRequestID:         graphRun.Spec.TargetRequestID,
+			TargetClusters:          graphRun.Spec.TargetClusters,
+			OwnerUserID:             graphRun.Spec.OwnerUserID,
+			ResiliencyScoreEnabled:  graphRun.Spec.ResiliencyScoreEnabled,
+			ResiliencyMountPath:     graphRun.Spec.ResiliencyMountPath,
+			ResiliencyScoreBaseline: graphRun.Spec.ResiliencyScoreBaseline,
 		},
 		Status: GraphRunStatusResponse{
 			Phase: graphRun.Status.Phase,
@@ -485,6 +549,20 @@ func (h *Handler) DeleteGraphRun(w http.ResponseWriter, r *http.Request) {
 
 // Helper functions
 
+// convertResiliencyScore converts ResiliencyScoreResult to API response format
+func convertResiliencyScore(score *krknv1alpha1.ResiliencyScoreResult) *ResiliencyScoreResponse {
+	if score == nil {
+		return nil
+	}
+
+	return &ResiliencyScoreResponse{
+		Calculated: score.Calculated,
+		Baseline:   score.Baseline,
+		Status:     score.Status,
+		Message:    score.Message,
+	}
+}
+
 // convertNodeStatuses converts Kubernetes NodeStatus to API response format
 func convertNodeStatuses(nodeStatuses []krknv1alpha1.NodeStatus) []NodeStatusResponse {
 	if nodeStatuses == nil {
@@ -539,4 +617,16 @@ func (h *Handler) GraphRunsRouter(w http.ResponseWriter, r *http.Request) {
 	}
 
 	http.Error(w, "Not found", http.StatusNotFound)
+}
+
+// parseBoolHeader parses a header value as a boolean, accepting common representations.
+// Accepts: "true", "True", "TRUE", "1", "yes", "Yes", "YES"
+// Rejects: "false", "False", "FALSE", "0", "no", "No", "NO", empty string, anything else
+func parseBoolHeader(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "true", "1", "yes":
+		return true
+	default:
+		return false
+	}
 }

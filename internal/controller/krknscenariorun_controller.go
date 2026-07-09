@@ -159,6 +159,11 @@ func (r *KrknScenarioRunReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		scenarioRun.Status.TotalTargets = totalTargets
 		scenarioRun.Status.ClusterJobs = make([]krknv1alpha1.ClusterJobStatus, 0)
 		if err := r.Status().Update(ctx, &scenarioRun); err != nil {
+			// If it's a conflict error, just requeue - the object was modified concurrently
+			if apierrors.IsConflict(err) {
+				logger.Info("conflict on status initialization, will retry on next reconcile")
+				return ctrl.Result{Requeue: true}, nil
+			}
 			logger.Error(err, "failed to initialize status")
 			return ctrl.Result{}, err
 		}
@@ -244,6 +249,12 @@ func (r *KrknScenarioRunReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 			"changes", changes)
 
 		if err := r.Status().Update(ctx, &scenarioRun); err != nil {
+			// If it's a conflict error, just requeue - the object was modified concurrently
+			// and will be re-fetched on next reconcile with fresh data
+			if apierrors.IsConflict(err) {
+				logger.Info("conflict on status update, will retry on next reconcile")
+				return ctrl.Result{Requeue: true}, nil
+			}
 			logger.Error(err, "failed to update status")
 			return ctrl.Result{}, err
 		}

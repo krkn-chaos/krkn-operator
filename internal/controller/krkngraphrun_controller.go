@@ -161,6 +161,10 @@ func (r *KrknGraphRunReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	if graphRun.Status.Phase == "" {
 		if err := r.initializeStatus(ctx, &graphRun); err != nil {
 			logger.Error(err, "failed to initialize status")
+			// If it's a conflict error, just requeue - the object was modified concurrently
+			if apierrors.IsConflict(err) {
+				return ctrl.Result{Requeue: true}, nil
+			}
 			return ctrl.Result{}, err
 		}
 		return ctrl.Result{Requeue: true}, nil
@@ -177,6 +181,12 @@ func (r *KrknGraphRunReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	if len(graphRun.Status.ResolvedLevels) == 0 {
 		if err := r.resolveGraph(ctx, &graphRun); err != nil {
 			logger.Error(err, "failed to resolve graph")
+			// If it's a conflict error, just requeue - the object was modified concurrently
+			// and will be re-fetched on next reconcile with fresh data
+			if apierrors.IsConflict(err) {
+				return ctrl.Result{Requeue: true}, nil
+			}
+			// For other errors, mark as Failed
 			return r.updateStatusWithError(ctx, &graphRun, err)
 		}
 		return ctrl.Result{Requeue: true}, nil
@@ -199,6 +209,24 @@ func (r *KrknGraphRunReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	// 7. Calculate global phase and summary (if not already updated by fail-fast)
 	if !statusAlreadyUpdated {
 		r.calculateGlobalStatus(&graphRun)
+
+		// 7.1. Calculate resiliency score if enabled and GraphRun is in terminal state
+		if graphRun.Spec.ResiliencyScoreEnabled &&
+			r.isTerminalPhase(graphRun.Status.Phase) &&
+			graphRun.Status.ResiliencyScore == nil {
+			if err := r.calculateResiliencyScore(ctx, &graphRun, existingRuns); err != nil {
+				logger.Error(err, "failed to calculate resiliency score", "graphRun", graphRun.Name)
+
+				// Set sentinel value to prevent retries and preserve immutability
+				// Once we attempt calculation, we never retry to ensure score consistency
+				graphRun.Status.ResiliencyScore = &krknv1alpha1.ResiliencyScoreResult{
+					Calculated: 0,
+					Baseline:   graphRun.Spec.ResiliencyScoreBaseline,
+					Status:     "error",
+					Message:    fmt.Sprintf("Failed to calculate resiliency score: %v", err),
+				}
+			}
+		}
 
 		// 8. Persist all status updates in a single call
 		if err := r.Status().Update(ctx, &graphRun); err != nil {
@@ -475,6 +503,52 @@ func (r *KrknGraphRunReconciler) createScenarioRun(
 		logger.V(1).Info("added file mounts to scenario run spec",
 			"nodeID", nodeID,
 			"fileCount", len(fileMounts))
+	}
+
+	// Handle resiliency score environment variables (controller-reserved)
+	// These env vars are exclusively managed by the controller and should never
+	// come from user-defined node.Env. Strip them first to prevent leakage.
+	logger.Info("checking resiliency score configuration",
+		"nodeID", nodeID,
+		"resiliencyScoreEnabled", graphRun.Spec.ResiliencyScoreEnabled,
+		"resiliencyMountPath", graphRun.Spec.ResiliencyMountPath)
+
+	// Initialize environment map if nil
+	if spec.Environment == nil {
+		spec.Environment = make(map[string]string)
+	}
+
+	// Remove any user-provided RESILIENCY_* env vars (reserved by controller)
+	delete(spec.Environment, "RESILIENCY_SCORE")
+	delete(spec.Environment, "RESILIENCY_FILE")
+
+	// Add resiliency env vars ONLY if enabled
+	if graphRun.Spec.ResiliencyScoreEnabled {
+		// Set RESILIENCY_SCORE=true to enable resiliency scoring in the scenario pod
+		spec.Environment["RESILIENCY_SCORE"] = "true"
+		logger.Info("added RESILIENCY_SCORE environment variable",
+			"nodeID", nodeID,
+			"value", "true")
+
+		// If a resiliency mount path is specified, check if this node has a file mounted at that path
+		if graphRun.Spec.ResiliencyMountPath != "" {
+			// Search for a file mount matching the resiliency mount path
+			for _, fileMount := range fileMounts {
+				if fileMount.MountPath == graphRun.Spec.ResiliencyMountPath {
+					// Found the resiliency metrics file - set RESILIENCY_FILE env var
+					spec.Environment["RESILIENCY_FILE"] = graphRun.Spec.ResiliencyMountPath
+					logger.V(1).Info("configured resiliency file for node",
+						"nodeID", nodeID,
+						"resiliencyFile", graphRun.Spec.ResiliencyMountPath)
+					break
+				}
+			}
+		}
+
+		logger.V(1).Info("enabled resiliency score for node",
+			"nodeID", nodeID,
+			"resiliencyEnabled", true,
+			"resiliencyFile", spec.Environment["RESILIENCY_FILE"])
 	}
 
 	// Sanitize node ID for use in Kubernetes resource names and labels
