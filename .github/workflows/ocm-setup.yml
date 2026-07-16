@@ -25,7 +25,7 @@ jobs:
           echo "Installing clusteradm ${{ matrix.ocm-version }}..."
           curl -L https://raw.githubusercontent.com/open-cluster-management-io/clusteradm/main/install.sh | bash -s -- ${{ matrix.ocm-version }}
           echo "Verifying clusteradm version..."
-          clusteradm version
+          clusteradm version client
 
       - name: Install kind
         run: |
