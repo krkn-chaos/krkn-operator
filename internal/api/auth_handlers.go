@@ -150,6 +150,15 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Validate email format (UserID is the user's email address)
+	if err := auth.ValidateEmail(req.UserID); err != nil {
+		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+			Error:   "validation_error",
+			Message: fmt.Sprintf("Email validation failed: %s", err.Error()),
+		})
+		return
+	}
+
 	// Validate password
 	if err := auth.ValidatePassword(req.Password); err != nil {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{

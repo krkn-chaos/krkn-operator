@@ -240,6 +240,16 @@ func TestValidatePassword(t *testing.T) {
 			password: "",
 			wantErr:  true,
 		},
+		{
+			name:     "valid - exactly 72 bytes (bcrypt max)",
+			password: strings.Repeat("a", 72),
+			wantErr:  false,
+		},
+		{
+			name:     "invalid - 73 bytes exceeds bcrypt max",
+			password: strings.Repeat("a", 73),
+			wantErr:  true,
+		},
 	}
 
 	for _, tt := range tests {

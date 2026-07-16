@@ -29,6 +29,10 @@ const (
 	DefaultCost = bcrypt.DefaultCost
 	// MinPasswordLength is the minimum password length required
 	MinPasswordLength = 8
+	// MaxPasswordLength is the maximum password length allowed.
+	// bcrypt only hashes the first 72 bytes of input and returns an error above
+	// that, so we reject longer passwords up front instead of failing at hash time.
+	MaxPasswordLength = 72
 )
 
 // HashPassword hashes a password using bcrypt.
@@ -73,8 +77,11 @@ func ValidatePassword(password string) error {
 		return fmt.Errorf("password must be at least %d characters", MinPasswordLength)
 	}
 
-	// Add more validation rules as needed (uppercase, lowercase, numbers, special chars, etc.)
-	// For now, we just check minimum length
+	// len() counts bytes, which is intentional: bcrypt operates on bytes and only
+	// uses the first 72, so the limit is a byte limit, not a character count.
+	if len(password) > MaxPasswordLength {
+		return fmt.Errorf("password must not be more than %d bytes", MaxPasswordLength)
+	}
 
 	return nil
 }
