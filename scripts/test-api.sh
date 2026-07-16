@@ -447,6 +447,75 @@ log_info "Cluster details (grouped by operator):"
 echo "$TARGET_DATA" | jq -r 'to_entries[] | "  Operator: \(.key)" as $op | .value[] | "    - \(."cluster-name"): \(."cluster-api-url")"'
 echo ""
 
+# Test 7: Execute terminal command on managed cluster to verify OCM authentication
+log_step "Test 7: Testing OCM authentication via terminal API..."
+
+# Use cluster1 from the discovered clusters
+TEST_CLUSTER="cluster1"
+TEST_COMMAND="kubectl get pods --all-namespaces"
+
+log_info "Executing command on $TEST_CLUSTER: $TEST_COMMAND"
+
+TERMINAL_DATA=$(cat <<EOF
+{
+  "cluster_id": "$TEST_CLUSTER",
+  "uuid": "$TARGET_UUID",
+  "command": "$TEST_COMMAND"
+}
+EOF
+)
+
+RESPONSE=$(api_call POST "/api/v1/terminal" "$TERMINAL_DATA" "$TOKEN")
+HTTP_CODE=$(extract_http_code "$RESPONSE")
+BODY=$(extract_body "$RESPONSE")
+
+if [ "$HTTP_CODE" != "200" ]; then
+    log_error "Terminal command failed: HTTP $HTTP_CODE"
+    echo "$BODY" | jq '.' 2>/dev/null || echo "$BODY"
+    exit 1
+fi
+
+log_success "Terminal command executed successfully"
+
+# Decode and display stdout (first 10 lines)
+STDOUT_BASE64=$(echo "$BODY" | jq -r '.stdout_base64')
+EXIT_CODE=$(echo "$BODY" | jq -r '.exit_code')
+
+if [ "$EXIT_CODE" != "0" ]; then
+    log_error "Command exited with non-zero status: $EXIT_CODE"
+    STDERR_BASE64=$(echo "$BODY" | jq -r '.stderr_base64')
+    if [ -n "$STDERR_BASE64" ] && [ "$STDERR_BASE64" != "null" ]; then
+        log_error "STDERR:"
+        echo "$STDERR_BASE64" | base64 -d
+    fi
+    exit 1
+fi
+
+log_info "Command output (first 10 lines):"
+echo "$STDOUT_BASE64" | base64 -d | head -10
+
+# Verify output contains expected headers
+OUTPUT=$(echo "$STDOUT_BASE64" | base64 -d)
+if echo "$OUTPUT" | grep -q "NAMESPACE"; then
+    log_success "✓ ASSERTION PASSED: Terminal command returned valid kubectl output"
+else
+    log_error "ASSERTION FAILED: Output does not look like kubectl output"
+    echo "Full output:"
+    echo "$OUTPUT"
+    exit 1
+fi
+
+# Count number of pods found
+POD_COUNT=$(echo "$OUTPUT" | grep -v "NAMESPACE" | grep -v "^$" | wc -l | tr -d ' ')
+log_info "Found $POD_COUNT pods across all namespaces on $TEST_CLUSTER"
+
+if [ "$POD_COUNT" -gt "0" ]; then
+    log_success "✓ ASSERTION PASSED: OCM authentication working - retrieved pod list from managed cluster"
+else
+    log_warn "No pods found on managed cluster (this may be expected for a fresh cluster)"
+fi
+echo ""
+
 # Final summary
 echo -e "${GREEN}========================================${NC}"
 echo -e "${GREEN}✓ API Tests Complete!${NC}"
@@ -458,6 +527,7 @@ echo "  - Admin user registered: $USER_ID"
 echo "  - Authentication working"
 echo "  - JWT token obtained and saved"
 echo "  - Target clusters verified: 2 clusters (cluster1, cluster2)"
+echo "  - OCM authentication verified: executed kubectl on managed cluster via terminal API"
 if [ -n "$PORT_FORWARD_PID" ]; then
     echo "  - Port-forward running (PID: $PORT_FORWARD_PID)"
 fi
