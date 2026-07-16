@@ -7,16 +7,24 @@ on:
 
 jobs:
   ocm-setup:
-    name: Setup OCM with ManagedServiceAccount
+    name: OCM ${{ matrix.ocm-version }}
     runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        ocm-version:
+          - v1.3.1  # Latest (May 2026)
+          - v1.2.0  # Previous major (Feb 2026)
+          - v1.1.0  # Two releases back (Oct 2025)
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Install clusteradm
+      - name: Install clusteradm ${{ matrix.ocm-version }}
         run: |
-          echo "Installing clusteradm..."
-          curl -L https://raw.githubusercontent.com/open-cluster-management-io/clusteradm/main/install.sh | bash
+          echo "Installing clusteradm ${{ matrix.ocm-version }}..."
+          curl -L https://raw.githubusercontent.com/open-cluster-management-io/clusteradm/main/install.sh | bash -s -- ${{ matrix.ocm-version }}
+          echo "Verifying clusteradm version..."
           clusteradm version
 
       - name: Install kind
@@ -418,6 +426,12 @@ jobs:
         run: |
           echo "# OCM Setup & krkn-operator Validation Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## 🔧 Test Configuration" >> $GITHUB_STEP_SUMMARY
+          echo "- **OCM Version**: \`${{ matrix.ocm-version }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **clusteradm Version**: \`$(clusteradm version 2>/dev/null | head -1 || echo 'N/A')\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Kubernetes Version**: \`$(kubectl version --short 2>/dev/null | grep Server || echo 'N/A')\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **krkn-operator Image**: \`quay.io/krkn-chaos/krkn-operator:latest\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
           echo "## OCM ManagedClusters" >> $GITHUB_STEP_SUMMARY
           kubectl get managedclusters --context kind-hub >> $GITHUB_STEP_SUMMARY 2>&1 || echo "Failed to get clusters" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
@@ -427,9 +441,10 @@ jobs:
           echo "## krkn-operator Pods" >> $GITHUB_STEP_SUMMARY
           kubectl get pods -n krkn-operator --context kind-hub >> $GITHUB_STEP_SUMMARY 2>&1 || echo "Failed to get operator pods" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "## Test Results" >> $GITHUB_STEP_SUMMARY
-          echo "- ✅ OCM hub and managed clusters configured" >> $GITHUB_STEP_SUMMARY
+          echo "## ✅ Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ OCM ${{ matrix.ocm-version }} hub and managed clusters configured" >> $GITHUB_STEP_SUMMARY
           echo "- ✅ krkn-operator deployed and running" >> $GITHUB_STEP_SUMMARY
           echo "- ✅ Admin user registered successfully" >> $GITHUB_STEP_SUMMARY
           echo "- ✅ JWT authentication working" >> $GITHUB_STEP_SUMMARY
           echo "- ✅ Target clusters discovered: 2 (cluster1, cluster2)" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ **krkn-operator is compatible with OCM ${{ matrix.ocm-version }}**" >> $GITHUB_STEP_SUMMARY
