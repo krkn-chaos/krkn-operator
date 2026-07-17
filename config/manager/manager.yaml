@@ -99,7 +99,7 @@ spec:
             memory: 64Mi
         volumeMounts: []
       - name: data-provider
-        image: quay.io/krkn-chaos/krkn-operator-data-provider:latest
+        image: krkn-chaos.docker.scarf.sh/krkn-chaos/krkn-operator-data-provider:latest
         imagePullPolicy: Always
         ports:
         - containerPort: 50051

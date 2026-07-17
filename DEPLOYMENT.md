@@ -115,10 +115,10 @@ For development or custom builds, use the Makefile-based deployment described be
 ### Registry and Image Configuration
 
 ```bash
-COMPONENT=krkn-operator                    # Component name (default)
-REGISTRY=quay.io/krkn-chaos               # Container registry (default)
-NAMESPACE=krkn-operator-system            # Deployment namespace (default)
-CONTAINER_TOOL=docker                      # docker or podman (default: docker)
+COMPONENT=krkn-operator                             # Component name (default)
+REGISTRY=krkn-chaos.docker.scarf.sh/krkn-chaos     # Container registry (default)
+NAMESPACE=krkn-operator-system                      # Deployment namespace (default)
+CONTAINER_TOOL=docker                               # docker or podman (default: docker)
 ```
 
 ### Image Names (Auto-Generated)
@@ -139,13 +139,13 @@ The Makefile automatically detects git tags for versioning:
 ```bash
 # Without git tag
 make docker-build
-# → quay.io/krkn-chaos/krkn-operator:latest
+# → krkn-chaos.docker.scarf.sh/krkn-chaos/krkn-operator:latest
 
 # With git tag v1.0.0
 git tag v1.0.0
 make docker-build
-# → quay.io/krkn-chaos/krkn-operator:latest
-# → quay.io/krkn-chaos/krkn-operator:v1.0.0
+# → krkn-chaos.docker.scarf.sh/krkn-chaos/krkn-operator:latest
+# → krkn-chaos.docker.scarf.sh/krkn-chaos/krkn-operator:v1.0.0
 ```
 
 ## Building Images
@@ -274,8 +274,8 @@ make install
 make docker-build-all
 
 # For kind clusters: load images
-kind load docker-image quay.io/krkn-chaos/krkn-operator:latest
-kind load docker-image quay.io/krkn-chaos/krkn-operator-data-provider:latest
+kind load docker-image krkn-chaos.docker.scarf.sh/krkn-chaos/krkn-operator:latest
+kind load docker-image krkn-chaos.docker.scarf.sh/krkn-chaos/krkn-operator-data-provider:latest
 
 # Deploy with local images
 make deploy
@@ -398,8 +398,8 @@ make uninstall
 Ensure images are pushed and accessible:
 ```bash
 # Verify images exist in registry
-docker pull quay.io/krkn-chaos/krkn-operator:latest
-docker pull quay.io/krkn-chaos/krkn-operator-data-provider:latest
+docker pull krkn-chaos.docker.scarf.sh/krkn-chaos/krkn-operator:latest
+docker pull krkn-chaos.docker.scarf.sh/krkn-chaos/krkn-operator-data-provider:latest
 ```
 
 ### Pod Not Starting

@@ -227,7 +227,7 @@ log_info "Installing from chart: $REPO_ROOT/charts/krkn-operator"
 helm install krkn-operator "$REPO_ROOT/charts/krkn-operator" \
     --namespace $OPERATOR_NAMESPACE \
     --create-namespace \
-    --set images.operator.image=quay.io/krkn-chaos/krkn-operator:latest \
+    --set images.operator.image=krkn-chaos.docker.scarf.sh/krkn-chaos/krkn-operator:latest \
     --set acm.enabled=true \
     --kube-context $HUB_CONTEXT \
     --wait \

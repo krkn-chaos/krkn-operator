@@ -54,7 +54,7 @@ OPERATOR_SDK_VERSION ?= v1.41.1
 COMPONENT ?= krkn-operator
 
 # Registry configuration
-REGISTRY ?= quay.io/krkn-chaos
+REGISTRY ?= krkn-chaos.docker.scarf.sh/krkn-chaos
 
 # Git tag detection for versioning
 GIT_TAG ?= $(shell git describe --tags --exact-match 2>/dev/null)
