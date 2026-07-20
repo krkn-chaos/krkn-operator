@@ -1180,3 +1180,241 @@ func TestListScenarioRuns_FilterByScenarioName(t *testing.T) {
 
 // NOTE: Tests for deleteTargetRequest were removed - KrknTargetRequest is now owned by ScenarioRun
 // and will be automatically deleted via Kubernetes garbage collection when ScenarioRun is deleted.
+
+func TestPostScenarioRun_CustomRunName_StoredAndReturned(t *testing.T) {
+	targetRequestID := "test-request-id"
+	clusterName := "test-cluster"
+	kubeconfig := "YXBpVmVyc2lvbjogdjEKa2luZDogQ29uZmlnCmNsdXN0ZXJzOiBbXQpjb250ZXh0czogW10KdXNlcnM6IFtd"
+
+	handler := setupScenarioRunTestHandler(targetRequestID, map[string]string{
+		clusterName: kubeconfig,
+	})
+
+	reqBody := `{
+		"targetRequestID": "test-request-id",
+		"targetClusters": {
+			"krkn-operator": ["test-cluster"]
+		},
+		"scenarioImage": "quay.io/krkn/pod-scenarios:latest",
+		"scenarioName": "pod-delete",
+		"customRunName": "my-chaos-run"
+	}`
+
+	req := httptest.NewRequest("POST", ScenariosRunPath, strings.NewReader(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	handler.PostScenarioRun(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("Expected status code %d, got %d. Body: %s", http.StatusCreated, w.Code, w.Body.String())
+	}
+
+	var response ScenarioRunCreateResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("Failed to unmarshal response: %v", err)
+	}
+
+	if response.CustomRunName != "my-chaos-run" {
+		t.Errorf("Expected CustomRunName='my-chaos-run' in create response, got '%s'", response.CustomRunName)
+	}
+
+	// Verify the CR was created with CustomRunName in spec
+	ctx := context.Background()
+	var scenarioRun krknv1alpha1.KrknScenarioRun
+	if err := handler.client.Get(ctx, client.ObjectKey{Name: response.ScenarioRunName, Namespace: "default"}, &scenarioRun); err != nil {
+		t.Fatalf("Failed to fetch created KrknScenarioRun: %v", err)
+	}
+
+	if scenarioRun.Spec.CustomRunName != "my-chaos-run" {
+		t.Errorf("Expected KrknScenarioRun.Spec.CustomRunName='my-chaos-run', got '%s'", scenarioRun.Spec.CustomRunName)
+	}
+}
+
+func TestPostScenarioRun_DuplicateCustomRunName_Conflict(t *testing.T) {
+	targetRequestID := "test-request-id"
+	clusterName := "test-cluster"
+	kubeconfig := "YXBpVmVyc2lvbjogdjEKa2luZDogQ29uZmlnCmNsdXN0ZXJzOiBbXQpjb250ZXh0czogW10KdXNlcnM6IFtd"
+
+	scheme := runtime.NewScheme()
+	krknv1alpha1.AddToScheme(scheme)
+	corev1.AddToScheme(scheme)
+
+	managedClusters := map[string]map[string]map[string]string{
+		"krkn-operator-acm": {
+			clusterName: {"kubeconfig": kubeconfig},
+		},
+	}
+	managedClustersJSON, _ := json.Marshal(managedClusters)
+
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: targetRequestID, Namespace: "default"},
+		Data:       map[string][]byte{"managed-clusters": managedClustersJSON},
+	}
+
+	targetRequest := &krknv1alpha1.KrknTargetRequest{
+		ObjectMeta: metav1.ObjectMeta{Name: targetRequestID, Namespace: "default"},
+		Spec:       krknv1alpha1.KrknTargetRequestSpec{UUID: "test-uuid"},
+		Status: krknv1alpha1.KrknTargetRequestStatus{
+			Status: "Completed",
+			TargetData: map[string][]krknv1alpha1.ClusterTarget{
+				"krkn-operator": {{ClusterName: clusterName, ClusterAPIURL: "https://" + clusterName + ".example.com:6443"}},
+			},
+		},
+	}
+
+	// Name must match sanitizeResourceName("my-chaos-run") so the fake client returns
+	// AlreadyExists when the handler attempts to create a run with the same custom name.
+	existingRun := &krknv1alpha1.KrknScenarioRun{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "my-chaos-run",
+			Namespace: "default",
+			Labels:    map[string]string{"krkn.krkn-chaos.dev/custom-run-name": "my-chaos-run"},
+		},
+		Spec: krknv1alpha1.KrknScenarioRunSpec{
+			ScenarioName:  "pod-delete",
+			CustomRunName: "my-chaos-run",
+			TargetClusters: map[string][]string{
+				"krkn-operator": {"cluster-1"},
+			},
+		},
+	}
+
+	fakeClient := fakeclient.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(secret, targetRequest, existingRun).
+		Build()
+	fakeClientset := fake.NewSimpleClientset()
+	handler := NewTestHandler(fakeClient, fakeClientset, "default", "localhost:50051")
+
+	reqBody := `{
+		"targetRequestID": "test-request-id",
+		"targetClusters": {
+			"krkn-operator": ["test-cluster"]
+		},
+		"scenarioImage": "quay.io/krkn/pod-scenarios:latest",
+		"scenarioName": "pod-delete",
+		"customRunName": "my-chaos-run"
+	}`
+
+	req := httptest.NewRequest("POST", ScenariosRunPath, strings.NewReader(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	handler.PostScenarioRun(w, req)
+
+	if w.Code != http.StatusConflict {
+		t.Errorf("Expected status code %d, got %d. Body: %s", http.StatusConflict, w.Code, w.Body.String())
+	}
+
+	var errResp ErrorResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &errResp); err != nil {
+		t.Fatalf("Failed to unmarshal error response: %v", err)
+	}
+
+	if errResp.Error != "conflict" {
+		t.Errorf("Expected error='conflict', got '%s'", errResp.Error)
+	}
+}
+
+func TestListScenarioRuns_IncludesCustomRunName(t *testing.T) {
+	scheme := runtime.NewScheme()
+	krknv1alpha1.AddToScheme(scheme)
+	corev1.AddToScheme(scheme)
+
+	scenarioRun := &krknv1alpha1.KrknScenarioRun{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "pod-delete-abc123",
+			Namespace: "default",
+		},
+		Spec: krknv1alpha1.KrknScenarioRunSpec{
+			ScenarioName:  "pod-delete",
+			CustomRunName: "my-chaos-run",
+			TargetClusters: map[string][]string{
+				"krkn-operator": {"cluster-1"},
+			},
+		},
+		Status: krknv1alpha1.KrknScenarioRunStatus{
+			Phase:        "Running",
+			TotalTargets: 1,
+		},
+	}
+
+	fakeClient := fakeclient.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(scenarioRun).
+		Build()
+	fakeClientset := fake.NewSimpleClientset()
+	handler := NewTestHandler(fakeClient, fakeClientset, "default", "localhost:50051")
+
+	req := httptest.NewRequest("GET", ScenariosRunPath, nil)
+	w := httptest.NewRecorder()
+	handler.ListScenarioRuns(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("Expected status code %d, got %d", http.StatusOK, w.Code)
+	}
+
+	var response ScenarioRunListResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("Failed to unmarshal response: %v", err)
+	}
+
+	if len(response.ScenarioRuns) != 1 {
+		t.Fatalf("Expected 1 scenario run, got %d", len(response.ScenarioRuns))
+	}
+
+	if response.ScenarioRuns[0].CustomRunName != "my-chaos-run" {
+		t.Errorf("Expected CustomRunName='my-chaos-run' in list response, got '%s'", response.ScenarioRuns[0].CustomRunName)
+	}
+}
+
+func TestGetScenarioRunStatus_IncludesCustomRunName(t *testing.T) {
+	scheme := runtime.NewScheme()
+	krknv1alpha1.AddToScheme(scheme)
+	corev1.AddToScheme(scheme)
+
+	scenarioRun := &krknv1alpha1.KrknScenarioRun{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "pod-delete-abc123",
+			Namespace: "default",
+		},
+		Spec: krknv1alpha1.KrknScenarioRunSpec{
+			ScenarioName:  "pod-delete",
+			CustomRunName: "my-chaos-run",
+			TargetClusters: map[string][]string{
+				"krkn-operator": {"cluster-1"},
+			},
+		},
+		Status: krknv1alpha1.KrknScenarioRunStatus{
+			Phase:        "Running",
+			TotalTargets: 1,
+		},
+	}
+
+	fakeClient := fakeclient.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(scenarioRun).
+		Build()
+	fakeClientset := fake.NewSimpleClientset()
+	handler := NewTestHandler(fakeClient, fakeClientset, "default", "localhost:50051")
+
+	req := httptest.NewRequest("GET", ScenariosRunPath+"/pod-delete-abc123", nil)
+	w := httptest.NewRecorder()
+	handler.GetScenarioRunStatus(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("Expected status code %d, got %d. Body: %s", http.StatusOK, w.Code, w.Body.String())
+	}
+
+	var response ScenarioRunStatusResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("Failed to unmarshal response: %v", err)
+	}
+
+	if response.CustomRunName != "my-chaos-run" {
+		t.Errorf("Expected CustomRunName='my-chaos-run' in status response, got '%s'", response.CustomRunName)
+	}
+
+	if response.ScenarioRunName != "pod-delete-abc123" {
+		t.Errorf("Expected ScenarioRunName='pod-delete-abc123', got '%s'", response.ScenarioRunName)
+	}
+}

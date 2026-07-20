@@ -145,6 +145,8 @@ type ScenarioRunRequest struct {
 	Files []FileMount `json:"files,omitempty"`
 	// FileReferences are references to centrally-managed files by UUID (optional)
 	FileReferences []files.FileReference `json:"fileReferences,omitempty"`
+	// CustomRunName is a user-provided label for the run (optional)
+	CustomRunName string `json:"customRunName,omitempty"`
 	// Private registry configuration (optional)
 	ScenariosRequest
 }
@@ -283,6 +285,8 @@ type ScenarioRunCreateResponse struct {
 	TotalTargets int `json:"totalTargets"`
 	// OwnerUserID is the email address of the user who created this scenario run
 	OwnerUserID string `json:"ownerUserId,omitempty"`
+	// CustomRunName is the user-provided label for the run, if supplied
+	CustomRunName string `json:"customRunName,omitempty"`
 }
 
 // ScenarioRunStatusResponse represents the response for GET /scenarios/run/{scenarioRunName} (new CRD-based approach)
@@ -309,6 +313,8 @@ type ScenarioRunStatusResponse struct {
 	GraphRunName string `json:"graphRunName,omitempty"`
 	// GraphNodeID is the node ID in the graph (if this scenario run is part of a graph run)
 	GraphNodeID string `json:"graphNodeId,omitempty"`
+	// CustomRunName is the user-provided label for this run
+	CustomRunName string `json:"customRunName,omitempty"`
 }
 
 // ClusterJobStatusResponse represents the status of a job for a specific cluster
@@ -365,6 +371,8 @@ type ScenarioRunListItem struct {
 	GraphRunName string `json:"graphRunName,omitempty"`
 	// GraphNodeID is the node ID in the graph (if this scenario run is part of a graph run)
 	GraphNodeID string `json:"graphNodeId,omitempty"`
+	// CustomRunName is the user-provided label for this run
+	CustomRunName string `json:"customRunName,omitempty"`
 }
 
 // ScenarioRunListResponse represents the response for GET /scenarios/run

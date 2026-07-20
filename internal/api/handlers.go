@@ -91,6 +91,22 @@ func sanitizeResourceName(name string) string {
 	return sanitized
 }
 
+// sanitizeRunNameLabel converts a customRunName into a valid Kubernetes label value
+// (max 63 chars, alphanumeric + dash/dot/underscore, must start and end with alphanumeric).
+func sanitizeRunNameLabel(name string) string {
+	reg := regexp.MustCompile(`[^a-zA-Z0-9._-]`)
+	sanitized := reg.ReplaceAllString(name, "-")
+	sanitized = strings.Trim(sanitized, "-_.")
+	if len(sanitized) > 63 {
+		sanitized = sanitized[:63]
+		sanitized = strings.Trim(sanitized, "-_.")
+	}
+	if sanitized == "" {
+		return "custom-run"
+	}
+	return sanitized
+}
+
 // Handler contains the dependencies for API handlers
 type Handler struct {
 	client         client.Client
@@ -1261,8 +1277,16 @@ func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
 		logger.V(1).Info("Loaded registry configuration", "registryName", *req.RegistryName)
 	}
 
-	// Generate scenario run name
-	scenarioRunName := fmt.Sprintf("%s-%s", req.ScenarioName, uuid.New().String()[:8])
+	// Generate scenario run name.
+	// When a customRunName is provided, use its sanitized form as the CR name so that
+	// Kubernetes enforces uniqueness atomically at create time — no TOCTOU window, and
+	// resources created via kubectl are subject to the same constraint.
+	var scenarioRunName string
+	if req.CustomRunName != "" {
+		scenarioRunName = sanitizeResourceName(req.CustomRunName)
+	} else {
+		scenarioRunName = fmt.Sprintf("%s-%s", req.ScenarioName, uuid.New().String()[:8])
+	}
 
 	// Create KrknScenarioRun CR
 	// Extract user claims for ownership tracking (defensive check for tests)
@@ -1273,6 +1297,9 @@ func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
 	if claims != nil {
 		labels["krkn.krkn-chaos.dev/owner-user"] = sanitizeUserID(claims.UserID)
 		ownerUserID = claims.UserID
+	}
+	if req.CustomRunName != "" {
+		labels["krkn.krkn-chaos.dev/custom-run-name"] = sanitizeRunNameLabel(req.CustomRunName)
 	}
 
 	scenarioRun := &krknv1alpha1.KrknScenarioRun{
@@ -1289,6 +1316,7 @@ func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
 			ScenarioImage:   req.ScenarioImage,
 			KubeconfigPath:  req.KubeconfigPath,
 			Environment:     req.Environment,
+			CustomRunName:   req.CustomRunName,
 		},
 	}
 
@@ -1321,8 +1349,15 @@ func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Create the CR
+	// Create the CR — if customRunName was provided, a name collision produces AlreadyExists.
 	if err := h.client.Create(ctx, scenarioRun); err != nil {
+		if apierrors.IsAlreadyExists(err) {
+			writeJSONError(w, http.StatusConflict, ErrorResponse{
+				Error:   "conflict",
+				Message: fmt.Sprintf("A scenario run with the name '%s' already exists", req.CustomRunName),
+			})
+			return
+		}
 		logger.Error(err, "Failed to create scenario run", "scenarioRunName", scenarioRunName)
 		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
 			Error:   "internal_error",
@@ -1363,6 +1398,7 @@ func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
 		TargetClusters:  req.TargetClusters,
 		TotalTargets:    totalTargets,
 		OwnerUserID:     ownerUserID,
+		CustomRunName:   req.CustomRunName,
 	}
 
 	writeJSON(w, http.StatusCreated, response)
@@ -1513,6 +1549,7 @@ func (h *Handler) GetScenarioRunStatus(w http.ResponseWriter, r *http.Request) {
 		RegistryName:    scenarioRun.Spec.RegistryName,
 		GraphRunName:    scenarioRun.Labels["krkn.dev/graph-run"],
 		GraphNodeID:     scenarioRun.Labels["krkn.dev/graph-node"],
+		CustomRunName:   scenarioRun.Spec.CustomRunName,
 	}
 
 	writeJSON(w, http.StatusOK, response)
@@ -1852,23 +1889,25 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	// Find pod by jobID label (no need to fetch the CR)
-	var podList corev1.PodList
-	if err := h.client.List(ctx, &podList, client.InNamespace(h.namespace), client.MatchingLabels{
-		"krkn-job-id": jobID,
-	}); err != nil {
-		logger.Error(err, "Failed to list pods", "jobID", jobID)
-		_ = conn.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("ERROR: Failed to list pods: %s", err.Error()))) // Best-effort error reporting
+	// Use PodName directly from CR status (already fetched above for permissions)
+	if targetJob.PodName == "" {
+		logger.Error(nil, "Job has no associated pod", "jobID", jobID)
+		_ = conn.WriteMessage(websocket.TextMessage, []byte("ERROR: Job has no associated pod — it may have failed before a pod was created")) // Best-effort error reporting
 		return
 	}
 
-	if len(podList.Items) == 0 {
-		logger.Error(nil, "Job not found", "jobID", jobID)
-		_ = conn.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("ERROR: Job with ID '%s' not found", jobID))) // Best-effort error reporting
+	var pod corev1.Pod
+	if err := h.client.Get(ctx, client.ObjectKey{Name: targetJob.PodName, Namespace: h.namespace}, &pod); err != nil {
+		if client.IgnoreNotFound(err) == nil {
+			logger.Error(nil, "Pod no longer exists", "jobID", jobID, "podName", targetJob.PodName)
+			_ = conn.WriteMessage(websocket.TextMessage, []byte("ERROR: Pod no longer exists — logs may have been cleaned up")) // Best-effort error reporting
+		} else {
+			logger.Error(err, "Failed to get pod", "jobID", jobID, "podName", targetJob.PodName)
+			_ = conn.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("ERROR: Failed to get pod: %s", err.Error()))) // Best-effort error reporting
+		}
 		return
 	}
 
-	pod := podList.Items[0]
 	logger.Info("Found pod for job", "scenarioRunName", scenarioRunName, "jobID", jobID, "podName", pod.Name, "podPhase", pod.Status.Phase)
 
 	// Parse query parameters
@@ -2025,6 +2064,7 @@ func (h *Handler) ListScenarioRuns(w http.ResponseWriter, r *http.Request) {
 			OwnerUserID:     sr.Spec.OwnerUserID,
 			GraphRunName:    sr.Labels["krkn.dev/graph-run"],
 			GraphNodeID:     sr.Labels["krkn.dev/graph-node"],
+			CustomRunName:   sr.Spec.CustomRunName,
 		}
 
 		runs = append(runs, run)

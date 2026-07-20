@@ -212,7 +212,7 @@ func TestGetScenarioReplay_ScenarioRunNotFound(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/scenarios/run/replay/"+jobID, nil)
 	claims := &auth.Claims{
 		UserID: "admin@test.com",
-		Role: "admin",
+		Role:   "admin",
 	}
 	ctx := context.WithValue(req.Context(), auth.UserClaimsKey, claims)
 	req = req.WithContext(ctx)
@@ -261,7 +261,7 @@ func TestGetScenarioReplay_NoOwnerReference(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/scenarios/run/replay/"+jobID, nil)
 	claims := &auth.Claims{
 		UserID: "admin@test.com",
-		Role: "admin",
+		Role:   "admin",
 	}
 	ctx := context.WithValue(req.Context(), auth.UserClaimsKey, claims)
 	req = req.WithContext(ctx)
@@ -414,7 +414,7 @@ func TestGetScenarioReplay_WithInlineFiles(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/scenarios/run/replay/"+jobID, nil)
 	claims := &auth.Claims{
 		UserID: "admin@test.com",
-		Role: "admin",
+		Role:   "admin",
 	}
 	ctx := context.WithValue(req.Context(), auth.UserClaimsKey, claims)
 	req = req.WithContext(ctx)

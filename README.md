@@ -10,6 +10,21 @@ Kubernetes operator for chaos engineering built on the [krkn](https://github.com
 
 📖 **[Official Documentation](https://krkn-chaos.dev/docs/krkn-operator)**
 
+## Quick Start
+
+**Install:**
+```bash
+helm install krkn-operator oci://quay.io/krkn-chaos/charts/krkn-operator --version <version> \
+  -n krkn-operator-system --create-namespace
+```
+
+**Uninstall:**
+```bash
+helm uninstall krkn-operator -n krkn-operator-system
+```
+
+See [DEPLOYMENT.md](DEPLOYMENT.md) for full installation options and configuration.
+
 ## License
 
 Copyright 2025 krkn-chaos
