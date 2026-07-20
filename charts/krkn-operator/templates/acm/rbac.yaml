@@ -50,6 +50,13 @@ rules:
   - list
   - watch
 - apiGroups:
+  - ""
+  resources:
+  - services
+  verbs:
+  - get
+  - list
+- apiGroups:
   - proxy.open-cluster-management.io
   resources:
   - managedproxyconfigurations
@@ -68,13 +75,6 @@ rules:
   - patch
   - update
   - watch
-- apiGroups:
-  - ""
-  resources:
-  - services
-  verbs:
-  - get
-  - list
 - apiGroups:
   - krkn.krkn-chaos.dev
   resources:
