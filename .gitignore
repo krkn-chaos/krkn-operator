@@ -41,5 +41,3 @@ venv/
 .beads
 PROMPT
 
-# Swagger generated documentation (generated in Dockerfile)
-internal/api/docs/
