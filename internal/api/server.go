@@ -12,10 +12,32 @@ distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
+
+Assisted-by: Claude Sonnet 4.5 (claude-sonnet-4-5@20250929)
 */
 
 // Package api provides HTTP API handlers and server implementation for the krkn-operator.
 // It includes endpoints for authentication, target management, scenario execution, and user management.
+//
+// @title Krkn Operator API
+// @version 1.0
+// @description REST API for Krkn chaos engineering operator. Provides endpoints for cluster management, chaos scenario execution, and GraphRun orchestration.
+// @termsOfService https://krkn-chaos.dev/terms
+//
+// @contact.name Krkn Team
+// @contact.url https://github.com/krkn-chaos/krkn-operator
+// @contact.email krkn-chaos@googlegroups.com
+//
+// @license.name Apache 2.0
+// @license.url http://www.apache.org/licenses/LICENSE-2.0.html
+//
+// @host localhost:8080
+// @BasePath /api/v1
+//
+// @securityDefinitions.apikey BearerAuth
+// @in header
+// @name Authorization
+// @description JWT token obtained from /api/v1/auth/login. Format: "Bearer {token}"
 package api
 
 import (
@@ -27,10 +49,12 @@ import (
 	"strings"
 	"time"
 
+	httpSwagger "github.com/swaggo/http-swagger"
 	"k8s.io/client-go/kubernetes"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
+	_ "github.com/krkn-chaos/krkn-operator/internal/api/docs" // Import generated docs
 	"github.com/krkn-chaos/krkn-operator/pkg/auth"
 )
 
@@ -151,6 +175,9 @@ func NewServer(port int, client client.Client, clientset kubernetes.Interface, n
 	// Graph Run endpoints - user and admin access (ownership-based authorization)
 	mux.Handle(GraphRunsPath, authMw.RequireAuth(http.HandlerFunc(handler.GraphRunsRouter)))
 	mux.Handle(GraphRunsPath+"/", authMw.RequireAuth(http.HandlerFunc(handler.GraphRunsRouter)))
+
+	// Swagger UI - public endpoint for API documentation
+	mux.Handle("/api/swagger/", httpSwagger.WrapHandler)
 
 	// Wrap mux with logging middleware
 	server := &http.Server{

@@ -12,12 +12,19 @@ COPY go.sum go.sum
 # Disable CGO to avoid building C dependencies (NVIDIA nvml, etc.) that aren't needed
 RUN CGO_ENABLED=0 go mod download
 
+# Install swag CLI for generating Swagger documentation
+RUN go install github.com/swaggo/swag/cmd/swag@latest
+
 # Copy the go source
 COPY cmd/main.go cmd/main.go
 COPY api/ api/
 COPY internal/ internal/
 COPY pkg/ pkg/
 COPY proto/ proto/
+
+# Generate Swagger documentation (BEFORE building binary)
+# This ensures docs are always up-to-date in every built image
+RUN swag init -g internal/api/server.go --parseDependency --parseInternal -o internal/api/docs
 
 # Build
 # the GOARCH has not a default value to allow the binary be built according to the host where the command
