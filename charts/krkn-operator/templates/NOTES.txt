@@ -65,6 +65,42 @@ The Krkn Console is available at:
 {{- end }}
 
 =============================================================================
+📖 API DOCUMENTATION (SWAGGER UI)
+=============================================================================
+
+The REST API documentation is available via Swagger UI:
+
+{{- if .Values.console.enabled }}
+  {{- if .Values.console.route.enabled }}
+    {{- if .Values.console.route.hostname }}
+  https://{{ .Values.console.route.hostname }}/api/swagger/index.html
+    {{- else }}
+  https://<CONSOLE_ROUTE>/api/swagger/index.html
+    {{- end }}
+  {{- else if .Values.console.ingress.enabled }}
+    {{- range .Values.console.ingress.hosts }}
+  http{{ if $.Values.console.ingress.tls }}s{{ end }}://{{ .host }}/api/swagger/index.html
+    {{- end }}
+  {{- else }}
+  http://localhost:8080/api/swagger/index.html (after port-forward)
+  {{- end }}
+
+  Try API endpoints directly in Swagger UI:
+    1. Click "Authorize" button
+    2. Login via POST /auth/login endpoint
+    3. Copy the token from response
+    4. Paste in "Authorize" dialog as: Bearer <token>
+    5. Try authenticated endpoints interactively!
+
+{{- else }}
+  Port Forward to Operator:
+    kubectl port-forward -n {{ include "krkn-operator.namespace" . }} svc/{{ include "krkn-operator.fullname" . }} 8080:8080
+
+  Then access Swagger UI at:
+    http://localhost:8080/api/swagger/index.html
+{{- end }}
+
+=============================================================================
 {{- if .Values.acm.enabled }}
 🔗 ACM INTEGRATION (Advanced Cluster Management)
 =============================================================================
