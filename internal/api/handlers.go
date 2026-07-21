@@ -712,6 +712,18 @@ func createScenarioProvider(mode provider.Mode) (provider.ScenarioDataProvider, 
 
 // PostScenarios handles POST /api/v1/scenarios endpoint
 // It returns the list of available krkn scenarios from quay.io or a private registry
+//
+// @Summary List available scenarios
+// @Description Get list of available chaos scenarios from container registry (Quay.io or private registry)
+// @Tags scenarios
+// @Accept json
+// @Produce json
+// @Param registry body object false "Registry configuration (optional for private registries)"
+// @Success 200 {object} object "List of available scenarios"
+// @Failure 400 {object} ErrorResponse "Invalid registry configuration"
+// @Failure 500 {object} ErrorResponse "Internal server error"
+// @Security BearerAuth
+// @Router /scenarios [post]
 func (h *Handler) PostScenarios(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	registry, mode, err := h.parseRegistryRequest(r)
@@ -794,6 +806,20 @@ func extractPathSuffix(path string, prefix string) (string, error) {
 
 // PostScenarioDetail handles POST /api/v1/scenarios/detail/{scenario_name} endpoint
 // It returns detailed information about a specific scenario including input fields
+//
+// @Summary Get scenario details
+// @Description Get detailed information about a specific chaos scenario including configuration fields
+// @Tags scenarios
+// @Accept json
+// @Produce json
+// @Param scenario_name path string true "Scenario name"
+// @Param registry body object false "Registry configuration (optional for private registries)"
+// @Success 200 {object} object "Scenario details with input fields"
+// @Failure 400 {object} ErrorResponse "Invalid scenario name or registry"
+// @Failure 404 {object} ErrorResponse "Scenario not found"
+// @Failure 500 {object} ErrorResponse "Internal server error"
+// @Security BearerAuth
+// @Router /scenarios/detail/{scenario_name} [post]
 func (h *Handler) PostScenarioDetail(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	scenarioName, err := extractPathSuffix(r.URL.Path, ScenariosDetailPath+"/")
@@ -871,6 +897,20 @@ func (h *Handler) PostScenarioDetail(w http.ResponseWriter, r *http.Request) {
 
 // PostScenarioGlobals handles POST /api/v1/scenarios/globals/{scenario_name} endpoint
 // It returns global environment fields for a specific scenario
+//
+// @Summary Get scenario globals
+// @Description Get global environment configuration fields for a specific scenario
+// @Tags scenarios
+// @Accept json
+// @Produce json
+// @Param scenario_name path string true "Scenario name"
+// @Param registry body object false "Registry configuration (optional for private registries)"
+// @Success 200 {object} object "Global fields for scenario"
+// @Failure 400 {object} ErrorResponse "Invalid scenario name or registry"
+// @Failure 404 {object} ErrorResponse "Scenario not found"
+// @Failure 500 {object} ErrorResponse "Internal server error"
+// @Security BearerAuth
+// @Router /scenarios/globals/{scenario_name} [post]
 func (h *Handler) PostScenarioGlobals(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	scenarioName, err := extractPathSuffix(r.URL.Path, ScenariosGlobalsPath+"/")
@@ -946,6 +986,22 @@ func (h *Handler) PostScenarioGlobals(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, response)
 }
 
+// PostScenarioRun handles POST /api/v1/scenarios/run endpoint
+// Executes a chaos scenario on target clusters
+//
+// @Summary Run chaos scenario
+// @Description Execute a chaos scenario on target clusters with specified configuration
+// @Tags scenarios
+// @Accept json
+// @Produce json
+// @Param request body ScenarioRunRequest true "Scenario run configuration"
+// @Success 202 {object} object "Scenario run created"
+// @Failure 400 {object} ErrorResponse "Invalid request body or validation error"
+// @Failure 403 {object} ErrorResponse "Insufficient permissions"
+// @Failure 404 {object} ErrorResponse "Target or scenario not found"
+// @Failure 500 {object} ErrorResponse "Internal server error"
+// @Security BearerAuth
+// @Router /scenarios/run [post]
 func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	logger := log.FromContext(ctx)
@@ -1312,6 +1368,19 @@ func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
 
 // GetScenarioRunStatus handles GET /api/v1/scenarios/run/{scenarioRunName} endpoint
 // It returns the current status of a scenario run
+//
+// @Summary Get scenario run status
+// @Description Get current execution status and metrics for a running or completed scenario
+// @Tags scenarios
+// @Produce json
+// @Param scenarioRunName path string true "Scenario run name"
+// @Success 200 {object} object "Scenario run status"
+// @Failure 400 {object} ErrorResponse "Invalid scenario run name"
+// @Failure 403 {object} ErrorResponse "Insufficient permissions"
+// @Failure 404 {object} ErrorResponse "Scenario run not found"
+// @Failure 500 {object} ErrorResponse "Internal server error"
+// @Security BearerAuth
+// @Router /scenarios/run/{scenarioRunName} [get]
 func (h *Handler) GetScenarioRunStatus(w http.ResponseWriter, r *http.Request) {
 	scenarioRunName, err := extractPathSuffix(r.URL.Path, ScenariosRunPath+"/")
 	if err != nil {
@@ -1893,6 +1962,17 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 
 // ListScenarioRuns handles GET /api/v1/scenarios/run endpoint
 // It returns a list of all scenario runs (KrknScenarioRun CRs)
+//
+// @Summary List scenario runs
+// @Description Get list of all scenario runs with optional filtering by phase or scenario name
+// @Tags scenarios
+// @Produce json
+// @Param phase query string false "Filter by phase (Running, Succeeded, Failed)"
+// @Param scenarioName query string false "Filter by scenario name"
+// @Success 200 {array} object "List of scenario runs"
+// @Failure 500 {object} ErrorResponse "Internal server error"
+// @Security BearerAuth
+// @Router /scenarios/run [get]
 func (h *Handler) ListScenarioRuns(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
@@ -2004,6 +2084,19 @@ func (h *Handler) GetActiveRunsOverview(w http.ResponseWriter, r *http.Request) 
 
 // DeleteScenarioRun handles DELETE /api/v1/scenarios/run/{jobID} endpoint
 // It stops and deletes a running job
+//
+// @Summary Delete scenario run
+// @Description Stop and delete a running or completed scenario run
+// @Tags scenarios
+// @Produce json
+// @Param jobID path string true "Scenario run job ID"
+// @Success 200 {object} object "Scenario run deleted"
+// @Failure 400 {object} ErrorResponse "Invalid job ID"
+// @Failure 403 {object} ErrorResponse "Insufficient permissions"
+// @Failure 404 {object} ErrorResponse "Scenario run not found"
+// @Failure 500 {object} ErrorResponse "Internal server error"
+// @Security BearerAuth
+// @Router /scenarios/run/{jobID} [delete]
 func (h *Handler) DeleteScenarioRun(w http.ResponseWriter, r *http.Request) {
 	jobID, err := extractPathSuffix(r.URL.Path, ScenariosRunPath+"/")
 	if err != nil {

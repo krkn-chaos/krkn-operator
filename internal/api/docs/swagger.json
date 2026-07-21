@@ -506,6 +506,407 @@
                 }
             }
         },
+        "/scenarios": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Get list of available chaos scenarios from container registry (Quay.io or private registry)",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "scenarios"
+                ],
+                "summary": "List available scenarios",
+                "parameters": [
+                    {
+                        "description": "Registry configuration (optional for private registries)",
+                        "name": "registry",
+                        "in": "body",
+                        "schema": {
+                            "type": "object"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "List of available scenarios",
+                        "schema": {
+                            "type": "object"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid registry configuration",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/scenarios/detail/{scenario_name}": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Get detailed information about a specific chaos scenario including configuration fields",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "scenarios"
+                ],
+                "summary": "Get scenario details",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Scenario name",
+                        "name": "scenario_name",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Registry configuration (optional for private registries)",
+                        "name": "registry",
+                        "in": "body",
+                        "schema": {
+                            "type": "object"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Scenario details with input fields",
+                        "schema": {
+                            "type": "object"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid scenario name or registry",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Scenario not found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/scenarios/globals/{scenario_name}": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Get global environment configuration fields for a specific scenario",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "scenarios"
+                ],
+                "summary": "Get scenario globals",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Scenario name",
+                        "name": "scenario_name",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Registry configuration (optional for private registries)",
+                        "name": "registry",
+                        "in": "body",
+                        "schema": {
+                            "type": "object"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Global fields for scenario",
+                        "schema": {
+                            "type": "object"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid scenario name or registry",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Scenario not found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/scenarios/run": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Get list of all scenario runs with optional filtering by phase or scenario name",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "scenarios"
+                ],
+                "summary": "List scenario runs",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Filter by phase (Running, Succeeded, Failed)",
+                        "name": "phase",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by scenario name",
+                        "name": "scenarioName",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "List of scenario runs",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "type": "object"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Execute a chaos scenario on target clusters with specified configuration",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "scenarios"
+                ],
+                "summary": "Run chaos scenario",
+                "parameters": [
+                    {
+                        "description": "Scenario run configuration",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ScenarioRunRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "202": {
+                        "description": "Scenario run created",
+                        "schema": {
+                            "type": "object"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request body or validation error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Target or scenario not found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/scenarios/run/{jobID}": {
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Stop and delete a running or completed scenario run",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "scenarios"
+                ],
+                "summary": "Delete scenario run",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Scenario run job ID",
+                        "name": "jobID",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Scenario run deleted",
+                        "schema": {
+                            "type": "object"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid job ID",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Scenario run not found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/scenarios/run/{scenarioRunName}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Get current execution status and metrics for a running or completed scenario",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "scenarios"
+                ],
+                "summary": "Get scenario run status",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Scenario run name",
+                        "name": "scenarioRunName",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Scenario run status",
+                        "schema": {
+                            "type": "object"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid scenario run name",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Scenario run not found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/targets": {
             "post": {
                 "security": [
@@ -698,6 +1099,19 @@
                 }
             }
         },
+        "github_com_krkn-chaos_krkn-operator_pkg_files.FileReference": {
+            "type": "object",
+            "properties": {
+                "fileId": {
+                    "description": "FileID is the UUID of the file to mount",
+                    "type": "string"
+                },
+                "mountPath": {
+                    "description": "MountPath is the absolute path where the file should be mounted",
+                    "type": "string"
+                }
+            }
+        },
         "internal_api.ClustersResponse": {
             "type": "object",
             "properties": {
@@ -724,6 +1138,23 @@
                     "type": "string"
                 },
                 "message": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_api.FileMount": {
+            "type": "object",
+            "properties": {
+                "content": {
+                    "description": "Content is the base64-encoded file content",
+                    "type": "string"
+                },
+                "mountPath": {
+                    "description": "MountPath is the absolute path where the file should be mounted",
+                    "type": "string"
+                },
+                "name": {
+                    "description": "Name is the file name",
                     "type": "string"
                 }
             }
@@ -1006,6 +1437,62 @@
                     "type": "string"
                 },
                 "status": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_api.ScenarioRunRequest": {
+            "type": "object",
+            "properties": {
+                "environment": {
+                    "description": "Environment is a map of environment variables to pass to the container (optional)",
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "fileReferences": {
+                    "description": "FileReferences are references to centrally-managed files by UUID (optional)",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_krkn-chaos_krkn-operator_pkg_files.FileReference"
+                    }
+                },
+                "files": {
+                    "description": "Files is an array of file objects to mount in the container (optional, legacy inline file mount)",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_api.FileMount"
+                    }
+                },
+                "kubeconfigPath": {
+                    "description": "KubeconfigPath is the path where kubeconfig should be mounted (optional, default: /home/krkn/.kube/config)",
+                    "type": "string"
+                },
+                "registryName": {
+                    "description": "RegistryName is the name of a saved registry (optional)\nIf omitted, defaults to quay.io public registry",
+                    "type": "string"
+                },
+                "scenarioImage": {
+                    "description": "ScenarioImage is the container image to run",
+                    "type": "string"
+                },
+                "scenarioName": {
+                    "description": "ScenarioName is the name of the scenario being executed",
+                    "type": "string"
+                },
+                "targetClusters": {
+                    "description": "TargetClusters is a map of provider-name to list of cluster names\nExample: {\"krkn-operator\": [\"cluster1\", \"cluster2\"], \"krkn-operator-acm\": [\"cluster3\"]}",
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    }
+                },
+                "targetRequestId": {
+                    "description": "TargetRequestID is the UUID of the KrknTargetRequest (required)",
                     "type": "string"
                 }
             }

@@ -46,6 +46,15 @@ definitions:
           +optional
         type: object
     type: object
+  github_com_krkn-chaos_krkn-operator_pkg_files.FileReference:
+    properties:
+      fileId:
+        description: FileID is the UUID of the file to mount
+        type: string
+      mountPath:
+        description: MountPath is the absolute path where the file should be mounted
+        type: string
+    type: object
   internal_api.ClustersResponse:
     properties:
       status:
@@ -66,6 +75,18 @@ definitions:
       error:
         type: string
       message:
+        type: string
+    type: object
+  internal_api.FileMount:
+    properties:
+      content:
+        description: Content is the base64-encoded file content
+        type: string
+      mountPath:
+        description: MountPath is the absolute path where the file should be mounted
+        type: string
+      name:
+        description: Name is the file name
         type: string
     type: object
   internal_api.GraphRunCreateRequest:
@@ -257,6 +278,54 @@ definitions:
       message:
         type: string
       status:
+        type: string
+    type: object
+  internal_api.ScenarioRunRequest:
+    properties:
+      environment:
+        additionalProperties:
+          type: string
+        description: Environment is a map of environment variables to pass to the
+          container (optional)
+        type: object
+      fileReferences:
+        description: FileReferences are references to centrally-managed files by UUID
+          (optional)
+        items:
+          $ref: '#/definitions/github_com_krkn-chaos_krkn-operator_pkg_files.FileReference'
+        type: array
+      files:
+        description: Files is an array of file objects to mount in the container (optional,
+          legacy inline file mount)
+        items:
+          $ref: '#/definitions/internal_api.FileMount'
+        type: array
+      kubeconfigPath:
+        description: 'KubeconfigPath is the path where kubeconfig should be mounted
+          (optional, default: /home/krkn/.kube/config)'
+        type: string
+      registryName:
+        description: |-
+          RegistryName is the name of a saved registry (optional)
+          If omitted, defaults to quay.io public registry
+        type: string
+      scenarioImage:
+        description: ScenarioImage is the container image to run
+        type: string
+      scenarioName:
+        description: ScenarioName is the name of the scenario being executed
+        type: string
+      targetClusters:
+        additionalProperties:
+          items:
+            type: string
+          type: array
+        description: |-
+          TargetClusters is a map of provider-name to list of cluster names
+          Example: {"krkn-operator": ["cluster1", "cluster2"], "krkn-operator-acm": ["cluster3"]}
+        type: object
+      targetRequestId:
+        description: TargetRequestID is the UUID of the KrknTargetRequest (required)
         type: string
     type: object
 host: localhost:8080
@@ -594,6 +663,264 @@ paths:
       summary: Get cluster nodes
       tags:
       - clusters
+  /scenarios:
+    post:
+      consumes:
+      - application/json
+      description: Get list of available chaos scenarios from container registry (Quay.io
+        or private registry)
+      parameters:
+      - description: Registry configuration (optional for private registries)
+        in: body
+        name: registry
+        schema:
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: List of available scenarios
+          schema:
+            type: object
+        "400":
+          description: Invalid registry configuration
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: List available scenarios
+      tags:
+      - scenarios
+  /scenarios/detail/{scenario_name}:
+    post:
+      consumes:
+      - application/json
+      description: Get detailed information about a specific chaos scenario including
+        configuration fields
+      parameters:
+      - description: Scenario name
+        in: path
+        name: scenario_name
+        required: true
+        type: string
+      - description: Registry configuration (optional for private registries)
+        in: body
+        name: registry
+        schema:
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Scenario details with input fields
+          schema:
+            type: object
+        "400":
+          description: Invalid scenario name or registry
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "404":
+          description: Scenario not found
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get scenario details
+      tags:
+      - scenarios
+  /scenarios/globals/{scenario_name}:
+    post:
+      consumes:
+      - application/json
+      description: Get global environment configuration fields for a specific scenario
+      parameters:
+      - description: Scenario name
+        in: path
+        name: scenario_name
+        required: true
+        type: string
+      - description: Registry configuration (optional for private registries)
+        in: body
+        name: registry
+        schema:
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Global fields for scenario
+          schema:
+            type: object
+        "400":
+          description: Invalid scenario name or registry
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "404":
+          description: Scenario not found
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get scenario globals
+      tags:
+      - scenarios
+  /scenarios/run:
+    get:
+      description: Get list of all scenario runs with optional filtering by phase
+        or scenario name
+      parameters:
+      - description: Filter by phase (Running, Succeeded, Failed)
+        in: query
+        name: phase
+        type: string
+      - description: Filter by scenario name
+        in: query
+        name: scenarioName
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: List of scenario runs
+          schema:
+            items:
+              type: object
+            type: array
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: List scenario runs
+      tags:
+      - scenarios
+    post:
+      consumes:
+      - application/json
+      description: Execute a chaos scenario on target clusters with specified configuration
+      parameters:
+      - description: Scenario run configuration
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_api.ScenarioRunRequest'
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: Scenario run created
+          schema:
+            type: object
+        "400":
+          description: Invalid request body or validation error
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "403":
+          description: Insufficient permissions
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "404":
+          description: Target or scenario not found
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Run chaos scenario
+      tags:
+      - scenarios
+  /scenarios/run/{jobID}:
+    delete:
+      description: Stop and delete a running or completed scenario run
+      parameters:
+      - description: Scenario run job ID
+        in: path
+        name: jobID
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Scenario run deleted
+          schema:
+            type: object
+        "400":
+          description: Invalid job ID
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "403":
+          description: Insufficient permissions
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "404":
+          description: Scenario run not found
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Delete scenario run
+      tags:
+      - scenarios
+  /scenarios/run/{scenarioRunName}:
+    get:
+      description: Get current execution status and metrics for a running or completed
+        scenario
+      parameters:
+      - description: Scenario run name
+        in: path
+        name: scenarioRunName
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Scenario run status
+          schema:
+            type: object
+        "400":
+          description: Invalid scenario run name
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "403":
+          description: Insufficient permissions
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "404":
+          description: Scenario run not found
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get scenario run status
+      tags:
+      - scenarios
   /targets:
     post:
       consumes:
