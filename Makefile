@@ -542,3 +542,20 @@ catalog-build: opm ## Build a catalog image.
 .PHONY: catalog-push
 catalog-push: ## Push a catalog image.
 	$(MAKE) docker-push IMG=$(CATALOG_IMG)
+
+##@ Swagger Documentation
+
+.PHONY: swagger
+swagger: ## Generate Swagger documentation locally (for development)
+	@command -v swag >/dev/null 2>&1 || { echo "Installing swag..."; go install github.com/swaggo/swag/cmd/swag@latest; }
+	swag init -g internal/api/server.go --parseDependency --parseInternal -o internal/api/docs
+	@echo "✅ Swagger documentation generated at internal/api/docs/"
+
+.PHONY: swagger-clean
+swagger-clean: ## Remove generated Swagger documentation
+	rm -rf internal/api/docs/
+	@echo "✅ Swagger documentation cleaned"
+
+.PHONY: swagger-validate
+swagger-validate: swagger ## Validate that Swagger annotations compile correctly
+	@echo "✅ Swagger annotations are valid"
