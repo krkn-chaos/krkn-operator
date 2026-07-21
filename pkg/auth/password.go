@@ -66,12 +66,17 @@ func VerifyPassword(password, hash string) bool {
 	return err == nil
 }
 
-// ValidatePassword checks if a password meets the minimum requirements.
+// ValidatePassword checks that a password's length is within the accepted
+// range: at least MinPasswordLength (8) and at most MaxPasswordLength (72)
+// bytes. The maximum is a byte limit rather than a character count because
+// bcrypt only hashes the first 72 bytes and rejects longer input; enforcing it
+// here surfaces a clean validation error instead of a downstream hashing error.
 //
 // Parameters:
 //   - password: The password to validate
 //
-// Returns an error if the password doesn't meet requirements, nil otherwise.
+// Returns an error if the password is shorter than MinPasswordLength or longer
+// than MaxPasswordLength bytes, nil otherwise.
 func ValidatePassword(password string) error {
 	if len(password) < MinPasswordLength {
 		return fmt.Errorf("password must be at least %d characters", MinPasswordLength)
