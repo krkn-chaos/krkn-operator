@@ -40,6 +40,15 @@ import (
 
 // ListGraphRuns handles GET /api/v1/graphruns
 // Lists all graph runs with optional filtering by owner
+//
+// @Summary List graph runs
+// @Description Get list of all graph runs. Regular users see only their own, admins see all.
+// @Tags graphruns
+// @Produce json
+// @Success 200 {array} object "List of graph runs"
+// @Failure 500 {object} ErrorResponse "Internal server error"
+// @Security BearerAuth
+// @Router /graphruns [get]
 func (h *Handler) ListGraphRuns(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	logger := log.FromContext(ctx)
@@ -103,6 +112,21 @@ func (h *Handler) ListGraphRuns(w http.ResponseWriter, r *http.Request) {
 
 // GetGraphRun handles GET /api/v1/graphruns/:name
 // Returns detailed information about a specific graph run
+// GetGraphRun handles GET /api/v1/graphruns/{name}
+// Returns detailed information about a specific graph run
+//
+// @Summary Get graph run details
+// @Description Get detailed status and execution information for a specific graph run by name
+// @Tags graphruns
+// @Produce json
+// @Param name path string true "Graph run name"
+// @Success 200 {object} GraphRunDetailResponse "Graph run details"
+// @Failure 400 {object} ErrorResponse "Invalid or missing name"
+// @Failure 403 {object} ErrorResponse "Insufficient permissions"
+// @Failure 404 {object} ErrorResponse "Graph run not found"
+// @Failure 500 {object} ErrorResponse "Internal server error"
+// @Security BearerAuth
+// @Router /graphruns/{name} [get]
 func (h *Handler) GetGraphRun(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	logger := log.FromContext(ctx)
@@ -198,6 +222,20 @@ func (h *Handler) GetGraphRun(w http.ResponseWriter, r *http.Request) {
 
 // CreateGraphRun handles POST /api/v1/graphruns
 // Creates a new graph run
+//
+// @Summary Create graph run
+// @Description Create a new graph run to execute a chaos scenario graph
+// @Tags graphruns
+// @Accept json
+// @Produce json
+// @Param request body GraphRunCreateRequest true "Graph run configuration"
+// @Success 201 {object} GraphRunDetailResponse "Graph run created"
+// @Failure 400 {object} ErrorResponse "Invalid request body or validation error"
+// @Failure 403 {object} ErrorResponse "Insufficient permissions"
+// @Failure 404 {object} ErrorResponse "Referenced resource not found"
+// @Failure 500 {object} ErrorResponse "Internal server error"
+// @Security BearerAuth
+// @Router /graphruns [post]
 func (h *Handler) CreateGraphRun(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	logger := log.FromContext(ctx)
@@ -471,6 +509,19 @@ func (h *Handler) CreateGraphRun(w http.ResponseWriter, r *http.Request) {
 
 // DeleteGraphRun handles DELETE /api/v1/graphruns/:name
 // Deletes a graph run (cascade deletes scenario runs via owner references)
+//
+// @Summary Delete graph run
+// @Description Delete a graph run and all associated scenario runs (cascade delete via owner references)
+// @Tags graphruns
+// @Produce json
+// @Param name path string true "Graph run name"
+// @Success 200 {object} object "Deletion successful"
+// @Failure 400 {object} ErrorResponse "Invalid or missing name"
+// @Failure 403 {object} ErrorResponse "Insufficient permissions"
+// @Failure 404 {object} ErrorResponse "Graph run not found"
+// @Failure 500 {object} ErrorResponse "Internal server error"
+// @Security BearerAuth
+// @Router /graphruns/{name} [delete]
 func (h *Handler) DeleteGraphRun(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	logger := log.FromContext(ctx)

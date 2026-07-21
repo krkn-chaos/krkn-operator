@@ -1,0 +1,696 @@
+basePath: /api/v1
+definitions:
+  github_com_krkn-chaos_krkn-operator_api_v1alpha1.ClusterTarget:
+    properties:
+      cluster-api-url:
+        description: ClusterAPIURL is the API server URL of the managed cluster
+        type: string
+      cluster-name:
+        description: ClusterName is the name of the managed cluster
+        type: string
+    type: object
+  github_com_krkn-chaos_krkn-operator_api_v1alpha1.GraphScenarioNode:
+    properties:
+      _comment:
+        description: |-
+          Comment is an optional comment describing the scenario
+          +optional
+        type: string
+      depends_on:
+        description: |-
+          DependsOn is the node ID that this scenario depends on (parent in the graph)
+          +optional
+        type: string
+      env:
+        additionalProperties:
+          type: string
+        description: |-
+          Env is a map of environment variables for the scenario
+          +optional
+        type: object
+      image:
+        description: |-
+          Image is the container image for the scenario
+          +optional
+        type: string
+      name:
+        description: |-
+          Name is the name of the scenario
+          +optional
+        type: string
+      volumes:
+        additionalProperties:
+          type: string
+        description: |-
+          Volumes is a map of volume mounts for the scenario
+          +optional
+        type: object
+    type: object
+  internal_api.ClustersResponse:
+    properties:
+      status:
+        description: Status represents the current state of the request (pending,
+          completed)
+        type: string
+      targetData:
+        additionalProperties:
+          items:
+            $ref: '#/definitions/github_com_krkn-chaos_krkn-operator_api_v1alpha1.ClusterTarget'
+          type: array
+        description: TargetData contains a map of operator-name to list of cluster
+          targets
+        type: object
+    type: object
+  internal_api.ErrorResponse:
+    properties:
+      error:
+        type: string
+      message:
+        type: string
+    type: object
+  internal_api.GraphRunCreateRequest:
+    properties:
+      graph:
+        additionalProperties:
+          $ref: '#/definitions/github_com_krkn-chaos_krkn-operator_api_v1alpha1.GraphScenarioNode'
+        description: Graph is the dependency graph of scenarios to execute
+        type: object
+      targetClusters:
+        additionalProperties:
+          items:
+            type: string
+          type: array
+        description: TargetClusters is a map of provider-name to list of cluster names
+        type: object
+      targetRequestId:
+        description: TargetRequestID is the reference to the KrknTargetRequest CR
+        type: string
+    type: object
+  internal_api.GraphRunDetailResponse:
+    properties:
+      creationTimestamp:
+        type: string
+      name:
+        type: string
+      namespace:
+        type: string
+      spec:
+        $ref: '#/definitions/internal_api.GraphRunSpecResponse'
+      status:
+        $ref: '#/definitions/internal_api.GraphRunStatusResponse'
+    type: object
+  internal_api.GraphRunSpecResponse:
+    properties:
+      graph:
+        additionalProperties:
+          $ref: '#/definitions/github_com_krkn-chaos_krkn-operator_api_v1alpha1.GraphScenarioNode'
+        type: object
+      ownerUserId:
+        type: string
+      resiliencyMountPath:
+        type: string
+      resiliencyScoreBaseline:
+        type: number
+      resiliencyScoreEnabled:
+        type: boolean
+      targetClusters:
+        additionalProperties:
+          items:
+            type: string
+          type: array
+        type: object
+      targetRequestId:
+        type: string
+    type: object
+  internal_api.GraphRunStatusResponse:
+    properties:
+      completionTime:
+        type: string
+      nodeStatuses:
+        items:
+          $ref: '#/definitions/internal_api.NodeStatusResponse'
+        type: array
+      phase:
+        type: string
+      resiliencyScore:
+        $ref: '#/definitions/internal_api.ResiliencyScoreResponse'
+      resolvedLevels:
+        items:
+          items:
+            type: string
+          type: array
+        type: array
+      startTime:
+        type: string
+      summary:
+        $ref: '#/definitions/internal_api.GraphRunSummaryResponse'
+    type: object
+  internal_api.GraphRunSummaryResponse:
+    properties:
+      completedNodes:
+        type: integer
+      failedNodes:
+        type: integer
+      pendingNodes:
+        type: integer
+      runningNodes:
+        type: integer
+      totalNodes:
+        type: integer
+    type: object
+  internal_api.IsRegisteredResponse:
+    properties:
+      registered:
+        description: Registered indicates if at least one admin user exists
+        type: boolean
+    type: object
+  internal_api.LoginRequest:
+    properties:
+      password:
+        description: Password is the plaintext password (required)
+        type: string
+      userId:
+        description: UserID is the email address of the user (required)
+        type: string
+    type: object
+  internal_api.LoginResponse:
+    properties:
+      expiresAt:
+        description: ExpiresAt is the token expiration timestamp
+        type: string
+      name:
+        description: Name is the user's first name
+        type: string
+      role:
+        description: Role is the user's role
+        type: string
+      surname:
+        description: Surname is the user's last name
+        type: string
+      token:
+        description: Token is the JWT authentication token
+        type: string
+      userId:
+        description: UserID is the authenticated user's email
+        type: string
+    type: object
+  internal_api.NodeStatusResponse:
+    properties:
+      completionTime:
+        type: string
+      dependsOn:
+        items:
+          type: string
+        type: array
+      message:
+        type: string
+      nodeId:
+        type: string
+      nodeName:
+        type: string
+      phase:
+        type: string
+      scenarioRunRef:
+        type: string
+      startTime:
+        type: string
+    type: object
+  internal_api.RegisterRequest:
+    properties:
+      name:
+        description: Name is the first name of the user (required)
+        type: string
+      organization:
+        description: Organization is the user's organization (optional)
+        type: string
+      password:
+        description: Password is the plaintext password (required, min 8 characters)
+        type: string
+      role:
+        description: Role is either "user" or "admin" (required)
+        type: string
+      surname:
+        description: Surname is the last name of the user (required)
+        type: string
+      userId:
+        description: UserID is the email address of the user (required)
+        type: string
+    type: object
+  internal_api.RegisterResponse:
+    properties:
+      message:
+        description: Message contains a success message
+        type: string
+      role:
+        description: Role is the user's role
+        type: string
+      userId:
+        description: UserID is the registered user's email
+        type: string
+    type: object
+  internal_api.ResiliencyScoreResponse:
+    properties:
+      baseline:
+        type: number
+      calculated:
+        type: number
+      message:
+        type: string
+      status:
+        type: string
+    type: object
+host: localhost:8080
+info:
+  contact:
+    email: krkn-chaos@googlegroups.com
+    name: Krkn Team
+    url: https://github.com/krkn-chaos/krkn-operator
+  description: REST API for Krkn chaos engineering operator. Provides endpoints for
+    cluster management, chaos scenario execution, and GraphRun orchestration.
+  license:
+    name: Apache 2.0
+    url: http://www.apache.org/licenses/LICENSE-2.0.html
+  termsOfService: https://krkn-chaos.dev/terms
+  title: Krkn Operator API
+  version: "1.0"
+paths:
+  /auth/is-registered:
+    get:
+      description: Check if at least one admin user exists in the system. Used to
+        determine if initial registration is needed.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Registration status
+          schema:
+            $ref: '#/definitions/internal_api.IsRegisteredResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+      summary: Check if admin user is registered
+      tags:
+      - authentication
+  /auth/login:
+    post:
+      consumes:
+      - application/json
+      description: Authenticate user with userID and password. Returns JWT token for
+        API access.
+      parameters:
+      - description: User credentials
+        in: body
+        name: credentials
+        required: true
+        schema:
+          $ref: '#/definitions/internal_api.LoginRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: JWT token and user info
+          schema:
+            $ref: '#/definitions/internal_api.LoginResponse'
+        "400":
+          description: Invalid request
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "401":
+          description: Invalid credentials
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+      summary: User login
+      tags:
+      - authentication
+  /auth/register:
+    post:
+      consumes:
+      - application/json
+      description: Register the first admin user in the system. This endpoint is only
+        available when no admin exists. After registration, use POST /api/v1/users
+        to create additional users.
+      parameters:
+      - description: User registration details
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_api.RegisterRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: User created and JWT token issued
+          schema:
+            $ref: '#/definitions/internal_api.RegisterResponse'
+        "400":
+          description: Invalid request or validation error
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "403":
+          description: Admin already registered
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "409":
+          description: User already exists
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+      summary: Register first admin user
+      tags:
+      - authentication
+  /clusters:
+    get:
+      description: Get the list of target clusters from a KrknTargetRequest by ID
+      parameters:
+      - description: KrknTargetRequest ID
+        in: query
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: List of clusters by provider
+          schema:
+            $ref: '#/definitions/internal_api.ClustersResponse'
+        "400":
+          description: Missing or invalid ID parameter
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "404":
+          description: Target request not found
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: List available clusters
+      tags:
+      - clusters
+  /graphruns:
+    get:
+      description: Get list of all graph runs. Regular users see only their own, admins
+        see all.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: List of graph runs
+          schema:
+            items:
+              type: object
+            type: array
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: List graph runs
+      tags:
+      - graphruns
+    post:
+      consumes:
+      - application/json
+      description: Create a new graph run to execute a chaos scenario graph
+      parameters:
+      - description: Graph run configuration
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_api.GraphRunCreateRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Graph run created
+          schema:
+            $ref: '#/definitions/internal_api.GraphRunDetailResponse'
+        "400":
+          description: Invalid request body or validation error
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "403":
+          description: Insufficient permissions
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "404":
+          description: Referenced resource not found
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Create graph run
+      tags:
+      - graphruns
+  /graphruns/{name}:
+    delete:
+      description: Delete a graph run and all associated scenario runs (cascade delete
+        via owner references)
+      parameters:
+      - description: Graph run name
+        in: path
+        name: name
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Deletion successful
+          schema:
+            type: object
+        "400":
+          description: Invalid or missing name
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "403":
+          description: Insufficient permissions
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "404":
+          description: Graph run not found
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Delete graph run
+      tags:
+      - graphruns
+    get:
+      description: Get detailed status and execution information for a specific graph
+        run by name
+      parameters:
+      - description: Graph run name
+        in: path
+        name: name
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Graph run details
+          schema:
+            $ref: '#/definitions/internal_api.GraphRunDetailResponse'
+        "400":
+          description: Invalid or missing name
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "403":
+          description: Insufficient permissions
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "404":
+          description: Graph run not found
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get graph run details
+      tags:
+      - graphruns
+  /health:
+    get:
+      description: Check if the operator API is healthy and responding
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: API is healthy
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Health check
+      tags:
+      - health
+  /nodes:
+    get:
+      description: Get list of nodes from a cluster target (supports both KrknOperatorTarget
+        UUID and legacy KrknTargetRequest ID)
+      parameters:
+      - description: KrknOperatorTarget UUID (new API)
+        in: query
+        name: targetUUID
+        type: string
+      - description: KrknTargetRequest ID (legacy)
+        in: query
+        name: id
+        type: string
+      - description: Cluster name (legacy, required with id)
+        in: query
+        name: cluster-name
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: List of nodes
+          schema:
+            type: object
+        "400":
+          description: Missing or invalid parameters
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "404":
+          description: Target not found
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get cluster nodes
+      tags:
+      - clusters
+  /targets:
+    post:
+      consumes:
+      - application/json
+      description: Create a KrknTargetRequest to trigger cluster discovery by krkn-operator-acm
+        (legacy API)
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Target request created with UUID
+          schema:
+            type: object
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Create target request
+      tags:
+      - targets
+  /targets/{uuid}:
+    delete:
+      description: Delete a KrknTargetRequest resource by UUID. Admins can delete
+        any, users can delete their own.
+      parameters:
+      - description: Target UUID
+        in: path
+        name: uuid
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Target deleted successfully
+          schema:
+            type: object
+        "400":
+          description: Invalid UUID
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "403":
+          description: Insufficient permissions
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "404":
+          description: Target not found
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Delete target by UUID
+      tags:
+      - targets
+    get:
+      description: Get target request status and cluster information by UUID (legacy
+        KrknTargetRequest API)
+      parameters:
+      - description: Target UUID
+        in: path
+        name: uuid
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Target status and clusters
+          schema:
+            type: object
+        "400":
+          description: Invalid UUID
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "404":
+          description: Target not found
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get target by UUID
+      tags:
+      - targets
+securityDefinitions:
+  BearerAuth:
+    description: 'JWT token obtained from /api/v1/auth/login. Format: "Bearer {token}"'
+    in: header
+    name: Authorization
+    type: apiKey
+swagger: "2.0"

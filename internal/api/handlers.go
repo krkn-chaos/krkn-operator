@@ -123,6 +123,18 @@ func (h *Handler) getTokenGenerator(ctx context.Context) (*auth.TokenGenerator, 
 
 // GetClusters handles GET /api/v1/clusters endpoint
 // It fetches the KrknTargetRequest CR by the provided ID and returns the target data
+//
+// @Summary List available clusters
+// @Description Get the list of target clusters from a KrknTargetRequest by ID
+// @Tags clusters
+// @Produce json
+// @Param id query string true "KrknTargetRequest ID"
+// @Success 200 {object} ClustersResponse "List of clusters by provider"
+// @Failure 400 {object} ErrorResponse "Missing or invalid ID parameter"
+// @Failure 404 {object} ErrorResponse "Target request not found"
+// @Failure 500 {object} ErrorResponse "Internal server error"
+// @Security BearerAuth
+// @Router /clusters [get]
 func (h *Handler) GetClusters(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	id := r.URL.Query().Get("id")
@@ -203,6 +215,22 @@ func (h *Handler) GetClusters(w http.ResponseWriter, r *http.Request) {
 // Supports both new and legacy parameter formats:
 // - New: ?targetUUID=<uuid>
 // - Legacy: ?id=<targetRequestId>&cluster-name=<clusterName>
+// GetNodes handles GET /api/v1/nodes
+// Gets cluster nodes from a target
+//
+// @Summary Get cluster nodes
+// @Description Get list of nodes from a cluster target (supports both KrknOperatorTarget UUID and legacy KrknTargetRequest ID)
+// @Tags clusters
+// @Produce json
+// @Param targetUUID query string false "KrknOperatorTarget UUID (new API)"
+// @Param id query string false "KrknTargetRequest ID (legacy)"
+// @Param cluster-name query string false "Cluster name (legacy, required with id)"
+// @Success 200 {object} object "List of nodes"
+// @Failure 400 {object} ErrorResponse "Missing or invalid parameters"
+// @Failure 404 {object} ErrorResponse "Target not found"
+// @Failure 500 {object} ErrorResponse "Internal server error"
+// @Security BearerAuth
+// @Router /nodes [get]
 func (h *Handler) GetNodes(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
@@ -305,6 +333,14 @@ func (h *Handler) GetNodes(w http.ResponseWriter, r *http.Request) {
 }
 
 // HealthCheck handles GET /api/v1/health endpoint
+//
+// @Summary Health check
+// @Description Check if the operator API is healthy and responding
+// @Tags health
+// @Produce json
+// @Success 200 {object} map[string]string "API is healthy"
+// @Security BearerAuth
+// @Router /health [get]
 func (h *Handler) HealthCheck(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{
 		"status": "healthy",
@@ -313,6 +349,18 @@ func (h *Handler) HealthCheck(w http.ResponseWriter, r *http.Request) {
 
 // GetTargetByUUID handles GET /api/v1/targets/{uuid} endpoint (legacy - checks KrknTargetRequest status)
 // This endpoint checks the status of a KrknTargetRequest CR created by krkn-operator-acm
+//
+// @Summary Get target by UUID
+// @Description Get target request status and cluster information by UUID (legacy KrknTargetRequest API)
+// @Tags targets
+// @Produce json
+// @Param uuid path string true "Target UUID"
+// @Success 200 {object} object "Target status and clusters"
+// @Failure 400 {object} ErrorResponse "Invalid UUID"
+// @Failure 404 {object} ErrorResponse "Target not found"
+// @Failure 500 {object} ErrorResponse "Internal server error"
+// @Security BearerAuth
+// @Router /targets/{uuid} [get]
 func (h *Handler) GetTargetByUUID(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	uuid, err := extractPathSuffix(r.URL.Path, TargetsPath+"/")
@@ -350,6 +398,16 @@ func (h *Handler) GetTargetByUUID(w http.ResponseWriter, r *http.Request) {
 
 // PostTarget handles POST /api/v1/targets endpoint (legacy - creates KrknTargetRequest)
 // This endpoint triggers the krkn-operator-acm to discover and return target clusters
+//
+// @Summary Create target request
+// @Description Create a KrknTargetRequest to trigger cluster discovery by krkn-operator-acm (legacy API)
+// @Tags targets
+// @Accept json
+// @Produce json
+// @Success 201 {object} object "Target request created with UUID"
+// @Failure 500 {object} ErrorResponse "Internal server error"
+// @Security BearerAuth
+// @Router /targets [post]
 func (h *Handler) PostTarget(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	// Generate a new UUID
@@ -397,6 +455,19 @@ func (h *Handler) PostTarget(w http.ResponseWriter, r *http.Request) {
 // DeleteTargetByUUID handles DELETE /api/v1/targets/{uuid} endpoint
 // It deletes a KrknTargetRequest resource by UUID
 // Authorization: Admin can delete any resource, owner can delete their own
+//
+// @Summary Delete target by UUID
+// @Description Delete a KrknTargetRequest resource by UUID. Admins can delete any, users can delete their own.
+// @Tags targets
+// @Produce json
+// @Param uuid path string true "Target UUID"
+// @Success 200 {object} object "Target deleted successfully"
+// @Failure 400 {object} ErrorResponse "Invalid UUID"
+// @Failure 403 {object} ErrorResponse "Insufficient permissions"
+// @Failure 404 {object} ErrorResponse "Target not found"
+// @Failure 500 {object} ErrorResponse "Internal server error"
+// @Security BearerAuth
+// @Router /targets/{uuid} [delete]
 func (h *Handler) DeleteTargetByUUID(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	logger := log.FromContext(ctx).WithName("delete-target")

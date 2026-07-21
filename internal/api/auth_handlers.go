@@ -73,6 +73,14 @@ func getTokenDuration() time.Duration {
 
 // IsRegistered handles GET /auth/is-registered
 // Returns whether at least one admin user is registered in the system
+//
+// @Summary Check if admin user is registered
+// @Description Check if at least one admin user exists in the system. Used to determine if initial registration is needed.
+// @Tags authentication
+// @Produce json
+// @Success 200 {object} IsRegisteredResponse "Registration status"
+// @Failure 500 {object} ErrorResponse "Internal server error"
+// @Router /auth/is-registered [get]
 func (h *Handler) IsRegistered(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeJSONError(w, http.StatusMethodNotAllowed, ErrorResponse{
@@ -110,6 +118,19 @@ func (h *Handler) IsRegistered(w http.ResponseWriter, r *http.Request) {
 
 // Register handles POST /auth/register
 // Registers the FIRST admin user only. After that, use POST /api/v1/users (admin only).
+//
+// @Summary Register first admin user
+// @Description Register the first admin user in the system. This endpoint is only available when no admin exists. After registration, use POST /api/v1/users to create additional users.
+// @Tags authentication
+// @Accept json
+// @Produce json
+// @Param request body RegisterRequest true "User registration details"
+// @Success 201 {object} RegisterResponse "User created and JWT token issued"
+// @Failure 400 {object} ErrorResponse "Invalid request or validation error"
+// @Failure 403 {object} ErrorResponse "Admin already registered"
+// @Failure 409 {object} ErrorResponse "User already exists"
+// @Failure 500 {object} ErrorResponse "Internal server error"
+// @Router /auth/register [post]
 func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeJSONError(w, http.StatusMethodNotAllowed, ErrorResponse{
@@ -333,6 +354,18 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 
 // Login handles POST /auth/login
 // Authenticates a user and returns a JWT token
+//
+// @Summary User login
+// @Description Authenticate user with userID and password. Returns JWT token for API access.
+// @Tags authentication
+// @Accept json
+// @Produce json
+// @Param credentials body LoginRequest true "User credentials"
+// @Success 200 {object} LoginResponse "JWT token and user info"
+// @Failure 400 {object} ErrorResponse "Invalid request"
+// @Failure 401 {object} ErrorResponse "Invalid credentials"
+// @Failure 500 {object} ErrorResponse "Internal server error"
+// @Router /auth/login [post]
 func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeJSONError(w, http.StatusMethodNotAllowed, ErrorResponse{
