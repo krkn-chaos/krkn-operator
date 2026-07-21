@@ -32,6 +32,7 @@ type InputField struct {
 	Requires          *string `json:"requires,omitempty"`
 	MutuallyExcludes  *string `json:"mutually_excludes,omitempty"`
 	Secret            bool    `json:"secret,omitempty"`
+	Group             *string `json:"group,omitempty"`
 }
 
 type alias InputField

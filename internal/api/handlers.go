@@ -578,6 +578,43 @@ func (h *Handler) TargetsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// groupKeyToTitle converts a snake_case group key to a Title Cased display string.
+// e.g. "health_check" → "Health Check", "elasticsearch" → "Elasticsearch"
+func groupKeyToTitle(key string) string {
+	words := strings.Split(strings.ReplaceAll(key, "_", " "), " ")
+	for i, w := range words {
+		if len(w) > 0 {
+			words[i] = strings.ToUpper(w[:1]) + strings.ToLower(w[1:])
+		}
+	}
+	return strings.Join(words, " ")
+}
+
+// buildFieldGroups derives display groups from the "group" property on each InputField.
+// Fields without a group fall into "general". Order follows first appearance in fields.
+// Titles are derived from the group key — no hardcoded map.
+func buildFieldGroups(fields []typing.InputField) []FieldGroupResponse {
+	indexMap := make(map[string]int)
+	var result []FieldGroupResponse
+
+	for _, f := range fields {
+		if f.Variable == nil {
+			continue
+		}
+		key := "general"
+		if f.Group != nil && *f.Group != "" {
+			key = *f.Group
+		}
+		if idx, exists := indexMap[key]; exists {
+			result[idx].Fields = append(result[idx].Fields, *f.Variable)
+		} else {
+			indexMap[key] = len(result)
+			result = append(result, FieldGroupResponse{Key: key, Title: groupKeyToTitle(key), Fields: []string{*f.Variable}})
+		}
+	}
+	return result
+}
+
 // convertInputFields converts krknctl InputField models to API InputFieldResponse format.
 // This ensures Type fields are serialized as strings instead of int64 enums.
 func convertInputFields(fields []typing.InputField) []InputFieldResponse {
@@ -981,6 +1018,7 @@ func (h *Handler) PostScenarioGlobals(w http.ResponseWriter, r *http.Request) {
 		Title:        globalDetail.Title,
 		Description:  globalDetail.Description,
 		Fields:       convertInputFields(globalDetail.Fields),
+		Groups:       buildFieldGroups(globalDetail.Fields),
 	}
 
 	writeJSON(w, http.StatusOK, response)

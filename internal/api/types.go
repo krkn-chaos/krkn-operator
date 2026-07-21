@@ -90,6 +90,15 @@ type InputFieldResponse struct {
 	Secret            bool    `json:"secret,omitempty"`
 }
 
+// FieldGroupResponse describes one display group of global parameter fields.
+// Groups are derived from the "group" property in the scenario's krknctl-input.json
+// and are only present on the globals response.
+type FieldGroupResponse struct {
+	Key    string   `json:"key"`
+	Title  string   `json:"title"`
+	Fields []string `json:"fields"` // variable names in display order
+}
+
 // ScenarioDetailResponse represents the response for POST /scenarios/detail/{scenario_name}
 // This wraps krknctl models.ScenarioDetail to ensure Type fields are strings
 type ScenarioDetailResponse struct {
@@ -100,6 +109,7 @@ type ScenarioDetailResponse struct {
 	Title        string               `json:"title"`
 	Description  string               `json:"description"`
 	Fields       []InputFieldResponse `json:"fields"`
+	Groups       []FieldGroupResponse `json:"groups,omitempty"`
 }
 
 // GlobalsRequest represents the request body for POST /scenarios/globals

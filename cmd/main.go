@@ -232,9 +232,7 @@ func main() {
 		// after the manager stops then its usage might be unsafe.
 		// LeaderElectionReleaseOnCancel: true,
 		Cache: cache.Options{
-			DefaultNamespaces: map[string]cache.Config{
-				operatorNamespace: {}, // Watch only the operator's own namespace
-			},
+			DefaultNamespaces: buildCacheNamespaces(operatorNamespace, krknNamespace),
 		},
 	})
 	if err != nil {
@@ -432,4 +430,15 @@ func (c *ConfigStoreInitializer) Start(ctx context.Context) error {
 // Returns false because kvstore initialization should happen on all replicas
 func (c *ConfigStoreInitializer) NeedLeaderElection() bool {
 	return false
+}
+
+// buildCacheNamespaces returns the cache namespace map for the manager.
+// Always includes operatorNamespace; adds krknNamespace when it differs so the
+// cached client can read secrets and CRs from both namespaces.
+func buildCacheNamespaces(operatorNamespace, krknNamespace string) map[string]cache.Config {
+	ns := map[string]cache.Config{operatorNamespace: {}}
+	if krknNamespace != operatorNamespace {
+		ns[krknNamespace] = cache.Config{}
+	}
+	return ns
 }
