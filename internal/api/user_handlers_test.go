@@ -430,6 +430,41 @@ func TestCreateUser_DuplicateUser_Conflict(t *testing.T) {
 	}
 }
 
+// TestCreateUser_EmailNormalizedToLowercase verifies that a mixed-case email is
+// normalized to lowercase at save time, so storage and lookups are consistent
+// (emails are case-insensitive per RFC 5321).
+func TestCreateUser_EmailNormalizedToLowercase(t *testing.T) {
+	handler := setupUserTestHandler()
+
+	reqBody := `{
+		"userID": "User@Example.COM",
+		"password": "NewPass123",
+		"name": "New",
+		"surname": "User",
+		"role": "user"
+	}`
+
+	req := httptest.NewRequest("POST", UsersPath, strings.NewReader(reqBody))
+	req = req.WithContext(createAdminContext())
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	handler.CreateUser(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("Expected status %d, got %d: %s", http.StatusCreated, w.Code, w.Body.String())
+	}
+
+	var response CreateUserResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("Failed to unmarshal response: %v", err)
+	}
+
+	if response.UserID != "user@example.com" {
+		t.Errorf("Expected userID normalized to user@example.com, got %s", response.UserID)
+	}
+}
+
 // TestCreateUser_CaseInsensitiveDuplicate_Conflict verifies that a case-variant
 // of an existing user's email is rejected as a duplicate (409) rather than being
 // treated as a new user. sanitizeUsername lowercases the derived Secret/KrknUser

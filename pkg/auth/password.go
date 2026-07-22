@@ -32,6 +32,7 @@ const (
 	// MaxPasswordLength is the maximum password length allowed.
 	// bcrypt only hashes the first 72 bytes of input and returns an error above
 	// that, so we reject longer passwords up front instead of failing at hash time.
+	// See: https://pkg.go.dev/golang.org/x/crypto/bcrypt#GenerateFromPassword
 	MaxPasswordLength = 72
 )
 

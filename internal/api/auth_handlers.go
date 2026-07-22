@@ -25,6 +25,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -159,6 +160,10 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Normalize email to lowercase so storage and lookups are consistent
+	// (emails are case-insensitive per RFC 5321).
+	req.UserID = strings.ToLower(req.UserID)
+
 	// Validate password
 	if err := auth.ValidatePassword(req.Password); err != nil {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
@@ -218,7 +223,7 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 	}
 
 	for _, user := range existingUsers.Items {
-		if user.Spec.UserID == req.UserID {
+		if strings.EqualFold(user.Spec.UserID, req.UserID) {
 			writeJSONError(w, http.StatusConflict, ErrorResponse{
 				Error:   "user_exists",
 				Message: fmt.Sprintf("User with email %s already exists", req.UserID),
@@ -387,7 +392,9 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 
 	var user *krknv1alpha1.KrknUser
 	for i := range userList.Items {
-		if userList.Items[i].Spec.UserID == req.UserID {
+		// Case-insensitive match: emails are normalized to lowercase at save
+		// time, but users created before normalization may be stored mixed-case.
+		if strings.EqualFold(userList.Items[i].Spec.UserID, req.UserID) {
 			user = &userList.Items[i]
 			break
 		}

@@ -331,6 +331,10 @@ func (h *Handler) CreateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Normalize email to lowercase so storage and lookups are consistent
+	// (emails are case-insensitive per RFC 5321).
+	req.UserID = strings.ToLower(req.UserID)
+
 	// Validate password
 	if err := auth.ValidatePassword(req.Password); err != nil {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
