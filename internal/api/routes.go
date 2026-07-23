@@ -108,3 +108,8 @@ const (
 const (
 	GraphRunsPath = APIBasePath + "/graphruns"
 )
+
+// Elasticsearch config endpoints
+const (
+	ElasticsearchConfigsPath = APIBasePath + "/elasticsearch-configs"
+)

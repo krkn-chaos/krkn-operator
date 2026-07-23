@@ -160,6 +160,10 @@ type ScenarioRunRequest struct {
 	FileReferences []files.FileReference `json:"fileReferences,omitempty"`
 	// CustomRunName is a user-provided label for the run (optional)
 	CustomRunName string `json:"customRunName,omitempty"`
+	// ElasticsearchConfigName, if set, names a saved Elasticsearch config Secret whose
+	// credentials (ES_PASSWORD, and any ES_* vars not already in Environment) are
+	// injected server-side so the password is never transmitted by the client.
+	ElasticsearchConfigName string `json:"elasticsearchConfigName,omitempty"`
 	// Private registry configuration (optional)
 	ScenariosRequest
 }

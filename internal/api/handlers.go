@@ -50,6 +50,7 @@ import (
 
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
 	"github.com/krkn-chaos/krkn-operator/pkg/auth"
+	"github.com/krkn-chaos/krkn-operator/pkg/elasticsearch"
 	"github.com/krkn-chaos/krkn-operator/pkg/groupauth"
 	"github.com/krkn-chaos/krkn-operator/pkg/registry"
 	pb "github.com/krkn-chaos/krkn-operator/proto/dataprovider"
@@ -1296,6 +1297,30 @@ func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
 		scenarioRunName = sanitizeResourceName(req.CustomRunName)
 	} else {
 		scenarioRunName = fmt.Sprintf("%s-%s", req.ScenarioName, uuid.New().String()[:8])
+	}
+	// Inject Elasticsearch credentials server-side so the password is never sent by the client.
+	if req.ElasticsearchConfigName != "" {
+		esSecret, err := h.loadElasticsearchConfigSecret(ctx, req.ElasticsearchConfigName)
+		if err != nil {
+			logger.Error(err, "Failed to load elasticsearch config for run", "name", req.ElasticsearchConfigName)
+			writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+				Error:   "bad_request",
+				Message: fmt.Sprintf("Elasticsearch config '%s' not found or inaccessible", req.ElasticsearchConfigName),
+			})
+			return
+		}
+		if req.Environment == nil {
+			req.Environment = make(map[string]string)
+		}
+		// Always inject password; only inject other vars if not already provided by the client.
+		if p, ok := esSecret.Data[elasticsearch.SecretKeyPassword]; ok {
+			req.Environment["ES_PASSWORD"] = string(p)
+		}
+		if u, ok := esSecret.Data[elasticsearch.SecretKeyUsername]; ok {
+			if _, set := req.Environment["ES_USERNAME"]; !set {
+				req.Environment["ES_USERNAME"] = string(u)
+			}
+		}
 	}
 
 	// Create KrknScenarioRun CR

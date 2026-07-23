@@ -47,15 +47,15 @@ INFO  🌐 Starting REST API server (waiting for JWT secret to be ready)
 First, create a test user and get a JWT token:
 
 ```bash
-# Register admin user
+# Register admin user (first registered user must have role "admin")
 curl -X POST http://localhost:8080/api/v1/auth/register \
   -H "Content-Type: application/json" \
-  -d '{"username":"admin","password":"admin"}'
+  -d '{"userId":"admin@local.dev","password":"Admin1234!","name":"Admin","surname":"User","role":"admin"}'
 
 # Login to get JWT token
 curl -X POST http://localhost:8080/api/v1/auth/login \
   -H "Content-Type: application/json" \
-  -d '{"username":"admin","password":"admin"}'
+  -d '{"userId":"admin@local.dev","password":"Admin1234!"}'
 
 # Save the token
 export TOKEN="<paste-token-here>"
