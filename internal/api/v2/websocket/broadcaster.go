@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"hash/fnv"
 	"sync"
+	"time"
 
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -73,11 +74,27 @@ func (b *Broadcaster) BroadcastScenarioRunUpdate(scenarioRun *krknv1alpha1.KrknS
 	}
 
 	// Status changed - broadcast and update cache
+	// Build the SAME response as REST API
+	response := ScenarioRunStatusResponse{
+		ScenarioRunName: scenarioRun.Name,
+		Phase:           scenarioRun.Status.Phase,
+		TotalTargets:    scenarioRun.Status.TotalTargets,
+		SuccessfulJobs:  scenarioRun.Status.SuccessfulJobs,
+		FailedJobs:      scenarioRun.Status.FailedJobs,
+		RunningJobs:     scenarioRun.Status.RunningJobs,
+		ClusterJobs:     nil, // WebSocket doesn't send cluster jobs details
+		OwnerUserID:     scenarioRun.Spec.OwnerUserID,
+		RegistryName:    scenarioRun.Spec.RegistryName,
+		GraphRunName:    scenarioRun.Labels["krkn.dev/graph-run"],
+		GraphNodeID:     scenarioRun.Labels["krkn.dev/graph-node"],
+		CreatedAt:       scenarioRun.CreationTimestamp.Format(time.RFC3339),
+	}
+
 	msg := ServerMessage{
 		Resource: "run",
 		ID:       scenarioRun.Name,
 		Event:    "updated",
-		Data:     scenarioRun.Status,
+		Data:     response,
 	}
 
 	data, err := json.Marshal(msg)
@@ -121,11 +138,28 @@ func (b *Broadcaster) BroadcastGraphRunUpdate(graphRun *krknv1alpha1.KrknGraphRu
 	}
 
 	// Status changed - broadcast and update cache
+	// Build the SAME response as REST API
+	response := GraphRunStatusResponse{
+		Phase: graphRun.Status.Phase,
+		Summary: GraphRunSummaryResponse{
+			TotalNodes:     graphRun.Status.Summary.TotalNodes,
+			CompletedNodes: graphRun.Status.Summary.CompletedNodes,
+			RunningNodes:   graphRun.Status.Summary.RunningNodes,
+			FailedNodes:    graphRun.Status.Summary.FailedNodes,
+			PendingNodes:   graphRun.Status.Summary.PendingNodes,
+		},
+		NodeStatuses:   nil, // WebSocket doesn't send full node details
+		ResolvedLevels: graphRun.Status.ResolvedLevels,
+		StartTime:      graphRun.Status.StartTime,
+		CompletionTime: graphRun.Status.CompletionTime,
+		// ResiliencyScore needs conversion - skip for now
+	}
+
 	msg := ServerMessage{
 		Resource: "graphrun",
 		ID:       graphRun.Name,
 		Event:    "updated",
-		Data:     graphRun.Status,
+		Data:     response,
 	}
 
 	data, err := json.Marshal(msg)

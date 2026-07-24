@@ -383,11 +383,14 @@ func (h *Handler) sendScenarioRunsSnapshot(ctx context.Context, client *Client, 
 		}
 
 		// Send this run as an initial snapshot (using "updated" event for compatibility)
+		// Build the SAME response as REST API
+		response := buildScenarioRunResponse(run)
+
 		msg := ServerMessage{
 			Resource: "run",
 			ID:       run.Name,
 			Event:    "updated",
-			Data:     run.Status,
+			Data:     response,
 		}
 
 		data, err := json.Marshal(msg)
@@ -434,11 +437,14 @@ func (h *Handler) sendGraphRunsSnapshot(ctx context.Context, client *Client, res
 		}
 
 		// Send this run as an initial snapshot (using "updated" event for compatibility)
+		// Build the SAME response as REST API
+		response := buildGraphRunResponse(run)
+
 		msg := ServerMessage{
 			Resource: "graphrun",
 			ID:       run.Name,
 			Event:    "updated",
-			Data:     run.Status,
+			Data:     response,
 		}
 
 		data, err := json.Marshal(msg)
