@@ -164,10 +164,24 @@ func hasScenarioRunStatusChanged(old, new *krknv1alpha1.KrknScenarioRun) bool {
 		return true
 	}
 
+	// Build a map of old jobs by JobID for efficient lookup
+	oldJobsMap := make(map[string]*krknv1alpha1.ClusterJobStatus, len(old.Status.ClusterJobs))
 	for i := range old.Status.ClusterJobs {
-		oldJob := &old.Status.ClusterJobs[i]
-		newJob := &new.Status.ClusterJobs[i]
+		job := &old.Status.ClusterJobs[i]
+		oldJobsMap[job.JobID] = job
+	}
 
+	// Compare each new job with its corresponding old job by JobID
+	for i := range new.Status.ClusterJobs {
+		newJob := &new.Status.ClusterJobs[i]
+		oldJob, exists := oldJobsMap[newJob.JobID]
+
+		// New job added (not in old map)
+		if !exists {
+			return true
+		}
+
+		// Check if job status changed
 		if oldJob.Phase != newJob.Phase ||
 			oldJob.RetryCount != newJob.RetryCount ||
 			oldJob.CancelRequested != newJob.CancelRequested {
@@ -200,10 +214,24 @@ func hasGraphRunStatusChanged(old, new *krknv1alpha1.KrknGraphRun) bool {
 		return true
 	}
 
+	// Build a map of old nodes by NodeID for efficient lookup
+	oldNodesMap := make(map[string]*krknv1alpha1.NodeStatus, len(old.Status.NodeStatuses))
 	for i := range old.Status.NodeStatuses {
-		oldNode := &old.Status.NodeStatuses[i]
-		newNode := &new.Status.NodeStatuses[i]
+		node := &old.Status.NodeStatuses[i]
+		oldNodesMap[node.NodeID] = node
+	}
 
+	// Compare each new node with its corresponding old node by NodeID
+	for i := range new.Status.NodeStatuses {
+		newNode := &new.Status.NodeStatuses[i]
+		oldNode, exists := oldNodesMap[newNode.NodeID]
+
+		// New node added (not in old map)
+		if !exists {
+			return true
+		}
+
+		// Check if node status changed
 		if oldNode.Phase != newNode.Phase ||
 			oldNode.ScenarioRunRef != newNode.ScenarioRunRef {
 			return true
