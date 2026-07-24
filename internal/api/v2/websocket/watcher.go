@@ -74,6 +74,7 @@ type scenarioRunEventHandler struct {
 func (h *scenarioRunEventHandler) OnAdd(obj interface{}, _ bool) {
 	run := obj.(*krknv1alpha1.KrknScenarioRun)
 	h.logger.V(1).Info("ScenarioRun added", "name", run.Name)
+	// Broadcaster will deduplicate via cache, so always call it
 	h.broadcaster.BroadcastScenarioRunUpdate(run)
 }
 
