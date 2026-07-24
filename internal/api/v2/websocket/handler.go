@@ -376,11 +376,11 @@ func (h *Handler) sendScenarioRunsSnapshot(ctx context.Context, client *Client, 
 			continue
 		}
 
-		// Send this run as an initial snapshot
+		// Send this run as an initial snapshot (using "updated" event for compatibility)
 		msg := ServerMessage{
 			Resource: "run",
 			ID:       run.Name,
-			Event:    "snapshot",
+			Event:    "updated",
 			Data:     run.Status,
 		}
 
@@ -427,11 +427,11 @@ func (h *Handler) sendGraphRunsSnapshot(ctx context.Context, client *Client, res
 			continue
 		}
 
-		// Send this run as an initial snapshot
+		// Send this run as an initial snapshot (using "updated" event for compatibility)
 		msg := ServerMessage{
 			Resource: "graphrun",
 			ID:       run.Name,
-			Event:    "snapshot",
+			Event:    "updated",
 			Data:     run.Status,
 		}
 
