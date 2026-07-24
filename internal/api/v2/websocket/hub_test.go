@@ -250,3 +250,131 @@ func TestHubBroadcast(t *testing.T) {
 type mockConn struct {
 	*websocket.Conn
 }
+
+// TestClientSubscribeWildcard tests subscribing to all resources of a type (wildcard)
+func TestClientSubscribeWildcard(t *testing.T) {
+	client := &Client{
+		userID:        "test-user",
+		isAdmin:       false,
+		send:          make(chan []byte, 256),
+		subscriptions: make(map[string]map[string]bool),
+	}
+
+	// Subscribe with empty array (wildcard - all runs)
+	client.Subscribe("run", []string{})
+
+	if !client.subscriptions["run"]["*"] {
+		t.Error("Expected client to have wildcard subscription for runs")
+	}
+
+	// Now subscribe to a specific run (should coexist with wildcard)
+	client.Subscribe("run", []string{"run-specific"})
+
+	if !client.subscriptions["run"]["*"] {
+		t.Error("Wildcard subscription should still exist")
+	}
+
+	if !client.subscriptions["run"]["run-specific"] {
+		t.Error("Specific subscription should exist alongside wildcard")
+	}
+}
+
+// TestShouldSendToClient_Wildcard tests that wildcard subscriptions receive all broadcasts
+func TestShouldSendToClient_Wildcard(t *testing.T) {
+	hub := NewHub()
+
+	tests := []struct {
+		name           string
+		subscriptions  map[string]map[string]bool
+		broadcastType  string
+		broadcastID    string
+		expectedResult bool
+		description    string
+	}{
+		{
+			name: "wildcard subscription receives specific resource",
+			subscriptions: map[string]map[string]bool{
+				"run": {"*": true},
+			},
+			broadcastType:  "run",
+			broadcastID:    "run-abc123",
+			expectedResult: true,
+			description:    "Client with wildcard subscription should receive specific resource updates",
+		},
+		{
+			name: "wildcard subscription receives any resource",
+			subscriptions: map[string]map[string]bool{
+				"run": {"*": true},
+			},
+			broadcastType:  "run",
+			broadcastID:    "run-xyz789",
+			expectedResult: true,
+			description:    "Client with wildcard subscription should receive any resource ID",
+		},
+		{
+			name: "specific subscription does not receive other IDs",
+			subscriptions: map[string]map[string]bool{
+				"run": {"run-abc123": true},
+			},
+			broadcastType:  "run",
+			broadcastID:    "run-xyz789",
+			expectedResult: false,
+			description:    "Client with specific subscription should only receive that ID",
+		},
+		{
+			name: "wildcard + specific both match specific ID",
+			subscriptions: map[string]map[string]bool{
+				"run": {
+					"*":          true,
+					"run-abc123": true,
+				},
+			},
+			broadcastType:  "run",
+			broadcastID:    "run-abc123",
+			expectedResult: true,
+			description:    "Both wildcard and specific subscription match",
+		},
+		{
+			name: "wildcard for different resource type",
+			subscriptions: map[string]map[string]bool{
+				"graphrun": {"*": true},
+			},
+			broadcastType:  "run",
+			broadcastID:    "run-abc123",
+			expectedResult: false,
+			description:    "Wildcard subscription for different resource type should not match",
+		},
+		{
+			name: "global broadcast with wildcard subscription",
+			subscriptions: map[string]map[string]bool{
+				"dashboard": {"*": true},
+			},
+			broadcastType:  "dashboard",
+			broadcastID:    "", // empty = global broadcast
+			expectedResult: true,
+			description:    "Wildcard subscription should receive global broadcasts",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client := &Client{
+				userID:        "test-user",
+				isAdmin:       false,
+				send:          make(chan []byte, 256),
+				subscriptions: tt.subscriptions,
+			}
+
+			msg := &BroadcastMessage{
+				resourceType: tt.broadcastType,
+				resourceID:   tt.broadcastID,
+				message:      []byte("test"),
+			}
+
+			result := hub.shouldSendToClient(client, msg)
+			if result != tt.expectedResult {
+				t.Errorf("%s: expected %v, got %v", tt.description, tt.expectedResult, result)
+			}
+		})
+	}
+}

@@ -138,17 +138,29 @@ func (h *Hub) shouldSendToClient(client *Client, msg *BroadcastMessage) bool {
 		return len(resourceSubs) > 0
 	}
 
+	// Check for wildcard subscription (subscribed to ALL resources of this type)
+	if resourceSubs["*"] {
+		return true
+	}
+
 	// Check if client is subscribed to this specific resource ID
 	return resourceSubs[msg.resourceID]
 }
 
 // Subscribe adds a resource subscription for a client
+// If resourceIDs is empty, subscribes to ALL resources of that type (wildcard)
 func (c *Client) Subscribe(resourceType string, resourceIDs []string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	if c.subscriptions[resourceType] == nil {
 		c.subscriptions[resourceType] = make(map[string]bool)
+	}
+
+	// Empty array means subscribe to ALL resources of this type (wildcard)
+	if len(resourceIDs) == 0 {
+		c.subscriptions[resourceType]["*"] = true
+		return
 	}
 
 	for _, id := range resourceIDs {
