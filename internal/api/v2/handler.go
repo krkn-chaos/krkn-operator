@@ -23,6 +23,7 @@ import (
 
 	v2ws "github.com/krkn-chaos/krkn-operator/internal/api/v2/websocket"
 	"github.com/krkn-chaos/krkn-operator/pkg/auth"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 // Handler manages v2 WebSocket endpoints
@@ -36,13 +37,13 @@ type Handler struct {
 }
 
 // NewHandler creates a new v2 Handler
-func NewHandler(getTokenGen func(context.Context) (*auth.TokenGenerator, error)) *Handler {
+func NewHandler(k8sClient client.Client, namespace string, getTokenGen func(context.Context) (*auth.TokenGenerator, error)) *Handler {
 	// Create WebSocket hub and start it
 	hub := v2ws.NewHub()
 	go hub.Run()
 
 	return &Handler{
-		WsHandler:   v2ws.NewHandler(hub, getTokenGen),
+		WsHandler:   v2ws.NewHandler(hub, k8sClient, namespace, getTokenGen),
 		broadcaster: v2ws.NewBroadcaster(hub),
 	}
 }

@@ -32,7 +32,7 @@ import (
 
 func TestHandleClientMessage_Subscribe(t *testing.T) {
 	hub := NewHub()
-	handler := NewHandler(hub, mockTokenGen)
+	handler := NewHandler(hub, nil, "test-namespace", mockTokenGen)
 
 	client := &Client{
 		userID:        "test-user",
@@ -60,7 +60,7 @@ func TestHandleClientMessage_Subscribe(t *testing.T) {
 
 func TestHandleClientMessage_Unsubscribe(t *testing.T) {
 	hub := NewHub()
-	handler := NewHandler(hub, mockTokenGen)
+	handler := NewHandler(hub, nil, "test-namespace", mockTokenGen)
 
 	client := &Client{
 		userID:  "test-user",
@@ -93,7 +93,7 @@ func TestHandleClientMessage_Unsubscribe(t *testing.T) {
 
 func TestHandleClientMessage_InvalidResource(t *testing.T) {
 	hub := NewHub()
-	handler := NewHandler(hub, mockTokenGen)
+	handler := NewHandler(hub, nil, "test-namespace", mockTokenGen)
 
 	client := &Client{
 		userID:        "test-user",
@@ -128,7 +128,7 @@ func TestHandleClientMessage_InvalidResource(t *testing.T) {
 
 func TestHandleClientMessage_InvalidAction(t *testing.T) {
 	hub := NewHub()
-	handler := NewHandler(hub, mockTokenGen)
+	handler := NewHandler(hub, nil, "test-namespace", mockTokenGen)
 
 	client := &Client{
 		userID:        "test-user",
@@ -163,7 +163,7 @@ func TestHandleClientMessage_InvalidAction(t *testing.T) {
 
 func TestHandleWebSocket_MissingAuth(t *testing.T) {
 	hub := NewHub()
-	handler := NewHandler(hub, mockTokenGen)
+	handler := NewHandler(hub, nil, "test-namespace", mockTokenGen)
 
 	req := httptest.NewRequest("GET", "/api/v2/ws/runs", nil)
 	w := httptest.NewRecorder()
@@ -182,7 +182,7 @@ func TestHandleWebSocket_MissingAuth(t *testing.T) {
 
 func TestHandleWebSocket_InvalidProtocolFormat(t *testing.T) {
 	hub := NewHub()
-	handler := NewHandler(hub, mockTokenGen)
+	handler := NewHandler(hub, nil, "test-namespace", mockTokenGen)
 
 	req := httptest.NewRequest("GET", "/api/v2/ws/runs", nil)
 	req.Header.Set("Sec-WebSocket-Protocol", "invalid-format")
@@ -202,7 +202,7 @@ func TestHandleWebSocket_InvalidProtocolFormat(t *testing.T) {
 
 func TestHandleWebSocket_InvalidToken(t *testing.T) {
 	hub := NewHub()
-	handler := NewHandler(hub, mockTokenGenInvalid)
+	handler := NewHandler(hub, nil, "test-namespace", mockTokenGenInvalid)
 
 	req := httptest.NewRequest("GET", "/api/v2/ws/runs", nil)
 	req.Header.Set("Sec-WebSocket-Protocol", "access_token.invalid-token")

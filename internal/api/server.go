@@ -114,7 +114,7 @@ func NewServer(port int, client client.Client, clientset kubernetes.Interface, n
 	getTokenGenCtx := func(ctx context.Context) (*auth.TokenGenerator, error) {
 		return secretManager.GetTokenGenerator()
 	}
-	v2Handler := v2.NewHandler(getTokenGenCtx)
+	v2Handler := v2.NewHandler(client, namespace, getTokenGenCtx)
 
 	mux := http.NewServeMux()
 

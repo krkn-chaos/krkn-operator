@@ -25,134 +25,126 @@ import (
 	"strings"
 	"time"
 
+	"github.com/go-logr/logr"
 	"github.com/gorilla/websocket"
+	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
 	"github.com/krkn-chaos/krkn-operator/pkg/auth"
+	k8sclient "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 // Handler contains dependencies for WebSocket handlers
 type Handler struct {
-	hub           *Hub
-	tokenGen      *auth.TokenGenerator
-	getTokenGen   func(context.Context) (*auth.TokenGenerator, error)
-	upgrader      websocket.Upgrader
-	pingInterval  time.Duration
-	pongWait      time.Duration
-	writeWait     time.Duration
+	hub            *Hub
+	k8sClient      k8sclient.Client
+	namespace      string
+	tokenGen       *auth.TokenGenerator
+	getTokenGen    func(context.Context) (*auth.TokenGenerator, error)
+	upgrader       websocket.Upgrader
+	pingInterval   time.Duration
+	pongWait       time.Duration
+	writeWait      time.Duration
 	maxMessageSize int64
 }
 
 // NewHandler creates a new WebSocket handler
-func NewHandler(hub *Hub, getTokenGen func(context.Context) (*auth.TokenGenerator, error)) *Handler {
+func NewHandler(hub *Hub, k8sClient k8sclient.Client, namespace string, getTokenGen func(context.Context) (*auth.TokenGenerator, error)) *Handler {
 	return &Handler{
 		hub:         hub,
+		k8sClient:   k8sClient,
+		namespace:   namespace,
 		getTokenGen: getTokenGen,
 		upgrader: websocket.Upgrader{
 			ReadBufferSize:  1024,
 			WriteBufferSize: 1024,
 			CheckOrigin: func(r *http.Request) bool {
-				// Allow all origins - in production validate origin
+				// Allow all origins for WebSocket connections
+				// Authentication is handled via JWT token in Sec-WebSocket-Protocol header
 				return true
 			},
-			Subprotocols: []string{"access_token"},
 		},
-		pingInterval:   30 * time.Second,
+		pingInterval:   54 * time.Second,
 		pongWait:       60 * time.Second,
 		writeWait:      10 * time.Second,
-		maxMessageSize: 512, // Client messages are small (subscribe/unsubscribe)
+		maxMessageSize: 512,
 	}
 }
 
-// HandleWebSocket handles WebSocket connections with JWT authentication
+// HandleWebSocket handles WebSocket connections
 //
 // @Summary WebSocket real-time updates
-// @Description Multiplexed WebSocket endpoint for real-time resource updates. Supports scenario runs, graph runs, and dashboard.
+// @Description Multiplexed WebSocket for real-time updates across all resources
 // @Description
-// @Description **Authentication:** JWT token via WebSocket subprotocol header:
+// @Description **Authentication:** JWT token via Sec-WebSocket-Protocol subprotocol
 // @Description - JavaScript: `new WebSocket(url, 'access_token.' + jwtToken)`
 // @Description - Header: `Sec-WebSocket-Protocol: access_token.<jwt_token>`
 // @Description
-// @Description **Client → Server Messages:**
+// @Description **Client → Server Messages (subscribe/unsubscribe):**
 // @Description ```json
 // @Description {
 // @Description   "action": "subscribe",
-// @Description   "resource": "run|graphrun|dashboard",
-// @Description   "ids": ["run-abc123", "run-def456"]
+// @Description   "resource": "run",
+// @Description   "ids": ["run-abc123", "run-xyz789"]
 // @Description }
 // @Description ```
 // @Description
-// @Description **Server → Client Messages:**
+// @Description **Resource types:** `run`, `graphrun`, `dashboard`
+// @Description
+// @Description **Server → Client Messages (updates):**
 // @Description ```json
 // @Description {
-// @Description   "resource": "run|graphrun|dashboard",
+// @Description   "resource": "run",
 // @Description   "id": "run-abc123",
-// @Description   "event": "updated|deleted",
+// @Description   "event": "updated",
 // @Description   "data": { ... }
 // @Description }
 // @Description ```
 // @Description
-// @Description **Endpoints:**
+// @Description **Available endpoints:**
 // @Description - `/api/v2/ws/runs` - Subscribe to scenario run updates
 // @Description - `/api/v2/ws/graphruns` - Subscribe to graph run updates
 // @Description - `/api/v2/ws/dashboard/active-runs` - Subscribe to dashboard updates
 // @Tags websocket
 // @Accept json
 // @Produce json
-// @Success 101 {string} string "Switching Protocols"
+// @Security BearerAuth
 // @Failure 401 {object} websocket.ErrorMessage "Unauthorized - missing or invalid JWT token"
 // @Failure 500 {object} websocket.ErrorMessage "Internal server error"
-// @Security BearerAuth
+// @Success 101 {object} websocket.ServerMessage "Switching protocols - WebSocket upgrade successful"
 // @Router /v2/ws/runs [get]
 // @Router /v2/ws/graphruns [get]
 // @Router /v2/ws/dashboard/active-runs [get]
 func (h *Handler) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 	logger := log.Log.WithName("websocket-v2")
 
-	// Extract and validate JWT token from subprotocol
-	protocols := r.Header.Get("Sec-WebSocket-Protocol")
-	if protocols == "" {
-		logger.Info("WebSocket authentication failed: missing Sec-WebSocket-Protocol header",
-			"path", r.URL.Path,
+	// Extract JWT token from Sec-WebSocket-Protocol header
+	// Format: "access_token.{jwt_token}"
+	protocol := r.Header.Get("Sec-WebSocket-Protocol")
+	parts := strings.SplitN(protocol, ".", 2)
+	if len(parts) != 2 || parts[0] != "access_token" {
+		logger.Error(nil, "Invalid WebSocket protocol format",
+			"protocol", protocol,
 			"client_ip", r.RemoteAddr)
-		http.Error(w, "Unauthorized: Missing Sec-WebSocket-Protocol header", http.StatusUnauthorized)
+		http.Error(w, "Invalid WebSocket protocol. Expected: access_token.{jwt_token}", http.StatusBadRequest)
 		return
 	}
 
-	// Parse protocol: "access_token.<jwt_token>"
-	protocolParts := strings.SplitN(protocols, ".", 2)
-	if len(protocolParts) != 2 || protocolParts[0] != "access_token" {
-		logger.Info("WebSocket authentication failed: invalid protocol format",
-			"path", r.URL.Path,
-			"protocol", protocols,
-			"client_ip", r.RemoteAddr)
-		http.Error(w, "Unauthorized: Invalid Sec-WebSocket-Protocol format. Expected: access_token.<jwt>", http.StatusUnauthorized)
-		return
-	}
+	tokenString := parts[1]
 
-	token := protocolParts[1]
-	if token == "" {
-		logger.Info("WebSocket authentication failed: empty token",
-			"path", r.URL.Path,
-			"client_ip", r.RemoteAddr)
-		http.Error(w, "Unauthorized: Missing authentication token", http.StatusUnauthorized)
+	// Get TokenGenerator from SecretManager
+	tokenGen, err := h.getTokenGen(r.Context())
+	if err != nil {
+		logger.Error(err, "Failed to get TokenGenerator")
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
 
 	// Validate JWT token
-	tokenGen, err := h.getTokenGen(r.Context())
+	claims, err := tokenGen.ValidateToken(tokenString)
 	if err != nil {
-		logger.Error(err, "Failed to get TokenGenerator for WebSocket auth")
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-		return
-	}
-
-	claims, err := tokenGen.ValidateToken(token)
-	if err != nil {
-		logger.Info("WebSocket authentication failed: invalid token",
-			"path", r.URL.Path,
-			"error", err.Error(),
+		logger.Error(err, "Invalid WebSocket JWT token",
 			"client_ip", r.RemoteAddr)
-		http.Error(w, "Unauthorized: Invalid or expired token", http.StatusUnauthorized)
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
 
@@ -162,18 +154,18 @@ func (h *Handler) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 		"path", r.URL.Path,
 		"client_ip", r.RemoteAddr)
 
-	// Upgrade to WebSocket
-	conn, err := h.upgrader.Upgrade(w, r, http.Header{
-		"Sec-WebSocket-Protocol": []string{protocols},
-	})
+	// Upgrade HTTP connection to WebSocket
+	// Respond with matching subprotocol to complete handshake
+	h.upgrader.Subprotocols = []string{protocol}
+	conn, err := h.upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		logger.Error(err, "WebSocket upgrade failed",
-			"url", r.URL.String(),
+		logger.Error(err, "Failed to upgrade WebSocket connection",
+			"userId", claims.UserID,
 			"client_ip", r.RemoteAddr)
 		return
 	}
 
-	// Create client
+	// Create client and register with hub
 	client := &Client{
 		conn:          conn,
 		userID:        claims.UserID,
@@ -182,7 +174,6 @@ func (h *Handler) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 		subscriptions: make(map[string]map[string]bool),
 	}
 
-	// Register client with hub
 	h.hub.register <- client
 
 	logger.Info("WebSocket client registered",
@@ -191,20 +182,19 @@ func (h *Handler) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 		"path", r.URL.Path,
 		"client_ip", r.RemoteAddr)
 
-	// Start client read and write pumps
+	// Start goroutines for reading and writing
 	go h.writePump(client)
 	go h.readPump(client)
 }
 
 // readPump reads messages from the WebSocket connection
 func (h *Handler) readPump(client *Client) {
-	logger := log.Log.WithName("websocket-read")
-
 	defer func() {
 		h.hub.unregister <- client
 		client.conn.Close()
-		logger.Info("WebSocket client disconnected", "userId", client.userID)
 	}()
+
+	logger := log.Log.WithName("websocket-read")
 
 	client.conn.SetReadDeadline(time.Now().Add(h.pongWait))
 	client.conn.SetReadLimit(h.maxMessageSize)
@@ -217,20 +207,21 @@ func (h *Handler) readPump(client *Client) {
 		_, message, err := client.conn.ReadMessage()
 		if err != nil {
 			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
-				logger.Error(err, "WebSocket read error", "userId", client.userID)
+				logger.Error(err, "WebSocket read error",
+					"userId", client.userID)
 			}
+			logger.Info("WebSocket client disconnected",
+				"userId", client.userID)
 			break
 		}
 
-		// Parse client message
+		// Parse client message (subscribe/unsubscribe)
 		var msg ClientMessage
 		if err := json.Unmarshal(message, &msg); err != nil {
-			logger.Info("Invalid client message", "userId", client.userID, "error", err.Error())
-			h.sendError(client, "invalid_message", "Invalid JSON message format")
+			h.sendError(client, "invalid_json", "Invalid JSON message")
 			continue
 		}
 
-		// Handle client action
 		h.handleClientMessage(client, &msg)
 	}
 }
@@ -296,6 +287,9 @@ func (h *Handler) handleClientMessage(client *Client, msg *ClientMessage) {
 			"resource", msg.Resource,
 			"ids", msg.IDs)
 
+		// Send initial snapshot of current state
+		h.sendInitialSnapshot(client, msg.Resource, msg.IDs)
+
 	case "unsubscribe":
 		if msg.Resource == "" {
 			h.sendError(client, "invalid_request", "resource field is required")
@@ -330,5 +324,128 @@ func (h *Handler) sendError(client *Client, errCode, errMsg string) {
 	case client.send <- data:
 	default:
 		// Client buffer full, ignore
+	}
+}
+
+// sendInitialSnapshot sends the current state of resources to a newly subscribed client
+func (h *Handler) sendInitialSnapshot(client *Client, resourceType string, resourceIDs []string) {
+	// Skip snapshot if k8sClient is not available (e.g., in tests)
+	if h.k8sClient == nil {
+		return
+	}
+
+	logger := log.Log.WithName("websocket-snapshot")
+	ctx := context.Background()
+
+	switch resourceType {
+	case "run":
+		h.sendScenarioRunsSnapshot(ctx, client, resourceIDs, logger)
+	case "graphrun":
+		h.sendGraphRunsSnapshot(ctx, client, resourceIDs, logger)
+	case "dashboard":
+		// Dashboard is a global subscription - no snapshot needed as it will be broadcasted
+		logger.V(1).Info("Dashboard subscription - no initial snapshot needed")
+	}
+}
+
+// sendScenarioRunsSnapshot sends current scenario runs to the client
+func (h *Handler) sendScenarioRunsSnapshot(ctx context.Context, client *Client, resourceIDs []string, logger logr.Logger) {
+	var runs krknv1alpha1.KrknScenarioRunList
+	if err := h.k8sClient.List(ctx, &runs, k8sclient.InNamespace(h.namespace)); err != nil {
+		logger.Error(err, "Failed to list scenario runs for snapshot")
+		return
+	}
+
+	// If specific IDs requested, filter to those
+	// If empty (wildcard), send all
+	for i := range runs.Items {
+		run := &runs.Items[i]
+
+		// Check if we should send this run
+		shouldSend := len(resourceIDs) == 0 // wildcard
+		if !shouldSend {
+			for _, id := range resourceIDs {
+				if run.Name == id {
+					shouldSend = true
+					break
+				}
+			}
+		}
+
+		if !shouldSend {
+			continue
+		}
+
+		// Send this run as an initial snapshot
+		msg := ServerMessage{
+			Resource: "run",
+			ID:       run.Name,
+			Event:    "snapshot",
+			Data:     run.Status,
+		}
+
+		data, err := json.Marshal(msg)
+		if err != nil {
+			logger.Error(err, "Failed to marshal scenario run snapshot", "runName", run.Name)
+			continue
+		}
+
+		select {
+		case client.send <- data:
+			logger.V(1).Info("Sent initial snapshot", "resource", "run", "id", run.Name)
+		default:
+			logger.Error(nil, "Client buffer full, dropping snapshot", "runName", run.Name)
+		}
+	}
+}
+
+// sendGraphRunsSnapshot sends current graph runs to the client
+func (h *Handler) sendGraphRunsSnapshot(ctx context.Context, client *Client, resourceIDs []string, logger logr.Logger) {
+	var runs krknv1alpha1.KrknGraphRunList
+	if err := h.k8sClient.List(ctx, &runs, k8sclient.InNamespace(h.namespace)); err != nil {
+		logger.Error(err, "Failed to list graph runs for snapshot")
+		return
+	}
+
+	// If specific IDs requested, filter to those
+	// If empty (wildcard), send all
+	for i := range runs.Items {
+		run := &runs.Items[i]
+
+		// Check if we should send this run
+		shouldSend := len(resourceIDs) == 0 // wildcard
+		if !shouldSend {
+			for _, id := range resourceIDs {
+				if run.Name == id {
+					shouldSend = true
+					break
+				}
+			}
+		}
+
+		if !shouldSend {
+			continue
+		}
+
+		// Send this run as an initial snapshot
+		msg := ServerMessage{
+			Resource: "graphrun",
+			ID:       run.Name,
+			Event:    "snapshot",
+			Data:     run.Status,
+		}
+
+		data, err := json.Marshal(msg)
+		if err != nil {
+			logger.Error(err, "Failed to marshal graph run snapshot", "runName", run.Name)
+			continue
+		}
+
+		select {
+		case client.send <- data:
+			logger.V(1).Info("Sent initial snapshot", "resource", "graphrun", "id", run.Name)
+		default:
+			logger.Error(nil, "Client buffer full, dropping snapshot", "runName", run.Name)
+		}
 	}
 }
