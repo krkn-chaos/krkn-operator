@@ -361,6 +361,12 @@ func (h *Handler) sendScenarioRunsSnapshot(ctx context.Context, client *Client, 
 	for i := range runs.Items {
 		run := &runs.Items[i]
 
+		// Skip ScenarioRuns that are part of a GraphRun (client subscribes to GraphRun instead)
+		if graphRunName := run.Labels["krkn.dev/graph-run"]; graphRunName != "" {
+			logger.V(2).Info("Skipping GraphRun node in snapshot", "runName", run.Name, "graphRun", graphRunName)
+			continue
+		}
+
 		// Check if we should send this run
 		shouldSend := len(resourceIDs) == 0 // wildcard
 		if !shouldSend {

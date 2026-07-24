@@ -73,6 +73,15 @@ type scenarioRunEventHandler struct {
 
 func (h *scenarioRunEventHandler) OnAdd(obj interface{}, _ bool) {
 	run := obj.(*krknv1alpha1.KrknScenarioRun)
+
+	// Skip ScenarioRuns that are part of a GraphRun (they are broadcast via GraphRun updates)
+	if graphRunName := run.Labels["krkn.dev/graph-run"]; graphRunName != "" {
+		h.logger.V(2).Info("ScenarioRun is part of GraphRun, skipping standalone broadcast",
+			"name", run.Name,
+			"graphRun", graphRunName)
+		return
+	}
+
 	h.logger.V(1).Info("ScenarioRun added", "name", run.Name)
 	// Broadcaster will deduplicate via cache, so always call it
 	h.broadcaster.BroadcastScenarioRunUpdate(run)
@@ -81,6 +90,14 @@ func (h *scenarioRunEventHandler) OnAdd(obj interface{}, _ bool) {
 func (h *scenarioRunEventHandler) OnUpdate(oldObj, newObj interface{}) {
 	oldRun := oldObj.(*krknv1alpha1.KrknScenarioRun)
 	newRun := newObj.(*krknv1alpha1.KrknScenarioRun)
+
+	// Skip ScenarioRuns that are part of a GraphRun (they are broadcast via GraphRun updates)
+	if graphRunName := newRun.Labels["krkn.dev/graph-run"]; graphRunName != "" {
+		h.logger.V(2).Info("ScenarioRun is part of GraphRun, skipping standalone broadcast",
+			"name", newRun.Name,
+			"graphRun", graphRunName)
+		return
+	}
 
 	// Filter: only broadcast if status actually changed
 	if !hasScenarioRunStatusChanged(oldRun, newRun) {
