@@ -392,7 +392,7 @@ func (h *Handler) sendScenarioRunsSnapshot(ctx context.Context, client *Client, 
 
 		select {
 		case client.send <- data:
-			logger.V(1).Info("Sent initial snapshot", "resource", "run", "id", run.Name)
+			logger.Info("Sent initial snapshot", "resource", "run", "id", run.Name, "phase", run.Status.Phase)
 		default:
 			logger.Error(nil, "Client buffer full, dropping snapshot", "runName", run.Name)
 		}
@@ -443,7 +443,7 @@ func (h *Handler) sendGraphRunsSnapshot(ctx context.Context, client *Client, res
 
 		select {
 		case client.send <- data:
-			logger.V(1).Info("Sent initial snapshot", "resource", "graphrun", "id", run.Name)
+			logger.Info("Sent initial snapshot", "resource", "graphrun", "id", run.Name, "phase", run.Status.Phase)
 		default:
 			logger.Error(nil, "Client buffer full, dropping snapshot", "runName", run.Name)
 		}

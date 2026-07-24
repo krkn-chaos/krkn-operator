@@ -57,6 +57,7 @@ func (b *Broadcaster) BroadcastScenarioRunUpdate(scenarioRun *krknv1alpha1.KrknS
 		return
 	}
 
+	logger.Info("Broadcasting scenario run update", "runName", scenarioRun.Name, "phase", scenarioRun.Status.Phase)
 	b.hub.Broadcast("run", scenarioRun.Name, data)
 }
 
