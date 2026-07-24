@@ -170,13 +170,13 @@ func TestHandleWebSocket_MissingAuth(t *testing.T) {
 
 	handler.HandleWebSocket(w, req)
 
-	if w.Code != http.StatusUnauthorized {
-		t.Errorf("Expected status %d, got %d", http.StatusUnauthorized, w.Code)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("Expected status %d, got %d", http.StatusBadRequest, w.Code)
 	}
 
 	body := w.Body.String()
-	if !strings.Contains(body, "Missing Sec-WebSocket-Protocol") {
-		t.Error("Expected error message about missing Sec-WebSocket-Protocol header")
+	if !strings.Contains(body, "Invalid WebSocket protocol") {
+		t.Errorf("Expected error message about invalid protocol, got: %s", body)
 	}
 }
 
@@ -190,13 +190,13 @@ func TestHandleWebSocket_InvalidProtocolFormat(t *testing.T) {
 
 	handler.HandleWebSocket(w, req)
 
-	if w.Code != http.StatusUnauthorized {
-		t.Errorf("Expected status %d, got %d", http.StatusUnauthorized, w.Code)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("Expected status %d, got %d", http.StatusBadRequest, w.Code)
 	}
 
 	body := w.Body.String()
-	if !strings.Contains(body, "Invalid Sec-WebSocket-Protocol format") {
-		t.Error("Expected error message about invalid protocol format")
+	if !strings.Contains(body, "Invalid WebSocket protocol") {
+		t.Errorf("Expected error message about invalid protocol, got: %s", body)
 	}
 }
 

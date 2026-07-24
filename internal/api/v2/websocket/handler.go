@@ -144,7 +144,7 @@ func (h *Handler) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		logger.Error(err, "Invalid WebSocket JWT token",
 			"client_ip", r.RemoteAddr)
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		http.Error(w, "Invalid or expired token", http.StatusUnauthorized)
 		return
 	}
 
