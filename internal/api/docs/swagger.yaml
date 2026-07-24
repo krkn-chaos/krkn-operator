@@ -328,20 +328,40 @@ definitions:
         description: TargetRequestID is the UUID of the KrknTargetRequest (required)
         type: string
     type: object
+  internal_api_v2_websocket.ErrorMessage:
+    properties:
+      error:
+        type: string
+      message:
+        type: string
+    type: object
 host: localhost:8080
 info:
   contact:
     email: krkn-chaos@googlegroups.com
     name: Krkn Team
     url: https://github.com/krkn-chaos/krkn-operator
-  description: REST API for Krkn chaos engineering operator. Provides endpoints for
-    cluster management, chaos scenario execution, and GraphRun orchestration.
+  description: |-
+    REST and WebSocket API for Krkn chaos engineering operator.
+
+    **API Versions:**
+    - **v1** - REST API with polling (deprecated but maintained)
+    - **v2** - REST API (same as v1) + WebSocket real-time updates
+
+    **WebSocket Authentication (v2):**
+    WebSocket endpoints use JWT via subprotocol header:
+    - JavaScript: `new WebSocket(url, 'access_token.' + jwtToken)`
+    - Header: `Sec-WebSocket-Protocol: access_token.<jwt_token>`
+
+    **Migration Path:**
+    1. v1 REST → v2 REST (no changes, just update base path)
+    2. v2 REST → v2 WebSocket (replace polling with multiplexed WebSocket)
   license:
     name: Apache 2.0
     url: http://www.apache.org/licenses/LICENSE-2.0.html
   termsOfService: https://krkn-chaos.dev/terms
   title: Krkn Operator API
-  version: "1.0"
+  version: "2.0"
 paths:
   /auth/is-registered:
     get:
@@ -1014,9 +1034,172 @@ paths:
       summary: Get target by UUID
       tags:
       - targets
+  /v2/ws/dashboard/active-runs:
+    get:
+      consumes:
+      - application/json
+      description: |-
+        Multiplexed WebSocket endpoint for real-time resource updates. Supports scenario runs, graph runs, and dashboard.
+
+        **Authentication:** JWT token via WebSocket subprotocol header:
+        - JavaScript: `new WebSocket(url, 'access_token.' + jwtToken)`
+        - Header: `Sec-WebSocket-Protocol: access_token.<jwt_token>`
+
+        **Client → Server Messages:**
+        ```json
+        {
+        "action": "subscribe",
+        "resource": "run|graphrun|dashboard",
+        "ids": ["run-abc123", "run-def456"]
+        }
+        ```
+
+        **Server → Client Messages:**
+        ```json
+        {
+        "resource": "run|graphrun|dashboard",
+        "id": "run-abc123",
+        "event": "updated|deleted",
+        "data": { ... }
+        }
+        ```
+
+        **Endpoints:**
+        - `/api/v2/ws/runs` - Subscribe to scenario run updates
+        - `/api/v2/ws/graphruns` - Subscribe to graph run updates
+        - `/api/v2/ws/dashboard/active-runs` - Subscribe to dashboard updates
+      produces:
+      - application/json
+      responses:
+        "101":
+          description: Switching Protocols
+          schema:
+            type: string
+        "401":
+          description: Unauthorized - missing or invalid JWT token
+          schema:
+            $ref: '#/definitions/internal_api_v2_websocket.ErrorMessage'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/internal_api_v2_websocket.ErrorMessage'
+      security:
+      - BearerAuth: []
+      summary: WebSocket real-time updates
+      tags:
+      - websocket
+  /v2/ws/graphruns:
+    get:
+      consumes:
+      - application/json
+      description: |-
+        Multiplexed WebSocket endpoint for real-time resource updates. Supports scenario runs, graph runs, and dashboard.
+
+        **Authentication:** JWT token via WebSocket subprotocol header:
+        - JavaScript: `new WebSocket(url, 'access_token.' + jwtToken)`
+        - Header: `Sec-WebSocket-Protocol: access_token.<jwt_token>`
+
+        **Client → Server Messages:**
+        ```json
+        {
+        "action": "subscribe",
+        "resource": "run|graphrun|dashboard",
+        "ids": ["run-abc123", "run-def456"]
+        }
+        ```
+
+        **Server → Client Messages:**
+        ```json
+        {
+        "resource": "run|graphrun|dashboard",
+        "id": "run-abc123",
+        "event": "updated|deleted",
+        "data": { ... }
+        }
+        ```
+
+        **Endpoints:**
+        - `/api/v2/ws/runs` - Subscribe to scenario run updates
+        - `/api/v2/ws/graphruns` - Subscribe to graph run updates
+        - `/api/v2/ws/dashboard/active-runs` - Subscribe to dashboard updates
+      produces:
+      - application/json
+      responses:
+        "101":
+          description: Switching Protocols
+          schema:
+            type: string
+        "401":
+          description: Unauthorized - missing or invalid JWT token
+          schema:
+            $ref: '#/definitions/internal_api_v2_websocket.ErrorMessage'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/internal_api_v2_websocket.ErrorMessage'
+      security:
+      - BearerAuth: []
+      summary: WebSocket real-time updates
+      tags:
+      - websocket
+  /v2/ws/runs:
+    get:
+      consumes:
+      - application/json
+      description: |-
+        Multiplexed WebSocket endpoint for real-time resource updates. Supports scenario runs, graph runs, and dashboard.
+
+        **Authentication:** JWT token via WebSocket subprotocol header:
+        - JavaScript: `new WebSocket(url, 'access_token.' + jwtToken)`
+        - Header: `Sec-WebSocket-Protocol: access_token.<jwt_token>`
+
+        **Client → Server Messages:**
+        ```json
+        {
+        "action": "subscribe",
+        "resource": "run|graphrun|dashboard",
+        "ids": ["run-abc123", "run-def456"]
+        }
+        ```
+
+        **Server → Client Messages:**
+        ```json
+        {
+        "resource": "run|graphrun|dashboard",
+        "id": "run-abc123",
+        "event": "updated|deleted",
+        "data": { ... }
+        }
+        ```
+
+        **Endpoints:**
+        - `/api/v2/ws/runs` - Subscribe to scenario run updates
+        - `/api/v2/ws/graphruns` - Subscribe to graph run updates
+        - `/api/v2/ws/dashboard/active-runs` - Subscribe to dashboard updates
+      produces:
+      - application/json
+      responses:
+        "101":
+          description: Switching Protocols
+          schema:
+            type: string
+        "401":
+          description: Unauthorized - missing or invalid JWT token
+          schema:
+            $ref: '#/definitions/internal_api_v2_websocket.ErrorMessage'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/internal_api_v2_websocket.ErrorMessage'
+      security:
+      - BearerAuth: []
+      summary: WebSocket real-time updates
+      tags:
+      - websocket
 securityDefinitions:
   BearerAuth:
-    description: 'JWT token obtained from /api/v1/auth/login. Format: "Bearer {token}"'
+    description: 'JWT token obtained from /api/v1/auth/login or /api/v2/auth/login.
+      Format: "Bearer {token}"'
     in: header
     name: Authorization
     type: apiKey
