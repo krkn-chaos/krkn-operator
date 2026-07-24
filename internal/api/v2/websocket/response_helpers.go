@@ -25,9 +25,10 @@ func buildScenarioRunResponse(run *krknv1alpha1.KrknScenarioRun) ScenarioRunStat
 }
 
 // buildGraphRunResponse builds the SAME response as REST API
-func buildGraphRunResponse(run *krknv1alpha1.KrknGraphRun) GraphRunStatusResponse {
-	return GraphRunStatusResponse{
-		Phase: run.Status.Phase,
+func buildGraphRunResponse(run *krknv1alpha1.KrknGraphRun) GraphRunResponse {
+	return GraphRunResponse{
+		GraphRunName:   run.Name,
+		Phase:          run.Status.Phase,
 		Summary: GraphRunSummaryResponse{
 			TotalNodes:     run.Status.Summary.TotalNodes,
 			CompletedNodes: run.Status.Summary.CompletedNodes,
@@ -39,5 +40,7 @@ func buildGraphRunResponse(run *krknv1alpha1.KrknGraphRun) GraphRunStatusRespons
 		ResolvedLevels: run.Status.ResolvedLevels,
 		StartTime:      run.Status.StartTime,
 		CompletionTime: run.Status.CompletionTime,
+		OwnerUserID:    run.Spec.OwnerUserID,
+		CreatedAt:      run.CreationTimestamp.Format(time.RFC3339),
 	}
 }

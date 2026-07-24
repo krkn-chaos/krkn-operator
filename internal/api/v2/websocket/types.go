@@ -20,14 +20,17 @@ type ScenarioRunStatusResponse struct {
 	CreatedAt       string `json:"createdAt,omitempty"`
 }
 
-// GraphRunStatusResponse - copy of internal/api type
-type GraphRunStatusResponse struct {
+// GraphRunResponse - WebSocket response for GraphRun (same fields as REST API)
+type GraphRunResponse struct {
+	GraphRunName    string                   `json:"graphRunName"`
 	Phase           string                   `json:"phase"`
 	Summary         GraphRunSummaryResponse  `json:"summary"`
 	NodeStatuses    interface{}              `json:"nodeStatuses,omitempty"`
 	ResolvedLevels  [][]string               `json:"resolvedLevels"`
 	StartTime       *metav1.Time             `json:"startTime,omitempty"`
 	CompletionTime  *metav1.Time             `json:"completionTime,omitempty"`
+	OwnerUserID     string                   `json:"ownerUserId,omitempty"`
+	CreatedAt       string                   `json:"createdAt,omitempty"`
 }
 
 // GraphRunSummaryResponse - copy

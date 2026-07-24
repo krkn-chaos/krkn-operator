@@ -139,8 +139,9 @@ func (b *Broadcaster) BroadcastGraphRunUpdate(graphRun *krknv1alpha1.KrknGraphRu
 
 	// Status changed - broadcast and update cache
 	// Build the SAME response as REST API
-	response := GraphRunStatusResponse{
-		Phase: graphRun.Status.Phase,
+	response := GraphRunResponse{
+		GraphRunName:   graphRun.Name,
+		Phase:          graphRun.Status.Phase,
 		Summary: GraphRunSummaryResponse{
 			TotalNodes:     graphRun.Status.Summary.TotalNodes,
 			CompletedNodes: graphRun.Status.Summary.CompletedNodes,
@@ -152,7 +153,8 @@ func (b *Broadcaster) BroadcastGraphRunUpdate(graphRun *krknv1alpha1.KrknGraphRu
 		ResolvedLevels: graphRun.Status.ResolvedLevels,
 		StartTime:      graphRun.Status.StartTime,
 		CompletionTime: graphRun.Status.CompletionTime,
-		// ResiliencyScore needs conversion - skip for now
+		OwnerUserID:    graphRun.Spec.OwnerUserID,
+		CreatedAt:      graphRun.CreationTimestamp.Format(time.RFC3339),
 	}
 
 	msg := ServerMessage{
