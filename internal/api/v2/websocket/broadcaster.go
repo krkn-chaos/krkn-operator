@@ -112,6 +112,59 @@ func (b *Broadcaster) BroadcastScenarioRunUpdate(scenarioRun *krknv1alpha1.KrknS
 	b.cacheMu.Unlock()
 }
 
+// BroadcastScenarioRunDetailUpdate broadcasts FULL scenario run update (with clusterJobs) to detail subscribers
+func (b *Broadcaster) BroadcastScenarioRunDetailUpdate(scenarioRun *krknv1alpha1.KrknScenarioRun) {
+	logger := log.Log.WithName("websocket-broadcast")
+
+	// Calculate fingerprint of current status (same dedup logic as lightweight)
+	statusData, err := json.Marshal(scenarioRun.Status)
+	if err != nil {
+		logger.Error(err, "Failed to marshal status for detail fingerprint", "scenarioRunName", scenarioRun.Name)
+		return
+	}
+	fingerprint := hashBytes(statusData)
+
+	// Check cache - use separate cache key to avoid collision with lightweight broadcast
+	cacheKey := "run-detail:" + scenarioRun.Name
+	b.cacheMu.RLock()
+	lastSent, exists := b.lastSentCache[cacheKey]
+	b.cacheMu.RUnlock()
+
+	if exists && lastSent == fingerprint {
+		logger.V(1).Info("Detail status unchanged since last broadcast, skipping",
+			"runName", scenarioRun.Name,
+			"phase", scenarioRun.Status.Phase)
+		return
+	}
+
+	// Status changed - broadcast FULL response with clusterJobs
+	response := buildScenarioRunDetailResponse(scenarioRun)
+
+	msg := ServerMessage{
+		Resource: "run-detail",
+		ID:       scenarioRun.Name,
+		Event:    "updated",
+		Data:     response,
+	}
+
+	data, err := json.Marshal(msg)
+	if err != nil {
+		logger.Error(err, "Failed to marshal scenario run detail update", "scenarioRunName", scenarioRun.Name)
+		return
+	}
+
+	logger.Info("Broadcasting scenario run detail update",
+		"runName", scenarioRun.Name,
+		"phase", scenarioRun.Status.Phase,
+		"jobs", len(scenarioRun.Status.ClusterJobs))
+	b.hub.Broadcast("run-detail", scenarioRun.Name, data)
+
+	// Update cache
+	b.cacheMu.Lock()
+	b.lastSentCache[cacheKey] = fingerprint
+	b.cacheMu.Unlock()
+}
+
 // BroadcastGraphRunUpdate broadcasts a graph run update to subscribed clients
 func (b *Broadcaster) BroadcastGraphRunUpdate(graphRun *krknv1alpha1.KrknGraphRun) {
 	logger := log.Log.WithName("websocket-broadcast")

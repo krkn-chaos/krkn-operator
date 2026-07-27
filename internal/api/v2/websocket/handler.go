@@ -270,12 +270,13 @@ func (h *Handler) handleClientMessage(client *Client, msg *ClientMessage) {
 
 		// Validate resource type
 		validResources := map[string]bool{
-			"run":       true,
-			"graphrun":  true,
-			"dashboard": true,
+			"run":        true,
+			"run-detail": true, // Full ScenarioRun with clusterJobs
+			"graphrun":   true,
+			"dashboard":  true,
 		}
 		if !validResources[msg.Resource] {
-			h.sendError(client, "invalid_resource", "Invalid resource type. Valid: run, graphrun, dashboard")
+			h.sendError(client, "invalid_resource", "Invalid resource type. Valid: run, run-detail, graphrun, dashboard")
 			return
 		}
 
@@ -340,6 +341,8 @@ func (h *Handler) sendInitialSnapshot(client *Client, resourceType string, resou
 	switch resourceType {
 	case "run":
 		h.sendScenarioRunsSnapshot(ctx, client, resourceIDs, logger)
+	case "run-detail":
+		h.sendScenarioRunDetailSnapshot(ctx, client, resourceIDs, logger)
 	case "graphrun":
 		h.sendGraphRunsSnapshot(ctx, client, resourceIDs, logger)
 	case "dashboard":
@@ -404,6 +407,62 @@ func (h *Handler) sendScenarioRunsSnapshot(ctx context.Context, client *Client, 
 			logger.Info("Sent initial snapshot", "resource", "run", "id", run.Name, "phase", run.Status.Phase)
 		default:
 			logger.Error(nil, "Client buffer full, dropping snapshot", "runName", run.Name)
+		}
+	}
+}
+
+// sendScenarioRunDetailSnapshot sends full scenario run details (with clusterJobs) to the client
+func (h *Handler) sendScenarioRunDetailSnapshot(ctx context.Context, client *Client, resourceIDs []string, logger logr.Logger) {
+	var runs krknv1alpha1.KrknScenarioRunList
+	if err := h.k8sClient.List(ctx, &runs, k8sclient.InNamespace(h.namespace)); err != nil {
+		logger.Error(err, "Failed to list scenario runs for detail snapshot")
+		return
+	}
+
+	// For run-detail, specific IDs are expected (not wildcard)
+	for i := range runs.Items {
+		run := &runs.Items[i]
+
+		// Skip ScenarioRuns that are part of a GraphRun
+		if graphRunName := run.Labels["krkn.dev/graph-run"]; graphRunName != "" {
+			logger.V(2).Info("Skipping GraphRun node in detail snapshot", "runName", run.Name, "graphRun", graphRunName)
+			continue
+		}
+
+		// Check if we should send this run (match specific IDs)
+		shouldSend := false
+		for _, id := range resourceIDs {
+			if run.Name == id {
+				shouldSend = true
+				break
+			}
+		}
+
+		if !shouldSend {
+			continue
+		}
+
+		// Build FULL response with clusterJobs
+		response := buildScenarioRunDetailResponse(run)
+
+		msg := ServerMessage{
+			Resource: "run-detail",
+			ID:       run.Name,
+			Event:    "updated",
+			Data:     response,
+		}
+
+		data, err := json.Marshal(msg)
+		if err != nil {
+			logger.Error(err, "Failed to marshal scenario run detail snapshot", "runName", run.Name)
+			continue
+		}
+
+		select {
+		case client.send <- data:
+			logger.Info("Sent detail snapshot", "resource", "run-detail", "id", run.Name, "jobs", len(run.Status.ClusterJobs))
+		default:
+			logger.Error(nil, "Client buffer full, dropping detail snapshot", "runName", run.Name)
 		}
 	}
 }
