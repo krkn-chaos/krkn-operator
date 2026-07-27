@@ -296,6 +296,6 @@ func (b *Broadcaster) BroadcastGraphRunDeleted(graphRunName string) {
 // hashBytes computes a fast hash of a byte slice for deduplication
 func hashBytes(data []byte) uint64 {
 	h := fnv.New64a()
-	h.Write(data)
+	_, _ = h.Write(data) // fnv.Hash.Write never returns an error
 	return h.Sum64()
 }

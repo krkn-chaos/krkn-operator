@@ -191,15 +191,15 @@ func (h *Handler) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) readPump(client *Client) {
 	defer func() {
 		h.hub.unregister <- client
-		client.conn.Close()
+		_ = client.conn.Close()
 	}()
 
 	logger := log.Log.WithName("websocket-read")
 
-	client.conn.SetReadDeadline(time.Now().Add(h.pongWait))
+	_ = client.conn.SetReadDeadline(time.Now().Add(h.pongWait))
 	client.conn.SetReadLimit(h.maxMessageSize)
 	client.conn.SetPongHandler(func(string) error {
-		client.conn.SetReadDeadline(time.Now().Add(h.pongWait))
+		_ = client.conn.SetReadDeadline(time.Now().Add(h.pongWait))
 		return nil
 	})
 
@@ -231,16 +231,16 @@ func (h *Handler) writePump(client *Client) {
 	ticker := time.NewTicker(h.pingInterval)
 	defer func() {
 		ticker.Stop()
-		client.conn.Close()
+		_ = client.conn.Close()
 	}()
 
 	for {
 		select {
 		case message, ok := <-client.send:
-			client.conn.SetWriteDeadline(time.Now().Add(h.writeWait))
+			_ = client.conn.SetWriteDeadline(time.Now().Add(h.writeWait))
 			if !ok {
 				// Hub closed the channel
-				client.conn.WriteMessage(websocket.CloseMessage, []byte{})
+				_ = client.conn.WriteMessage(websocket.CloseMessage, []byte{})
 				return
 			}
 
@@ -249,7 +249,7 @@ func (h *Handler) writePump(client *Client) {
 			}
 
 		case <-ticker.C:
-			client.conn.SetWriteDeadline(time.Now().Add(h.writeWait))
+			_ = client.conn.SetWriteDeadline(time.Now().Add(h.writeWait))
 			if err := client.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
 				return
 			}
