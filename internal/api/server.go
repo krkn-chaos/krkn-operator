@@ -226,6 +226,18 @@ func NewServer(port int, client client.Client, clientset kubernetes.Interface, n
 	mux.HandleFunc(v2.WebSocketGraphRunsPath, v2Handler.WsHandler.HandleWebSocket)
 	mux.HandleFunc(v2.WebSocketDashboardActiveRunsPath, v2Handler.WsHandler.HandleWebSocket)
 
+	// v2 WebSocket job logs streaming (reuse v1 handler, just different path)
+	// Path pattern: /api/v2/ws/scenarios/run/{scenarioRunName}/jobs/{jobID}/logs
+	mux.HandleFunc(v2.WebSocketJobLogsPath, func(w http.ResponseWriter, r *http.Request) {
+		// Check if this is a logs request (ends with /logs)
+		if strings.Contains(r.URL.Path, "/jobs/") && strings.HasSuffix(r.URL.Path, "/logs") {
+			// Reuse v1 handler (it handles path parsing for both v1 and v2)
+			handler.GetScenarioRunLogs(w, r)
+			return
+		}
+		http.NotFound(w, r)
+	})
+
 	// Wrap mux with logging middleware
 	server := &http.Server{
 		Addr:              fmt.Sprintf(":%d", port),

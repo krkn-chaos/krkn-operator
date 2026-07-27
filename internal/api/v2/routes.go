@@ -54,4 +54,8 @@ const (
 
 	// Real-time dashboard active runs
 	WebSocketDashboardActiveRunsPath = WebSocketBasePath + "/dashboard/active-runs"
+
+	// Job logs streaming (per-job WebSocket, not multiplexed)
+	// Path pattern: /api/v2/ws/scenarios/run/{scenarioRunName}/jobs/{jobID}/logs
+	WebSocketJobLogsPath = WebSocketBasePath + "/scenarios/run/"
 )

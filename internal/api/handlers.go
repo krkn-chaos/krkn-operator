@@ -1692,18 +1692,24 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 		"client_ip", r.RemoteAddr)
 
 	// Extract scenarioRunName and jobID from path
-	// Path format: /api/v1/scenarios/run/{scenarioRunName}/jobs/{jobID}/logs
+	// Path format v1: /api/v1/scenarios/run/{scenarioRunName}/jobs/{jobID}/logs
+	// Path format v2: /api/v2/ws/scenarios/run/{scenarioRunName}/jobs/{jobID}/logs
 	path := r.URL.Path
-	prefix := ScenariosRunPath + "/"
 
-	if !strings.HasPrefix(path, prefix) {
-		logger.Error(nil, "Invalid logs endpoint path", "path", path)
-		_ = conn.WriteMessage(websocket.TextMessage, []byte("ERROR: Invalid logs endpoint")) // Best-effort error reporting
+	// Try v2 path first, then v1
+	var remainder string
+	v2Prefix := "/api/v2/ws/scenarios/run/"
+	v1Prefix := ScenariosRunPath + "/"
+
+	if strings.HasPrefix(path, v2Prefix) {
+		remainder = path[len(v2Prefix):]
+	} else if strings.HasPrefix(path, v1Prefix) {
+		remainder = path[len(v1Prefix):]
+	} else {
+		logger.Error(nil, "Invalid logs endpoint path", "path", path, "expected_v1", v1Prefix, "expected_v2", v2Prefix)
+		_ = conn.WriteMessage(websocket.TextMessage, []byte("ERROR: Invalid logs endpoint path")) // Best-effort error reporting
 		return
 	}
-
-	// Remove prefix
-	remainder := path[len(prefix):]
 
 	// Split by "/jobs/" and "/logs"
 	parts := strings.Split(remainder, "/jobs/")
