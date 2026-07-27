@@ -24,13 +24,14 @@ import (
 
 	"github.com/go-logr/logr"
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
+	k8sclient "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 // SetupWatchers configures Kubernetes informers to broadcast WebSocket updates
 // This is called from main.go after the manager is created
-func SetupWatchers(ctx context.Context, informerCache cache.Cache, broadcaster *Broadcaster) error {
+func SetupWatchers(ctx context.Context, informerCache cache.Cache, broadcaster *Broadcaster, k8sClient k8sclient.Client, namespace string) error {
 	logger := log.FromContext(ctx).WithName("websocket-watcher")
 
 	// Setup ScenarioRun watcher
@@ -41,6 +42,8 @@ func SetupWatchers(ctx context.Context, informerCache cache.Cache, broadcaster *
 
 	_, err = scenarioRunInformer.AddEventHandler(&scenarioRunEventHandler{
 		broadcaster: broadcaster,
+		k8sClient:   k8sClient,
+		namespace:   namespace,
 		logger:      logger.WithValues("resource", "scenariorun"),
 	})
 	if err != nil {
@@ -68,6 +71,8 @@ func SetupWatchers(ctx context.Context, informerCache cache.Cache, broadcaster *
 // scenarioRunEventHandler handles ScenarioRun events and broadcasts to WebSocket clients
 type scenarioRunEventHandler struct {
 	broadcaster *Broadcaster
+	k8sClient   k8sclient.Client
+	namespace   string
 	logger      logr.Logger
 }
 
@@ -116,6 +121,9 @@ func (h *scenarioRunEventHandler) OnUpdate(oldObj, newObj interface{}) {
 
 	h.broadcaster.BroadcastScenarioRunUpdate(newRun)           // Lightweight (no clusterJobs)
 	h.broadcaster.BroadcastScenarioRunDetailUpdate(newRun)     // Full detail (with clusterJobs)
+
+	// Update dashboard with current active runs count
+	h.broadcastDashboardUpdate(context.Background())
 }
 
 func (h *scenarioRunEventHandler) OnDelete(obj interface{}) {
@@ -266,4 +274,43 @@ func hasGraphRunStatusChanged(old, new *krknv1alpha1.KrknGraphRun) bool {
 	return false
 }
 
+// broadcastDashboardUpdate calculates and broadcasts dashboard active-runs summary
+// Called after any ScenarioRun state change to keep dashboard real-time
+func (h *scenarioRunEventHandler) broadcastDashboardUpdate(ctx context.Context) {
+	// List all scenario runs
+	var scenarioRunList krknv1alpha1.KrknScenarioRunList
+	if err := h.k8sClient.List(ctx, &scenarioRunList, k8sclient.InNamespace(h.namespace)); err != nil {
+		h.logger.Error(err, "Failed to list scenario runs for dashboard broadcast")
+		return
+	}
 
+	// Calculate active runs summary (same logic as REST endpoint)
+	clusterRuns := make(map[string][]string)
+	activeRunsCount := 0
+
+	for _, sr := range scenarioRunList.Items {
+		hasRunningJobs := false
+
+		// Check each cluster job in this scenario run
+		for _, job := range sr.Status.ClusterJobs {
+			// Only count jobs that are currently running
+			if job.Phase == "Running" {
+				hasRunningJobs = true
+				clusterRuns[job.ClusterName] = append(clusterRuns[job.ClusterName], sr.Name)
+			}
+		}
+
+		if hasRunningJobs {
+			activeRunsCount++
+		}
+	}
+
+	// Build response (same structure as REST API)
+	summary := map[string]interface{}{
+		"totalActiveRuns": activeRunsCount,
+		"totalClusters":   len(clusterRuns),
+		"clusterRuns":     clusterRuns,
+	}
+
+	h.broadcaster.BroadcastDashboardUpdate(summary)
+}

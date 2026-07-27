@@ -319,7 +319,7 @@ func main() {
 	// Setup WebSocket v2 watchers (Informer-based real-time broadcasts)
 	// This configures Kubernetes informers to automatically broadcast updates to WebSocket clients
 	setupLog.Info("Setting up WebSocket v2 watchers")
-	if err := v2ws.SetupWatchers(context.Background(), mgr.GetCache(), apiServer.GetV2Handler().GetBroadcaster()); err != nil {
+	if err := v2ws.SetupWatchers(context.Background(), mgr.GetCache(), apiServer.GetV2Handler().GetBroadcaster(), mgr.GetClient(), krknNamespace); err != nil {
 		setupLog.Error(err, "unable to setup WebSocket watchers")
 		os.Exit(1)
 	}
