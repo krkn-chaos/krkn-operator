@@ -16,6 +16,8 @@ limitations under the License.
 Assisted-by: Claude Sonnet 4.5 (claude-sonnet-4-5@20250929)
 */
 
+// Package v2 provides WebSocket-based real-time API endpoints.
+// REST endpoints reuse v1 handlers for backward compatibility.
 package v2
 
 import (

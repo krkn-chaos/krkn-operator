@@ -16,6 +16,8 @@ limitations under the License.
 Assisted-by: Claude Sonnet 4.5 (claude-sonnet-4-5@20250929)
 */
 
+// Package websocket provides real-time WebSocket broadcasting for Kubernetes resources.
+// It implements an Informer-based architecture with Hub/Client/Broadcaster patterns.
 package websocket
 
 import (

@@ -21,8 +21,6 @@ package websocket
 import (
 	"testing"
 	"time"
-
-	"github.com/gorilla/websocket"
 )
 
 func TestNewHub(t *testing.T) {
@@ -244,11 +242,6 @@ func TestHubBroadcast(t *testing.T) {
 	case <-time.After(100 * time.Millisecond):
 		t.Error("Timeout waiting for broadcast message")
 	}
-}
-
-// Mock conn for testing
-type mockConn struct {
-	*websocket.Conn
 }
 
 // TestClientSubscribeWildcard tests subscribing to all resources of a type (wildcard)

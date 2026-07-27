@@ -38,7 +38,6 @@ type Handler struct {
 	hub            *Hub
 	k8sClient      k8sclient.Client
 	namespace      string
-	tokenGen       *auth.TokenGenerator
 	getTokenGen    func(context.Context) (*auth.TokenGenerator, error)
 	upgrader       websocket.Upgrader
 	pingInterval   time.Duration
