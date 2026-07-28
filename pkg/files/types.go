@@ -114,6 +114,10 @@ type FileInfo struct {
 	FileType string `json:"fileType,omitempty"`
 	// FilePurpose is the system-level classification (e.g., "workflow-template")
 	FilePurpose string `json:"filePurpose,omitempty"`
+	// CreatedAt is the timestamp when the file was created (ISO 8601)
+	CreatedAt string `json:"createdAt,omitempty"`
+	// UpdatedAt is the timestamp when the file was last updated (ISO 8601)
+	UpdatedAt string `json:"updatedAt,omitempty"`
 }
 
 // ListFilesResponse is the response for list files requests

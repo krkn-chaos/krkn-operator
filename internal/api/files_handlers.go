@@ -731,6 +731,8 @@ func buildFileInfo(configMap *corev1.ConfigMap) files.FileInfo {
 		Description: configMap.Annotations[files.DescriptionAnnotation],
 		FileType:    files.ExtractFileTypeFromLabels(configMap.Labels),
 		FilePurpose: files.ExtractFilePurposeFromLabels(configMap.Labels),
+		CreatedAt:   configMap.Annotations[files.CreatedAtAnnotation],
+		UpdatedAt:   configMap.Annotations[files.UpdatedAtAnnotation],
 	}
 }
 
