@@ -108,12 +108,10 @@ func (h *Handler) CreateWorkflow(w http.ResponseWriter, r *http.Request) {
 	fileResp, err := h.createFileInternal(ctx, fileReq)
 	if err != nil {
 		// Distinguish validation errors (4xx) from internal errors (5xx)
-		// Validation errors contain user-facing messages like "you can only assign"
+		// Only known validation errors should return 400
 		statusCode := http.StatusInternalServerError
 		errorCode := "internal_error"
-		if strings.Contains(err.Error(), "you can only assign") ||
-			strings.Contains(err.Error(), "group") ||
-			strings.Contains(err.Error(), "does not exist") {
+		if strings.Contains(err.Error(), "you can only assign files to your own group") {
 			statusCode = http.StatusBadRequest
 			errorCode = "bad_request"
 		}
@@ -466,12 +464,16 @@ func convertFileResponseToWorkflow(fileResp files.FileResponse) (workflows.Workf
 func convertConfigMapToWorkflowInfo(cm *corev1.ConfigMap) workflows.WorkflowInfo {
 	fileInfo := buildFileInfo(cm)
 
-	// Parse graph to count nodes
+	// Parse graph to count nodes (exclude metadata nodes starting with _)
 	nodeCount := 0
 	if content, exists := cm.Data["workflow.json"]; exists {
 		graph, err := workflows.FromFileContent(content)
 		if err == nil {
-			nodeCount = len(graph)
+			for nodeID := range graph {
+				if !strings.HasPrefix(nodeID, "_") {
+					nodeCount++
+				}
+			}
 		}
 	}
 

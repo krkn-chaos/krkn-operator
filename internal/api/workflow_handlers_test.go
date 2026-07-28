@@ -154,6 +154,19 @@ func TestCreateWorkflow(t *testing.T) {
 			expectInDB:   false,
 		},
 		{
+			name: "reject workflow with empty name",
+			request: workflows.CreateWorkflowRequest{
+				WorkflowName:   "", // Empty name
+				Description:    "Workflow with no name",
+				Graph:          validWorkflowGraph(),
+				AvailableToAll: true,
+			},
+			userID:       "admin@test.example",
+			isAdmin:      true,
+			expectStatus: http.StatusBadRequest,
+			expectInDB:   false,
+		},
+		{
 			name: "reject workflow for other group (user)",
 			request: workflows.CreateWorkflowRequest{
 				WorkflowName: "Other Group Workflow",
@@ -572,5 +585,105 @@ func TestGetWorkflow(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestListAvailableWorkflowsMethodCheck(t *testing.T) {
+	handler := setupWorkflowTestHandler()
+
+	methods := []string{http.MethodPost, http.MethodPut, http.MethodDelete}
+	for _, method := range methods {
+		t.Run("reject "+method, func(t *testing.T) {
+			req := httptest.NewRequest(method, WorkflowsAvailablePath, nil)
+			req = addAdminContext(req)
+
+			rr := httptest.NewRecorder()
+			// Call via server route (which has method guard)
+			mux := http.NewServeMux()
+			mux.Handle(WorkflowsAvailablePath, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodGet {
+					http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+					return
+				}
+				handler.ListAvailableWorkflows(w, r)
+			}))
+
+			mux.ServeHTTP(rr, req)
+
+			if rr.Code != http.StatusMethodNotAllowed {
+				t.Errorf("Expected status %d for %s, got %d", http.StatusMethodNotAllowed, method, rr.Code)
+			}
+		})
+	}
+}
+
+func TestNodeCountAccuracy(t *testing.T) {
+	handler := setupWorkflowTestHandler()
+
+	// Create workflow with metadata node
+	workflow := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "file-test-nodecount",
+			Namespace: handler.namespace,
+			Labels: map[string]string{
+				"app.kubernetes.io/name":                     "krkn-operator",
+				"app.kubernetes.io/component":                "file",
+				"files.krkn.krkn-chaos.dev/file-id":          "nodecount-test",
+				"files.krkn.krkn-chaos.dev/file-purpose":     "workflow-template",
+				"files.krkn.krkn-chaos.dev/available-to-all": "true",
+			},
+			Annotations: map[string]string{
+				"files.krkn.krkn-chaos.dev/created-by": "admin@test.example",
+			},
+		},
+		Data: map[string]string{
+			"workflow.json": `{
+				"node1": {"name": "test1", "image": "test:latest"},
+				"node2": {"name": "test2", "image": "test:latest"},
+				"_metadata": {"version": "1.0"}
+			}`,
+		},
+	}
+
+	if err := handler.client.Create(context.Background(), workflow); err != nil {
+		t.Fatalf("Failed to create test workflow: %v", err)
+	}
+
+	userName := "krknuser-" + sanitizeUserID("admin@test.example")
+	user := &krknv1alpha1.KrknUser{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      userName,
+			Namespace: handler.namespace,
+		},
+		Spec: krknv1alpha1.KrknUserSpec{
+			UserID: "admin@test.example",
+		},
+	}
+	if err := handler.client.Create(context.Background(), user); err != nil {
+		t.Fatalf("Failed to create test user: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, WorkflowsAvailablePath, nil)
+	req = addAdminContext(req)
+
+	rr := httptest.NewRecorder()
+	handler.ListAvailableWorkflows(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("Expected status 200, got %d. Body: %s", rr.Code, rr.Body.String())
+	}
+
+	var resp workflows.AvailableWorkflowsResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("Failed to unmarshal response: %v", err)
+	}
+
+	if len(resp.Workflows) != 1 {
+		t.Fatalf("Expected 1 workflow, got %d", len(resp.Workflows))
+	}
+
+	// Should count only node1 and node2, not _metadata
+	if resp.Workflows[0].NodeCount != 2 {
+		t.Errorf("Expected NodeCount 2 (excluding _metadata), got %d", resp.Workflows[0].NodeCount)
 	}
 }

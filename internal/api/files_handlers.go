@@ -719,28 +719,8 @@ func (h *Handler) isFileOwnerOrAdmin(ctx context.Context, configMap *corev1.Conf
 		return false, nil
 	}
 
-	// For public files (available-to-all), only creator or admin can modify
-	if configMap.Labels[files.AvailableToAllLabel] == "true" {
-		return false, nil // Already checked creator above
-	}
-
-	// For group files, check if user belongs to the file's group
-	userGroups, err := groupauth.GetUserGroups(ctx, h.client, claims.UserID, h.namespace)
-	if err != nil {
-		return false, fmt.Errorf("failed to get user groups: %w", err)
-	}
-
-	userGroupNames := make(map[string]bool)
-	for _, ug := range userGroups {
-		userGroupNames[ug.Name] = true
-	}
-
-	for _, sg := range configMapGroups {
-		if userGroupNames[sg] {
-			return true, nil // User is in the file's group
-		}
-	}
-
+	// For all files (public and group), only creator or admin can modify
+	// Group membership grants READ access only, not write/delete
 	return false, nil
 }
 
