@@ -65,6 +65,10 @@ type Hub struct {
 }
 
 // BroadcastMessage contains a message and targeting information
+// AuthorizationCheckFunc is called to verify if a client can receive a broadcast message.
+// Returns true if client is authorized to receive the message.
+type AuthorizationCheckFunc func(userID string, isAdmin bool, resourceType string, resourceID string) bool
+
 type BroadcastMessage struct {
 	// Resource type: "run", "graphrun", "dashboard"
 	resourceType string
@@ -74,6 +78,11 @@ type BroadcastMessage struct {
 
 	// Message payload (JSON-encoded)
 	message []byte
+
+	// Optional authorization check function
+	// If nil, only subscription check is performed (e.g., for dashboard)
+	// If non-nil, called to verify user has permission to receive this message
+	authzCheck AuthorizationCheckFunc
 }
 
 // NewHub creates a new Hub instance
@@ -139,12 +148,18 @@ func (h *Hub) shouldSendToClient(client *Client, msg *BroadcastMessage) bool {
 	}
 
 	// Check for wildcard subscription (subscribed to ALL resources of this type)
-	if resourceSubs["*"] {
-		return true
+	subscribedToResource := resourceSubs["*"] || resourceSubs[msg.resourceID]
+	if !subscribedToResource {
+		return false
 	}
 
-	// Check if client is subscribed to this specific resource ID
-	return resourceSubs[msg.resourceID]
+	// AUTHORIZATION: If authz check is provided, verify user has permission
+	// Dashboard broadcasts don't have authz check (global to all authenticated users)
+	if msg.authzCheck != nil {
+		return msg.authzCheck(client.userID, client.isAdmin, msg.resourceType, msg.resourceID)
+	}
+
+	return true
 }
 
 // Subscribe adds a resource subscription for a client
@@ -183,10 +198,23 @@ func (c *Client) Unsubscribe(resourceType string, resourceIDs []string) {
 }
 
 // Broadcast sends a message to all subscribed clients
+// Does NOT enforce authorization - use BroadcastWithAuthz for resources that require authz checks
 func (h *Hub) Broadcast(resourceType, resourceID string, message []byte) {
 	h.broadcast <- &BroadcastMessage{
 		resourceType: resourceType,
 		resourceID:   resourceID,
 		message:      message,
+		authzCheck:   nil, // No authorization check
+	}
+}
+
+// BroadcastWithAuthz sends a message to all subscribed AND authorized clients
+// The authzCheck function is called for each client to verify permission
+func (h *Hub) BroadcastWithAuthz(resourceType, resourceID string, message []byte, authzCheck AuthorizationCheckFunc) {
+	h.broadcast <- &BroadcastMessage{
+		resourceType: resourceType,
+		resourceID:   resourceID,
+		message:      message,
+		authzCheck:   authzCheck,
 	}
 }

@@ -33,11 +33,26 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
+// AuthorizationChecker provides group-based authorization for filtering resources.
+// Implemented by internal/api.Handler.
+type AuthorizationChecker interface {
+	FilterScenarioRunsByGroupPermission(
+		runs []krknv1alpha1.KrknScenarioRun,
+		ctx context.Context,
+	) []krknv1alpha1.KrknScenarioRun
+
+	FilterGraphRunsByGroupPermission(
+		runs []krknv1alpha1.KrknGraphRun,
+		ctx context.Context,
+	) []krknv1alpha1.KrknGraphRun
+}
+
 // Handler contains dependencies for WebSocket handlers
 type Handler struct {
 	hub            *Hub
 	k8sClient      k8sclient.Client
 	namespace      string
+	authz          AuthorizationChecker // Group-based authorization
 	getTokenGen    func(context.Context) (*auth.TokenGenerator, error)
 	upgrader       websocket.Upgrader
 	pingInterval   time.Duration
@@ -47,11 +62,12 @@ type Handler struct {
 }
 
 // NewHandler creates a new WebSocket handler
-func NewHandler(hub *Hub, k8sClient k8sclient.Client, namespace string, getTokenGen func(context.Context) (*auth.TokenGenerator, error)) *Handler {
+func NewHandler(hub *Hub, k8sClient k8sclient.Client, namespace string, authz AuthorizationChecker, getTokenGen func(context.Context) (*auth.TokenGenerator, error)) *Handler {
 	return &Handler{
 		hub:         hub,
 		k8sClient:   k8sClient,
 		namespace:   namespace,
+		authz:       authz,
 		getTokenGen: getTokenGen,
 		upgrader: websocket.Upgrader{
 			ReadBufferSize:  1024,
@@ -358,10 +374,14 @@ func (h *Handler) sendScenarioRunsSnapshot(ctx context.Context, client *Client, 
 		return
 	}
 
+	// AUTHORIZATION: Filter runs based on user's group permissions
+	// Admins see all runs, regular users only see runs they have 'view' permission for
+	filteredRuns := h.authz.FilterScenarioRunsByGroupPermission(runs.Items, ctx)
+
 	// If specific IDs requested, filter to those
-	// If empty (wildcard), send all
-	for i := range runs.Items {
-		run := &runs.Items[i]
+	// If empty (wildcard), send all authorized runs
+	for i := range filteredRuns {
+		run := &filteredRuns[i]
 
 		// Skip ScenarioRuns that are part of a GraphRun (client subscribes to GraphRun instead)
 		if graphRunName := run.Labels["krkn.dev/graph-run"]; graphRunName != "" {
@@ -418,9 +438,12 @@ func (h *Handler) sendScenarioRunDetailSnapshot(ctx context.Context, client *Cli
 		return
 	}
 
+	// AUTHORIZATION: Filter runs based on user's group permissions
+	filteredRuns := h.authz.FilterScenarioRunsByGroupPermission(runs.Items, ctx)
+
 	// For run-detail, specific IDs are expected (not wildcard)
-	for i := range runs.Items {
-		run := &runs.Items[i]
+	for i := range filteredRuns {
+		run := &filteredRuns[i]
 
 		// Skip ScenarioRuns that are part of a GraphRun
 		if graphRunName := run.Labels["krkn.dev/graph-run"]; graphRunName != "" {
@@ -474,10 +497,14 @@ func (h *Handler) sendGraphRunsSnapshot(ctx context.Context, client *Client, res
 		return
 	}
 
+	// AUTHORIZATION: Filter runs based on user's group permissions
+	// Admins see all runs, regular users only see runs they have 'view' permission for
+	filteredRuns := h.authz.FilterGraphRunsByGroupPermission(runs.Items, ctx)
+
 	// If specific IDs requested, filter to those
-	// If empty (wildcard), send all
-	for i := range runs.Items {
-		run := &runs.Items[i]
+	// If empty (wildcard), send all authorized runs
+	for i := range filteredRuns {
+		run := &filteredRuns[i]
 
 		// Check if we should send this run
 		shouldSend := len(resourceIDs) == 0 // wildcard

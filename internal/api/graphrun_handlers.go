@@ -68,7 +68,7 @@ func (h *Handler) ListGraphRuns(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Filter by group permissions (admins see all, users see runs with group view permission)
-	graphRunList.Items = h.filterGraphRunsByGroupPermission(graphRunList.Items, ctx)
+	graphRunList.Items = h.FilterGraphRunsByGroupPermission(graphRunList.Items, ctx)
 
 	// Filter by owner if specified
 	var filteredRuns []krknv1alpha1.KrknGraphRun

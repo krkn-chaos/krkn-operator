@@ -129,7 +129,7 @@ func (h *scenarioRunEventHandler) OnUpdate(oldObj, newObj interface{}) {
 func (h *scenarioRunEventHandler) OnDelete(obj interface{}) {
 	run := obj.(*krknv1alpha1.KrknScenarioRun)
 	h.logger.V(1).Info("ScenarioRun deleted", "name", run.Name)
-	h.broadcaster.BroadcastScenarioRunDeleted(run.Name)
+	h.broadcaster.BroadcastScenarioRunDeleted(run)
 }
 
 // graphRunEventHandler handles GraphRun events and broadcasts to WebSocket clients
@@ -168,7 +168,7 @@ func (h *graphRunEventHandler) OnUpdate(oldObj, newObj interface{}) {
 func (h *graphRunEventHandler) OnDelete(obj interface{}) {
 	run := obj.(*krknv1alpha1.KrknGraphRun)
 	h.logger.V(1).Info("GraphRun deleted", "name", run.Name)
-	h.broadcaster.BroadcastGraphRunDeleted(run.Name)
+	h.broadcaster.BroadcastGraphRunDeleted(run)
 }
 
 // hasScenarioRunStatusChanged checks if ScenarioRun status has meaningful changes

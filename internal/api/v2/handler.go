@@ -39,14 +39,15 @@ type Handler struct {
 }
 
 // NewHandler creates a new v2 Handler
-func NewHandler(k8sClient client.Client, namespace string, getTokenGen func(context.Context) (*auth.TokenGenerator, error)) *Handler {
+// authz provides group-based authorization for filtering WebSocket broadcasts
+func NewHandler(k8sClient client.Client, namespace string, authz v2ws.AuthorizationChecker, getTokenGen func(context.Context) (*auth.TokenGenerator, error)) *Handler {
 	// Create WebSocket hub and start it
 	hub := v2ws.NewHub()
 	go hub.Run()
 
 	return &Handler{
-		WsHandler:   v2ws.NewHandler(hub, k8sClient, namespace, getTokenGen),
-		broadcaster: v2ws.NewBroadcaster(hub),
+		WsHandler:   v2ws.NewHandler(hub, k8sClient, namespace, authz, getTokenGen),
+		broadcaster: v2ws.NewBroadcaster(hub, authz, k8sClient, namespace),
 	}
 }
 

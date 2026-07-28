@@ -234,7 +234,7 @@ func (h *Handler) checkScenarioRunCancelAccess(
 	return true, nil // Has permission on all jobs
 }
 
-// filterScenarioRunsByGroupPermission filters scenario runs based on group permissions.
+// FilterScenarioRunsByGroupPermission filters scenario runs based on group permissions.
 //
 // Filtering rules:
 // - If no claims in context (e.g., tests), return all runs
@@ -246,7 +246,7 @@ func (h *Handler) checkScenarioRunCancelAccess(
 //   - ctx: The request context containing user claims
 //
 // Returns a filtered list of scenario runs the user is authorized to see
-func (h *Handler) filterScenarioRunsByGroupPermission(
+func (h *Handler) FilterScenarioRunsByGroupPermission(
 	runs []krknv1alpha1.KrknScenarioRun,
 	ctx context.Context,
 ) []krknv1alpha1.KrknScenarioRun {
@@ -443,7 +443,7 @@ func (h *Handler) checkGraphRunGroupAccess(
 	return false, nil // No permission on any target cluster
 }
 
-// filterGraphRunsByGroupPermission filters graph runs based on group permissions.
+// FilterGraphRunsByGroupPermission filters graph runs based on group permissions.
 //
 // Filtering rules:
 // - If no claims in context (e.g., tests), return all runs
@@ -455,7 +455,7 @@ func (h *Handler) checkGraphRunGroupAccess(
 //   - ctx: The request context containing user claims
 //
 // Returns a filtered list of graph runs the user is authorized to see
-func (h *Handler) filterGraphRunsByGroupPermission(
+func (h *Handler) FilterGraphRunsByGroupPermission(
 	runs []krknv1alpha1.KrknGraphRun,
 	ctx context.Context,
 ) []krknv1alpha1.KrknGraphRun {

@@ -1998,7 +1998,7 @@ func (h *Handler) ListScenarioRuns(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Filter by group permissions (admins see all, users see runs with group view permission)
-	scenarioRunList.Items = h.filterScenarioRunsByGroupPermission(scenarioRunList.Items, ctx)
+	scenarioRunList.Items = h.FilterScenarioRunsByGroupPermission(scenarioRunList.Items, ctx)
 
 	// Convert to response format with optional filtering
 	runs := make([]ScenarioRunListItem, 0)
