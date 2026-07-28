@@ -1054,6 +1054,126 @@ const docTemplate = `{
                     }
                 }
             }
+        },
+        "/v2/ws/dashboard/active-runs": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Multiplexed WebSocket endpoint for real-time resource updates. Supports scenario runs, graph runs, and dashboard.\n\n**Authentication:** JWT token via WebSocket subprotocol header:\n- JavaScript: ` + "`" + `new WebSocket(url, 'access_token.' + jwtToken)` + "`" + `\n- Header: ` + "`" + `Sec-WebSocket-Protocol: access_token.\u003cjwt_token\u003e` + "`" + `\n\n**Client → Server Messages:**\n` + "`" + `` + "`" + `` + "`" + `json\n{\n\"action\": \"subscribe\",\n\"resource\": \"run|graphrun|dashboard\",\n\"ids\": [\"run-abc123\", \"run-def456\"]\n}\n` + "`" + `` + "`" + `` + "`" + `\n\n**Server → Client Messages:**\n` + "`" + `` + "`" + `` + "`" + `json\n{\n\"resource\": \"run|graphrun|dashboard\",\n\"id\": \"run-abc123\",\n\"event\": \"updated|deleted\",\n\"data\": { ... }\n}\n` + "`" + `` + "`" + `` + "`" + `\n\n**Endpoints:**\n- ` + "`" + `/api/v2/ws/runs` + "`" + ` - Subscribe to scenario run updates\n- ` + "`" + `/api/v2/ws/graphruns` + "`" + ` - Subscribe to graph run updates\n- ` + "`" + `/api/v2/ws/dashboard/active-runs` + "`" + ` - Subscribe to dashboard updates",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "websocket"
+                ],
+                "summary": "WebSocket real-time updates",
+                "responses": {
+                    "101": {
+                        "description": "Switching Protocols",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized - missing or invalid JWT token",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_v2_websocket.ErrorMessage"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_v2_websocket.ErrorMessage"
+                        }
+                    }
+                }
+            }
+        },
+        "/v2/ws/graphruns": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Multiplexed WebSocket endpoint for real-time resource updates. Supports scenario runs, graph runs, and dashboard.\n\n**Authentication:** JWT token via WebSocket subprotocol header:\n- JavaScript: ` + "`" + `new WebSocket(url, 'access_token.' + jwtToken)` + "`" + `\n- Header: ` + "`" + `Sec-WebSocket-Protocol: access_token.\u003cjwt_token\u003e` + "`" + `\n\n**Client → Server Messages:**\n` + "`" + `` + "`" + `` + "`" + `json\n{\n\"action\": \"subscribe\",\n\"resource\": \"run|graphrun|dashboard\",\n\"ids\": [\"run-abc123\", \"run-def456\"]\n}\n` + "`" + `` + "`" + `` + "`" + `\n\n**Server → Client Messages:**\n` + "`" + `` + "`" + `` + "`" + `json\n{\n\"resource\": \"run|graphrun|dashboard\",\n\"id\": \"run-abc123\",\n\"event\": \"updated|deleted\",\n\"data\": { ... }\n}\n` + "`" + `` + "`" + `` + "`" + `\n\n**Endpoints:**\n- ` + "`" + `/api/v2/ws/runs` + "`" + ` - Subscribe to scenario run updates\n- ` + "`" + `/api/v2/ws/graphruns` + "`" + ` - Subscribe to graph run updates\n- ` + "`" + `/api/v2/ws/dashboard/active-runs` + "`" + ` - Subscribe to dashboard updates",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "websocket"
+                ],
+                "summary": "WebSocket real-time updates",
+                "responses": {
+                    "101": {
+                        "description": "Switching Protocols",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized - missing or invalid JWT token",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_v2_websocket.ErrorMessage"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_v2_websocket.ErrorMessage"
+                        }
+                    }
+                }
+            }
+        },
+        "/v2/ws/runs": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Multiplexed WebSocket endpoint for real-time resource updates. Supports scenario runs, graph runs, and dashboard.\n\n**Authentication:** JWT token via WebSocket subprotocol header:\n- JavaScript: ` + "`" + `new WebSocket(url, 'access_token.' + jwtToken)` + "`" + `\n- Header: ` + "`" + `Sec-WebSocket-Protocol: access_token.\u003cjwt_token\u003e` + "`" + `\n\n**Client → Server Messages:**\n` + "`" + `` + "`" + `` + "`" + `json\n{\n\"action\": \"subscribe\",\n\"resource\": \"run|graphrun|dashboard\",\n\"ids\": [\"run-abc123\", \"run-def456\"]\n}\n` + "`" + `` + "`" + `` + "`" + `\n\n**Server → Client Messages:**\n` + "`" + `` + "`" + `` + "`" + `json\n{\n\"resource\": \"run|graphrun|dashboard\",\n\"id\": \"run-abc123\",\n\"event\": \"updated|deleted\",\n\"data\": { ... }\n}\n` + "`" + `` + "`" + `` + "`" + `\n\n**Endpoints:**\n- ` + "`" + `/api/v2/ws/runs` + "`" + ` - Subscribe to scenario run updates\n- ` + "`" + `/api/v2/ws/graphruns` + "`" + ` - Subscribe to graph run updates\n- ` + "`" + `/api/v2/ws/dashboard/active-runs` + "`" + ` - Subscribe to dashboard updates",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "websocket"
+                ],
+                "summary": "WebSocket real-time updates",
+                "responses": {
+                    "101": {
+                        "description": "Switching Protocols",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized - missing or invalid JWT token",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_v2_websocket.ErrorMessage"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_v2_websocket.ErrorMessage"
+                        }
+                    }
+                }
+            }
         }
     },
     "definitions": {
@@ -1502,11 +1622,22 @@ const docTemplate = `{
                     "type": "string"
                 }
             }
+        },
+        "internal_api_v2_websocket.ErrorMessage": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "type": "string"
+                },
+                "message": {
+                    "type": "string"
+                }
+            }
         }
     },
     "securityDefinitions": {
         "BearerAuth": {
-            "description": "JWT token obtained from /api/v1/auth/login. Format: \"Bearer {token}\"",
+            "description": "JWT token obtained from /api/v1/auth/login or /api/v2/auth/login. Format: \"Bearer {token}\"",
             "type": "apiKey",
             "name": "Authorization",
             "in": "header"
@@ -1516,12 +1647,12 @@ const docTemplate = `{
 
 // SwaggerInfo holds exported Swagger Info so clients can modify it
 var SwaggerInfo = &swag.Spec{
-	Version:          "1.0",
+	Version:          "2.0",
 	Host:             "localhost:8080",
 	BasePath:         "/api/v1",
 	Schemes:          []string{},
 	Title:            "Krkn Operator API",
-	Description:      "REST API for Krkn chaos engineering operator. Provides endpoints for cluster management, chaos scenario execution, and GraphRun orchestration.",
+	Description:      "REST and WebSocket API for Krkn chaos engineering operator.\n\n**API Versions:**\n- **v1** - REST API with polling (deprecated but maintained)\n- **v2** - REST API (same as v1) + WebSocket real-time updates\n\n**WebSocket Authentication (v2):**\nWebSocket endpoints use JWT via subprotocol header:\n- JavaScript: `new WebSocket(url, 'access_token.' + jwtToken)`\n- Header: `Sec-WebSocket-Protocol: access_token.<jwt_token>`\n\n**Migration Path:**\n1. v1 REST → v2 REST (no changes, just update base path)\n2. v2 REST → v2 WebSocket (replace polling with multiplexed WebSocket)",
 	InfoInstanceName: "swagger",
 	SwaggerTemplate:  docTemplate,
 	LeftDelim:        "{{",

@@ -50,6 +50,32 @@ rules:
   - list
   - watch
 - apiGroups:
+  - proxy.open-cluster-management.io
+  resources:
+  - managedproxyconfigurations
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - work.open-cluster-management.io
+  resources:
+  - manifestworks
+  verbs:
+  - create
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - services
+  verbs:
+  - get
+  - list
+- apiGroups:
   - krkn.krkn-chaos.dev
   resources:
   - krknoperatortargetproviderconfigs

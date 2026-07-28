@@ -68,7 +68,7 @@ func (h *Handler) ListGraphRuns(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Filter by group permissions (admins see all, users see runs with group view permission)
-	graphRunList.Items = h.filterGraphRunsByGroupPermission(graphRunList.Items, ctx)
+	graphRunList.Items = h.FilterGraphRunsByGroupPermission(graphRunList.Items, ctx)
 
 	// Filter by owner if specified
 	var filteredRuns []krknv1alpha1.KrknGraphRun
@@ -641,7 +641,11 @@ func convertNodeStatuses(nodeStatuses []krknv1alpha1.NodeStatus) []NodeStatusRes
 func (h *Handler) GraphRunsRouter(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path
 
-	// Root endpoint: /api/v1/graphruns
+	// Normalize v2 paths to v1 for backward-compatible routing
+	// v2 REST endpoints reuse v1 handler logic (same behavior, different path prefix)
+	path = strings.Replace(path, "/api/v2/", "/api/v1/", 1)
+
+	// Root endpoint: /api/v1/graphruns (or /api/v2/graphruns normalized)
 	if path == GraphRunsPath {
 		switch r.Method {
 		case http.MethodGet:

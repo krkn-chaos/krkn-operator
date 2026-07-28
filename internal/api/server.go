@@ -20,8 +20,21 @@ Assisted-by: Claude Sonnet 4.5 (claude-sonnet-4-5@20250929)
 // It includes endpoints for authentication, target management, scenario execution, and user management.
 //
 // @title Krkn Operator API
-// @version 1.0
-// @description REST API for Krkn chaos engineering operator. Provides endpoints for cluster management, chaos scenario execution, and GraphRun orchestration.
+// @version 2.0
+// @description REST and WebSocket API for Krkn chaos engineering operator.
+// @description
+// @description **API Versions:**
+// @description - **v1** - REST API with polling (deprecated but maintained)
+// @description - **v2** - REST API (same as v1) + WebSocket real-time updates
+// @description
+// @description **WebSocket Authentication (v2):**
+// @description WebSocket endpoints use JWT via subprotocol header:
+// @description - JavaScript: `new WebSocket(url, 'access_token.' + jwtToken)`
+// @description - Header: `Sec-WebSocket-Protocol: access_token.<jwt_token>`
+// @description
+// @description **Migration Path:**
+// @description 1. v1 REST → v2 REST (no changes, just update base path)
+// @description 2. v2 REST → v2 WebSocket (replace polling with multiplexed WebSocket)
 // @termsOfService https://krkn-chaos.dev/terms
 //
 // @contact.name Krkn Team
@@ -37,7 +50,7 @@ Assisted-by: Claude Sonnet 4.5 (claude-sonnet-4-5@20250929)
 // @securityDefinitions.apikey BearerAuth
 // @in header
 // @name Authorization
-// @description JWT token obtained from /api/v1/auth/login. Format: "Bearer {token}"
+// @description JWT token obtained from /api/v1/auth/login or /api/v2/auth/login. Format: "Bearer {token}"
 package api
 
 import (
@@ -55,6 +68,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	_ "github.com/krkn-chaos/krkn-operator/internal/api/docs" // Import generated docs
+	v2 "github.com/krkn-chaos/krkn-operator/internal/api/v2"
 	"github.com/krkn-chaos/krkn-operator/pkg/auth"
 )
 
@@ -62,6 +76,7 @@ import (
 type Server struct {
 	server         *http.Server
 	handler        *Handler
+	v2Handler      *v2.Handler
 	authMiddleware *auth.Middleware
 	secretManager  *auth.SecretManager
 }
@@ -94,6 +109,12 @@ func NewServer(port int, client client.Client, clientset kubernetes.Interface, n
 		return tokenGen
 	}
 	authMw := auth.NewLazyMiddleware(getTokenGen)
+
+	// Create v2 handler (WebSocket support only, REST reuses v1 handlers)
+	getTokenGenCtx := func(ctx context.Context) (*auth.TokenGenerator, error) {
+		return secretManager.GetTokenGenerator()
+	}
+	v2Handler := v2.NewHandler(client, namespace, handler, getTokenGenCtx) // handler implements AuthorizationChecker
 
 	mux := http.NewServeMux()
 
@@ -179,6 +200,44 @@ func NewServer(port int, client client.Client, clientset kubernetes.Interface, n
 	// Swagger UI - public endpoint for API documentation
 	mux.Handle("/api/swagger/", httpSwagger.WrapHandler)
 
+	// ==================== API v2 Endpoints ====================
+	// v2 REST endpoints reuse v1 handlers (backward compatible)
+	// v2 WebSocket endpoints provide real-time multiplexed updates
+
+	// v2 REST endpoints (same as v1, for gradual migration)
+	mux.HandleFunc(v2.ScenariosRunPath+"/", func(w http.ResponseWriter, r *http.Request) {
+		// Check if this is a WebSocket logs request (same as v1)
+		if strings.Contains(r.URL.Path, "/jobs/") && strings.HasSuffix(r.URL.Path, "/logs") {
+			// WebSocket endpoint - auth handled internally via subprotocol
+			handler.GetScenarioRunLogs(w, r)
+			return
+		}
+		// All other endpoints require HTTP JWT auth (reuse v1 router)
+		authMw.RequireAuth(http.HandlerFunc(handler.ScenariosRunRouter)).ServeHTTP(w, r)
+	})
+	mux.Handle(v2.ScenariosRunPath, authMw.RequireAuth(http.HandlerFunc(handler.ScenariosRunRouter)))
+	mux.Handle(v2.GraphRunsPath, authMw.RequireAuth(http.HandlerFunc(handler.GraphRunsRouter)))
+	mux.Handle(v2.GraphRunsPath+"/", authMw.RequireAuth(http.HandlerFunc(handler.GraphRunsRouter)))
+	mux.Handle(v2.DashboardActiveRunsPath, authMw.RequireAuth(http.HandlerFunc(handler.GetActiveRunsOverview)))
+
+	// v2 WebSocket endpoints (NEW - real-time multiplexed updates)
+	// WebSocket authentication is handled internally via Sec-WebSocket-Protocol header
+	mux.HandleFunc(v2.WebSocketRunsPath, v2Handler.WsHandler.HandleWebSocket)
+	mux.HandleFunc(v2.WebSocketGraphRunsPath, v2Handler.WsHandler.HandleWebSocket)
+	mux.HandleFunc(v2.WebSocketDashboardActiveRunsPath, v2Handler.WsHandler.HandleWebSocket)
+
+	// v2 WebSocket job logs streaming (reuse v1 handler, just different path)
+	// Path pattern: /api/v2/ws/scenarios/run/{scenarioRunName}/jobs/{jobID}/logs
+	mux.HandleFunc(v2.WebSocketJobLogsPath, func(w http.ResponseWriter, r *http.Request) {
+		// Check if this is a logs request (ends with /logs)
+		if strings.Contains(r.URL.Path, "/jobs/") && strings.HasSuffix(r.URL.Path, "/logs") {
+			// Reuse v1 handler (it handles path parsing for both v1 and v2)
+			handler.GetScenarioRunLogs(w, r)
+			return
+		}
+		http.NotFound(w, r)
+	})
+
 	// Wrap mux with logging middleware
 	server := &http.Server{
 		Addr:              fmt.Sprintf(":%d", port),
@@ -192,6 +251,7 @@ func NewServer(port int, client client.Client, clientset kubernetes.Interface, n
 	return &Server{
 		server:         server,
 		handler:        handler,
+		v2Handler:      v2Handler,
 		authMiddleware: authMw,
 		secretManager:  secretManager,
 	}
@@ -302,4 +362,10 @@ func (rw *responseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 // handles any potential race conditions when multiple replicas modify the same resources.
 func (s *Server) NeedLeaderElection() bool {
 	return false
+}
+
+// GetV2Handler returns the v2 handler for access to WebSocket broadcaster
+// Controllers use this to send real-time updates to WebSocket clients
+func (s *Server) GetV2Handler() *v2.Handler {
+	return s.v2Handler
 }

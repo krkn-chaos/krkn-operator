@@ -48,6 +48,7 @@ import (
 
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
 	"github.com/krkn-chaos/krkn-operator/internal/api"
+	v2ws "github.com/krkn-chaos/krkn-operator/internal/api/v2/websocket"
 	"github.com/krkn-chaos/krkn-operator/internal/controller"
 	"github.com/krkn-chaos/krkn-operator/pkg/auth"
 	"github.com/krkn-chaos/krkn-operator/pkg/configmap"
@@ -314,6 +315,15 @@ func main() {
 		setupLog.Error(err, "unable to add REST API server to manager")
 		os.Exit(1)
 	}
+
+	// Setup WebSocket v2 watchers (Informer-based real-time broadcasts)
+	// This configures Kubernetes informers to automatically broadcast updates to WebSocket clients
+	setupLog.Info("Setting up WebSocket v2 watchers")
+	if err := v2ws.SetupWatchers(context.Background(), mgr.GetCache(), apiServer.GetV2Handler().GetBroadcaster(), mgr.GetClient(), krknNamespace); err != nil {
+		setupLog.Error(err, "unable to setup WebSocket watchers")
+		os.Exit(1)
+	}
+	setupLog.Info("WebSocket v2 watchers configured successfully")
 
 	// Setup and add provider registration
 	providerReg := provider.NewProviderRegistration(mgr.GetClient(), krknNamespace)

@@ -248,7 +248,7 @@ func TestClusterSegregationMultipleUsers(t *testing.T) {
 			}
 
 			ctx := context.WithValue(context.Background(), auth.UserClaimsKey, tt.claims)
-			filtered := handler.filterScenarioRunsByGroupPermission(runs, ctx)
+			filtered := handler.FilterScenarioRunsByGroupPermission(runs, ctx)
 
 			// Check count
 			if len(filtered) != tt.expectedCount {
@@ -558,7 +558,7 @@ func TestClusterSegregationWithNoGroups(t *testing.T) {
 	}
 
 	ctx := context.WithValue(context.Background(), auth.UserClaimsKey, userClaims)
-	filtered := handler.filterScenarioRunsByGroupPermission(runs, ctx)
+	filtered := handler.FilterScenarioRunsByGroupPermission(runs, ctx)
 
 	if len(filtered) != 0 {
 		t.Errorf("User with no groups should see 0 runs, got %d", len(filtered))
@@ -651,7 +651,7 @@ func TestClusterSegregationLegacyRunsWithoutJobs(t *testing.T) {
 
 	// Test admin - should see both runs
 	adminCtx := context.WithValue(context.Background(), auth.UserClaimsKey, adminClaims)
-	adminFiltered := handler.filterScenarioRunsByGroupPermission(runs, adminCtx)
+	adminFiltered := handler.FilterScenarioRunsByGroupPermission(runs, adminCtx)
 
 	if len(adminFiltered) != 2 {
 		t.Errorf("Admin should see 2 runs (including legacy), got %d", len(adminFiltered))
@@ -659,7 +659,7 @@ func TestClusterSegregationLegacyRunsWithoutJobs(t *testing.T) {
 
 	// Test regular user - should see only new run with jobs
 	userCtx := context.WithValue(context.Background(), auth.UserClaimsKey, userClaims)
-	userFiltered := handler.filterScenarioRunsByGroupPermission(runs, userCtx)
+	userFiltered := handler.FilterScenarioRunsByGroupPermission(runs, userCtx)
 
 	if len(userFiltered) != 1 {
 		t.Errorf("User should see 1 run (excluding legacy), got %d", len(userFiltered))
@@ -823,7 +823,7 @@ func TestEndToEndClusterSegregation(t *testing.T) {
 			t.Fatalf("Failed to list runs: %v", err)
 		}
 
-		filtered := handler.filterScenarioRunsByGroupPermission(allRuns.Items, ctx)
+		filtered := handler.FilterScenarioRunsByGroupPermission(allRuns.Items, ctx)
 
 		if len(filtered) != 1 {
 			t.Errorf("User A should see 1 run, got %d", len(filtered))
@@ -846,7 +846,7 @@ func TestEndToEndClusterSegregation(t *testing.T) {
 			t.Fatalf("Failed to list runs: %v", err)
 		}
 
-		filtered := handler.filterScenarioRunsByGroupPermission(allRuns.Items, ctx)
+		filtered := handler.FilterScenarioRunsByGroupPermission(allRuns.Items, ctx)
 
 		if len(filtered) != 1 {
 			t.Errorf("User B should see 1 run, got %d", len(filtered))

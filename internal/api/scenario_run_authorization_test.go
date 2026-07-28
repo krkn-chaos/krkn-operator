@@ -376,7 +376,7 @@ func TestFilterScenarioRunsByGroupPermission(t *testing.T) {
 			}
 
 			ctx := context.WithValue(context.Background(), auth.UserClaimsKey, tt.claims)
-			filtered := handler.filterScenarioRunsByGroupPermission(runs, ctx)
+			filtered := handler.FilterScenarioRunsByGroupPermission(runs, ctx)
 
 			if len(filtered) != tt.expectedCount {
 				t.Errorf("Expected %d runs, got %d", tt.expectedCount, len(filtered))
