@@ -32,7 +32,7 @@ func TestBroadcastScenarioRunUpdate(t *testing.T) {
 	go hub.Run()
 	defer close(hub.register)
 
-	broadcaster := NewBroadcaster(hub)
+	broadcaster := NewBroadcaster(hub, &mockAuthzChecker{}, nil, "default")
 
 	// Create a subscribed client
 	client := &Client{
@@ -93,7 +93,7 @@ func TestBroadcastGraphRunUpdate(t *testing.T) {
 	go hub.Run()
 	defer close(hub.register)
 
-	broadcaster := NewBroadcaster(hub)
+	broadcaster := NewBroadcaster(hub, &mockAuthzChecker{}, nil, "default")
 
 	// Create a subscribed client
 	client := &Client{
@@ -157,7 +157,7 @@ func TestBroadcastDashboardUpdate(t *testing.T) {
 	go hub.Run()
 	defer close(hub.register)
 
-	broadcaster := NewBroadcaster(hub)
+	broadcaster := NewBroadcaster(hub, &mockAuthzChecker{}, nil, "default")
 
 	// Create a subscribed client (subscribed to any dashboard updates)
 	client := &Client{
@@ -211,7 +211,7 @@ func TestBroadcastScenarioRunDeleted(t *testing.T) {
 	go hub.Run()
 	defer close(hub.register)
 
-	broadcaster := NewBroadcaster(hub)
+	broadcaster := NewBroadcaster(hub, &mockAuthzChecker{}, nil, "default")
 
 	// Create a subscribed client
 	client := &Client{
@@ -226,8 +226,15 @@ func TestBroadcastScenarioRunDeleted(t *testing.T) {
 	hub.register <- client
 	time.Sleep(10 * time.Millisecond)
 
+	// Create test scenario run for deletion
+	scenarioRun := &krknv1alpha1.KrknScenarioRun{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "scenario-run-1",
+		},
+	}
+
 	// Broadcast deletion
-	broadcaster.BroadcastScenarioRunDeleted("scenario-run-1")
+	broadcaster.BroadcastScenarioRunDeleted(scenarioRun)
 
 	// Verify client received message
 	select {
@@ -263,7 +270,7 @@ func TestBroadcastGraphRunDeleted(t *testing.T) {
 	go hub.Run()
 	defer close(hub.register)
 
-	broadcaster := NewBroadcaster(hub)
+	broadcaster := NewBroadcaster(hub, &mockAuthzChecker{}, nil, "default")
 
 	// Create a subscribed client
 	client := &Client{
@@ -278,8 +285,15 @@ func TestBroadcastGraphRunDeleted(t *testing.T) {
 	hub.register <- client
 	time.Sleep(10 * time.Millisecond)
 
+	// Create test graph run for deletion
+	graphRun := &krknv1alpha1.KrknGraphRun{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "graphrun-1",
+		},
+	}
+
 	// Broadcast deletion
-	broadcaster.BroadcastGraphRunDeleted("graphrun-1")
+	broadcaster.BroadcastGraphRunDeleted(graphRun)
 
 	// Verify client received message
 	select {
@@ -315,7 +329,7 @@ func TestBroadcastOnlyToSubscribedClients(t *testing.T) {
 	go hub.Run()
 	defer close(hub.register)
 
-	broadcaster := NewBroadcaster(hub)
+	broadcaster := NewBroadcaster(hub, &mockAuthzChecker{}, nil, "default")
 
 	// Create two clients: one subscribed, one not
 	subscribedClient := &Client{

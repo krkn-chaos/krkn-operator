@@ -64,10 +64,11 @@ type Hub struct {
 	mu sync.RWMutex
 }
 
-// BroadcastMessage contains a message and targeting information
 // AuthorizationCheckFunc is called to verify if a client can receive a broadcast message.
 // Returns true if client is authorized to receive the message.
 type AuthorizationCheckFunc func(userID string, isAdmin bool, resourceType string, resourceID string) bool
+
+// BroadcastMessage contains a message and targeting information
 
 type BroadcastMessage struct {
 	// Resource type: "run", "graphrun", "dashboard"
