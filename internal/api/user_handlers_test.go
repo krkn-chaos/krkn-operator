@@ -29,6 +29,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/client-go/kubernetes/fake"
 	fakeclient "sigs.k8s.io/controller-runtime/pkg/client/fake"
 
@@ -426,6 +427,109 @@ func TestCreateUser_DuplicateUser_Conflict(t *testing.T) {
 
 	if w.Code != http.StatusConflict {
 		t.Errorf("Expected status %d, got %d", http.StatusConflict, w.Code)
+	}
+}
+
+// TestCreateUser_EmailNormalizedToLowercase verifies that a mixed-case email is
+// normalized to lowercase at save time, so storage and lookups are consistent
+// (emails are case-insensitive per RFC 5321).
+func TestCreateUser_EmailNormalizedToLowercase(t *testing.T) {
+	handler := setupUserTestHandler()
+
+	reqBody := `{
+		"userID": "User@Example.COM",
+		"password": "NewPass123",
+		"name": "New",
+		"surname": "User",
+		"role": "user"
+	}`
+
+	req := httptest.NewRequest("POST", UsersPath, strings.NewReader(reqBody))
+	req = req.WithContext(createAdminContext())
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	handler.CreateUser(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("Expected status %d, got %d: %s", http.StatusCreated, w.Code, w.Body.String())
+	}
+
+	var response CreateUserResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("Failed to unmarshal response: %v", err)
+	}
+
+	if response.UserID != "user@example.com" {
+		t.Errorf("Expected userID normalized to user@example.com, got %s", response.UserID)
+	}
+}
+
+// TestCreateUser_CaseInsensitiveDuplicate_Conflict verifies that a case-variant
+// of an existing user's email is rejected as a duplicate (409) rather than being
+// treated as a new user. sanitizeUsername lowercases the derived Secret/KrknUser
+// name, so a case-variant collides on the same resource name; a case-sensitive
+// duplicate check would let it reach the delete+recreate path and destroy the
+// existing user's password secret.
+func TestCreateUser_CaseInsensitiveDuplicate_Conflict(t *testing.T) {
+	user1, secret1 := createTestUser("user1@test.local", "Existing", "User", "user", true)
+	handler := setupUserTestHandler(user1, secret1)
+
+	// Same address, different case.
+	reqBody := `{
+		"userID": "USER1@test.local",
+		"password": "NewPass123",
+		"name": "Duplicate",
+		"surname": "User",
+		"role": "user"
+	}`
+
+	req := httptest.NewRequest("POST", UsersPath, strings.NewReader(reqBody))
+	req = req.WithContext(createAdminContext())
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	handler.CreateUser(w, req)
+
+	if w.Code != http.StatusConflict {
+		t.Errorf("Expected status %d for case-variant duplicate, got %d: %s",
+			http.StatusConflict, w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "already exists") {
+		t.Errorf("Expected 'already exists' error, got: %s", w.Body.String())
+	}
+}
+
+// TestSanitizeUsername_ProducesValidK8sNames verifies that emails permitted by
+// ValidateEmail (which allows RFC 5322 characters such as '+') are converted to
+// valid RFC 1123 resource names, and that ordinary emails are unchanged.
+func TestSanitizeUsername_ProducesValidK8sNames(t *testing.T) {
+	tests := []struct {
+		name  string
+		email string
+		want  string // exact expected output; "" = assert validity only
+	}{
+		{name: "ordinary email unchanged", email: "admin@example.com", want: "krknuser-admin-example-com"},
+		{name: "plus tag replaced", email: "user+tag@example.com", want: "krknuser-user-tag-example-com"},
+		{name: "special chars replaced", email: "a.b!#$%@example.com", want: ""},
+		{name: "over-long local part capped", email: strings.Repeat("a", 200) + "@example.com", want: ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := sanitizeUsername(tt.email)
+
+			// The derived name and the "-password" secret name must both be valid.
+			if errs := validation.IsDNS1123Subdomain(got); len(errs) > 0 {
+				t.Errorf("sanitizeUsername(%q) = %q, not a valid k8s name: %v", tt.email, got, errs)
+			}
+			if errs := validation.IsDNS1123Subdomain(got + "-password"); len(errs) > 0 {
+				t.Errorf("secret name %q-password derived from %q is not valid: %v", got, tt.email, errs)
+			}
+			if tt.want != "" && got != tt.want {
+				t.Errorf("sanitizeUsername(%q) = %q, want %q", tt.email, got, tt.want)
+			}
+		})
 	}
 }
 

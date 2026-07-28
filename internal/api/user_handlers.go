@@ -152,13 +152,18 @@ func parsePaginationParams(r *http.Request) (int, int) {
 	return page, limit
 }
 
-// sanitizeUsername converts an email to a valid Kubernetes resource name
+// sanitizeUsername converts an email to a valid Kubernetes resource name of the
+// form "krknuser-<sanitized>".
+//
+// Character sanitization and length-capping are delegated to sanitizeResourceName
+// so that valid-but-unusual emails cannot produce an invalid metadata.name. In
+// particular ValidateEmail permits RFC 5322 local-part characters such as '+',
+// which are not valid in an RFC 1123 name; leaving them unreplaced (as the old
+// implementation did) caused the API server to reject the Create with a 500.
+// For ordinary emails the output is unchanged, e.g.
+// "admin@example.com" -> "krknuser-admin-example-com".
 func sanitizeUsername(email string) string {
-	// Replace @ and . with -
-	name := strings.ReplaceAll(email, "@", "-")
-	name = strings.ReplaceAll(name, ".", "-")
-	name = strings.ToLower(name)
-	return fmt.Sprintf("krknuser-%s", name)
+	return fmt.Sprintf("krknuser-%s", sanitizeResourceName(email))
 }
 
 // ListUsers handles GET /api/v1/users
@@ -317,6 +322,19 @@ func (h *Handler) CreateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Validate email format (UserID is the user's email address)
+	if err := auth.ValidateEmail(req.UserID); err != nil {
+		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+			Error:   "validation_error",
+			Message: fmt.Sprintf("Email validation failed: %s", err.Error()),
+		})
+		return
+	}
+
+	// Normalize email to lowercase so storage and lookups are consistent
+	// (emails are case-insensitive per RFC 5321).
+	req.UserID = strings.ToLower(req.UserID)
+
 	// Validate password
 	if err := auth.ValidatePassword(req.Password); err != nil {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
@@ -339,7 +357,12 @@ func (h *Handler) CreateUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	for _, user := range existingUsers.Items {
-		if user.Spec.UserID == req.UserID {
+		// Compare case-insensitively: sanitizeUsername lowercases the derived
+		// Secret/KrknUser name, so case-variant emails (e.g. "User@x.com" and
+		// "user@x.com") collide on the same resource name. A case-sensitive check
+		// here would let a variant slip through and hit the delete+recreate path
+		// below, destroying the existing user's password secret.
+		if strings.EqualFold(user.Spec.UserID, req.UserID) {
 			writeJSONError(w, http.StatusConflict, ErrorResponse{
 				Error:   "user_exists",
 				Message: fmt.Sprintf("User with email %s already exists", req.UserID),

@@ -87,7 +87,7 @@ func TestIsRegistered_WithAdmin(t *testing.T) {
 			},
 		},
 		Spec: krknv1alpha1.KrknUserSpec{
-			UserID:            "[email protected]",
+			UserID:            "admin@example.com",
 			Name:              "Admin",
 			Surname:           "User",
 			Role:              "admin",
@@ -134,7 +134,7 @@ func TestRegister_FirstAdmin_Success(t *testing.T) {
 	handler := setupAuthTestHandler()
 
 	reqBody := `{
-		"userId": "[email protected]",
+		"userId": "admin@example.com",
 		"password": "SecurePassword123",
 		"name": "First",
 		"surname": "Admin",
@@ -156,8 +156,8 @@ func TestRegister_FirstAdmin_Success(t *testing.T) {
 		t.Fatalf("Failed to unmarshal response: %v", err)
 	}
 
-	if response.UserID != "[email protected]" {
-		t.Errorf("Expected userId '[email protected]', got '%s'", response.UserID)
+	if response.UserID != "admin@example.com" {
+		t.Errorf("Expected userId 'admin@example.com', got '%s'", response.UserID)
 	}
 
 	if response.Role != "admin" {
@@ -188,7 +188,7 @@ func TestRegister_FirstUser_MustBeAdmin(t *testing.T) {
 	handler := setupAuthTestHandler()
 
 	reqBody := `{
-		"userId": "[email protected]",
+		"userId": "admin@example.com",
 		"password": "SecurePassword123",
 		"name": "First",
 		"surname": "User",
@@ -237,7 +237,7 @@ func TestRegister_Validation(t *testing.T) {
 		{
 			name: "missing password",
 			reqBody: `{
-				"userId": "[email protected]",
+				"userId": "admin@example.com",
 				"name": "Test",
 				"surname": "User",
 				"role": "admin"
@@ -248,7 +248,7 @@ func TestRegister_Validation(t *testing.T) {
 		{
 			name: "invalid role",
 			reqBody: `{
-				"userId": "[email protected]",
+				"userId": "admin@example.com",
 				"password": "SecurePassword123",
 				"name": "Test",
 				"surname": "User",
@@ -260,7 +260,7 @@ func TestRegister_Validation(t *testing.T) {
 		{
 			name: "password too short",
 			reqBody: `{
-				"userId": "[email protected]",
+				"userId": "admin@example.com",
 				"password": "short",
 				"name": "Test",
 				"surname": "User",
@@ -322,7 +322,7 @@ func TestLogin_Success(t *testing.T) {
 			},
 		},
 		Spec: krknv1alpha1.KrknUserSpec{
-			UserID:            "[email protected]",
+			UserID:            "admin@example.com",
 			Name:              "Test",
 			Surname:           "User",
 			Organization:      "Test Org",
@@ -354,7 +354,7 @@ func TestLogin_Success(t *testing.T) {
 	handler := NewTestHandler(fakeClient, fakeClientset, "default", "localhost:50051")
 
 	reqBody := `{
-		"userId": "[email protected]",
+		"userId": "admin@example.com",
 		"password": "TestPassword123"
 	}`
 
@@ -376,8 +376,8 @@ func TestLogin_Success(t *testing.T) {
 		t.Error("Expected token to be set")
 	}
 
-	if response.UserID != "[email protected]" {
-		t.Errorf("Expected userId '[email protected]', got '%s'", response.UserID)
+	if response.UserID != "admin@example.com" {
+		t.Errorf("Expected userId 'admin@example.com', got '%s'", response.UserID)
 	}
 
 	if response.Role != "user" {
@@ -406,7 +406,7 @@ func TestLogin_InvalidCredentials(t *testing.T) {
 			},
 		},
 		Spec: krknv1alpha1.KrknUserSpec{
-			UserID:            "[email protected]",
+			UserID:            "admin@example.com",
 			Name:              "Test",
 			Surname:           "User",
 			Role:              "user",
@@ -443,7 +443,7 @@ func TestLogin_InvalidCredentials(t *testing.T) {
 		{
 			name: "wrong password",
 			reqBody: `{
-				"userId": "[email protected]",
+				"userId": "admin@example.com",
 				"password": "WrongPassword"
 			}`,
 			wantStatus: http.StatusUnauthorized,
@@ -451,7 +451,7 @@ func TestLogin_InvalidCredentials(t *testing.T) {
 		{
 			name: "user not found",
 			reqBody: `{
-				"userId": "[email protected]",
+				"userId": "admin@example.com",
 				"password": "SomePassword123"
 			}`,
 			wantStatus: http.StatusUnauthorized,
@@ -485,7 +485,7 @@ func TestLogin_InactiveUser(t *testing.T) {
 			Namespace: "default",
 		},
 		Spec: krknv1alpha1.KrknUserSpec{
-			UserID:            "[email protected]",
+			UserID:            "admin@example.com",
 			Name:              "Test",
 			Surname:           "User",
 			Role:              "user",
@@ -515,7 +515,7 @@ func TestLogin_InactiveUser(t *testing.T) {
 	handler := NewTestHandler(fakeClient, fakeClientset, "default", "localhost:50051")
 
 	reqBody := `{
-		"userId": "[email protected]",
+		"userId": "admin@example.com",
 		"password": "TestPassword123"
 	}`
 
