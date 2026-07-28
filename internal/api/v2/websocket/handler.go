@@ -177,10 +177,12 @@ func (h *Handler) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 		"client_ip", r.RemoteAddr)
 
 	// Upgrade HTTP connection to WebSocket
-	// SECURITY: Only echo the prefix, not the full token
-	// Client sent "access_token.<jwt>", we respond with just "access_token"
-	// This prevents the JWT from being exposed in response headers
-	h.upgrader.Subprotocols = []string{"access_token"}
+	// NOTE: We must echo back the exact subprotocol sent by the client
+	// WebSocket spec requires server to respond with one of the client's proposed protocols
+	// Attempting to respond with a different protocol causes browser to reject the connection
+	// The JWT is already in the request headers, so echoing it in the response doesn't
+	// increase exposure risk (and connections are HTTPS in production)
+	h.upgrader.Subprotocols = []string{protocol}
 	conn, err := h.upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		logger.Error(err, "Failed to upgrade WebSocket connection",
