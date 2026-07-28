@@ -2467,7 +2467,11 @@ func (h *Handler) GetSingleJob(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) ScenariosRunRouter(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path
 
-	// Root endpoint: /api/v1/scenarios/run
+	// Normalize v2 paths to v1 for backward-compatible routing
+	// v2 REST endpoints reuse v1 handler logic (same behavior, different path prefix)
+	path = strings.Replace(path, "/api/v2/", "/api/v1/", 1)
+
+	// Root endpoint: /api/v1/scenarios/run (or /api/v2/scenarios/run normalized)
 	if path == ScenariosRunPath {
 		switch r.Method {
 		case http.MethodPost:
