@@ -180,7 +180,13 @@ func NewServer(port int, client client.Client, clientset kubernetes.Interface, n
 
 	// Workflow management endpoints - CRUD: authenticated users, list all: admin only, available: all users
 	// Register /available before generic /workflows to avoid path collision
-	mux.Handle(WorkflowsAvailablePath, authMw.RequireAuth(http.HandlerFunc(handler.ListAvailableWorkflows)))
+	mux.Handle(WorkflowsAvailablePath, authMw.RequireAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		handler.ListAvailableWorkflows(w, r)
+	})))
 	mux.Handle(WorkflowsPath, authMw.RequireAuth(http.HandlerFunc(handler.WorkflowsRouter)))
 	mux.Handle(WorkflowsPath+"/", authMw.RequireAuth(http.HandlerFunc(handler.WorkflowsRouter)))
 

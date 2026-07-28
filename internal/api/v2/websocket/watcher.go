@@ -26,8 +26,8 @@ import (
 	"github.com/go-logr/logr"
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
 	"k8s.io/client-go/tools/cache"
-	k8sclient "sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlcache "sigs.k8s.io/controller-runtime/pkg/cache"
+	k8sclient "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
@@ -91,8 +91,8 @@ func (h *scenarioRunEventHandler) OnAdd(obj interface{}, _ bool) {
 
 	h.logger.V(1).Info("ScenarioRun added", "name", run.Name)
 	// Broadcaster will deduplicate via cache, so always call it
-	h.broadcaster.BroadcastScenarioRunUpdate(run)           // Lightweight (no clusterJobs)
-	h.broadcaster.BroadcastScenarioRunDetailUpdate(run)     // Full detail (with clusterJobs)
+	h.broadcaster.BroadcastScenarioRunUpdate(run)       // Lightweight (no clusterJobs)
+	h.broadcaster.BroadcastScenarioRunDetailUpdate(run) // Full detail (with clusterJobs)
 }
 
 func (h *scenarioRunEventHandler) OnUpdate(oldObj, newObj interface{}) {
@@ -121,8 +121,8 @@ func (h *scenarioRunEventHandler) OnUpdate(oldObj, newObj interface{}) {
 		"newPhase", newRun.Status.Phase,
 		"runningJobs", newRun.Status.RunningJobs)
 
-	h.broadcaster.BroadcastScenarioRunUpdate(newRun)           // Lightweight (no clusterJobs)
-	h.broadcaster.BroadcastScenarioRunDetailUpdate(newRun)     // Full detail (with clusterJobs)
+	h.broadcaster.BroadcastScenarioRunUpdate(newRun)       // Lightweight (no clusterJobs)
+	h.broadcaster.BroadcastScenarioRunDetailUpdate(newRun) // Full detail (with clusterJobs)
 
 	// Update dashboard with current active runs count
 	h.broadcastDashboardUpdate(context.Background())

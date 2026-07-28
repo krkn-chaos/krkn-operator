@@ -61,6 +61,15 @@ func (h *Handler) CreateWorkflow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Validate workflow name (required field)
+	if req.WorkflowName == "" {
+		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+			Error:   "bad_request",
+			Message: "Workflow name is required",
+		})
+		return
+	}
+
 	// Validate graph structure (workflow-specific validation)
 	if err := workflows.ValidateWorkflowGraph(req.Graph); err != nil {
 		logger.Info("Workflow graph validation failed",
@@ -89,9 +98,9 @@ func (h *Handler) CreateWorkflow(w http.ResponseWriter, r *http.Request) {
 		FileName:       "workflow.json", // Standard filename for workflows
 		Content:        content,         // Graph JSON
 		Description:    req.Description,
-		FileType:       req.FileType,       // User categorization (optional)
-		Groups:         req.Groups,         // RBAC groups
-		AvailableToAll: req.AvailableToAll, // Public flag
+		FileType:       req.FileType,        // User categorization (optional)
+		Groups:         req.Groups,          // RBAC groups
+		AvailableToAll: req.AvailableToAll,  // Public flag
 		FilePurpose:    "workflow-template", // System marker
 	}
 
@@ -206,8 +215,8 @@ func (h *Handler) ListAvailableWorkflows(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Call file list with filePurpose filter
-	fileList, err := h.listAvailableFilesInternal(ctx, "workflow-template")
+	// Call file list with filePurpose filter (returns ConfigMaps)
+	configMaps, err := h.listAvailableFilesInternal(ctx, "workflow-template")
 	if err != nil {
 		logger.Error(err, "Failed to list available workflow files")
 		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
@@ -217,10 +226,10 @@ func (h *Handler) ListAvailableWorkflows(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Convert file info to workflow info
-	workflowList := make([]workflows.WorkflowInfo, 0, len(fileList))
-	for _, fileInfo := range fileList {
-		workflowInfo := convertFileInfoToWorkflow(fileInfo)
+	// Convert ConfigMaps to workflow info
+	workflowList := make([]workflows.WorkflowInfo, 0, len(configMaps))
+	for _, cm := range configMaps {
+		workflowInfo := convertConfigMapToWorkflowInfo(&cm)
 		workflowList = append(workflowList, workflowInfo)
 	}
 
@@ -302,6 +311,15 @@ func (h *Handler) UpdateWorkflow(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
 			Error:   "bad_request",
 			Message: "Invalid request body: " + err.Error(),
+		})
+		return
+	}
+
+	// Validate workflow name (required field)
+	if req.WorkflowName == "" {
+		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+			Error:   "bad_request",
+			Message: "Workflow name is required",
 		})
 		return
 	}
@@ -435,14 +453,25 @@ func convertFileResponseToWorkflow(fileResp files.FileResponse) (workflows.Workf
 	}, nil
 }
 
-// convertFileInfoToWorkflow converts a FileInfo to a WorkflowInfo
-func convertFileInfoToWorkflow(fileInfo files.FileInfo) workflows.WorkflowInfo {
+// convertConfigMapToWorkflowInfo converts a ConfigMap to WorkflowInfo with accurate NodeCount
+func convertConfigMapToWorkflowInfo(cm *corev1.ConfigMap) workflows.WorkflowInfo {
+	fileInfo := buildFileInfo(cm)
+
+	// Parse graph to count nodes
+	nodeCount := 0
+	if content, exists := cm.Data["workflow.json"]; exists {
+		graph, err := workflows.FromFileContent(content)
+		if err == nil {
+			nodeCount = len(graph)
+		}
+	}
+
 	return workflows.WorkflowInfo{
 		WorkflowID:   fileInfo.FileID,
 		WorkflowName: fileInfo.FileName,
 		Description:  fileInfo.Description,
 		FileType:     fileInfo.FileType,
-		NodeCount:    0, // Can't determine without parsing graph - set to 0 for list view
+		NodeCount:    nodeCount,
 	}
 }
 
@@ -541,7 +570,7 @@ func (h *Handler) listFilesInternal(ctx context.Context, filePurpose string) ([]
 }
 
 // listAvailableFilesInternal extracts available file listing logic with filePurpose filter
-func (h *Handler) listAvailableFilesInternal(ctx context.Context, filePurpose string) ([]files.FileInfo, error) {
+func (h *Handler) listAvailableFilesInternal(ctx context.Context, filePurpose string) ([]corev1.ConfigMap, error) {
 	logger := log.FromContext(ctx).WithName("list-available-files-internal")
 
 	// Get user claims
@@ -572,12 +601,7 @@ func (h *Handler) listAvailableFilesInternal(ctx context.Context, filePurpose st
 			return nil, fmt.Errorf("failed to list file ConfigMaps: %w", err)
 		}
 
-		fileList := make([]files.FileInfo, len(configMapList.Items))
-		for i, cm := range configMapList.Items {
-			fileList[i] = buildFileInfo(&cm)
-		}
-
-		return fileList, nil
+		return configMapList.Items, nil
 	}
 
 	// List all file ConfigMaps (reuse label filters from above)
@@ -591,7 +615,7 @@ func (h *Handler) listAvailableFilesInternal(ctx context.Context, filePurpose st
 	}
 
 	// Filter files by access
-	available := []files.FileInfo{}
+	available := []corev1.ConfigMap{}
 	for _, cm := range configMapList.Items {
 		hasAccess, err := h.canAccessFile(ctx, &cm)
 		if err != nil {
@@ -600,7 +624,7 @@ func (h *Handler) listAvailableFilesInternal(ctx context.Context, filePurpose st
 			continue
 		}
 		if hasAccess {
-			available = append(available, buildFileInfo(&cm))
+			available = append(available, cm)
 		}
 	}
 

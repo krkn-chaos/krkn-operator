@@ -81,6 +81,15 @@ func (h *Handler) CreateFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Validate filePurpose - only workflow API can create workflow-template files
+	if req.FilePurpose == "workflow-template" {
+		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+			Error:   "bad_request",
+			Message: "Use POST /api/v1/workflows to create workflow templates",
+		})
+		return
+	}
+
 	// Generate unique file ID (UUID)
 	fileID := uuid.New().String()
 
