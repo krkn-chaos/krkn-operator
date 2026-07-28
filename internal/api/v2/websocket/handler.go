@@ -354,6 +354,14 @@ func (h *Handler) sendError(client *Client, errCode, errMsg string) {
 	}
 }
 
+// roleFromAdmin converts isAdmin boolean to auth.Role string
+func roleFromAdmin(isAdmin bool) string {
+	if isAdmin {
+		return string(auth.RoleAdmin)
+	}
+	return string(auth.RoleUser)
+}
+
 // sendInitialSnapshot sends the current state of resources to a newly subscribed client
 func (h *Handler) sendInitialSnapshot(client *Client, resourceType string, resourceIDs []string) {
 	// Skip snapshot if k8sClient is not available (e.g., in tests)
@@ -362,7 +370,14 @@ func (h *Handler) sendInitialSnapshot(client *Client, resourceType string, resou
 	}
 
 	logger := log.Log.WithName("websocket-snapshot")
-	ctx := context.Background()
+
+	// CRITICAL: Create context with user claims for authorization filtering
+	// Without claims, the filter functions cannot enforce group-based permissions
+	claims := &auth.Claims{
+		UserID: client.userID,
+		Role:   roleFromAdmin(client.isAdmin),
+	}
+	ctx := context.WithValue(context.Background(), auth.UserClaimsKey, claims)
 
 	switch resourceType {
 	case "run":
