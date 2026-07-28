@@ -373,8 +373,28 @@ func (h *Handler) DeleteWorkflow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Verify the file is actually a workflow before deleting
+	configMap, err := h.loadFileConfigMapByID(ctx, workflowID)
+	if err != nil {
+		logger.Error(err, "Failed to load workflow", "workflowID", workflowID)
+		writeJSONError(w, http.StatusNotFound, ErrorResponse{
+			Error:   "not_found",
+			Message: "Workflow not found",
+		})
+		return
+	}
+
+	// Check file purpose
+	if files.ExtractFilePurposeFromLabels(configMap.Labels) != "workflow-template" {
+		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+			Error:   "bad_request",
+			Message: "File is not a workflow template",
+		})
+		return
+	}
+
 	// Delegate to file deletion
-	err := h.deleteFileInternal(ctx, workflowID)
+	err = h.deleteFileInternal(ctx, workflowID)
 	if err != nil {
 		logger.Error(err, "Failed to delete workflow", "workflowID", workflowID)
 		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
@@ -636,15 +656,22 @@ func (h *Handler) updateFileInternal(ctx context.Context, fileID string, req fil
 		return fmt.Errorf("file not found: %w", err)
 	}
 
-	// Check access permissions - users can only update files they have access to
-	if !isAdmin {
-		hasAccess, err := h.canAccessFile(ctx, configMap)
-		if err != nil {
-			return fmt.Errorf("failed to check file access: %w", err)
+	// Verify file purpose matches expected type (only for workflow operations)
+	// This prevents workflow endpoints from mutating non-workflow files
+	if req.FilePurpose == "workflow-template" {
+		existingPurpose := files.ExtractFilePurposeFromLabels(configMap.Labels)
+		if existingPurpose != "workflow-template" {
+			return fmt.Errorf("cannot update non-workflow file via workflow API")
 		}
-		if !hasAccess {
-			return fmt.Errorf("access denied")
-		}
+	}
+
+	// Check ownership - only owner or admin can update workflows
+	isOwner, err := h.isFileOwnerOrAdmin(ctx, configMap)
+	if err != nil {
+		return fmt.Errorf("failed to check file ownership: %w", err)
+	}
+	if !isOwner {
+		return fmt.Errorf("only the workflow owner or an admin can update this workflow")
 	}
 
 	// Get current user for audit trail
@@ -689,16 +716,13 @@ func (h *Handler) deleteFileInternal(ctx context.Context, fileID string) error {
 		return fmt.Errorf("file not found: %w", err)
 	}
 
-	// Check access permissions - users can only delete files they have access to
-	isAdmin := auth.IsAdmin(ctx)
-	if !isAdmin {
-		hasAccess, err := h.canAccessFile(ctx, configMap)
-		if err != nil {
-			return fmt.Errorf("failed to check file access: %w", err)
-		}
-		if !hasAccess {
-			return fmt.Errorf("access denied")
-		}
+	// Check ownership - only owner or admin can delete workflows
+	isOwner, err := h.isFileOwnerOrAdmin(ctx, configMap)
+	if err != nil {
+		return fmt.Errorf("failed to check file ownership: %w", err)
+	}
+	if !isOwner {
+		return fmt.Errorf("only the workflow owner or an admin can delete this workflow")
 	}
 
 	// Delete ConfigMap

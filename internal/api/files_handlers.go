@@ -323,24 +323,22 @@ func (h *Handler) UpdateFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check access permissions - users can only update files they have access to
-	if !isAdmin {
-		hasAccess, err := h.canAccessFile(ctx, configMap)
-		if err != nil {
-			logger.Error(err, "Failed to check file access", "fileID", fileID)
-			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
-				Error:   "internal_error",
-				Message: "Failed to validate file access permissions",
-			})
-			return
-		}
-		if !hasAccess {
-			writeJSONError(w, http.StatusForbidden, ErrorResponse{
-				Error:   "forbidden",
-				Message: "You do not have access to this file",
-			})
-			return
-		}
+	// Check ownership - only owner or admin can update files
+	isOwner, err := h.isFileOwnerOrAdmin(ctx, configMap)
+	if err != nil {
+		logger.Error(err, "Failed to check file ownership", "fileID", fileID)
+		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+			Error:   "internal_error",
+			Message: "Failed to validate file ownership",
+		})
+		return
+	}
+	if !isOwner {
+		writeJSONError(w, http.StatusForbidden, ErrorResponse{
+			Error:   "forbidden",
+			Message: "Only the file owner or an admin can update this file",
+		})
+		return
 	}
 
 	// Get current user for audit trail
@@ -420,25 +418,22 @@ func (h *Handler) DeleteFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check access permissions - users can only delete files they have access to
-	isAdmin := auth.IsAdmin(ctx)
-	if !isAdmin {
-		hasAccess, err := h.canAccessFile(ctx, configMap)
-		if err != nil {
-			logger.Error(err, "Failed to check file access", "fileID", fileID)
-			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
-				Error:   "internal_error",
-				Message: "Failed to validate file access permissions",
-			})
-			return
-		}
-		if !hasAccess {
-			writeJSONError(w, http.StatusForbidden, ErrorResponse{
-				Error:   "forbidden",
-				Message: "You do not have access to this file",
-			})
-			return
-		}
+	// Check ownership - only owner or admin can delete files
+	isOwner, err := h.isFileOwnerOrAdmin(ctx, configMap)
+	if err != nil {
+		logger.Error(err, "Failed to check file ownership", "fileID", fileID)
+		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+			Error:   "internal_error",
+			Message: "Failed to validate file ownership",
+		})
+		return
+	}
+	if !isOwner {
+		writeJSONError(w, http.StatusForbidden, ErrorResponse{
+			Error:   "forbidden",
+			Message: "Only the file owner or an admin can delete this file",
+		})
+		return
 	}
 
 	// Delete ConfigMap
@@ -683,6 +678,57 @@ func (h *Handler) canAccessFile(ctx context.Context, configMap *corev1.ConfigMap
 	for _, sg := range configMapGroups {
 		if userGroupNames[sg] {
 			return true, nil
+		}
+	}
+
+	return false, nil
+}
+
+// isFileOwnerOrAdmin checks if the current user is the owner of a file or an admin
+// This is used for mutation operations (update/delete) where only owner or admin should have access
+// For files: ownership is determined by group membership + created-by annotation
+func (h *Handler) isFileOwnerOrAdmin(ctx context.Context, configMap *corev1.ConfigMap) (bool, error) {
+	claims := auth.GetClaimsFromContext(ctx)
+	if claims == nil {
+		return false, nil
+	}
+
+	// Admins can modify all files
+	if auth.IsAdmin(ctx) {
+		return true, nil
+	}
+
+	// Check if user is the creator via created-by annotation
+	createdBy := configMap.Annotations[files.CreatedByAnnotation]
+	if createdBy != "" && createdBy == claims.UserID {
+		return true, nil
+	}
+
+	// If file has no groups and is not available-to-all, deny access
+	configMapGroups := files.ExtractGroupsFromLabels(configMap.Labels)
+	if len(configMapGroups) == 0 && configMap.Labels[files.AvailableToAllLabel] != "true" {
+		return false, nil
+	}
+
+	// For public files (available-to-all), only creator or admin can modify
+	if configMap.Labels[files.AvailableToAllLabel] == "true" {
+		return false, nil // Already checked creator above
+	}
+
+	// For group files, check if user belongs to the file's group
+	userGroups, err := groupauth.GetUserGroups(ctx, h.client, claims.UserID, h.namespace)
+	if err != nil {
+		return false, fmt.Errorf("failed to get user groups: %w", err)
+	}
+
+	userGroupNames := make(map[string]bool)
+	for _, ug := range userGroups {
+		userGroupNames[ug.Name] = true
+	}
+
+	for _, sg := range configMapGroups {
+		if userGroupNames[sg] {
+			return true, nil // User is in the file's group
 		}
 	}
 
