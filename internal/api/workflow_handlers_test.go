@@ -89,8 +89,6 @@ func stringPtr(s string) *string {
 }
 
 func TestCreateWorkflow(t *testing.T) {
-	handler := setupWorkflowTestHandler()
-
 	tests := []struct {
 		name         string
 		request      workflows.CreateWorkflowRequest
@@ -163,7 +161,7 @@ func TestCreateWorkflow(t *testing.T) {
 				Graph:        validWorkflowGraph(),
 				Groups:       []string{"other-team"},
 			},
-			setupGroups:  []string{"other-team"},
+			setupGroups:  []string{"other-team", "dev-team"}, // Create both groups
 			userGroups:   []string{"dev-team"},
 			userID:       "user@test.example",
 			isAdmin:      false,
@@ -174,6 +172,9 @@ func TestCreateWorkflow(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			// Create fresh handler for each test to avoid state pollution
+			handler := setupWorkflowTestHandler()
+
 			// Create user groups in fake client
 			for _, groupName := range tt.setupGroups {
 				group := &krknv1alpha1.KrknUserGroup{
@@ -187,25 +188,24 @@ func TestCreateWorkflow(t *testing.T) {
 				}
 			}
 
-			// Create user with group memberships
-			if len(tt.userGroups) > 0 && !tt.isAdmin {
-				labels := make(map[string]string)
-				for _, group := range tt.userGroups {
-					labels["group.krkn.krkn-chaos.dev/"+group] = "true"
-				}
-				user := &krknv1alpha1.KrknUser{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      tt.userID,
-						Namespace: handler.namespace,
-						Labels:    labels,
-					},
-					Spec: krknv1alpha1.KrknUserSpec{
-						UserID: tt.userID,
-					},
-				}
-				if err := handler.client.Create(context.Background(), user); err != nil {
-					t.Fatalf("Failed to create test user: %v", err)
-				}
+			// Create user (both admin and regular users need KrknUser CR)
+			labels := make(map[string]string)
+			for _, group := range tt.userGroups {
+				labels["group.krkn.krkn-chaos.dev/"+group] = "true"
+			}
+			userName := "krknuser-" + sanitizeUserID(tt.userID)
+			user := &krknv1alpha1.KrknUser{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      userName,
+					Namespace: handler.namespace,
+					Labels:    labels,
+				},
+				Spec: krknv1alpha1.KrknUserSpec{
+					UserID: tt.userID,
+				},
+			}
+			if err := handler.client.Create(context.Background(), user); err != nil {
+				t.Fatalf("Failed to create test user: %v", err)
 			}
 
 			// Marshal request
@@ -393,6 +393,9 @@ func TestListAvailableWorkflows(t *testing.T) {
 				"files.krkn.krkn-chaos.dev/file-purpose": "workflow-template",
 				"group.krkn.krkn-chaos.dev/dev-team":     "true",
 			},
+			Annotations: map[string]string{
+				"files.krkn.krkn-chaos.dev/created-by": "user@test.example",
+			},
 		},
 		Data: map[string]string{
 			"workflow.json": `{"node1": {"name": "test", "image": "test:latest"}}`,
@@ -418,9 +421,10 @@ func TestListAvailableWorkflows(t *testing.T) {
 	}
 
 	// Create user
+	userName := "krknuser-" + sanitizeUserID("user@test.example")
 	user := &krknv1alpha1.KrknUser{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "user@test.example",
+			Name:      userName,
 			Namespace: handler.namespace,
 			Labels: map[string]string{
 				"group.krkn.krkn-chaos.dev/dev-team": "true",

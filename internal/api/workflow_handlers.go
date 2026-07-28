@@ -107,9 +107,18 @@ func (h *Handler) CreateWorkflow(w http.ResponseWriter, r *http.Request) {
 	// Call existing CreateFile handler logic
 	fileResp, err := h.createFileInternal(ctx, fileReq)
 	if err != nil {
-		// Error already logged in createFileInternal
-		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
-			Error:   "internal_error",
+		// Distinguish validation errors (4xx) from internal errors (5xx)
+		// Validation errors contain user-facing messages like "you can only assign"
+		statusCode := http.StatusInternalServerError
+		errorCode := "internal_error"
+		if strings.Contains(err.Error(), "you can only assign") ||
+			strings.Contains(err.Error(), "group") ||
+			strings.Contains(err.Error(), "does not exist") {
+			statusCode = http.StatusBadRequest
+			errorCode = "bad_request"
+		}
+		writeJSONError(w, statusCode, ErrorResponse{
+			Error:   errorCode,
 			Message: err.Error(),
 		})
 		return
