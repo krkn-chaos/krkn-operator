@@ -38,9 +38,18 @@ import (
 )
 
 // CreateFile handles POST /api/v1/files
-// Creates a new file ConfigMap (authenticated users)
-// Users can create files for their own groups or public files
-// Admins can create files for any group
+// @Summary Create file
+// @Description Create a new file ConfigMap. Users can create files for their own groups or public files. Admins can create files for any group. Cannot create workflow-template files (use POST /api/v1/workflows instead).
+// @Tags files
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param file body files.CreateFileRequest true "File data"
+// @Success 201 {object} files.CreateFileResponse "File created"
+// @Failure 400 {object} ErrorResponse "Invalid request or validation error"
+// @Failure 401 {object} ErrorResponse "Unauthorized"
+// @Failure 500 {object} ErrorResponse "Internal server error"
+// @Router /files [post]
 func (h *Handler) CreateFile(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	logger := log.FromContext(ctx).WithName("create-file")
@@ -146,6 +155,17 @@ func (h *Handler) CreateFile(w http.ResponseWriter, r *http.Request) {
 
 // ListFiles handles GET /api/v1/files
 // Lists all files (admin only)
+// @Summary List files (admin only)
+// @Description Get list of all file ConfigMaps (admin only). Supports filtering by filePurpose query parameter.
+// @Tags files
+// @Produce json
+// @Security BearerAuth
+// @Param filePurpose query string false "Filter by file purpose (e.g., workflow-template)"
+// @Success 200 {object} files.ListFilesResponse "List of files"
+// @Failure 401 {object} ErrorResponse "Unauthorized"
+// @Failure 403 {object} ErrorResponse "Forbidden (admin only)"
+// @Failure 500 {object} ErrorResponse "Internal server error"
+// @Router /files [get]
 func (h *Handler) ListFiles(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	logger := log.FromContext(ctx).WithName("list-files")
@@ -464,6 +484,16 @@ func (h *Handler) DeleteFile(w http.ResponseWriter, r *http.Request) {
 
 // ListAvailableFiles handles GET /api/v1/files/available
 // Lists files available to the current user
+// @Summary List available files
+// @Description Get files accessible to current user (own files, group files, public files). Supports filtering by filePurpose query parameter.
+// @Tags files
+// @Produce json
+// @Security BearerAuth
+// @Param filePurpose query string false "Filter by file purpose (e.g., workflow-template)"
+// @Success 200 {object} files.AvailableFilesResponse "List of accessible files"
+// @Failure 401 {object} ErrorResponse "Unauthorized"
+// @Failure 500 {object} ErrorResponse "Internal server error"
+// @Router /files/available [get]
 func (h *Handler) ListAvailableFiles(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	logger := log.FromContext(ctx).WithName("list-available-files")

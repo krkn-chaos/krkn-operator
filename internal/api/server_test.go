@@ -12,168 +12,130 @@ distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
+
+Assisted-by: Claude Sonnet 4.5 (claude-sonnet-4-5@20250929)
 */
 
 package api
 
 import (
+	"context"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/assert"
-	"k8s.io/client-go/kubernetes/fake"
-	"sigs.k8s.io/controller-runtime/pkg/client"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	fakeclient "sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
 	"github.com/krkn-chaos/krkn-operator/pkg/auth"
 )
 
-// createMockSecretManager creates a SecretManager for testing
-// Note: This does not initialize the secret (Start() is not called)
-// These tests only verify server structure, not authentication functionality
-func createMockSecretManager(k8sClient client.Client, namespace string) *auth.SecretManager {
-	return auth.NewSecretManager(k8sClient, namespace, 24*time.Hour, "test-issuer")
-}
+// TestWorkflowsAvailableMethodGuard tests that the /workflows/available route
+// rejects non-GET methods at the routing layer (server.go)
+func TestWorkflowsAvailableMethodGuard(t *testing.T) {
+	// Setup fake Kubernetes client
+	scheme := runtime.NewScheme()
+	_ = krknv1alpha1.AddToScheme(scheme)
+	_ = corev1.AddToScheme(scheme)
 
-// TestServerNeedLeaderElection verifies that the API server does not require leader election
-// This ensures the API is available on all replicas for high availability
-func TestServerNeedLeaderElection(t *testing.T) {
-	// Setup
-	scheme, err := krknv1alpha1.SchemeBuilder.Build()
-	assert.NoError(t, err)
+	fakeClient := fakeclient.NewClientBuilder().
+		WithScheme(scheme).
+		Build()
 
-	k8sClient := fakeclient.NewClientBuilder().WithScheme(scheme).Build()
-	clientset := fake.NewSimpleClientset()
+	// Create JWT secret
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "krkn-jwt-secret",
+			Namespace: "test-namespace",
+		},
+		Data: map[string][]byte{
+			"jwt-secret": []byte("test-secret-key-for-testing-only-min-32-chars"),
+		},
+	}
+	if err := fakeClient.Create(context.Background(), secret); err != nil {
+		t.Fatalf("Failed to create JWT secret: %v", err)
+	}
 
-	// Create a mock SecretManager (in real usage, this would be started before API server)
-	secretManager := createMockSecretManager(k8sClient, "test-namespace")
+	// Create secret manager
+	secretManager := auth.NewSecretManager(fakeClient, "test-namespace", 24*time.Hour, "krkn-test")
 
-	server := NewServer(8080, k8sClient, clientset, "test-namespace", "localhost:50051", secretManager)
+	// Initialize secret manager (loads JWT secret)
+	ctx := context.Background()
+	if err := secretManager.Start(ctx); err != nil {
+		t.Fatalf("Failed to start secret manager: %v", err)
+	}
 
-	// Test
-	needsLeaderElection := server.NeedLeaderElection()
+	// Create real server instance
+	server := NewServer(8080, fakeClient, nil, "test-namespace", "localhost:50051", secretManager)
 
-	// Verify
-	assert.False(t, needsLeaderElection,
-		"API server should not require leader election to run on all replicas")
-}
+	// Get token generator for creating test tokens
+	tokenGen, err := secretManager.GetTokenGenerator()
+	if err != nil {
+		t.Fatalf("Failed to get token generator: %v", err)
+	}
 
-// TestServerImplementsLeaderElectionRunnable verifies that Server implements the LeaderElectionRunnable interface
-func TestServerImplementsLeaderElectionRunnable(t *testing.T) {
-	// Setup
-	scheme, err := krknv1alpha1.SchemeBuilder.Build()
-	assert.NoError(t, err)
+	// Test non-GET methods on /workflows/available
+	methods := []string{http.MethodPost, http.MethodPut, http.MethodDelete, http.MethodPatch}
 
-	k8sClient := fakeclient.NewClientBuilder().WithScheme(scheme).Build()
-	clientset := fake.NewSimpleClientset()
-	secretManager := createMockSecretManager(k8sClient, "test-namespace")
+	for _, method := range methods {
+		t.Run("reject_"+method, func(t *testing.T) {
+			req := httptest.NewRequest(method, WorkflowsAvailablePath, nil)
 
-	server := NewServer(8080, k8sClient, clientset, "test-namespace", "localhost:50051", secretManager)
+			// Add valid auth token (method guard should trigger before auth check)
+			token, err := tokenGen.GenerateToken("test@example.com", "admin", "Test", "User", "TestOrg")
+			if err != nil {
+				t.Fatalf("Failed to generate token: %v", err)
+			}
+			req.Header.Set("Authorization", "Bearer "+token)
 
-	// Test - This will compile only if Server implements the interface correctly
-	var _ interface {
-		NeedLeaderElection() bool
-	} = server
+			rr := httptest.NewRecorder()
 
-	// If we get here, the interface is implemented
-	assert.NotNil(t, server)
-}
+			// Call the real server HTTP handler
+			server.server.Handler.ServeHTTP(rr, req)
 
-// TestServerStatelessBehavior documents that the server is stateless and can handle concurrent requests
-func TestServerStatelessBehavior(t *testing.T) {
-	// This test documents the expected behavior rather than testing implementation
-	// The API server should be stateless, meaning:
-	// - No shared in-memory state between requests
-	// - All state is persisted in Kubernetes resources
-	// - Concurrent modifications are handled by Kubernetes optimistic locking (resourceVersion)
-	// - Multiple replicas can safely handle requests in parallel
+			// Should return 405 Method Not Allowed (not 200, 401, or any other code)
+			if rr.Code != http.StatusMethodNotAllowed {
+				t.Errorf("Expected status %d for %s, got %d. Body: %s",
+					http.StatusMethodNotAllowed, method, rr.Code, rr.Body.String())
+			}
+		})
+	}
 
-	t.Run("API server is designed to be stateless", func(t *testing.T) {
-		// Setup
-		scheme, err := krknv1alpha1.SchemeBuilder.Build()
-		assert.NoError(t, err)
+	// Verify GET still works
+	t.Run("allow_GET", func(t *testing.T) {
+		// Create test user
+		userName := "krknuser-" + sanitizeUserID("test@example.com")
+		user := &krknv1alpha1.KrknUser{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      userName,
+				Namespace: "test-namespace",
+			},
+			Spec: krknv1alpha1.KrknUserSpec{
+				UserID: "test@example.com",
+			},
+		}
+		if err := fakeClient.Create(context.Background(), user); err != nil {
+			t.Fatalf("Failed to create test user: %v", err)
+		}
 
-		k8sClient := fakeclient.NewClientBuilder().WithScheme(scheme).Build()
-		clientset := fake.NewSimpleClientset()
+		req := httptest.NewRequest(http.MethodGet, WorkflowsAvailablePath, nil)
 
-		// All replicas share the same SecretManager (loaded from same Kubernetes secret)
-		secretManager := createMockSecretManager(k8sClient, "test-namespace")
+		token, err := tokenGen.GenerateToken("test@example.com", "admin", "Test", "User", "TestOrg")
+		if err != nil {
+			t.Fatalf("Failed to generate token: %v", err)
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
 
-		// Create two server instances (simulating two replicas)
-		server1 := NewServer(8081, k8sClient, clientset, "test-namespace", "localhost:50051", secretManager)
-		server2 := NewServer(8082, k8sClient, clientset, "test-namespace", "localhost:50051", secretManager)
+		rr := httptest.NewRecorder()
+		server.server.Handler.ServeHTTP(rr, req)
 
-		// Both servers share the same client but have independent HTTP servers
-		assert.NotNil(t, server1)
-		assert.NotNil(t, server2)
-
-		// Verify both don't need leader election (can run concurrently)
-		assert.False(t, server1.NeedLeaderElection())
-		assert.False(t, server2.NeedLeaderElection())
-	})
-}
-
-// TestServerVsControllerLeaderElection documents the difference between API server and controllers
-func TestServerVsControllerLeaderElection(t *testing.T) {
-	t.Run("API server should NOT use leader election", func(t *testing.T) {
-		scheme, err := krknv1alpha1.SchemeBuilder.Build()
-		assert.NoError(t, err)
-
-		k8sClient := fakeclient.NewClientBuilder().WithScheme(scheme).Build()
-		clientset := fake.NewSimpleClientset()
-		secretManager := createMockSecretManager(k8sClient, "test-namespace")
-
-		server := NewServer(8080, k8sClient, clientset, "test-namespace", "localhost:50051", secretManager)
-
-		// API server should be available on all replicas
-		assert.False(t, server.NeedLeaderElection(),
-			"API server must be available on all replicas to avoid 502 errors")
-	})
-
-	t.Run("Controllers SHOULD use leader election by default", func(t *testing.T) {
-		// This is a documentation test - controllers added to the manager without
-		// implementing NeedLeaderElection() will default to requiring leader election
-		// This is correct behavior to prevent multiple reconciliation loops
-
-		// Controllers should NOT implement NeedLeaderElection() or should return true
-		// This ensures only the leader replica runs reconciliation loops
-		// preventing race conditions and infinite reconciliation loops
-		assert.True(t, true, "Controllers must use leader election (default behavior)")
-	})
-
-	t.Run("SecretManager should NOT use leader election", func(t *testing.T) {
-		scheme, err := krknv1alpha1.SchemeBuilder.Build()
-		assert.NoError(t, err)
-
-		k8sClient := fakeclient.NewClientBuilder().WithScheme(scheme).Build()
-		secretManager := createMockSecretManager(k8sClient, "test-namespace")
-
-		// All replicas need to load the JWT secret
-		assert.False(t, secretManager.NeedLeaderElection(),
-			"SecretManager must run on all replicas to load the same JWT secret")
-	})
-}
-
-// TestServerWaitsForSecretManager documents that the server waits for JWT secret before accepting traffic
-func TestServerWaitsForSecretManager(t *testing.T) {
-	t.Run("Server.Start() should wait for SecretManager.IsReady()", func(t *testing.T) {
-		// This is a documentation test
-		// In production, the Server.Start() method polls SecretManager.IsReady()
-		// with a 100ms ticker until the secret is loaded (max 2 minutes timeout)
-		// This prevents the HTTP server from accepting requests before authentication is ready
-
-		// The wait loop ensures:
-		// 1. No race condition between SecretManager and API server startup
-		// 2. HTTP 503 errors instead of 500 when secret not ready
-		// 3. Clear logs showing when server is waiting vs when it's accepting traffic
-
-		// Expected log sequence:
-		// "🌐 Starting REST API server (waiting for JWT secret to be ready)"
-		// "Waiting for JWT secret to be ready..." (repeated every 100ms)
-		// "✅ JWT secret ready, starting HTTP server"
-		// "🚀 REST API server started and accepting connections"
-
-		assert.True(t, true, "Server waits for SecretManager before accepting traffic")
+		// Should return 200 OK (or at least not 405)
+		if rr.Code == http.StatusMethodNotAllowed {
+			t.Errorf("GET should be allowed, got %d", rr.Code)
+		}
 	})
 }

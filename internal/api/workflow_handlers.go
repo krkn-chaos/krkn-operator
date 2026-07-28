@@ -36,7 +36,18 @@ import (
 )
 
 // CreateWorkflow handles POST /api/v1/workflows
-// Creates a new workflow template (authenticated users)
+// @Summary Create workflow template
+// @Description Create a new workflow template. Validates graph structure (DAG, no cycles). Users can create templates for their own groups or public. Admins can create for any group.
+// @Tags workflows
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param workflow body workflows.CreateWorkflowRequest true "Workflow data with graph definition"
+// @Success 201 {object} workflows.CreateWorkflowResponse "Workflow created"
+// @Failure 400 {object} ErrorResponse "Invalid request or graph validation error"
+// @Failure 401 {object} ErrorResponse "Unauthorized"
+// @Failure 500 {object} ErrorResponse "Internal server error"
+// @Router /workflows [post]
 func (h *Handler) CreateWorkflow(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	logger := log.FromContext(ctx).WithName("create-workflow")
@@ -164,7 +175,16 @@ func (h *Handler) WorkflowsRouter(w http.ResponseWriter, r *http.Request) {
 }
 
 // ListWorkflows handles GET /api/v1/workflows
-// Lists all workflows (admin only)
+// @Summary List all workflow templates (admin only)
+// @Description Get list of all workflow templates in the system (admin only).
+// @Tags workflows
+// @Produce json
+// @Security BearerAuth
+// @Success 200 {object} workflows.ListWorkflowsResponse "List of workflows"
+// @Failure 401 {object} ErrorResponse "Unauthorized"
+// @Failure 403 {object} ErrorResponse "Forbidden (admin only)"
+// @Failure 500 {object} ErrorResponse "Internal server error"
+// @Router /workflows [get]
 func (h *Handler) ListWorkflows(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	logger := log.FromContext(ctx).WithName("list-workflows")
@@ -207,7 +227,16 @@ func (h *Handler) ListWorkflows(w http.ResponseWriter, r *http.Request) {
 }
 
 // ListAvailableWorkflows handles GET /api/v1/workflows/available
-// Lists workflows visible to the current user
+// @Summary List available workflow templates
+// @Description Get workflows accessible to current user (own workflows, group workflows, public workflows). Includes node count excluding metadata nodes.
+// @Tags workflows
+// @Produce json
+// @Security BearerAuth
+// @Success 200 {object} workflows.AvailableWorkflowsResponse "List of accessible workflows"
+// @Failure 401 {object} ErrorResponse "Unauthorized"
+// @Failure 405 {object} ErrorResponse "Method not allowed (GET only)"
+// @Failure 500 {object} ErrorResponse "Internal server error"
+// @Router /workflows/available [get]
 func (h *Handler) ListAvailableWorkflows(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	logger := log.FromContext(ctx).WithName("list-available-workflows")

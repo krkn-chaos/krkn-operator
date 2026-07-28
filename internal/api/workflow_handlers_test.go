@@ -588,35 +588,6 @@ func TestGetWorkflow(t *testing.T) {
 	}
 }
 
-func TestListAvailableWorkflowsMethodCheck(t *testing.T) {
-	handler := setupWorkflowTestHandler()
-
-	methods := []string{http.MethodPost, http.MethodPut, http.MethodDelete}
-	for _, method := range methods {
-		t.Run("reject "+method, func(t *testing.T) {
-			req := httptest.NewRequest(method, WorkflowsAvailablePath, nil)
-			req = addAdminContext(req)
-
-			rr := httptest.NewRecorder()
-			// Call via server route (which has method guard)
-			mux := http.NewServeMux()
-			mux.Handle(WorkflowsAvailablePath, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if r.Method != http.MethodGet {
-					http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-					return
-				}
-				handler.ListAvailableWorkflows(w, r)
-			}))
-
-			mux.ServeHTTP(rr, req)
-
-			if rr.Code != http.StatusMethodNotAllowed {
-				t.Errorf("Expected status %d for %s, got %d", http.StatusMethodNotAllowed, method, rr.Code)
-			}
-		})
-	}
-}
-
 func TestNodeCountAccuracy(t *testing.T) {
 	handler := setupWorkflowTestHandler()
 

@@ -212,6 +212,157 @@ const docTemplate = `{
                 }
             }
         },
+        "/files": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Get list of all file ConfigMaps (admin only). Supports filtering by filePurpose query parameter.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "files"
+                ],
+                "summary": "List files (admin only)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Filter by file purpose (e.g., workflow-template)",
+                        "name": "filePurpose",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "List of files",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_krkn-chaos_krkn-operator_pkg_files.ListFilesResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden (admin only)",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Create a new file ConfigMap. Users can create files for their own groups or public files. Admins can create files for any group. Cannot create workflow-template files (use POST /api/v1/workflows instead).",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "files"
+                ],
+                "summary": "Create file",
+                "parameters": [
+                    {
+                        "description": "File data",
+                        "name": "file",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/github_com_krkn-chaos_krkn-operator_pkg_files.CreateFileRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "File created",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_krkn-chaos_krkn-operator_pkg_files.CreateFileResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request or validation error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/files/available": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Get files accessible to current user (own files, group files, public files). Supports filtering by filePurpose query parameter.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "files"
+                ],
+                "summary": "List available files",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Filter by file purpose (e.g., workflow-template)",
+                        "name": "filePurpose",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "List of accessible files",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_krkn-chaos_krkn-operator_pkg_files.AvailableFilesResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/graphruns": {
             "get": {
                 "security": [
@@ -1062,7 +1213,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Multiplexed WebSocket endpoint for real-time resource updates. Supports scenario runs, graph runs, and dashboard.\n\n**Authentication:** JWT token via WebSocket subprotocol header:\n- JavaScript: ` + "`" + `new WebSocket(url, 'access_token.' + jwtToken)` + "`" + `\n- Header: ` + "`" + `Sec-WebSocket-Protocol: access_token.\u003cjwt_token\u003e` + "`" + `\n\n**Client → Server Messages:**\n` + "`" + `` + "`" + `` + "`" + `json\n{\n\"action\": \"subscribe\",\n\"resource\": \"run|graphrun|dashboard\",\n\"ids\": [\"run-abc123\", \"run-def456\"]\n}\n` + "`" + `` + "`" + `` + "`" + `\n\n**Server → Client Messages:**\n` + "`" + `` + "`" + `` + "`" + `json\n{\n\"resource\": \"run|graphrun|dashboard\",\n\"id\": \"run-abc123\",\n\"event\": \"updated|deleted\",\n\"data\": { ... }\n}\n` + "`" + `` + "`" + `` + "`" + `\n\n**Endpoints:**\n- ` + "`" + `/api/v2/ws/runs` + "`" + ` - Subscribe to scenario run updates\n- ` + "`" + `/api/v2/ws/graphruns` + "`" + ` - Subscribe to graph run updates\n- ` + "`" + `/api/v2/ws/dashboard/active-runs` + "`" + ` - Subscribe to dashboard updates",
+                "description": "Multiplexed WebSocket for real-time updates across all resources\n\n**Authentication:** JWT token via Sec-WebSocket-Protocol subprotocol\n- JavaScript: ` + "`" + `new WebSocket(url, 'access_token.' + jwtToken)` + "`" + `\n- Header: ` + "`" + `Sec-WebSocket-Protocol: access_token.\u003cjwt_token\u003e` + "`" + `\n\n**Client → Server Messages (subscribe/unsubscribe):**\n` + "`" + `` + "`" + `` + "`" + `json\n{\n\"action\": \"subscribe\",\n\"resource\": \"run\",\n\"ids\": [\"run-abc123\", \"run-xyz789\"]\n}\n` + "`" + `` + "`" + `` + "`" + `\n\n**Resource types:** ` + "`" + `run` + "`" + `, ` + "`" + `graphrun` + "`" + `, ` + "`" + `dashboard` + "`" + `\n\n**Server → Client Messages (updates):**\n` + "`" + `` + "`" + `` + "`" + `json\n{\n\"resource\": \"run\",\n\"id\": \"run-abc123\",\n\"event\": \"updated\",\n\"data\": { ... }\n}\n` + "`" + `` + "`" + `` + "`" + `\n\n**Available endpoints:**\n- ` + "`" + `/api/v2/ws/runs` + "`" + ` - Subscribe to scenario run updates\n- ` + "`" + `/api/v2/ws/graphruns` + "`" + ` - Subscribe to graph run updates\n- ` + "`" + `/api/v2/ws/dashboard/active-runs` + "`" + ` - Subscribe to dashboard updates",
                 "consumes": [
                     "application/json"
                 ],
@@ -1075,9 +1226,9 @@ const docTemplate = `{
                 "summary": "WebSocket real-time updates",
                 "responses": {
                     "101": {
-                        "description": "Switching Protocols",
+                        "description": "Switching protocols - WebSocket upgrade successful",
                         "schema": {
-                            "type": "string"
+                            "$ref": "#/definitions/internal_api_v2_websocket.ServerMessage"
                         }
                     },
                     "401": {
@@ -1102,7 +1253,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Multiplexed WebSocket endpoint for real-time resource updates. Supports scenario runs, graph runs, and dashboard.\n\n**Authentication:** JWT token via WebSocket subprotocol header:\n- JavaScript: ` + "`" + `new WebSocket(url, 'access_token.' + jwtToken)` + "`" + `\n- Header: ` + "`" + `Sec-WebSocket-Protocol: access_token.\u003cjwt_token\u003e` + "`" + `\n\n**Client → Server Messages:**\n` + "`" + `` + "`" + `` + "`" + `json\n{\n\"action\": \"subscribe\",\n\"resource\": \"run|graphrun|dashboard\",\n\"ids\": [\"run-abc123\", \"run-def456\"]\n}\n` + "`" + `` + "`" + `` + "`" + `\n\n**Server → Client Messages:**\n` + "`" + `` + "`" + `` + "`" + `json\n{\n\"resource\": \"run|graphrun|dashboard\",\n\"id\": \"run-abc123\",\n\"event\": \"updated|deleted\",\n\"data\": { ... }\n}\n` + "`" + `` + "`" + `` + "`" + `\n\n**Endpoints:**\n- ` + "`" + `/api/v2/ws/runs` + "`" + ` - Subscribe to scenario run updates\n- ` + "`" + `/api/v2/ws/graphruns` + "`" + ` - Subscribe to graph run updates\n- ` + "`" + `/api/v2/ws/dashboard/active-runs` + "`" + ` - Subscribe to dashboard updates",
+                "description": "Multiplexed WebSocket for real-time updates across all resources\n\n**Authentication:** JWT token via Sec-WebSocket-Protocol subprotocol\n- JavaScript: ` + "`" + `new WebSocket(url, 'access_token.' + jwtToken)` + "`" + `\n- Header: ` + "`" + `Sec-WebSocket-Protocol: access_token.\u003cjwt_token\u003e` + "`" + `\n\n**Client → Server Messages (subscribe/unsubscribe):**\n` + "`" + `` + "`" + `` + "`" + `json\n{\n\"action\": \"subscribe\",\n\"resource\": \"run\",\n\"ids\": [\"run-abc123\", \"run-xyz789\"]\n}\n` + "`" + `` + "`" + `` + "`" + `\n\n**Resource types:** ` + "`" + `run` + "`" + `, ` + "`" + `graphrun` + "`" + `, ` + "`" + `dashboard` + "`" + `\n\n**Server → Client Messages (updates):**\n` + "`" + `` + "`" + `` + "`" + `json\n{\n\"resource\": \"run\",\n\"id\": \"run-abc123\",\n\"event\": \"updated\",\n\"data\": { ... }\n}\n` + "`" + `` + "`" + `` + "`" + `\n\n**Available endpoints:**\n- ` + "`" + `/api/v2/ws/runs` + "`" + ` - Subscribe to scenario run updates\n- ` + "`" + `/api/v2/ws/graphruns` + "`" + ` - Subscribe to graph run updates\n- ` + "`" + `/api/v2/ws/dashboard/active-runs` + "`" + ` - Subscribe to dashboard updates",
                 "consumes": [
                     "application/json"
                 ],
@@ -1115,9 +1266,9 @@ const docTemplate = `{
                 "summary": "WebSocket real-time updates",
                 "responses": {
                     "101": {
-                        "description": "Switching Protocols",
+                        "description": "Switching protocols - WebSocket upgrade successful",
                         "schema": {
-                            "type": "string"
+                            "$ref": "#/definitions/internal_api_v2_websocket.ServerMessage"
                         }
                     },
                     "401": {
@@ -1142,7 +1293,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Multiplexed WebSocket endpoint for real-time resource updates. Supports scenario runs, graph runs, and dashboard.\n\n**Authentication:** JWT token via WebSocket subprotocol header:\n- JavaScript: ` + "`" + `new WebSocket(url, 'access_token.' + jwtToken)` + "`" + `\n- Header: ` + "`" + `Sec-WebSocket-Protocol: access_token.\u003cjwt_token\u003e` + "`" + `\n\n**Client → Server Messages:**\n` + "`" + `` + "`" + `` + "`" + `json\n{\n\"action\": \"subscribe\",\n\"resource\": \"run|graphrun|dashboard\",\n\"ids\": [\"run-abc123\", \"run-def456\"]\n}\n` + "`" + `` + "`" + `` + "`" + `\n\n**Server → Client Messages:**\n` + "`" + `` + "`" + `` + "`" + `json\n{\n\"resource\": \"run|graphrun|dashboard\",\n\"id\": \"run-abc123\",\n\"event\": \"updated|deleted\",\n\"data\": { ... }\n}\n` + "`" + `` + "`" + `` + "`" + `\n\n**Endpoints:**\n- ` + "`" + `/api/v2/ws/runs` + "`" + ` - Subscribe to scenario run updates\n- ` + "`" + `/api/v2/ws/graphruns` + "`" + ` - Subscribe to graph run updates\n- ` + "`" + `/api/v2/ws/dashboard/active-runs` + "`" + ` - Subscribe to dashboard updates",
+                "description": "Multiplexed WebSocket for real-time updates across all resources\n\n**Authentication:** JWT token via Sec-WebSocket-Protocol subprotocol\n- JavaScript: ` + "`" + `new WebSocket(url, 'access_token.' + jwtToken)` + "`" + `\n- Header: ` + "`" + `Sec-WebSocket-Protocol: access_token.\u003cjwt_token\u003e` + "`" + `\n\n**Client → Server Messages (subscribe/unsubscribe):**\n` + "`" + `` + "`" + `` + "`" + `json\n{\n\"action\": \"subscribe\",\n\"resource\": \"run\",\n\"ids\": [\"run-abc123\", \"run-xyz789\"]\n}\n` + "`" + `` + "`" + `` + "`" + `\n\n**Resource types:** ` + "`" + `run` + "`" + `, ` + "`" + `graphrun` + "`" + `, ` + "`" + `dashboard` + "`" + `\n\n**Server → Client Messages (updates):**\n` + "`" + `` + "`" + `` + "`" + `json\n{\n\"resource\": \"run\",\n\"id\": \"run-abc123\",\n\"event\": \"updated\",\n\"data\": { ... }\n}\n` + "`" + `` + "`" + `` + "`" + `\n\n**Available endpoints:**\n- ` + "`" + `/api/v2/ws/runs` + "`" + ` - Subscribe to scenario run updates\n- ` + "`" + `/api/v2/ws/graphruns` + "`" + ` - Subscribe to graph run updates\n- ` + "`" + `/api/v2/ws/dashboard/active-runs` + "`" + ` - Subscribe to dashboard updates",
                 "consumes": [
                     "application/json"
                 ],
@@ -1155,9 +1306,9 @@ const docTemplate = `{
                 "summary": "WebSocket real-time updates",
                 "responses": {
                     "101": {
-                        "description": "Switching Protocols",
+                        "description": "Switching protocols - WebSocket upgrade successful",
                         "schema": {
-                            "type": "string"
+                            "$ref": "#/definitions/internal_api_v2_websocket.ServerMessage"
                         }
                     },
                     "401": {
@@ -1170,6 +1321,147 @@ const docTemplate = `{
                         "description": "Internal server error",
                         "schema": {
                             "$ref": "#/definitions/internal_api_v2_websocket.ErrorMessage"
+                        }
+                    }
+                }
+            }
+        },
+        "/workflows": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Get list of all workflow templates in the system (admin only).",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "workflows"
+                ],
+                "summary": "List all workflow templates (admin only)",
+                "responses": {
+                    "200": {
+                        "description": "List of workflows",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_krkn-chaos_krkn-operator_pkg_workflows.ListWorkflowsResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden (admin only)",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Create a new workflow template. Validates graph structure (DAG, no cycles). Users can create templates for their own groups or public. Admins can create for any group.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "workflows"
+                ],
+                "summary": "Create workflow template",
+                "parameters": [
+                    {
+                        "description": "Workflow data with graph definition",
+                        "name": "workflow",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/github_com_krkn-chaos_krkn-operator_pkg_workflows.CreateWorkflowRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Workflow created",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_krkn-chaos_krkn-operator_pkg_workflows.CreateWorkflowResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request or graph validation error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/workflows/available": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Get workflows accessible to current user (own workflows, group workflows, public workflows). Includes node count excluding metadata nodes.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "workflows"
+                ],
+                "summary": "List available workflow templates",
+                "responses": {
+                    "200": {
+                        "description": "List of accessible workflows",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_krkn-chaos_krkn-operator_pkg_workflows.AvailableWorkflowsResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed (GET only)",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
                 }
@@ -1225,6 +1517,99 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_krkn-chaos_krkn-operator_pkg_files.AvailableFilesResponse": {
+            "type": "object",
+            "properties": {
+                "files": {
+                    "description": "Files is the list of files available to the current user",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_krkn-chaos_krkn-operator_pkg_files.FileInfo"
+                    }
+                }
+            }
+        },
+        "github_com_krkn-chaos_krkn-operator_pkg_files.CreateFileRequest": {
+            "type": "object",
+            "properties": {
+                "availableToAll": {
+                    "description": "AvailableToAll makes the file accessible to all users",
+                    "type": "boolean"
+                },
+                "content": {
+                    "description": "Content is the file content",
+                    "type": "string"
+                },
+                "description": {
+                    "description": "Description is an optional description of the file",
+                    "type": "string"
+                },
+                "fileName": {
+                    "description": "FileName is the key in the ConfigMap data (the actual file name)",
+                    "type": "string"
+                },
+                "filePurpose": {
+                    "description": "FilePurpose is an optional system-level classification (e.g., \"workflow-template\")",
+                    "type": "string"
+                },
+                "fileType": {
+                    "description": "FileType is an optional file type category (e.g., \"config\", \"script\") - for user categorization",
+                    "type": "string"
+                },
+                "groups": {
+                    "description": "Groups is a list of group names that can access this file",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "github_com_krkn-chaos_krkn-operator_pkg_files.CreateFileResponse": {
+            "type": "object",
+            "properties": {
+                "fileId": {
+                    "description": "FileID is the generated UUID for this file (used for retrieval)",
+                    "type": "string"
+                },
+                "message": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_krkn-chaos_krkn-operator_pkg_files.FileInfo": {
+            "type": "object",
+            "properties": {
+                "createdAt": {
+                    "description": "CreatedAt is the timestamp when the file was created (ISO 8601)",
+                    "type": "string"
+                },
+                "description": {
+                    "description": "Description is an optional description of the file",
+                    "type": "string"
+                },
+                "fileId": {
+                    "description": "FileID is the UUID identifier for this file",
+                    "type": "string"
+                },
+                "fileName": {
+                    "description": "FileName is the key in the ConfigMap data (the actual file name)",
+                    "type": "string"
+                },
+                "filePurpose": {
+                    "description": "FilePurpose is the system-level classification (e.g., \"workflow-template\")",
+                    "type": "string"
+                },
+                "fileType": {
+                    "description": "FileType is an optional file type category (e.g., \"config\", \"script\") - for user categorization",
+                    "type": "string"
+                },
+                "updatedAt": {
+                    "description": "UpdatedAt is the timestamp when the file was last updated (ISO 8601)",
+                    "type": "string"
+                }
+            }
+        },
         "github_com_krkn-chaos_krkn-operator_pkg_files.FileReference": {
             "type": "object",
             "properties": {
@@ -1234,6 +1619,234 @@ const docTemplate = `{
                 },
                 "mountPath": {
                     "description": "MountPath is the absolute path where the file should be mounted",
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_krkn-chaos_krkn-operator_pkg_files.FileResponse": {
+            "type": "object",
+            "properties": {
+                "availableToAll": {
+                    "description": "AvailableToAll makes the file accessible to all users",
+                    "type": "boolean"
+                },
+                "content": {
+                    "description": "Content is the file content",
+                    "type": "string"
+                },
+                "createdAt": {
+                    "description": "CreatedAt is the timestamp when the file was created",
+                    "type": "string"
+                },
+                "createdBy": {
+                    "description": "CreatedBy is the email of the user who created the file",
+                    "type": "string"
+                },
+                "description": {
+                    "description": "Description is an optional description of the file",
+                    "type": "string"
+                },
+                "fileId": {
+                    "description": "FileID is the UUID identifier for this file",
+                    "type": "string"
+                },
+                "fileName": {
+                    "description": "FileName is the key in the ConfigMap data (the actual file name)",
+                    "type": "string"
+                },
+                "filePurpose": {
+                    "description": "FilePurpose is the system-level classification (e.g., \"workflow-template\")",
+                    "type": "string"
+                },
+                "fileType": {
+                    "description": "FileType is an optional file type category (e.g., \"config\", \"script\") - for user categorization",
+                    "type": "string"
+                },
+                "groups": {
+                    "description": "Groups is a list of group names that can access this file",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "updatedAt": {
+                    "description": "UpdatedAt is the timestamp when the file was last updated",
+                    "type": "string"
+                },
+                "updatedBy": {
+                    "description": "UpdatedBy is the email of the user who last updated the file",
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_krkn-chaos_krkn-operator_pkg_files.ListFilesResponse": {
+            "type": "object",
+            "properties": {
+                "files": {
+                    "description": "Files is the list of file ConfigMaps",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_krkn-chaos_krkn-operator_pkg_files.FileResponse"
+                    }
+                },
+                "total": {
+                    "description": "Total is the total number of files returned",
+                    "type": "integer"
+                }
+            }
+        },
+        "github_com_krkn-chaos_krkn-operator_pkg_workflows.AvailableWorkflowsResponse": {
+            "type": "object",
+            "properties": {
+                "workflows": {
+                    "description": "Workflows is the list of workflows available to the current user",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_krkn-chaos_krkn-operator_pkg_workflows.WorkflowInfo"
+                    }
+                }
+            }
+        },
+        "github_com_krkn-chaos_krkn-operator_pkg_workflows.CreateWorkflowRequest": {
+            "type": "object",
+            "properties": {
+                "availableToAll": {
+                    "description": "AvailableToAll makes the workflow accessible to all users",
+                    "type": "boolean"
+                },
+                "description": {
+                    "description": "Description is an optional description of the workflow",
+                    "type": "string"
+                },
+                "fileType": {
+                    "description": "FileType is an optional user-defined category (e.g., \"pod-chaos\", \"network-chaos\")",
+                    "type": "string"
+                },
+                "graph": {
+                    "description": "Graph is the workflow graph definition (map of node ID to GraphScenarioNode)",
+                    "type": "object",
+                    "additionalProperties": {
+                        "$ref": "#/definitions/github_com_krkn-chaos_krkn-operator_api_v1alpha1.GraphScenarioNode"
+                    }
+                },
+                "groups": {
+                    "description": "Groups is a list of group names that can access this workflow (max 1)",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "workflowName": {
+                    "description": "WorkflowName is a human-readable name for the workflow",
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_krkn-chaos_krkn-operator_pkg_workflows.CreateWorkflowResponse": {
+            "type": "object",
+            "properties": {
+                "message": {
+                    "description": "Message is a human-readable status message",
+                    "type": "string"
+                },
+                "workflowId": {
+                    "description": "WorkflowID is the generated UUID for this workflow",
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_krkn-chaos_krkn-operator_pkg_workflows.ListWorkflowsResponse": {
+            "type": "object",
+            "properties": {
+                "total": {
+                    "description": "Total is the total number of workflows returned",
+                    "type": "integer"
+                },
+                "workflows": {
+                    "description": "Workflows is the list of workflow templates",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_krkn-chaos_krkn-operator_pkg_workflows.WorkflowResponse"
+                    }
+                }
+            }
+        },
+        "github_com_krkn-chaos_krkn-operator_pkg_workflows.WorkflowInfo": {
+            "type": "object",
+            "properties": {
+                "description": {
+                    "description": "Description is an optional description of the workflow",
+                    "type": "string"
+                },
+                "fileType": {
+                    "description": "FileType is the user-defined category",
+                    "type": "string"
+                },
+                "nodeCount": {
+                    "description": "NodeCount is the number of nodes in the workflow graph",
+                    "type": "integer"
+                },
+                "workflowId": {
+                    "description": "WorkflowID is the UUID identifier for this workflow",
+                    "type": "string"
+                },
+                "workflowName": {
+                    "description": "WorkflowName is a human-readable name for the workflow",
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_krkn-chaos_krkn-operator_pkg_workflows.WorkflowResponse": {
+            "type": "object",
+            "properties": {
+                "availableToAll": {
+                    "description": "AvailableToAll indicates if the workflow is accessible to all users",
+                    "type": "boolean"
+                },
+                "createdAt": {
+                    "description": "CreatedAt is the timestamp when the workflow was created",
+                    "type": "string"
+                },
+                "createdBy": {
+                    "description": "CreatedBy is the email of the user who created the workflow",
+                    "type": "string"
+                },
+                "description": {
+                    "description": "Description is an optional description of the workflow",
+                    "type": "string"
+                },
+                "fileType": {
+                    "description": "FileType is the user-defined category",
+                    "type": "string"
+                },
+                "graph": {
+                    "description": "Graph is the workflow graph definition",
+                    "type": "object",
+                    "additionalProperties": {
+                        "$ref": "#/definitions/github_com_krkn-chaos_krkn-operator_api_v1alpha1.GraphScenarioNode"
+                    }
+                },
+                "groups": {
+                    "description": "Groups is a list of group names that can access this workflow",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "updatedAt": {
+                    "description": "UpdatedAt is the timestamp when the workflow was last updated",
+                    "type": "string"
+                },
+                "updatedBy": {
+                    "description": "UpdatedBy is the email of the user who last updated the workflow",
+                    "type": "string"
+                },
+                "workflowId": {
+                    "description": "WorkflowID is the UUID identifier for this workflow",
+                    "type": "string"
+                },
+                "workflowName": {
+                    "description": "WorkflowName is a human-readable name for the workflow",
                     "type": "string"
                 }
             }
@@ -1630,6 +2243,24 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "message": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_api_v2_websocket.ServerMessage": {
+            "type": "object",
+            "properties": {
+                "data": {},
+                "event": {
+                    "description": "\"updated\", \"deleted\", \"snapshot\"",
+                    "type": "string"
+                },
+                "id": {
+                    "description": "resource ID (empty for dashboard)",
+                    "type": "string"
+                },
+                "resource": {
+                    "description": "\"run\", \"graphrun\", \"dashboard\"",
                     "type": "string"
                 }
             }

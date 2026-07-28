@@ -46,6 +46,76 @@ definitions:
           +optional
         type: object
     type: object
+  github_com_krkn-chaos_krkn-operator_pkg_files.AvailableFilesResponse:
+    properties:
+      files:
+        description: Files is the list of files available to the current user
+        items:
+          $ref: '#/definitions/github_com_krkn-chaos_krkn-operator_pkg_files.FileInfo'
+        type: array
+    type: object
+  github_com_krkn-chaos_krkn-operator_pkg_files.CreateFileRequest:
+    properties:
+      availableToAll:
+        description: AvailableToAll makes the file accessible to all users
+        type: boolean
+      content:
+        description: Content is the file content
+        type: string
+      description:
+        description: Description is an optional description of the file
+        type: string
+      fileName:
+        description: FileName is the key in the ConfigMap data (the actual file name)
+        type: string
+      filePurpose:
+        description: FilePurpose is an optional system-level classification (e.g.,
+          "workflow-template")
+        type: string
+      fileType:
+        description: FileType is an optional file type category (e.g., "config", "script")
+          - for user categorization
+        type: string
+      groups:
+        description: Groups is a list of group names that can access this file
+        items:
+          type: string
+        type: array
+    type: object
+  github_com_krkn-chaos_krkn-operator_pkg_files.CreateFileResponse:
+    properties:
+      fileId:
+        description: FileID is the generated UUID for this file (used for retrieval)
+        type: string
+      message:
+        type: string
+    type: object
+  github_com_krkn-chaos_krkn-operator_pkg_files.FileInfo:
+    properties:
+      createdAt:
+        description: CreatedAt is the timestamp when the file was created (ISO 8601)
+        type: string
+      description:
+        description: Description is an optional description of the file
+        type: string
+      fileId:
+        description: FileID is the UUID identifier for this file
+        type: string
+      fileName:
+        description: FileName is the key in the ConfigMap data (the actual file name)
+        type: string
+      filePurpose:
+        description: FilePurpose is the system-level classification (e.g., "workflow-template")
+        type: string
+      fileType:
+        description: FileType is an optional file type category (e.g., "config", "script")
+          - for user categorization
+        type: string
+      updatedAt:
+        description: UpdatedAt is the timestamp when the file was last updated (ISO
+          8601)
+        type: string
+    type: object
   github_com_krkn-chaos_krkn-operator_pkg_files.FileReference:
     properties:
       fileId:
@@ -53,6 +123,173 @@ definitions:
         type: string
       mountPath:
         description: MountPath is the absolute path where the file should be mounted
+        type: string
+    type: object
+  github_com_krkn-chaos_krkn-operator_pkg_files.FileResponse:
+    properties:
+      availableToAll:
+        description: AvailableToAll makes the file accessible to all users
+        type: boolean
+      content:
+        description: Content is the file content
+        type: string
+      createdAt:
+        description: CreatedAt is the timestamp when the file was created
+        type: string
+      createdBy:
+        description: CreatedBy is the email of the user who created the file
+        type: string
+      description:
+        description: Description is an optional description of the file
+        type: string
+      fileId:
+        description: FileID is the UUID identifier for this file
+        type: string
+      fileName:
+        description: FileName is the key in the ConfigMap data (the actual file name)
+        type: string
+      filePurpose:
+        description: FilePurpose is the system-level classification (e.g., "workflow-template")
+        type: string
+      fileType:
+        description: FileType is an optional file type category (e.g., "config", "script")
+          - for user categorization
+        type: string
+      groups:
+        description: Groups is a list of group names that can access this file
+        items:
+          type: string
+        type: array
+      updatedAt:
+        description: UpdatedAt is the timestamp when the file was last updated
+        type: string
+      updatedBy:
+        description: UpdatedBy is the email of the user who last updated the file
+        type: string
+    type: object
+  github_com_krkn-chaos_krkn-operator_pkg_files.ListFilesResponse:
+    properties:
+      files:
+        description: Files is the list of file ConfigMaps
+        items:
+          $ref: '#/definitions/github_com_krkn-chaos_krkn-operator_pkg_files.FileResponse'
+        type: array
+      total:
+        description: Total is the total number of files returned
+        type: integer
+    type: object
+  github_com_krkn-chaos_krkn-operator_pkg_workflows.AvailableWorkflowsResponse:
+    properties:
+      workflows:
+        description: Workflows is the list of workflows available to the current user
+        items:
+          $ref: '#/definitions/github_com_krkn-chaos_krkn-operator_pkg_workflows.WorkflowInfo'
+        type: array
+    type: object
+  github_com_krkn-chaos_krkn-operator_pkg_workflows.CreateWorkflowRequest:
+    properties:
+      availableToAll:
+        description: AvailableToAll makes the workflow accessible to all users
+        type: boolean
+      description:
+        description: Description is an optional description of the workflow
+        type: string
+      fileType:
+        description: FileType is an optional user-defined category (e.g., "pod-chaos",
+          "network-chaos")
+        type: string
+      graph:
+        additionalProperties:
+          $ref: '#/definitions/github_com_krkn-chaos_krkn-operator_api_v1alpha1.GraphScenarioNode'
+        description: Graph is the workflow graph definition (map of node ID to GraphScenarioNode)
+        type: object
+      groups:
+        description: Groups is a list of group names that can access this workflow
+          (max 1)
+        items:
+          type: string
+        type: array
+      workflowName:
+        description: WorkflowName is a human-readable name for the workflow
+        type: string
+    type: object
+  github_com_krkn-chaos_krkn-operator_pkg_workflows.CreateWorkflowResponse:
+    properties:
+      message:
+        description: Message is a human-readable status message
+        type: string
+      workflowId:
+        description: WorkflowID is the generated UUID for this workflow
+        type: string
+    type: object
+  github_com_krkn-chaos_krkn-operator_pkg_workflows.ListWorkflowsResponse:
+    properties:
+      total:
+        description: Total is the total number of workflows returned
+        type: integer
+      workflows:
+        description: Workflows is the list of workflow templates
+        items:
+          $ref: '#/definitions/github_com_krkn-chaos_krkn-operator_pkg_workflows.WorkflowResponse'
+        type: array
+    type: object
+  github_com_krkn-chaos_krkn-operator_pkg_workflows.WorkflowInfo:
+    properties:
+      description:
+        description: Description is an optional description of the workflow
+        type: string
+      fileType:
+        description: FileType is the user-defined category
+        type: string
+      nodeCount:
+        description: NodeCount is the number of nodes in the workflow graph
+        type: integer
+      workflowId:
+        description: WorkflowID is the UUID identifier for this workflow
+        type: string
+      workflowName:
+        description: WorkflowName is a human-readable name for the workflow
+        type: string
+    type: object
+  github_com_krkn-chaos_krkn-operator_pkg_workflows.WorkflowResponse:
+    properties:
+      availableToAll:
+        description: AvailableToAll indicates if the workflow is accessible to all
+          users
+        type: boolean
+      createdAt:
+        description: CreatedAt is the timestamp when the workflow was created
+        type: string
+      createdBy:
+        description: CreatedBy is the email of the user who created the workflow
+        type: string
+      description:
+        description: Description is an optional description of the workflow
+        type: string
+      fileType:
+        description: FileType is the user-defined category
+        type: string
+      graph:
+        additionalProperties:
+          $ref: '#/definitions/github_com_krkn-chaos_krkn-operator_api_v1alpha1.GraphScenarioNode'
+        description: Graph is the workflow graph definition
+        type: object
+      groups:
+        description: Groups is a list of group names that can access this workflow
+        items:
+          type: string
+        type: array
+      updatedAt:
+        description: UpdatedAt is the timestamp when the workflow was last updated
+        type: string
+      updatedBy:
+        description: UpdatedBy is the email of the user who last updated the workflow
+        type: string
+      workflowId:
+        description: WorkflowID is the UUID identifier for this workflow
+        type: string
+      workflowName:
+        description: WorkflowName is a human-readable name for the workflow
         type: string
     type: object
   internal_api.ClustersResponse:
@@ -335,6 +572,19 @@ definitions:
       message:
         type: string
     type: object
+  internal_api_v2_websocket.ServerMessage:
+    properties:
+      data: {}
+      event:
+        description: '"updated", "deleted", "snapshot"'
+        type: string
+      id:
+        description: resource ID (empty for dashboard)
+        type: string
+      resource:
+        description: '"run", "graphrun", "dashboard"'
+        type: string
+    type: object
 host: localhost:8080
 info:
   contact:
@@ -489,6 +739,105 @@ paths:
       summary: List available clusters
       tags:
       - clusters
+  /files:
+    get:
+      description: Get list of all file ConfigMaps (admin only). Supports filtering
+        by filePurpose query parameter.
+      parameters:
+      - description: Filter by file purpose (e.g., workflow-template)
+        in: query
+        name: filePurpose
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: List of files
+          schema:
+            $ref: '#/definitions/github_com_krkn-chaos_krkn-operator_pkg_files.ListFilesResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "403":
+          description: Forbidden (admin only)
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: List files (admin only)
+      tags:
+      - files
+    post:
+      consumes:
+      - application/json
+      description: Create a new file ConfigMap. Users can create files for their own
+        groups or public files. Admins can create files for any group. Cannot create
+        workflow-template files (use POST /api/v1/workflows instead).
+      parameters:
+      - description: File data
+        in: body
+        name: file
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_krkn-chaos_krkn-operator_pkg_files.CreateFileRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: File created
+          schema:
+            $ref: '#/definitions/github_com_krkn-chaos_krkn-operator_pkg_files.CreateFileResponse'
+        "400":
+          description: Invalid request or validation error
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Create file
+      tags:
+      - files
+  /files/available:
+    get:
+      description: Get files accessible to current user (own files, group files, public
+        files). Supports filtering by filePurpose query parameter.
+      parameters:
+      - description: Filter by file purpose (e.g., workflow-template)
+        in: query
+        name: filePurpose
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: List of accessible files
+          schema:
+            $ref: '#/definitions/github_com_krkn-chaos_krkn-operator_pkg_files.AvailableFilesResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: List available files
+      tags:
+      - files
   /graphruns:
     get:
       description: Get list of all graph runs. Regular users see only their own, admins
@@ -1039,32 +1388,34 @@ paths:
       consumes:
       - application/json
       description: |-
-        Multiplexed WebSocket endpoint for real-time resource updates. Supports scenario runs, graph runs, and dashboard.
+        Multiplexed WebSocket for real-time updates across all resources
 
-        **Authentication:** JWT token via WebSocket subprotocol header:
+        **Authentication:** JWT token via Sec-WebSocket-Protocol subprotocol
         - JavaScript: `new WebSocket(url, 'access_token.' + jwtToken)`
         - Header: `Sec-WebSocket-Protocol: access_token.<jwt_token>`
 
-        **Client → Server Messages:**
+        **Client → Server Messages (subscribe/unsubscribe):**
         ```json
         {
         "action": "subscribe",
-        "resource": "run|graphrun|dashboard",
-        "ids": ["run-abc123", "run-def456"]
+        "resource": "run",
+        "ids": ["run-abc123", "run-xyz789"]
         }
         ```
 
-        **Server → Client Messages:**
+        **Resource types:** `run`, `graphrun`, `dashboard`
+
+        **Server → Client Messages (updates):**
         ```json
         {
-        "resource": "run|graphrun|dashboard",
+        "resource": "run",
         "id": "run-abc123",
-        "event": "updated|deleted",
+        "event": "updated",
         "data": { ... }
         }
         ```
 
-        **Endpoints:**
+        **Available endpoints:**
         - `/api/v2/ws/runs` - Subscribe to scenario run updates
         - `/api/v2/ws/graphruns` - Subscribe to graph run updates
         - `/api/v2/ws/dashboard/active-runs` - Subscribe to dashboard updates
@@ -1072,9 +1423,9 @@ paths:
       - application/json
       responses:
         "101":
-          description: Switching Protocols
+          description: Switching protocols - WebSocket upgrade successful
           schema:
-            type: string
+            $ref: '#/definitions/internal_api_v2_websocket.ServerMessage'
         "401":
           description: Unauthorized - missing or invalid JWT token
           schema:
@@ -1093,32 +1444,34 @@ paths:
       consumes:
       - application/json
       description: |-
-        Multiplexed WebSocket endpoint for real-time resource updates. Supports scenario runs, graph runs, and dashboard.
+        Multiplexed WebSocket for real-time updates across all resources
 
-        **Authentication:** JWT token via WebSocket subprotocol header:
+        **Authentication:** JWT token via Sec-WebSocket-Protocol subprotocol
         - JavaScript: `new WebSocket(url, 'access_token.' + jwtToken)`
         - Header: `Sec-WebSocket-Protocol: access_token.<jwt_token>`
 
-        **Client → Server Messages:**
+        **Client → Server Messages (subscribe/unsubscribe):**
         ```json
         {
         "action": "subscribe",
-        "resource": "run|graphrun|dashboard",
-        "ids": ["run-abc123", "run-def456"]
+        "resource": "run",
+        "ids": ["run-abc123", "run-xyz789"]
         }
         ```
 
-        **Server → Client Messages:**
+        **Resource types:** `run`, `graphrun`, `dashboard`
+
+        **Server → Client Messages (updates):**
         ```json
         {
-        "resource": "run|graphrun|dashboard",
+        "resource": "run",
         "id": "run-abc123",
-        "event": "updated|deleted",
+        "event": "updated",
         "data": { ... }
         }
         ```
 
-        **Endpoints:**
+        **Available endpoints:**
         - `/api/v2/ws/runs` - Subscribe to scenario run updates
         - `/api/v2/ws/graphruns` - Subscribe to graph run updates
         - `/api/v2/ws/dashboard/active-runs` - Subscribe to dashboard updates
@@ -1126,9 +1479,9 @@ paths:
       - application/json
       responses:
         "101":
-          description: Switching Protocols
+          description: Switching protocols - WebSocket upgrade successful
           schema:
-            type: string
+            $ref: '#/definitions/internal_api_v2_websocket.ServerMessage'
         "401":
           description: Unauthorized - missing or invalid JWT token
           schema:
@@ -1147,32 +1500,34 @@ paths:
       consumes:
       - application/json
       description: |-
-        Multiplexed WebSocket endpoint for real-time resource updates. Supports scenario runs, graph runs, and dashboard.
+        Multiplexed WebSocket for real-time updates across all resources
 
-        **Authentication:** JWT token via WebSocket subprotocol header:
+        **Authentication:** JWT token via Sec-WebSocket-Protocol subprotocol
         - JavaScript: `new WebSocket(url, 'access_token.' + jwtToken)`
         - Header: `Sec-WebSocket-Protocol: access_token.<jwt_token>`
 
-        **Client → Server Messages:**
+        **Client → Server Messages (subscribe/unsubscribe):**
         ```json
         {
         "action": "subscribe",
-        "resource": "run|graphrun|dashboard",
-        "ids": ["run-abc123", "run-def456"]
+        "resource": "run",
+        "ids": ["run-abc123", "run-xyz789"]
         }
         ```
 
-        **Server → Client Messages:**
+        **Resource types:** `run`, `graphrun`, `dashboard`
+
+        **Server → Client Messages (updates):**
         ```json
         {
-        "resource": "run|graphrun|dashboard",
+        "resource": "run",
         "id": "run-abc123",
-        "event": "updated|deleted",
+        "event": "updated",
         "data": { ... }
         }
         ```
 
-        **Endpoints:**
+        **Available endpoints:**
         - `/api/v2/ws/runs` - Subscribe to scenario run updates
         - `/api/v2/ws/graphruns` - Subscribe to graph run updates
         - `/api/v2/ws/dashboard/active-runs` - Subscribe to dashboard updates
@@ -1180,9 +1535,9 @@ paths:
       - application/json
       responses:
         "101":
-          description: Switching Protocols
+          description: Switching protocols - WebSocket upgrade successful
           schema:
-            type: string
+            $ref: '#/definitions/internal_api_v2_websocket.ServerMessage'
         "401":
           description: Unauthorized - missing or invalid JWT token
           schema:
@@ -1196,6 +1551,98 @@ paths:
       summary: WebSocket real-time updates
       tags:
       - websocket
+  /workflows:
+    get:
+      description: Get list of all workflow templates in the system (admin only).
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: List of workflows
+          schema:
+            $ref: '#/definitions/github_com_krkn-chaos_krkn-operator_pkg_workflows.ListWorkflowsResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "403":
+          description: Forbidden (admin only)
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: List all workflow templates (admin only)
+      tags:
+      - workflows
+    post:
+      consumes:
+      - application/json
+      description: Create a new workflow template. Validates graph structure (DAG,
+        no cycles). Users can create templates for their own groups or public. Admins
+        can create for any group.
+      parameters:
+      - description: Workflow data with graph definition
+        in: body
+        name: workflow
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_krkn-chaos_krkn-operator_pkg_workflows.CreateWorkflowRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Workflow created
+          schema:
+            $ref: '#/definitions/github_com_krkn-chaos_krkn-operator_pkg_workflows.CreateWorkflowResponse'
+        "400":
+          description: Invalid request or graph validation error
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Create workflow template
+      tags:
+      - workflows
+  /workflows/available:
+    get:
+      description: Get workflows accessible to current user (own workflows, group
+        workflows, public workflows). Includes node count excluding metadata nodes.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: List of accessible workflows
+          schema:
+            $ref: '#/definitions/github_com_krkn-chaos_krkn-operator_pkg_workflows.AvailableWorkflowsResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "405":
+          description: Method not allowed (GET only)
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: List available workflow templates
+      tags:
+      - workflows
 securityDefinitions:
   BearerAuth:
     description: 'JWT token obtained from /api/v1/auth/login or /api/v2/auth/login.
