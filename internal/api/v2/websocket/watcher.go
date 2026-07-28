@@ -20,18 +20,20 @@ package websocket
 
 import (
 	"context"
+	"fmt"
 	"reflect"
 
 	"github.com/go-logr/logr"
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
+	"k8s.io/client-go/tools/cache"
 	k8sclient "sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/cache"
+	ctrlcache "sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 // SetupWatchers configures Kubernetes informers to broadcast WebSocket updates
 // This is called from main.go after the manager is created
-func SetupWatchers(ctx context.Context, informerCache cache.Cache, broadcaster *Broadcaster, k8sClient k8sclient.Client, namespace string) error {
+func SetupWatchers(ctx context.Context, informerCache ctrlcache.Cache, broadcaster *Broadcaster, k8sClient k8sclient.Client, namespace string) error {
 	logger := log.FromContext(ctx).WithName("websocket-watcher")
 
 	// Setup ScenarioRun watcher
@@ -127,7 +129,23 @@ func (h *scenarioRunEventHandler) OnUpdate(oldObj, newObj interface{}) {
 }
 
 func (h *scenarioRunEventHandler) OnDelete(obj interface{}) {
-	run := obj.(*krknv1alpha1.KrknScenarioRun)
+	// Handle tombstone: when informer misses a delete (watch reconnect/relist),
+	// it sends cache.DeletedFinalStateUnknown instead of the actual object
+	run, ok := obj.(*krknv1alpha1.KrknScenarioRun)
+	if !ok {
+		tombstone, ok := obj.(cache.DeletedFinalStateUnknown)
+		if !ok {
+			h.logger.Error(nil, "OnDelete received object that is not ScenarioRun or tombstone", "type", fmt.Sprintf("%T", obj))
+			return
+		}
+		run, ok = tombstone.Obj.(*krknv1alpha1.KrknScenarioRun)
+		if !ok {
+			h.logger.Error(nil, "Tombstone contained object that is not ScenarioRun", "type", fmt.Sprintf("%T", tombstone.Obj))
+			return
+		}
+		h.logger.V(1).Info("Recovered ScenarioRun from tombstone", "name", run.Name)
+	}
+
 	h.logger.V(1).Info("ScenarioRun deleted", "name", run.Name)
 	h.broadcaster.BroadcastScenarioRunDeleted(run)
 }
@@ -166,7 +184,23 @@ func (h *graphRunEventHandler) OnUpdate(oldObj, newObj interface{}) {
 }
 
 func (h *graphRunEventHandler) OnDelete(obj interface{}) {
-	run := obj.(*krknv1alpha1.KrknGraphRun)
+	// Handle tombstone: when informer misses a delete (watch reconnect/relist),
+	// it sends cache.DeletedFinalStateUnknown instead of the actual object
+	run, ok := obj.(*krknv1alpha1.KrknGraphRun)
+	if !ok {
+		tombstone, ok := obj.(cache.DeletedFinalStateUnknown)
+		if !ok {
+			h.logger.Error(nil, "OnDelete received object that is not GraphRun or tombstone", "type", fmt.Sprintf("%T", obj))
+			return
+		}
+		run, ok = tombstone.Obj.(*krknv1alpha1.KrknGraphRun)
+		if !ok {
+			h.logger.Error(nil, "Tombstone contained object that is not GraphRun", "type", fmt.Sprintf("%T", tombstone.Obj))
+			return
+		}
+		h.logger.V(1).Info("Recovered GraphRun from tombstone", "name", run.Name)
+	}
+
 	h.logger.V(1).Info("GraphRun deleted", "name", run.Name)
 	h.broadcaster.BroadcastGraphRunDeleted(run)
 }
