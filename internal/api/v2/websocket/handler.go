@@ -73,8 +73,15 @@ func NewHandler(hub *Hub, k8sClient k8sclient.Client, namespace string, authz Au
 			ReadBufferSize:  1024,
 			WriteBufferSize: 1024,
 			CheckOrigin: func(r *http.Request) bool {
-				// Allow all origins for WebSocket connections
-				// Authentication is handled via JWT token in Sec-WebSocket-Protocol header
+				// SECURITY: Intentionally permissive (allows all origins)
+				// Rationale:
+				// 1. Authentication/authorization is enforced via JWT in Sec-WebSocket-Protocol
+				// 2. Invalid/missing JWT → connection refused at upgrade time
+				// 3. Valid JWT but insufficient permissions → filtered broadcasts (authz layer)
+				// 4. CORS-style origin checks don't prevent token theft attacks
+				// 5. Allows legitimate cross-origin use (e.g., separate frontend domain)
+				//
+				// If stricter origin validation is needed, configure an allowlist here.
 				return true
 			},
 		},
@@ -138,7 +145,7 @@ func (h *Handler) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 	parts := strings.SplitN(protocol, ".", 2)
 	if len(parts) != 2 || parts[0] != "access_token" {
 		logger.Error(nil, "Invalid WebSocket protocol format",
-			"protocol", protocol,
+			"protocol", "access_token.<redacted>", // Don't log raw token
 			"client_ip", r.RemoteAddr)
 		http.Error(w, "Invalid WebSocket protocol. Expected: access_token.{jwt_token}", http.StatusBadRequest)
 		return
@@ -170,8 +177,10 @@ func (h *Handler) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 		"client_ip", r.RemoteAddr)
 
 	// Upgrade HTTP connection to WebSocket
-	// Respond with matching subprotocol to complete handshake
-	h.upgrader.Subprotocols = []string{protocol}
+	// SECURITY: Only echo the prefix, not the full token
+	// Client sent "access_token.<jwt>", we respond with just "access_token"
+	// This prevents the JWT from being exposed in response headers
+	h.upgrader.Subprotocols = []string{"access_token"}
 	conn, err := h.upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		logger.Error(err, "Failed to upgrade WebSocket connection",
