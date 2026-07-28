@@ -22,6 +22,7 @@ import (
 	"sync"
 
 	"github.com/gorilla/websocket"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 // Client represents a connected WebSocket client
@@ -200,22 +201,44 @@ func (c *Client) Unsubscribe(resourceType string, resourceIDs []string) {
 
 // Broadcast sends a message to all subscribed clients
 // Does NOT enforce authorization - use BroadcastWithAuthz for resources that require authz checks
+// Non-blocking: drops message if broadcast channel is full (prevents informer stalls)
 func (h *Hub) Broadcast(resourceType, resourceID string, message []byte) {
-	h.broadcast <- &BroadcastMessage{
+	msg := &BroadcastMessage{
 		resourceType: resourceType,
 		resourceID:   resourceID,
 		message:      message,
 		authzCheck:   nil, // No authorization check
 	}
+
+	select {
+	case h.broadcast <- msg:
+		// Message enqueued successfully
+	default:
+		// Channel full - drop message to prevent blocking informer
+		log.Log.V(1).Info("Broadcast channel full, dropping message",
+			"resource", resourceType,
+			"id", resourceID)
+	}
 }
 
 // BroadcastWithAuthz sends a message to all subscribed AND authorized clients
 // The authzCheck function is called for each client to verify permission
+// Non-blocking: drops message if broadcast channel is full (prevents informer stalls)
 func (h *Hub) BroadcastWithAuthz(resourceType, resourceID string, message []byte, authzCheck AuthorizationCheckFunc) {
-	h.broadcast <- &BroadcastMessage{
+	msg := &BroadcastMessage{
 		resourceType: resourceType,
 		resourceID:   resourceID,
 		message:      message,
 		authzCheck:   authzCheck,
+	}
+
+	select {
+	case h.broadcast <- msg:
+		// Message enqueued successfully
+	default:
+		// Channel full - drop message to prevent blocking informer
+		log.Log.V(1).Info("Broadcast channel full, dropping message",
+			"resource", resourceType,
+			"id", resourceID)
 	}
 }
