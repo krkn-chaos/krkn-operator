@@ -178,6 +178,12 @@ func NewServer(port int, client client.Client, clientset kubernetes.Interface, n
 	mux.Handle(FileTypesPath, authMw.RequireAuth(http.HandlerFunc(handler.FileTypesRouter)))
 	mux.Handle(FileTypesPath+"/", authMw.RequireAuth(http.HandlerFunc(handler.FileTypesRouter)))
 
+	// Workflow management endpoints - CRUD: authenticated users, list all: admin only, available: all users
+	// Register /available before generic /workflows to avoid path collision
+	mux.Handle(WorkflowsAvailablePath, authMw.RequireAuth(http.HandlerFunc(handler.ListAvailableWorkflows)))
+	mux.Handle(WorkflowsPath, authMw.RequireAuth(http.HandlerFunc(handler.WorkflowsRouter)))
+	mux.Handle(WorkflowsPath+"/", authMw.RequireAuth(http.HandlerFunc(handler.WorkflowsRouter)))
+
 	// Provider config endpoints - admin only (POST), user and admin (GET)
 	// Note: handler.ProviderConfigHandler internally handles method-based authorization
 	mux.Handle(ProviderConfigPath, authMw.RequireAuth(http.HandlerFunc(handler.ProviderConfigHandler)))

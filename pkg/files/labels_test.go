@@ -115,7 +115,7 @@ func TestBuildFileLabels(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := BuildFileLabels(tt.fileID, tt.fileType, tt.groups, tt.availableToAll)
+			got := BuildFileLabels(tt.fileID, tt.fileType, tt.groups, tt.availableToAll, "")
 
 			// Check all expected labels are present
 			for key, wantValue := range tt.want {

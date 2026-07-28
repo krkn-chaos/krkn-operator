@@ -86,6 +86,12 @@ const (
 	FileTypesPath      = APIBasePath + "/file-types"
 )
 
+// Workflow management endpoints
+const (
+	WorkflowsPath          = APIBasePath + "/workflows"
+	WorkflowsAvailablePath = WorkflowsPath + "/available"
+)
+
 // Provider endpoints
 const (
 	ProvidersPath      = APIBasePath + "/providers"

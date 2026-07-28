@@ -99,7 +99,7 @@ func (h *Handler) CreateFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Build labels and annotations
-	labels := files.BuildFileLabels(fileID, req.FileType, req.Groups, req.AvailableToAll)
+	labels := files.BuildFileLabels(fileID, req.FileType, req.Groups, req.AvailableToAll, req.FilePurpose)
 	annotations := files.BuildFileAnnotations(
 		req.Description,
 		createdBy,
@@ -150,14 +150,23 @@ func (h *Handler) ListFiles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Build label filters
+	matchingLabels := map[string]string{
+		files.AppNameLabel:      files.AppName,
+		files.AppComponentLabel: files.ComponentFile,
+	}
+
+	// Add optional filePurpose filter from query parameter
+	filePurpose := r.URL.Query().Get("filePurpose")
+	if filePurpose != "" {
+		matchingLabels[files.FilePurposeLabel] = filePurpose
+	}
+
 	// List all file ConfigMaps
 	var configMapList corev1.ConfigMapList
 	err := h.client.List(ctx, &configMapList,
 		client.InNamespace(h.namespace),
-		client.MatchingLabels{
-			files.AppNameLabel:      files.AppName,
-			files.AppComponentLabel: files.ComponentFile,
-		},
+		client.MatchingLabels(matchingLabels),
 	)
 	if err != nil {
 		logger.Error(err, "Failed to list file ConfigMaps")
@@ -346,7 +355,7 @@ func (h *Handler) UpdateFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Update labels and annotations (preserve existing file ID)
-	configMap.Labels = files.BuildFileLabels(fileID, req.FileType, req.Groups, req.AvailableToAll)
+	configMap.Labels = files.BuildFileLabels(fileID, req.FileType, req.Groups, req.AvailableToAll, req.FilePurpose)
 	configMap.Annotations = files.UpdateFileAnnotations(
 		configMap.Annotations,
 		req.Description,
@@ -465,15 +474,24 @@ func (h *Handler) ListAvailableFiles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Build label filters
+	matchingLabels := map[string]string{
+		files.AppNameLabel:      files.AppName,
+		files.AppComponentLabel: files.ComponentFile,
+	}
+
+	// Add optional filePurpose filter from query parameter
+	filePurpose := r.URL.Query().Get("filePurpose")
+	if filePurpose != "" {
+		matchingLabels[files.FilePurposeLabel] = filePurpose
+	}
+
 	// Admins see all files
 	if auth.IsAdmin(ctx) {
 		var configMapList corev1.ConfigMapList
 		err := h.client.List(ctx, &configMapList,
 			client.InNamespace(h.namespace),
-			client.MatchingLabels{
-				files.AppNameLabel:      files.AppName,
-				files.AppComponentLabel: files.ComponentFile,
-			},
+			client.MatchingLabels(matchingLabels),
 		)
 		if err != nil {
 			logger.Error(err, "Failed to list file ConfigMaps")
@@ -495,14 +513,11 @@ func (h *Handler) ListAvailableFiles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// List all file ConfigMaps
+	// List all file ConfigMaps (reuse label filters from above)
 	var configMapList corev1.ConfigMapList
 	err := h.client.List(ctx, &configMapList,
 		client.InNamespace(h.namespace),
-		client.MatchingLabels{
-			files.AppNameLabel:      files.AppName,
-			files.AppComponentLabel: files.ComponentFile,
-		},
+		client.MatchingLabels(matchingLabels),
 	)
 	if err != nil {
 		logger.Error(err, "Failed to list file ConfigMaps")
@@ -691,6 +706,7 @@ func buildFileResponse(configMap *corev1.ConfigMap) files.FileResponse {
 		Content:        content,
 		Description:    configMap.Annotations[files.DescriptionAnnotation],
 		FileType:       files.ExtractFileTypeFromLabels(configMap.Labels),
+		FilePurpose:    files.ExtractFilePurposeFromLabels(configMap.Labels),
 		Groups:         files.ExtractGroupsFromLabels(configMap.Labels),
 		AvailableToAll: configMap.Labels[files.AvailableToAllLabel] == "true",
 		CreatedAt:      configMap.Annotations[files.CreatedAtAnnotation],
@@ -714,6 +730,7 @@ func buildFileInfo(configMap *corev1.ConfigMap) files.FileInfo {
 		FileName:    fileName,
 		Description: configMap.Annotations[files.DescriptionAnnotation],
 		FileType:    files.ExtractFileTypeFromLabels(configMap.Labels),
+		FilePurpose: files.ExtractFilePurposeFromLabels(configMap.Labels),
 	}
 }
 

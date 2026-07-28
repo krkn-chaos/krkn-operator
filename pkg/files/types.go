@@ -27,12 +27,14 @@ type CreateFileRequest struct {
 	Content string `json:"content"`
 	// Description is an optional description of the file
 	Description string `json:"description,omitempty"`
-	// FileType is an optional file type category (e.g., "config", "script")
+	// FileType is an optional file type category (e.g., "config", "script") - for user categorization
 	FileType string `json:"fileType,omitempty"`
 	// Groups is a list of group names that can access this file
 	Groups []string `json:"groups,omitempty"`
 	// AvailableToAll makes the file accessible to all users
 	AvailableToAll bool `json:"availableToAll,omitempty"`
+	// FilePurpose is an optional system-level classification (e.g., "workflow-template")
+	FilePurpose string `json:"filePurpose,omitempty"`
 }
 
 // CreateFileResponse is the response for create file requests
@@ -50,12 +52,14 @@ type UpdateFileRequest struct {
 	Content string `json:"content"`
 	// Description is an optional description of the file
 	Description string `json:"description,omitempty"`
-	// FileType is an optional file type category (e.g., "config", "script")
+	// FileType is an optional file type category (e.g., "config", "script") - for user categorization
 	FileType string `json:"fileType,omitempty"`
 	// Groups is a list of group names that can access this file
 	Groups []string `json:"groups,omitempty"`
 	// AvailableToAll makes the file accessible to all users
 	AvailableToAll bool `json:"availableToAll,omitempty"`
+	// FilePurpose is an optional system-level classification (e.g., "workflow-template")
+	FilePurpose string `json:"filePurpose,omitempty"`
 }
 
 // UpdateFileResponse is the response for update file requests
@@ -80,8 +84,10 @@ type FileResponse struct {
 	Content string `json:"content"`
 	// Description is an optional description of the file
 	Description string `json:"description,omitempty"`
-	// FileType is an optional file type category (e.g., "config", "script")
+	// FileType is an optional file type category (e.g., "config", "script") - for user categorization
 	FileType string `json:"fileType,omitempty"`
+	// FilePurpose is the system-level classification (e.g., "workflow-template")
+	FilePurpose string `json:"filePurpose,omitempty"`
 	// Groups is a list of group names that can access this file
 	Groups []string `json:"groups,omitempty"`
 	// AvailableToAll makes the file accessible to all users
@@ -104,8 +110,10 @@ type FileInfo struct {
 	FileName string `json:"fileName"`
 	// Description is an optional description of the file
 	Description string `json:"description,omitempty"`
-	// FileType is an optional file type category (e.g., "config", "script")
+	// FileType is an optional file type category (e.g., "config", "script") - for user categorization
 	FileType string `json:"fileType,omitempty"`
+	// FilePurpose is the system-level classification (e.g., "workflow-template")
+	FilePurpose string `json:"filePurpose,omitempty"`
 }
 
 // ListFilesResponse is the response for list files requests
