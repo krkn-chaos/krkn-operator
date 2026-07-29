@@ -1,22 +1,8 @@
 {
     "swagger": "2.0",
     "info": {
-        "description": "REST and WebSocket API for Krkn chaos engineering operator.\n\n**API Versions:**\n- **v1** - REST API with polling (deprecated but maintained)\n- **v2** - REST API (same as v1) + WebSocket real-time updates\n\n**WebSocket Authentication (v2):**\nWebSocket endpoints use JWT via subprotocol header:\n- JavaScript: `new WebSocket(url, 'access_token.' + jwtToken)`\n- Header: `Sec-WebSocket-Protocol: access_token.\u003cjwt_token\u003e`\n\n**Migration Path:**\n1. v1 REST → v2 REST (no changes, just update base path)\n2. v2 REST → v2 WebSocket (replace polling with multiplexed WebSocket)",
-        "title": "Krkn Operator API",
-        "termsOfService": "https://krkn-chaos.dev/terms",
-        "contact": {
-            "name": "Krkn Team",
-            "url": "https://github.com/krkn-chaos/krkn-operator",
-            "email": "krkn-chaos@googlegroups.com"
-        },
-        "license": {
-            "name": "Apache 2.0",
-            "url": "http://www.apache.org/licenses/LICENSE-2.0.html"
-        },
-        "version": "2.0"
+        "contact": {}
     },
-    "host": "localhost:8080",
-    "basePath": "/api/v1",
     "paths": {
         "/auth/is-registered": {
             "get": {
@@ -1556,6 +1542,10 @@
                     "items": {
                         "type": "string"
                     }
+                },
+                "studioLayout": {
+                    "description": "StudioLayout is optional frontend visual layout data (stored as separate ConfigMap entry)",
+                    "type": "string"
                 }
             }
         },
@@ -1663,6 +1653,10 @@
                         "type": "string"
                     }
                 },
+                "studioLayout": {
+                    "description": "StudioLayout is optional frontend visual layout data",
+                    "type": "string"
+                },
                 "updatedAt": {
                     "description": "UpdatedAt is the timestamp when the file was last updated",
                     "type": "string"
@@ -1729,6 +1723,11 @@
                     "items": {
                         "type": "string"
                     }
+                },
+                "studioLayout": {
+                    "description": "StudioLayout is frontend-owned visual canvas data (opaque to backend - just store and return it)\nContains node positions, edges, nextNodeNumber, etc.",
+                    "type": "object",
+                    "additionalProperties": true
                 },
                 "workflowName": {
                     "description": "WorkflowName is a human-readable name for the workflow",
@@ -1826,6 +1825,11 @@
                     "items": {
                         "type": "string"
                     }
+                },
+                "studioLayout": {
+                    "description": "StudioLayout is frontend-owned visual canvas data (opaque to backend - just store and return it)\nContains node positions, edges, nextNodeNumber, etc.",
+                    "type": "object",
+                    "additionalProperties": true
                 },
                 "updatedAt": {
                     "description": "UpdatedAt is the timestamp when the workflow was last updated",
@@ -2258,14 +2262,6 @@
                     "type": "string"
                 }
             }
-        }
-    },
-    "securityDefinitions": {
-        "BearerAuth": {
-            "description": "JWT token obtained from /api/v1/auth/login or /api/v2/auth/login. Format: \"Bearer {token}\"",
-            "type": "apiKey",
-            "name": "Authorization",
-            "in": "header"
         }
     }
 }

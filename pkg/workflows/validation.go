@@ -71,3 +71,29 @@ func FromFileContent(content string) (map[string]krknv1alpha1.GraphScenarioNode,
 	}
 	return scenarioGraph, nil
 }
+
+// StudioLayoutToJSON marshals studioLayout to JSON string for ConfigMap storage.
+// Returns empty string if studioLayout is nil or empty.
+func StudioLayoutToJSON(studioLayout map[string]interface{}) (string, error) {
+	if len(studioLayout) == 0 {
+		return "", nil
+	}
+	bytes, err := json.Marshal(studioLayout)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal studioLayout: %w", err)
+	}
+	return string(bytes), nil
+}
+
+// StudioLayoutFromJSON parses studioLayout from JSON string.
+// Returns nil if content is empty, error if JSON is invalid.
+func StudioLayoutFromJSON(content string) (map[string]interface{}, error) {
+	if content == "" {
+		return nil, nil
+	}
+	var studioLayout map[string]interface{}
+	if err := json.Unmarshal([]byte(content), &studioLayout); err != nil {
+		return nil, fmt.Errorf("failed to parse studioLayout JSON: %w", err)
+	}
+	return studioLayout, nil
+}

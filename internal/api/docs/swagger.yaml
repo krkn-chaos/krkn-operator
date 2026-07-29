@@ -1,4 +1,3 @@
-basePath: /api/v1
 definitions:
   github_com_krkn-chaos_krkn-operator_api_v1alpha1.ClusterTarget:
     properties:
@@ -81,6 +80,10 @@ definitions:
         items:
           type: string
         type: array
+      studioLayout:
+        description: StudioLayout is optional frontend visual layout data (stored
+          as separate ConfigMap entry)
+        type: string
     type: object
   github_com_krkn-chaos_krkn-operator_pkg_files.CreateFileResponse:
     properties:
@@ -160,6 +163,9 @@ definitions:
         items:
           type: string
         type: array
+      studioLayout:
+        description: StudioLayout is optional frontend visual layout data
+        type: string
       updatedAt:
         description: UpdatedAt is the timestamp when the file was last updated
         type: string
@@ -209,6 +215,12 @@ definitions:
         items:
           type: string
         type: array
+      studioLayout:
+        additionalProperties: true
+        description: |-
+          StudioLayout is frontend-owned visual canvas data (opaque to backend - just store and return it)
+          Contains node positions, edges, nextNodeNumber, etc.
+        type: object
       workflowName:
         description: WorkflowName is a human-readable name for the workflow
         type: string
@@ -279,6 +291,12 @@ definitions:
         items:
           type: string
         type: array
+      studioLayout:
+        additionalProperties: true
+        description: |-
+          StudioLayout is frontend-owned visual canvas data (opaque to backend - just store and return it)
+          Contains node positions, edges, nextNodeNumber, etc.
+        type: object
       updatedAt:
         description: UpdatedAt is the timestamp when the workflow was last updated
         type: string
@@ -585,33 +603,8 @@ definitions:
         description: '"run", "graphrun", "dashboard"'
         type: string
     type: object
-host: localhost:8080
 info:
-  contact:
-    email: krkn-chaos@googlegroups.com
-    name: Krkn Team
-    url: https://github.com/krkn-chaos/krkn-operator
-  description: |-
-    REST and WebSocket API for Krkn chaos engineering operator.
-
-    **API Versions:**
-    - **v1** - REST API with polling (deprecated but maintained)
-    - **v2** - REST API (same as v1) + WebSocket real-time updates
-
-    **WebSocket Authentication (v2):**
-    WebSocket endpoints use JWT via subprotocol header:
-    - JavaScript: `new WebSocket(url, 'access_token.' + jwtToken)`
-    - Header: `Sec-WebSocket-Protocol: access_token.<jwt_token>`
-
-    **Migration Path:**
-    1. v1 REST → v2 REST (no changes, just update base path)
-    2. v2 REST → v2 WebSocket (replace polling with multiplexed WebSocket)
-  license:
-    name: Apache 2.0
-    url: http://www.apache.org/licenses/LICENSE-2.0.html
-  termsOfService: https://krkn-chaos.dev/terms
-  title: Krkn Operator API
-  version: "2.0"
+  contact: {}
 paths:
   /auth/is-registered:
     get:
@@ -1643,11 +1636,4 @@ paths:
       summary: List available workflow templates
       tags:
       - workflows
-securityDefinitions:
-  BearerAuth:
-    description: 'JWT token obtained from /api/v1/auth/login or /api/v2/auth/login.
-      Format: "Bearer {token}"'
-    in: header
-    name: Authorization
-    type: apiKey
 swagger: "2.0"

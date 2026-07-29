@@ -756,19 +756,25 @@ func (h *Handler) isFileOwnerOrAdmin(ctx context.Context, configMap *corev1.Conf
 
 // buildFileResponse builds a FileResponse from a ConfigMap
 func buildFileResponse(configMap *corev1.ConfigMap) files.FileResponse {
-	// Extract first file name and content from data
+	// Extract file name, content, and studioLayout from data
+	// studioLayout.json is separate from the main file content
 	fileName := ""
 	content := ""
+	studioLayout := ""
 	for k, v := range configMap.Data {
-		fileName = k
-		content = v
-		break
+		if k == "studioLayout.json" {
+			studioLayout = v
+		} else {
+			fileName = k
+			content = v
+		}
 	}
 
 	return files.FileResponse{
 		FileID:         files.ExtractFileIDFromLabels(configMap.Labels),
 		FileName:       fileName,
 		Content:        content,
+		StudioLayout:   studioLayout,
 		Description:    configMap.Annotations[files.DescriptionAnnotation],
 		FileType:       files.ExtractFileTypeFromLabels(configMap.Labels),
 		FilePurpose:    files.ExtractFilePurposeFromLabels(configMap.Labels),

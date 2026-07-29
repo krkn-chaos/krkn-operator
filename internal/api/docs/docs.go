@@ -9,16 +9,7 @@ const docTemplate = `{
     "info": {
         "description": "{{escape .Description}}",
         "title": "{{.Title}}",
-        "termsOfService": "https://krkn-chaos.dev/terms",
-        "contact": {
-            "name": "Krkn Team",
-            "url": "https://github.com/krkn-chaos/krkn-operator",
-            "email": "krkn-chaos@googlegroups.com"
-        },
-        "license": {
-            "name": "Apache 2.0",
-            "url": "http://www.apache.org/licenses/LICENSE-2.0.html"
-        },
+        "contact": {},
         "version": "{{.Version}}"
     },
     "host": "{{.Host}}",
@@ -1562,6 +1553,10 @@ const docTemplate = `{
                     "items": {
                         "type": "string"
                     }
+                },
+                "studioLayout": {
+                    "description": "StudioLayout is optional frontend visual layout data (stored as separate ConfigMap entry)",
+                    "type": "string"
                 }
             }
         },
@@ -1669,6 +1664,10 @@ const docTemplate = `{
                         "type": "string"
                     }
                 },
+                "studioLayout": {
+                    "description": "StudioLayout is optional frontend visual layout data",
+                    "type": "string"
+                },
                 "updatedAt": {
                     "description": "UpdatedAt is the timestamp when the file was last updated",
                     "type": "string"
@@ -1735,6 +1734,11 @@ const docTemplate = `{
                     "items": {
                         "type": "string"
                     }
+                },
+                "studioLayout": {
+                    "description": "StudioLayout is frontend-owned visual canvas data (opaque to backend - just store and return it)\nContains node positions, edges, nextNodeNumber, etc.",
+                    "type": "object",
+                    "additionalProperties": true
                 },
                 "workflowName": {
                     "description": "WorkflowName is a human-readable name for the workflow",
@@ -1832,6 +1836,11 @@ const docTemplate = `{
                     "items": {
                         "type": "string"
                     }
+                },
+                "studioLayout": {
+                    "description": "StudioLayout is frontend-owned visual canvas data (opaque to backend - just store and return it)\nContains node positions, edges, nextNodeNumber, etc.",
+                    "type": "object",
+                    "additionalProperties": true
                 },
                 "updatedAt": {
                     "description": "UpdatedAt is the timestamp when the workflow was last updated",
@@ -2265,25 +2274,17 @@ const docTemplate = `{
                 }
             }
         }
-    },
-    "securityDefinitions": {
-        "BearerAuth": {
-            "description": "JWT token obtained from /api/v1/auth/login or /api/v2/auth/login. Format: \"Bearer {token}\"",
-            "type": "apiKey",
-            "name": "Authorization",
-            "in": "header"
-        }
     }
 }`
 
 // SwaggerInfo holds exported Swagger Info so clients can modify it
 var SwaggerInfo = &swag.Spec{
-	Version:          "2.0",
-	Host:             "localhost:8080",
-	BasePath:         "/api/v1",
+	Version:          "",
+	Host:             "",
+	BasePath:         "",
 	Schemes:          []string{},
-	Title:            "Krkn Operator API",
-	Description:      "REST and WebSocket API for Krkn chaos engineering operator.\n\n**API Versions:**\n- **v1** - REST API with polling (deprecated but maintained)\n- **v2** - REST API (same as v1) + WebSocket real-time updates\n\n**WebSocket Authentication (v2):**\nWebSocket endpoints use JWT via subprotocol header:\n- JavaScript: `new WebSocket(url, 'access_token.' + jwtToken)`\n- Header: `Sec-WebSocket-Protocol: access_token.<jwt_token>`\n\n**Migration Path:**\n1. v1 REST → v2 REST (no changes, just update base path)\n2. v2 REST → v2 WebSocket (replace polling with multiplexed WebSocket)",
+	Title:            "",
+	Description:      "",
 	InfoInstanceName: "swagger",
 	SwaggerTemplate:  docTemplate,
 	LeftDelim:        "{{",

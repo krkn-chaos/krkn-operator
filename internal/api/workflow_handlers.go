@@ -104,10 +104,22 @@ func (h *Handler) CreateWorkflow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Convert studioLayout to JSON string (if provided)
+	studioLayoutJSON, err := workflows.StudioLayoutToJSON(req.StudioLayout)
+	if err != nil {
+		logger.Error(err, "Failed to marshal studioLayout")
+		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+			Error:   "internal_error",
+			Message: "Failed to serialize studioLayout",
+		})
+		return
+	}
+
 	// Delegate to file creation (reuse ALL file logic)
 	fileReq := files.CreateFileRequest{
-		FileName:       "workflow.json", // Standard filename for workflows
-		Content:        content,         // Graph JSON
+		FileName:       "workflow.json",  // Standard filename for workflows
+		Content:        content,          // Graph JSON
+		StudioLayout:   studioLayoutJSON, // Studio visual layout (optional)
 		Description:    req.Description,
 		FileType:       req.FileType,        // User categorization (optional)
 		Groups:         req.Groups,          // RBAC groups
@@ -383,10 +395,22 @@ func (h *Handler) UpdateWorkflow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Convert studioLayout to JSON string (if provided)
+	studioLayoutJSON, err := workflows.StudioLayoutToJSON(req.StudioLayout)
+	if err != nil {
+		logger.Error(err, "Failed to marshal studioLayout")
+		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+			Error:   "internal_error",
+			Message: "Failed to serialize studioLayout",
+		})
+		return
+	}
+
 	// Delegate to file update
 	fileReq := files.UpdateFileRequest{
 		FileName:       "workflow.json",
 		Content:        content,
+		StudioLayout:   studioLayoutJSON,
 		Description:    req.Description,
 		FileType:       req.FileType,
 		Groups:         req.Groups,
@@ -474,11 +498,18 @@ func convertFileResponseToWorkflow(fileResp files.FileResponse) (workflows.Workf
 		return workflows.WorkflowResponse{}, err
 	}
 
+	// Parse studioLayout from JSON (optional)
+	studioLayout, err := workflows.StudioLayoutFromJSON(fileResp.StudioLayout)
+	if err != nil {
+		return workflows.WorkflowResponse{}, fmt.Errorf("failed to parse studioLayout: %w", err)
+	}
+
 	return workflows.WorkflowResponse{
 		WorkflowID:     fileResp.FileID,
 		WorkflowName:   fileResp.FileName, // Use filename as workflow name for now
 		Description:    fileResp.Description,
 		Graph:          graph,
+		StudioLayout:   studioLayout,
 		FileType:       fileResp.FileType,
 		Groups:         fileResp.Groups,
 		AvailableToAll: fileResp.AvailableToAll,
@@ -549,6 +580,15 @@ func (h *Handler) createFileInternal(ctx context.Context, req files.CreateFileRe
 	labels := files.BuildFileLabels(fileID, req.FileType, req.Groups, req.AvailableToAll, req.FilePurpose)
 	annotations := files.BuildFileAnnotations(req.Description, createdBy)
 
+	// Build ConfigMap data
+	data := map[string]string{
+		req.FileName: req.Content,
+	}
+	// Add studioLayout if provided
+	if req.StudioLayout != "" {
+		data["studioLayout.json"] = req.StudioLayout
+	}
+
 	// Create ConfigMap
 	configMap := &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
@@ -557,9 +597,7 @@ func (h *Handler) createFileInternal(ctx context.Context, req files.CreateFileRe
 			Labels:      labels,
 			Annotations: annotations,
 		},
-		Data: map[string]string{
-			req.FileName: req.Content,
-		},
+		Data: data,
 	}
 
 	if err := h.client.Create(ctx, configMap); err != nil {
@@ -758,9 +796,14 @@ func (h *Handler) updateFileInternal(ctx context.Context, fileID string, req fil
 	)
 
 	// Update data
-	configMap.Data = map[string]string{
+	data := map[string]string{
 		req.FileName: req.Content,
 	}
+	// Add studioLayout if provided
+	if req.StudioLayout != "" {
+		data["studioLayout.json"] = req.StudioLayout
+	}
+	configMap.Data = data
 
 	if err := h.client.Update(ctx, configMap); err != nil {
 		return fmt.Errorf("failed to update file: %w", err)
