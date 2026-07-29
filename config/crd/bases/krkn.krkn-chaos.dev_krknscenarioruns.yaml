@@ -57,6 +57,18 @@ spec:
           spec:
             description: KrknScenarioRunSpec defines the desired state of KrknScenarioRun
             properties:
+              duration:
+                description: |-
+                  Duration bounds how long a scenario pod is allowed to run before it is
+                  auto-terminated. It is expressed as a Go duration (e.g., "30s", "5m", "1h")
+                  and maps to the pod's activeDeadlineSeconds. An empty value means no
+                  deadline is applied and the pod runs unbounded.
+
+                  activeDeadlineSeconds is second-granular, so sub-second units are not
+                  accepted and any fractional second is rounded up to the next whole second
+                  (minimum effective bound is 1s). "0s" is rejected during reconciliation.
+                pattern: ^([0-9]+(\.[0-9]+)?(s|m|h))+$
+                type: string
               environment:
                 additionalProperties:
                   type: string
