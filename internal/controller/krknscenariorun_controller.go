@@ -71,9 +71,6 @@ type preparedJobResources struct {
 	clusterAPIURL     string
 	containerImage    string
 	kubeconfigPath    string
-	volumes           []corev1.Volume
-	volumeMounts      []corev1.VolumeMount
-	envVars           []corev1.EnvVar
 	imagePullSecrets  []corev1.LocalObjectReference
 	createdConfigMaps []string // names of created ConfigMaps for cleanup
 	createdSecrets    []string // names of created Secrets for cleanup
@@ -121,6 +118,153 @@ func buildContainerImage(spec *krknv1alpha1.KrknScenarioRunSpec, config *krknctl
 		config.QuayScenarioRegistry,
 		scenarioTag,
 	), nil
+}
+
+// buildJobLabels builds the common set of labels applied to all resources created
+// for a single cluster scenario job (ConfigMaps, Secrets, and the scenario Pod).
+// It always includes the krkn-job-id, krkn-scenario-run, krkn-scenario-name,
+// krkn-cluster-name, and krkn-target-request labels. When the scenario run has an
+// owner user set, the krkn.krkn-chaos.dev/owner-user label is added via getOwnerLabel.
+// Any entries in extra are merged in (used to add "app": "krkn-scenario" for the Pod).
+// This function performs no client I/O and is safe to unit test without a cluster.
+func buildJobLabels(jobID, clusterName string, scenarioRun *krknv1alpha1.KrknScenarioRun, extra map[string]string) map[string]string {
+	labels := map[string]string{
+		"krkn-job-id":         jobID,
+		"krkn-scenario-run":   scenarioRun.Name,
+		"krkn-scenario-name":  scenarioRun.Spec.ScenarioName,
+		"krkn-cluster-name":   clusterName,
+		"krkn-target-request": scenarioRun.Spec.TargetRequestID,
+	}
+	if ownerLabel := getOwnerLabel(scenarioRun); ownerLabel != "" {
+		labels["krkn.krkn-chaos.dev/owner-user"] = ownerLabel
+	}
+	for k, v := range extra {
+		labels[k] = v
+	}
+	return labels
+}
+
+// buildScenarioPod constructs the scenario Pod object for a single cluster job.
+// It is pure: it performs no client I/O. The caller is responsible for resolving
+// the kubeconfig ConfigMap name, the per-file ConfigMap names, the container image,
+// and the image pull secrets before invoking this builder, and for setting the
+// owner reference and creating the Pod afterwards. Keeping this construction
+// client-free makes the volume, mount, env, security context, and label logic
+// unit-testable without a live cluster.
+func buildScenarioPod(
+	jobID string,
+	clusterName string,
+	containerImage string,
+	kubeconfigConfigMapName string,
+	kubeconfigPath string,
+	fileConfigMaps []string,
+	imagePullSecrets []corev1.LocalObjectReference,
+	namespace string,
+	scenarioRun *krknv1alpha1.KrknScenarioRun,
+) *corev1.Pod {
+	// Build volumes and volume mounts
+	volumes := []corev1.Volume{
+		{
+			Name: "kubeconfig",
+			VolumeSource: corev1.VolumeSource{
+				ConfigMap: &corev1.ConfigMapVolumeSource{
+					LocalObjectReference: corev1.LocalObjectReference{
+						Name: kubeconfigConfigMapName,
+					},
+				},
+			},
+		},
+	}
+
+	volumeMounts := []corev1.VolumeMount{
+		{
+			Name:      "kubeconfig",
+			MountPath: kubeconfigPath,
+			SubPath:   "config",
+		},
+	}
+
+	// Add file mounts
+	for i, file := range scenarioRun.Spec.Files {
+		volumeName := fmt.Sprintf("file-%d", i)
+
+		volumes = append(volumes, corev1.Volume{
+			Name: volumeName,
+			VolumeSource: corev1.VolumeSource{
+				ConfigMap: &corev1.ConfigMapVolumeSource{
+					LocalObjectReference: corev1.LocalObjectReference{
+						Name: fileConfigMaps[i],
+					},
+				},
+			},
+		})
+
+		volumeMounts = append(volumeMounts, corev1.VolumeMount{
+			Name:      volumeName,
+			MountPath: file.MountPath,
+			SubPath:   file.Name,
+		})
+	}
+
+	// Add writable tmp volume
+	volumes = append(volumes, corev1.Volume{
+		Name: "tmp",
+		VolumeSource: corev1.VolumeSource{
+			EmptyDir: &corev1.EmptyDirVolumeSource{},
+		},
+	})
+
+	volumeMounts = append(volumeMounts, corev1.VolumeMount{
+		Name:      "tmp",
+		MountPath: "/tmp",
+	})
+
+	// Convert environment map to EnvVar slice
+	envVars := make([]corev1.EnvVar, 0, len(scenarioRun.Spec.Environment))
+	for key, value := range scenarioRun.Spec.Environment {
+		envVars = append(envVars, corev1.EnvVar{
+			Name:  key,
+			Value: value,
+		})
+	}
+
+	// SecurityContext for running as krkn user (UID 1001)
+	var runAsUser int64 = 1001
+	var runAsGroup int64 = 1001
+	var fsGroup int64 = 1001
+
+	// Create the pod
+	podName := fmt.Sprintf("krkn-job-%s", jobID)
+	podLabels := buildJobLabels(jobID, clusterName, scenarioRun, map[string]string{
+		"app": "krkn-scenario",
+	})
+	return &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      podName,
+			Namespace: namespace,
+			Labels:    podLabels,
+		},
+		Spec: corev1.PodSpec{
+			ServiceAccountName: "krkn-operator-krkn-scenario-runner",
+			RestartPolicy:      corev1.RestartPolicyNever,
+			ImagePullSecrets:   imagePullSecrets,
+			SecurityContext: &corev1.PodSecurityContext{
+				RunAsUser:  &runAsUser,
+				RunAsGroup: &runAsGroup,
+				FSGroup:    &fsGroup,
+			},
+			Containers: []corev1.Container{
+				{
+					Name:            "scenario",
+					Image:           containerImage,
+					Env:             envVars,
+					VolumeMounts:    volumeMounts,
+					ImagePullPolicy: corev1.PullAlways,
+				},
+			},
+			Volumes: volumes,
+		},
+	}
 }
 
 // Reconcile handles the reconciliation loop for KrknScenarioRun
@@ -355,16 +499,7 @@ func (r *KrknScenarioRunReconciler) prepareJobResources(
 
 	// Create ConfigMap for kubeconfig
 	kubeconfigConfigMapName := fmt.Sprintf("krkn-job-%s-kubeconfig", jobID)
-	kubeconfigLabels := map[string]string{
-		"krkn-job-id":         jobID,
-		"krkn-scenario-run":   scenarioRun.Name,
-		"krkn-scenario-name":  scenarioRun.Spec.ScenarioName,
-		"krkn-cluster-name":   clusterName,
-		"krkn-target-request": scenarioRun.Spec.TargetRequestID,
-	}
-	if ownerLabel := getOwnerLabel(scenarioRun); ownerLabel != "" {
-		kubeconfigLabels["krkn.krkn-chaos.dev/owner-user"] = ownerLabel
-	}
+	kubeconfigLabels := buildJobLabels(jobID, clusterName, scenarioRun, nil)
 	kubeconfigConfigMap := &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      kubeconfigConfigMapName,
@@ -423,16 +558,7 @@ func (r *KrknScenarioRunReconciler) prepareJobResources(
 			return nil, fmt.Errorf("failed to decode file content for '%s': %w", file.Name, err)
 		}
 
-		fileLabels := map[string]string{
-			"krkn-job-id":         jobID,
-			"krkn-scenario-run":   scenarioRun.Name,
-			"krkn-scenario-name":  scenarioRun.Spec.ScenarioName,
-			"krkn-cluster-name":   clusterName,
-			"krkn-target-request": scenarioRun.Spec.TargetRequestID,
-		}
-		if ownerLabel := getOwnerLabel(scenarioRun); ownerLabel != "" {
-			fileLabels["krkn.krkn-chaos.dev/owner-user"] = ownerLabel
-		}
+		fileLabels := buildJobLabels(jobID, clusterName, scenarioRun, nil)
 		fileConfigMap := &corev1.ConfigMap{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      configMapName,
@@ -505,16 +631,7 @@ func (r *KrknScenarioRunReconciler) prepareJobResources(
 
 		dockerConfigJSON, _ := json.Marshal(dockerConfig)
 
-		secretLabels := map[string]string{
-			"krkn-job-id":         jobID,
-			"krkn-scenario-run":   scenarioRun.Name,
-			"krkn-scenario-name":  scenarioRun.Spec.ScenarioName,
-			"krkn-cluster-name":   clusterName,
-			"krkn-target-request": scenarioRun.Spec.TargetRequestID,
-		}
-		if ownerLabel := getOwnerLabel(scenarioRun); ownerLabel != "" {
-			secretLabels["krkn.krkn-chaos.dev/owner-user"] = ownerLabel
-		}
+		secretLabels := buildJobLabels(jobID, clusterName, scenarioRun, nil)
 		imagePullSecret := &corev1.Secret{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      imagePullSecretName,
@@ -544,91 +661,20 @@ func (r *KrknScenarioRunReconciler) prepareJobResources(
 		})
 	}
 
-	// Build volumes and volume mounts
-	volumes := []corev1.Volume{
-		{
-			Name: "kubeconfig",
-			VolumeSource: corev1.VolumeSource{
-				ConfigMap: &corev1.ConfigMapVolumeSource{
-					LocalObjectReference: corev1.LocalObjectReference{
-						Name: kubeconfigConfigMapName,
-					},
-				},
-			},
-		},
-	}
-
-	volumeMounts := []corev1.VolumeMount{
-		{
-			Name:      "kubeconfig",
-			MountPath: kubeconfigPath,
-			SubPath:   "config",
-		},
-	}
-
-	// Add file mounts
-	// Skip first ConfigMap (kubeconfig), file ConfigMaps start from index 1
-	fileConfigMaps := createdConfigMaps[1:]
-	for i, file := range scenarioRun.Spec.Files {
-		volumeName := fmt.Sprintf("file-%d", i)
-
-		volumes = append(volumes, corev1.Volume{
-			Name: volumeName,
-			VolumeSource: corev1.VolumeSource{
-				ConfigMap: &corev1.ConfigMapVolumeSource{
-					LocalObjectReference: corev1.LocalObjectReference{
-						Name: fileConfigMaps[i],
-					},
-				},
-			},
-		})
-
-		volumeMounts = append(volumeMounts, corev1.VolumeMount{
-			Name:      volumeName,
-			MountPath: file.MountPath,
-			SubPath:   file.Name,
-		})
-	}
-
-	// Add writable tmp volume
-	volumes = append(volumes, corev1.Volume{
-		Name: "tmp",
-		VolumeSource: corev1.VolumeSource{
-			EmptyDir: &corev1.EmptyDirVolumeSource{},
-		},
-	})
-
-	volumeMounts = append(volumeMounts, corev1.VolumeMount{
-		Name:      "tmp",
-		MountPath: "/tmp",
-	})
-
-	// Convert environment map to EnvVar slice
-	envVars := make([]corev1.EnvVar, 0, len(scenarioRun.Spec.Environment))
-	for key, value := range scenarioRun.Spec.Environment {
-		envVars = append(envVars, corev1.EnvVar{
-			Name:  key,
-			Value: value,
-		})
-	}
-
 	return &preparedJobResources{
 		jobID:             jobID,
 		clusterName:       clusterName,
 		clusterAPIURL:     clusterAPIURL,
 		containerImage:    containerImage,
 		kubeconfigPath:    kubeconfigPath,
-		volumes:           volumes,
-		volumeMounts:      volumeMounts,
-		envVars:           envVars,
 		imagePullSecrets:  imagePullSecrets,
 		createdConfigMaps: createdConfigMaps,
 		createdSecrets:    createdSecrets,
 	}, nil
 }
 
-// cleanupPreparedResources deletes ConfigMaps and Secrets created during resource preparation.
-// This is called when executeScenarioPod fails to prevent resource leaks.
+// cleanupPreparedResources deletes ConfigMaps and Secrets created during resource
+// preparation. It is called when executeScenarioPod fails to prevent resource leaks.
 func (r *KrknScenarioRunReconciler) cleanupPreparedResources(ctx context.Context, resources *preparedJobResources) {
 	logger := log.FromContext(ctx)
 
@@ -638,11 +684,9 @@ func (r *KrknScenarioRunReconciler) cleanupPreparedResources(ctx context.Context
 				Name:      cmName,
 				Namespace: r.Namespace,
 			},
-		}); err != nil {
-			if !apierrors.IsNotFound(err) {
-				logger.Error(err, "failed to delete ConfigMap during cleanup",
-					"configMapName", cmName, "jobID", resources.jobID)
-			}
+		}); err != nil && !apierrors.IsNotFound(err) {
+			logger.Error(err, "failed to delete ConfigMap during cleanup",
+				"configMapName", cmName, "jobID", resources.jobID)
 		}
 	}
 
@@ -652,17 +696,16 @@ func (r *KrknScenarioRunReconciler) cleanupPreparedResources(ctx context.Context
 				Name:      secretName,
 				Namespace: r.Namespace,
 			},
-		}); err != nil {
-			if !apierrors.IsNotFound(err) {
-				logger.Error(err, "failed to delete Secret during cleanup",
-					"secretName", secretName, "jobID", resources.jobID)
-			}
+		}); err != nil && !apierrors.IsNotFound(err) {
+			logger.Error(err, "failed to delete Secret during cleanup",
+				"secretName", secretName, "jobID", resources.jobID)
 		}
 	}
 }
 
-// executeScenarioPod creates the scenario pod using prepared resources and updates the scenario run status.
-// Takes the container image as a parameter to avoid reconstruction logic.
+// executeScenarioPod builds and creates the scenario Pod from prepared resources and
+// updates the scenario run status. On pod creation failure it cleans up the prepared
+// ConfigMaps and Secrets to avoid leaks.
 func (r *KrknScenarioRunReconciler) executeScenarioPod(
 	ctx context.Context,
 	scenarioRun *krknv1alpha1.KrknScenarioRun,
@@ -672,62 +715,30 @@ func (r *KrknScenarioRunReconciler) executeScenarioPod(
 ) error {
 	logger := log.FromContext(ctx)
 
-	// SecurityContext for running as krkn user (UID 1001)
-	var runAsUser int64 = 1001
-	var runAsGroup int64 = 1001
-	var fsGroup int64 = 1001
+	// The kubeconfig ConfigMap is always the first created; the rest are per-file mounts.
+	kubeconfigConfigMapName := resources.createdConfigMaps[0]
+	fileConfigMaps := resources.createdConfigMaps[1:]
 
-	// Create the pod
 	podName := fmt.Sprintf("krkn-job-%s", resources.jobID)
-	podLabels := map[string]string{
-		"app":                 "krkn-scenario",
-		"krkn-job-id":         resources.jobID,
-		"krkn-scenario-run":   scenarioRun.Name,
-		"krkn-scenario-name":  scenarioRun.Spec.ScenarioName,
-		"krkn-cluster-name":   resources.clusterName,
-		"krkn-target-request": scenarioRun.Spec.TargetRequestID,
-	}
-	if ownerLabel := getOwnerLabel(scenarioRun); ownerLabel != "" {
-		podLabels["krkn.krkn-chaos.dev/owner-user"] = ownerLabel
-	}
-
-	pod := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      podName,
-			Namespace: r.Namespace,
-			Labels:    podLabels,
-		},
-		Spec: corev1.PodSpec{
-			ServiceAccountName: "krkn-operator-krkn-scenario-runner",
-			RestartPolicy:      corev1.RestartPolicyNever,
-			ImagePullSecrets:   resources.imagePullSecrets,
-			SecurityContext: &corev1.PodSecurityContext{
-				RunAsUser:  &runAsUser,
-				RunAsGroup: &runAsGroup,
-				FSGroup:    &fsGroup,
-			},
-			Containers: []corev1.Container{
-				{
-					Name:            "scenario",
-					Image:           resources.containerImage,
-					Env:             resources.envVars,
-					VolumeMounts:    resources.volumeMounts,
-					ImagePullPolicy: corev1.PullAlways,
-				},
-			},
-			Volumes: resources.volumes,
-		},
-	}
+	pod := buildScenarioPod(
+		resources.jobID,
+		resources.clusterName,
+		resources.containerImage,
+		kubeconfigConfigMapName,
+		resources.kubeconfigPath,
+		fileConfigMaps,
+		resources.imagePullSecrets,
+		r.Namespace,
+		scenarioRun,
+	)
 
 	// Set owner reference
 	if err := controllerutil.SetControllerReference(scenarioRun, pod, r.Scheme); err != nil {
-		// Cleanup resources on failure
 		r.cleanupPreparedResources(ctx, resources)
 		return fmt.Errorf("failed to set owner reference on pod: %w", err)
 	}
 
 	if err := r.Create(ctx, pod); err != nil {
-		// Cleanup resources on failure
 		r.cleanupPreparedResources(ctx, resources)
 		return fmt.Errorf("failed to create pod: %w", err)
 	}
