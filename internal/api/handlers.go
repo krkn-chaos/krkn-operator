@@ -1198,11 +1198,12 @@ func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
 		// Base64 encode content for FileMount
 		encodedContent := base64.StdEncoding.EncodeToString([]byte(content))
 
-		// Translate to FileMount
+		// Translate to FileMount (preserve FileID for replay functionality)
 		translatedFiles = append(translatedFiles, krknv1alpha1.FileMount{
 			Name:      fileName,
 			Content:   encodedContent,
 			MountPath: fileRef.MountPath,
+			FileID:    fileRef.FileID,
 		})
 
 		logger.V(1).Info("Translated file reference",

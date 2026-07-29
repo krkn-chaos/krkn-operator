@@ -72,6 +72,10 @@ spec:
                     content:
                       description: Content is the base64-encoded content of the file
                       type: string
+                    fileId:
+                      description: FileID is the UUID of the source ConfigMap (optional,
+                        preserved for replay functionality)
+                      type: string
                     mountPath:
                       description: MountPath is the absolute path where the file should
                         be mounted
