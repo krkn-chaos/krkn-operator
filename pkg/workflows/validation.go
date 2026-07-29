@@ -36,10 +36,13 @@ import (
 // - No self-references
 // - At least one root node (no all-dependent graph)
 //
-// Returns an error if the graph is invalid, nil if valid.
+// Empty graphs are allowed (for work-in-progress templates in Chaos Studio).
+// Returns an error if the graph structure is invalid, nil if valid.
 func ValidateWorkflowGraph(scenarioGraph map[string]krknv1alpha1.GraphScenarioNode) error {
+	// Allow empty graphs for work-in-progress templates
+	// The Chaos Studio may save templates with visual layout but no configured nodes yet
 	if len(scenarioGraph) == 0 {
-		return fmt.Errorf("workflow graph cannot be empty")
+		return nil
 	}
 
 	// Reuse existing validation from graph package

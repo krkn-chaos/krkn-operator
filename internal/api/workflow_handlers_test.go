@@ -141,17 +141,17 @@ func TestCreateWorkflow(t *testing.T) {
 			expectInDB:   false,
 		},
 		{
-			name: "reject workflow with empty graph",
+			name: "allow workflow with empty graph (work-in-progress template)",
 			request: workflows.CreateWorkflowRequest{
 				WorkflowName:   "Empty Workflow",
-				Description:    "Workflow with no nodes",
+				Description:    "Workflow with no nodes (work-in-progress)",
 				Graph:          map[string]krknv1alpha1.GraphScenarioNode{},
 				AvailableToAll: true,
 			},
 			userID:       "admin@test.example",
 			isAdmin:      true,
-			expectStatus: http.StatusBadRequest,
-			expectInDB:   false,
+			expectStatus: http.StatusCreated,
+			expectInDB:   true,
 		},
 		{
 			name: "reject workflow with empty name",
