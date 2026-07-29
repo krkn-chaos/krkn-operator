@@ -168,6 +168,19 @@ func TestCreateFile(t *testing.T) {
 			isAdmin:      true,
 		},
 		{
+			name: "reject workflow-template filePurpose",
+			request: files.CreateFileRequest{
+				FileName:       "workflow.json",
+				Content:        `{"node1": {"name": "test"}}`,
+				FilePurpose:    "workflow-template",
+				AvailableToAll: true,
+			},
+			userID:       "admin@test.example",
+			expectStatus: http.StatusBadRequest,
+			expectInDB:   false,
+			isAdmin:      true,
+		},
+		{
 			name: "user can create file for own group",
 			request: files.CreateFileRequest{
 				FileName:       "team.yaml",
@@ -572,7 +585,7 @@ func TestUpdateFile(t *testing.T) {
 			expectStatus: http.StatusNotFound,
 		},
 		{
-			name:    "user can update file from own group",
+			name:    "user cannot update group file (not owner)",
 			fileID:  "550e8400-e29b-41d4-a716-446655440005",
 			request: updateReq,
 			setupFile: &corev1.ConfigMap{
@@ -585,6 +598,9 @@ func TestUpdateFile(t *testing.T) {
 						files.FileIDLabel:                    "550e8400-e29b-41d4-a716-446655440005",
 						"group.krkn.krkn-chaos.dev/dev-team": "true",
 					},
+					Annotations: map[string]string{
+						files.CreatedByAnnotation: "other@test.example", // Different owner
+					},
 				},
 				Data: map[string]string{
 					"old.txt": "old content",
@@ -593,7 +609,7 @@ func TestUpdateFile(t *testing.T) {
 			userGroups:   []string{"dev-team"},
 			userID:       "user@test.example",
 			isAdmin:      false,
-			expectStatus: http.StatusOK,
+			expectStatus: http.StatusForbidden, // Group membership grants READ only
 		},
 		{
 			name:    "user cannot update file from other group",
@@ -620,7 +636,7 @@ func TestUpdateFile(t *testing.T) {
 			expectStatus: http.StatusForbidden,
 		},
 		{
-			name:    "user can update public file",
+			name:    "user cannot update public file (not owner)",
 			fileID:  "550e8400-e29b-41d4-a716-446655440007",
 			request: updateReq,
 			setupFile: &corev1.ConfigMap{
@@ -633,6 +649,9 @@ func TestUpdateFile(t *testing.T) {
 						files.FileIDLabel:         "550e8400-e29b-41d4-a716-446655440007",
 						files.AvailableToAllLabel: "true",
 					},
+					Annotations: map[string]string{
+						files.CreatedByAnnotation: "other@test.example", // Different owner
+					},
 				},
 				Data: map[string]string{
 					"old.txt": "old content",
@@ -641,7 +660,7 @@ func TestUpdateFile(t *testing.T) {
 			userGroups:   []string{"dev-team"},
 			userID:       "user@test.example",
 			isAdmin:      false,
-			expectStatus: http.StatusOK,
+			expectStatus: http.StatusForbidden, // Only owner/admin can modify
 		},
 	}
 
@@ -787,7 +806,7 @@ func TestDeleteFile(t *testing.T) {
 			expectStatus: http.StatusNotFound,
 		},
 		{
-			name:   "user can delete file from own group",
+			name:   "user cannot delete group file (not owner)",
 			fileID: "550e8400-e29b-41d4-a716-446655440009",
 			setupFile: &corev1.ConfigMap{
 				ObjectMeta: metav1.ObjectMeta{
@@ -799,6 +818,9 @@ func TestDeleteFile(t *testing.T) {
 						files.FileIDLabel:                    "550e8400-e29b-41d4-a716-446655440009",
 						"group.krkn.krkn-chaos.dev/dev-team": "true",
 					},
+					Annotations: map[string]string{
+						files.CreatedByAnnotation: "other@test.example", // Different owner
+					},
 				},
 				Data: map[string]string{
 					"file.txt": "content",
@@ -807,7 +829,7 @@ func TestDeleteFile(t *testing.T) {
 			userGroups:   []string{"dev-team"},
 			userID:       "user@test.example",
 			isAdmin:      false,
-			expectStatus: http.StatusOK,
+			expectStatus: http.StatusForbidden, // Group membership grants READ only
 		},
 		{
 			name:   "user cannot delete file from other group",
@@ -833,7 +855,7 @@ func TestDeleteFile(t *testing.T) {
 			expectStatus: http.StatusForbidden,
 		},
 		{
-			name:   "user can delete public file",
+			name:   "user cannot delete public file (not owner)",
 			fileID: "550e8400-e29b-41d4-a716-446655440011",
 			setupFile: &corev1.ConfigMap{
 				ObjectMeta: metav1.ObjectMeta{
@@ -845,6 +867,9 @@ func TestDeleteFile(t *testing.T) {
 						files.FileIDLabel:         "550e8400-e29b-41d4-a716-446655440011",
 						files.AvailableToAllLabel: "true",
 					},
+					Annotations: map[string]string{
+						files.CreatedByAnnotation: "other@test.example", // Different owner
+					},
 				},
 				Data: map[string]string{
 					"file.txt": "content",
@@ -853,7 +878,7 @@ func TestDeleteFile(t *testing.T) {
 			userGroups:   []string{"dev-team"},
 			userID:       "user@test.example",
 			isAdmin:      false,
-			expectStatus: http.StatusOK,
+			expectStatus: http.StatusForbidden, // Only owner/admin can delete
 		},
 	}
 

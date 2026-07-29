@@ -136,11 +136,11 @@ func TestShouldSendToClient(t *testing.T) {
 	hub := NewHub()
 
 	tests := []struct {
-		name         string
-		client       *Client
-		msg          *BroadcastMessage
-		shouldSend   bool
-		description  string
+		name        string
+		client      *Client
+		msg         *BroadcastMessage
+		shouldSend  bool
+		description string
 	}{
 		{
 			name: "subscribed to specific resource",

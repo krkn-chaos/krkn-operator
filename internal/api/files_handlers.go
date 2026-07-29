@@ -38,9 +38,18 @@ import (
 )
 
 // CreateFile handles POST /api/v1/files
-// Creates a new file ConfigMap (authenticated users)
-// Users can create files for their own groups or public files
-// Admins can create files for any group
+// @Summary Create file
+// @Description Create a new file ConfigMap. Users can create files for their own groups or public files. Admins can create files for any group. Cannot create workflow-template files (use POST /api/v1/workflows instead).
+// @Tags files
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param file body files.CreateFileRequest true "File data"
+// @Success 201 {object} files.CreateFileResponse "File created"
+// @Failure 400 {object} ErrorResponse "Invalid request or validation error"
+// @Failure 401 {object} ErrorResponse "Unauthorized"
+// @Failure 500 {object} ErrorResponse "Internal server error"
+// @Router /files [post]
 func (h *Handler) CreateFile(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	logger := log.FromContext(ctx).WithName("create-file")
@@ -81,6 +90,15 @@ func (h *Handler) CreateFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Validate filePurpose - only workflow API can create workflow-template files
+	if req.FilePurpose == "workflow-template" {
+		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+			Error:   "bad_request",
+			Message: "Use POST /api/v1/workflows to create workflow templates",
+		})
+		return
+	}
+
 	// Generate unique file ID (UUID)
 	fileID := uuid.New().String()
 
@@ -99,7 +117,7 @@ func (h *Handler) CreateFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Build labels and annotations
-	labels := files.BuildFileLabels(fileID, req.FileType, req.Groups, req.AvailableToAll)
+	labels := files.BuildFileLabels(fileID, req.FileType, req.Groups, req.AvailableToAll, req.FilePurpose)
 	annotations := files.BuildFileAnnotations(
 		req.Description,
 		createdBy,
@@ -137,6 +155,17 @@ func (h *Handler) CreateFile(w http.ResponseWriter, r *http.Request) {
 
 // ListFiles handles GET /api/v1/files
 // Lists all files (admin only)
+// @Summary List files (admin only)
+// @Description Get list of all file ConfigMaps (admin only). Supports filtering by filePurpose query parameter.
+// @Tags files
+// @Produce json
+// @Security BearerAuth
+// @Param filePurpose query string false "Filter by file purpose (e.g., workflow-template)"
+// @Success 200 {object} files.ListFilesResponse "List of files"
+// @Failure 401 {object} ErrorResponse "Unauthorized"
+// @Failure 403 {object} ErrorResponse "Forbidden (admin only)"
+// @Failure 500 {object} ErrorResponse "Internal server error"
+// @Router /files [get]
 func (h *Handler) ListFiles(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	logger := log.FromContext(ctx).WithName("list-files")
@@ -150,14 +179,23 @@ func (h *Handler) ListFiles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Build label filters
+	matchingLabels := map[string]string{
+		files.AppNameLabel:      files.AppName,
+		files.AppComponentLabel: files.ComponentFile,
+	}
+
+	// Add optional filePurpose filter from query parameter
+	filePurpose := r.URL.Query().Get("filePurpose")
+	if filePurpose != "" {
+		matchingLabels[files.FilePurposeLabel] = filePurpose
+	}
+
 	// List all file ConfigMaps
 	var configMapList corev1.ConfigMapList
 	err := h.client.List(ctx, &configMapList,
 		client.InNamespace(h.namespace),
-		client.MatchingLabels{
-			files.AppNameLabel:      files.AppName,
-			files.AppComponentLabel: files.ComponentFile,
-		},
+		client.MatchingLabels(matchingLabels),
 	)
 	if err != nil {
 		logger.Error(err, "Failed to list file ConfigMaps")
@@ -314,24 +352,22 @@ func (h *Handler) UpdateFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check access permissions - users can only update files they have access to
-	if !isAdmin {
-		hasAccess, err := h.canAccessFile(ctx, configMap)
-		if err != nil {
-			logger.Error(err, "Failed to check file access", "fileID", fileID)
-			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
-				Error:   "internal_error",
-				Message: "Failed to validate file access permissions",
-			})
-			return
-		}
-		if !hasAccess {
-			writeJSONError(w, http.StatusForbidden, ErrorResponse{
-				Error:   "forbidden",
-				Message: "You do not have access to this file",
-			})
-			return
-		}
+	// Check ownership - only owner or admin can update files
+	isOwner, err := h.isFileOwnerOrAdmin(ctx, configMap)
+	if err != nil {
+		logger.Error(err, "Failed to check file ownership", "fileID", fileID)
+		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+			Error:   "internal_error",
+			Message: "Failed to validate file ownership",
+		})
+		return
+	}
+	if !isOwner {
+		writeJSONError(w, http.StatusForbidden, ErrorResponse{
+			Error:   "forbidden",
+			Message: "Only the file owner or an admin can update this file",
+		})
+		return
 	}
 
 	// Get current user for audit trail
@@ -346,7 +382,7 @@ func (h *Handler) UpdateFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Update labels and annotations (preserve existing file ID)
-	configMap.Labels = files.BuildFileLabels(fileID, req.FileType, req.Groups, req.AvailableToAll)
+	configMap.Labels = files.BuildFileLabels(fileID, req.FileType, req.Groups, req.AvailableToAll, req.FilePurpose)
 	configMap.Annotations = files.UpdateFileAnnotations(
 		configMap.Annotations,
 		req.Description,
@@ -411,25 +447,22 @@ func (h *Handler) DeleteFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check access permissions - users can only delete files they have access to
-	isAdmin := auth.IsAdmin(ctx)
-	if !isAdmin {
-		hasAccess, err := h.canAccessFile(ctx, configMap)
-		if err != nil {
-			logger.Error(err, "Failed to check file access", "fileID", fileID)
-			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
-				Error:   "internal_error",
-				Message: "Failed to validate file access permissions",
-			})
-			return
-		}
-		if !hasAccess {
-			writeJSONError(w, http.StatusForbidden, ErrorResponse{
-				Error:   "forbidden",
-				Message: "You do not have access to this file",
-			})
-			return
-		}
+	// Check ownership - only owner or admin can delete files
+	isOwner, err := h.isFileOwnerOrAdmin(ctx, configMap)
+	if err != nil {
+		logger.Error(err, "Failed to check file ownership", "fileID", fileID)
+		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+			Error:   "internal_error",
+			Message: "Failed to validate file ownership",
+		})
+		return
+	}
+	if !isOwner {
+		writeJSONError(w, http.StatusForbidden, ErrorResponse{
+			Error:   "forbidden",
+			Message: "Only the file owner or an admin can delete this file",
+		})
+		return
 	}
 
 	// Delete ConfigMap
@@ -451,6 +484,16 @@ func (h *Handler) DeleteFile(w http.ResponseWriter, r *http.Request) {
 
 // ListAvailableFiles handles GET /api/v1/files/available
 // Lists files available to the current user
+// @Summary List available files
+// @Description Get files accessible to current user (own files, group files, public files). Supports filtering by filePurpose query parameter.
+// @Tags files
+// @Produce json
+// @Security BearerAuth
+// @Param filePurpose query string false "Filter by file purpose (e.g., workflow-template)"
+// @Success 200 {object} files.AvailableFilesResponse "List of accessible files"
+// @Failure 401 {object} ErrorResponse "Unauthorized"
+// @Failure 500 {object} ErrorResponse "Internal server error"
+// @Router /files/available [get]
 func (h *Handler) ListAvailableFiles(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	logger := log.FromContext(ctx).WithName("list-available-files")
@@ -465,15 +508,24 @@ func (h *Handler) ListAvailableFiles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Build label filters
+	matchingLabels := map[string]string{
+		files.AppNameLabel:      files.AppName,
+		files.AppComponentLabel: files.ComponentFile,
+	}
+
+	// Add optional filePurpose filter from query parameter
+	filePurpose := r.URL.Query().Get("filePurpose")
+	if filePurpose != "" {
+		matchingLabels[files.FilePurposeLabel] = filePurpose
+	}
+
 	// Admins see all files
 	if auth.IsAdmin(ctx) {
 		var configMapList corev1.ConfigMapList
 		err := h.client.List(ctx, &configMapList,
 			client.InNamespace(h.namespace),
-			client.MatchingLabels{
-				files.AppNameLabel:      files.AppName,
-				files.AppComponentLabel: files.ComponentFile,
-			},
+			client.MatchingLabels(matchingLabels),
 		)
 		if err != nil {
 			logger.Error(err, "Failed to list file ConfigMaps")
@@ -495,14 +547,11 @@ func (h *Handler) ListAvailableFiles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// List all file ConfigMaps
+	// List all file ConfigMaps (reuse label filters from above)
 	var configMapList corev1.ConfigMapList
 	err := h.client.List(ctx, &configMapList,
 		client.InNamespace(h.namespace),
-		client.MatchingLabels{
-			files.AppNameLabel:      files.AppName,
-			files.AppComponentLabel: files.ComponentFile,
-		},
+		client.MatchingLabels(matchingLabels),
 	)
 	if err != nil {
 		logger.Error(err, "Failed to list file ConfigMaps")
@@ -674,6 +723,37 @@ func (h *Handler) canAccessFile(ctx context.Context, configMap *corev1.ConfigMap
 	return false, nil
 }
 
+// isFileOwnerOrAdmin checks if the current user is the owner of a file or an admin
+// This is used for mutation operations (update/delete) where only owner or admin should have access
+// For files: ownership is determined by group membership + created-by annotation
+func (h *Handler) isFileOwnerOrAdmin(ctx context.Context, configMap *corev1.ConfigMap) (bool, error) {
+	claims := auth.GetClaimsFromContext(ctx)
+	if claims == nil {
+		return false, nil
+	}
+
+	// Admins can modify all files
+	if auth.IsAdmin(ctx) {
+		return true, nil
+	}
+
+	// Check if user is the creator via created-by annotation
+	createdBy := configMap.Annotations[files.CreatedByAnnotation]
+	if createdBy != "" && createdBy == claims.UserID {
+		return true, nil
+	}
+
+	// If file has no groups and is not available-to-all, deny access
+	configMapGroups := files.ExtractGroupsFromLabels(configMap.Labels)
+	if len(configMapGroups) == 0 && configMap.Labels[files.AvailableToAllLabel] != "true" {
+		return false, nil
+	}
+
+	// For all files (public and group), only creator or admin can modify
+	// Group membership grants READ access only, not write/delete
+	return false, nil
+}
+
 // buildFileResponse builds a FileResponse from a ConfigMap
 func buildFileResponse(configMap *corev1.ConfigMap) files.FileResponse {
 	// Extract first file name and content from data
@@ -691,6 +771,7 @@ func buildFileResponse(configMap *corev1.ConfigMap) files.FileResponse {
 		Content:        content,
 		Description:    configMap.Annotations[files.DescriptionAnnotation],
 		FileType:       files.ExtractFileTypeFromLabels(configMap.Labels),
+		FilePurpose:    files.ExtractFilePurposeFromLabels(configMap.Labels),
 		Groups:         files.ExtractGroupsFromLabels(configMap.Labels),
 		AvailableToAll: configMap.Labels[files.AvailableToAllLabel] == "true",
 		CreatedAt:      configMap.Annotations[files.CreatedAtAnnotation],
@@ -714,6 +795,9 @@ func buildFileInfo(configMap *corev1.ConfigMap) files.FileInfo {
 		FileName:    fileName,
 		Description: configMap.Annotations[files.DescriptionAnnotation],
 		FileType:    files.ExtractFileTypeFromLabels(configMap.Labels),
+		FilePurpose: files.ExtractFilePurposeFromLabels(configMap.Labels),
+		CreatedAt:   configMap.Annotations[files.CreatedAtAnnotation],
+		UpdatedAt:   configMap.Annotations[files.UpdatedAtAnnotation],
 	}
 }
 

@@ -212,8 +212,8 @@ func (b *Broadcaster) BroadcastGraphRunUpdate(graphRun *krknv1alpha1.KrknGraphRu
 	// Status changed - broadcast and update cache
 	// Build the SAME response as REST API
 	response := GraphRunResponse{
-		GraphRunName:   graphRun.Name,
-		Phase:          graphRun.Status.Phase,
+		GraphRunName: graphRun.Name,
+		Phase:        graphRun.Status.Phase,
 		Summary: GraphRunSummaryResponse{
 			TotalNodes:     graphRun.Status.Summary.TotalNodes,
 			CompletedNodes: graphRun.Status.Summary.CompletedNodes,

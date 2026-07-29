@@ -45,8 +45,8 @@ func buildScenarioRunDetailResponse(run *krknv1alpha1.KrknScenarioRun) ScenarioR
 // buildGraphRunResponse builds the SAME response as REST API
 func buildGraphRunResponse(run *krknv1alpha1.KrknGraphRun) GraphRunResponse {
 	return GraphRunResponse{
-		GraphRunName:   run.Name,
-		Phase:          run.Status.Phase,
+		GraphRunName: run.Name,
+		Phase:        run.Status.Phase,
 		Summary: GraphRunSummaryResponse{
 			TotalNodes:     run.Status.Summary.TotalNodes,
 			CompletedNodes: run.Status.Summary.CompletedNodes,

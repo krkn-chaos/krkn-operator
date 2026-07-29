@@ -35,6 +35,8 @@ const (
 	AvailableToAllLabel = "files.krkn.krkn-chaos.dev/available-to-all"
 	// FileIDLabel stores the UUID identifier for the file
 	FileIDLabel = "files.krkn.krkn-chaos.dev/file-id"
+	// FilePurposeLabel identifies the purpose/type of file (e.g., "workflow-template")
+	FilePurposeLabel = "files.krkn.krkn-chaos.dev/file-purpose"
 
 	// DescriptionAnnotation stores the file description
 	DescriptionAnnotation = "files.krkn.krkn-chaos.dev/description"
@@ -54,7 +56,7 @@ const (
 )
 
 // BuildFileLabels creates the labels map for a file ConfigMap
-func BuildFileLabels(fileID, fileType string, groups []string, availableToAll bool) map[string]string {
+func BuildFileLabels(fileID, fileType string, groups []string, availableToAll bool, filePurpose string) map[string]string {
 	labels := map[string]string{
 		AppNameLabel:      AppName,
 		AppComponentLabel: ComponentFile,
@@ -76,6 +78,11 @@ func BuildFileLabels(fileID, fileType string, groups []string, availableToAll bo
 	for _, groupName := range groups {
 		groupLabel := groupauth.GroupLabelKey(groupName)
 		labels[groupLabel] = "true"
+	}
+
+	// Add file purpose label if specified
+	if filePurpose != "" {
+		labels[FilePurposeLabel] = filePurpose
 	}
 
 	return labels
@@ -147,4 +154,10 @@ func ExtractGroupsFromLabels(labels map[string]string) []string {
 // Returns empty string if no file type label is found
 func ExtractFileTypeFromLabels(labels map[string]string) string {
 	return filetypes.ExtractFileTypeFromLabels(labels)
+}
+
+// ExtractFilePurposeFromLabels extracts the file purpose from file ConfigMap labels
+// Returns empty string if no file purpose label is found
+func ExtractFilePurposeFromLabels(labels map[string]string) string {
+	return labels[FilePurposeLabel]
 }
