@@ -95,7 +95,34 @@ func ExtractFileIDFromLabels(labels map[string]string) string {
 	return labels[FileIDLabel]
 }
 
-// BuildFileAnnotations creates the annotations map for a file ConfigMap
+// BuildFileAnnotations creates the annotations map for a file ConfigMap.
+//
+// Parameters:
+//   - description: Optional human-readable description of the file
+//   - createdBy: Email of the user creating the file (required, used for audit trail)
+//   - workflowName: User-defined workflow name (only for workflow templates, empty for regular files)
+//
+// Annotations created:
+//   - files.krkn.krkn-chaos.dev/created-by: Always set to createdBy
+//   - files.krkn.krkn-chaos.dev/created-at: Always set to current UTC timestamp (RFC3339)
+//   - files.krkn.krkn-chaos.dev/description: Set only if description is non-empty
+//   - files.krkn.krkn-chaos.dev/workflow-name: Set only if workflowName is non-empty
+//
+// Example usage:
+//
+//	// Regular file (no workflow name)
+//	annotations := BuildFileAnnotations(
+//	    "Configuration for production",
+//	    "admin@example.com",
+//	    "", // empty for non-workflow files
+//	)
+//
+//	// Workflow template
+//	annotations := BuildFileAnnotations(
+//	    "Pod chaos workflow",
+//	    "admin@example.com",
+//	    "My Pod Chaos Workflow", // workflow name for workflow templates
+//	)
 func BuildFileAnnotations(
 	description string,
 	createdBy string,
@@ -117,12 +144,16 @@ func BuildFileAnnotations(
 	return annotations
 }
 
-// UpdateFileAnnotations updates the annotations for a file ConfigMap
+// UpdateFileAnnotations updates the annotations for a file ConfigMap.
+// workflowName pointer semantics:
+//   - nil: field was omitted in request, preserve existing annotation
+//   - non-nil empty string: explicitly set to empty, delete annotation
+//   - non-nil non-empty: update annotation with new value
 func UpdateFileAnnotations(
 	existing map[string]string,
 	description string,
 	updatedBy string,
-	workflowName string,
+	workflowName *string,
 ) map[string]string {
 	// Keep existing annotations and update specific ones
 	updated := make(map[string]string)
@@ -139,11 +170,15 @@ func UpdateFileAnnotations(
 		delete(updated, DescriptionAnnotation)
 	}
 
-	if workflowName != "" {
-		updated[WorkflowNameAnnotation] = workflowName
-	} else {
-		delete(updated, WorkflowNameAnnotation)
+	// Only update workflowName if explicitly provided (non-nil pointer)
+	if workflowName != nil {
+		if *workflowName != "" {
+			updated[WorkflowNameAnnotation] = *workflowName
+		} else {
+			delete(updated, WorkflowNameAnnotation)
+		}
 	}
+	// If workflowName is nil, preserve existing annotation (don't touch it)
 
 	return updated
 }

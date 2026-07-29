@@ -76,7 +76,22 @@ func FromFileContent(content string) (map[string]krknv1alpha1.GraphScenarioNode,
 }
 
 // StudioLayoutToJSON marshals studioLayout to JSON string for ConfigMap storage.
+//
 // Returns empty string if studioLayout is nil or empty.
+//
+// Error conditions:
+//   - Returns error when JSON marshaling fails (e.g., circular references, unsupported types like channels/functions)
+//   - Wraps the underlying json.Marshal error with context
+//
+// Example usage:
+//
+//	layout := map[string]interface{}{
+//	    "nodes": map[string]interface{}{"x": 100, "y": 200},
+//	}
+//	jsonStr, err := StudioLayoutToJSON(layout)
+//	if err != nil {
+//	    return fmt.Errorf("failed to serialize layout: %w", err)
+//	}
 func StudioLayoutToJSON(studioLayout map[string]interface{}) (string, error) {
 	if len(studioLayout) == 0 {
 		return "", nil

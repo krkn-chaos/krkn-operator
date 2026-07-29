@@ -45,6 +45,7 @@ type CreateWorkflowRequest struct {
 // UpdateWorkflowRequest represents a request to update an existing workflow template.
 type UpdateWorkflowRequest struct {
 	// WorkflowName is a human-readable name for the workflow
+	// Required field (workflow name is mandatory for workflows)
 	WorkflowName string `json:"workflowName"`
 	// Description is an optional description of the workflow
 	Description string `json:"description,omitempty"`

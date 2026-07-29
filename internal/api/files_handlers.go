@@ -388,7 +388,7 @@ func (h *Handler) UpdateFile(w http.ResponseWriter, r *http.Request) {
 		configMap.Annotations,
 		req.Description,
 		updatedBy,
-		req.WorkflowName, // Empty for regular files, populated for workflows
+		req.WorkflowName, // Pointer: nil preserves existing, non-nil updates/deletes
 	)
 
 	// Update data
@@ -772,12 +772,19 @@ func buildFileResponse(configMap *corev1.ConfigMap) files.FileResponse {
 		}
 	}
 
+	// Get workflow name with backwards-compatible fallback
+	workflowName := configMap.Annotations[files.WorkflowNameAnnotation]
+	if workflowName == "" && files.ExtractFilePurposeFromLabels(configMap.Labels) == "workflow-template" {
+		// Fallback for workflows created before workflowName annotation was added
+		workflowName = fileName
+	}
+
 	return files.FileResponse{
 		FileID:         files.ExtractFileIDFromLabels(configMap.Labels),
 		FileName:       fileName,
 		Content:        content,
 		StudioLayout:   studioLayout,
-		WorkflowName:   configMap.Annotations[files.WorkflowNameAnnotation],
+		WorkflowName:   workflowName,
 		Description:    configMap.Annotations[files.DescriptionAnnotation],
 		FileType:       files.ExtractFileTypeFromLabels(configMap.Labels),
 		FilePurpose:    files.ExtractFilePurposeFromLabels(configMap.Labels),
@@ -792,11 +799,13 @@ func buildFileResponse(configMap *corev1.ConfigMap) files.FileResponse {
 
 // buildFileInfo builds a FileInfo from a ConfigMap (minimal user-facing info)
 func buildFileInfo(configMap *corev1.ConfigMap) files.FileInfo {
-	// Extract first file name from data
+	// Extract primary file name from data (exclude studioLayout.json)
 	fileName := ""
 	for k := range configMap.Data {
-		fileName = k
-		break
+		if k != "studioLayout.json" {
+			fileName = k
+			break
+		}
 	}
 
 	return files.FileInfo{

@@ -408,11 +408,12 @@ func (h *Handler) UpdateWorkflow(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Delegate to file update
+	workflowNamePtr := &req.WorkflowName // Convert to pointer (always set for workflows)
 	fileReq := files.UpdateFileRequest{
 		FileName:       "workflow.json",
 		Content:        content,
 		StudioLayout:   studioLayoutJSON,
-		WorkflowName:   req.WorkflowName, // User-defined workflow name
+		WorkflowName:   workflowNamePtr, // Always set for workflow updates
 		Description:    req.Description,
 		FileType:       req.FileType,
 		Groups:         req.Groups,
@@ -539,9 +540,16 @@ func convertConfigMapToWorkflowInfo(cm *corev1.ConfigMap) workflows.WorkflowInfo
 		}
 	}
 
+	// Get workflow name with backwards-compatible fallback
+	workflowName := cm.Annotations[files.WorkflowNameAnnotation]
+	if workflowName == "" {
+		// Fallback for workflows created before workflowName annotation was added
+		workflowName = fileInfo.FileName
+	}
+
 	return workflows.WorkflowInfo{
 		WorkflowID:   fileInfo.FileID,
-		WorkflowName: cm.Annotations[files.WorkflowNameAnnotation],
+		WorkflowName: workflowName,
 		Description:  fileInfo.Description,
 		FileType:     fileInfo.FileType,
 		NodeCount:    nodeCount,
@@ -795,7 +803,7 @@ func (h *Handler) updateFileInternal(ctx context.Context, fileID string, req fil
 		configMap.Annotations,
 		req.Description,
 		updatedBy,
-		req.WorkflowName,
+		req.WorkflowName, // Pointer: nil preserves existing, non-nil updates/deletes
 	)
 
 	// Update data
