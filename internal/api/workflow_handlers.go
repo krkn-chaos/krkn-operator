@@ -120,6 +120,7 @@ func (h *Handler) CreateWorkflow(w http.ResponseWriter, r *http.Request) {
 		FileName:       "workflow.json",  // Standard filename for workflows
 		Content:        content,          // Graph JSON
 		StudioLayout:   studioLayoutJSON, // Studio visual layout (optional)
+		WorkflowName:   req.WorkflowName, // User-defined workflow name
 		Description:    req.Description,
 		FileType:       req.FileType,        // User categorization (optional)
 		Groups:         req.Groups,          // RBAC groups
@@ -411,6 +412,7 @@ func (h *Handler) UpdateWorkflow(w http.ResponseWriter, r *http.Request) {
 		FileName:       "workflow.json",
 		Content:        content,
 		StudioLayout:   studioLayoutJSON,
+		WorkflowName:   req.WorkflowName, // User-defined workflow name
 		Description:    req.Description,
 		FileType:       req.FileType,
 		Groups:         req.Groups,
@@ -506,7 +508,7 @@ func convertFileResponseToWorkflow(fileResp files.FileResponse) (workflows.Workf
 
 	return workflows.WorkflowResponse{
 		WorkflowID:     fileResp.FileID,
-		WorkflowName:   fileResp.FileName, // Use filename as workflow name for now
+		WorkflowName:   fileResp.WorkflowName, // User-defined workflow name from annotation
 		Description:    fileResp.Description,
 		Graph:          graph,
 		StudioLayout:   studioLayout,
@@ -539,7 +541,7 @@ func convertConfigMapToWorkflowInfo(cm *corev1.ConfigMap) workflows.WorkflowInfo
 
 	return workflows.WorkflowInfo{
 		WorkflowID:   fileInfo.FileID,
-		WorkflowName: fileInfo.FileName,
+		WorkflowName: cm.Annotations[files.WorkflowNameAnnotation],
 		Description:  fileInfo.Description,
 		FileType:     fileInfo.FileType,
 		NodeCount:    nodeCount,
@@ -578,7 +580,7 @@ func (h *Handler) createFileInternal(ctx context.Context, req files.CreateFileRe
 
 	// Build labels and annotations
 	labels := files.BuildFileLabels(fileID, req.FileType, req.Groups, req.AvailableToAll, req.FilePurpose)
-	annotations := files.BuildFileAnnotations(req.Description, createdBy)
+	annotations := files.BuildFileAnnotations(req.Description, createdBy, req.WorkflowName)
 
 	// Build ConfigMap data
 	data := map[string]string{
@@ -793,6 +795,7 @@ func (h *Handler) updateFileInternal(ctx context.Context, fileID string, req fil
 		configMap.Annotations,
 		req.Description,
 		updatedBy,
+		req.WorkflowName,
 	)
 
 	// Update data

@@ -204,6 +204,7 @@ func TestBuildFileAnnotations(t *testing.T) {
 			got := BuildFileAnnotations(
 				tt.description,
 				tt.createdBy,
+				"", // workflowName - empty for regular files
 			)
 
 			// Check required annotations
@@ -275,6 +276,7 @@ func TestUpdateFileAnnotations(t *testing.T) {
 				tt.existing,
 				tt.description,
 				tt.updatedBy,
+				"", // workflowName - empty for regular files
 			)
 
 			// Check updated fields

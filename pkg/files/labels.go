@@ -40,6 +40,8 @@ const (
 
 	// DescriptionAnnotation stores the file description
 	DescriptionAnnotation = "files.krkn.krkn-chaos.dev/description"
+	// WorkflowNameAnnotation stores the user-defined workflow name (for workflow templates)
+	WorkflowNameAnnotation = "files.krkn.krkn-chaos.dev/workflow-name"
 	// CreatedByAnnotation stores the email of the admin who created the file
 	CreatedByAnnotation = "files.krkn.krkn-chaos.dev/created-by"
 	// CreatedAtAnnotation stores the creation timestamp
@@ -97,6 +99,7 @@ func ExtractFileIDFromLabels(labels map[string]string) string {
 func BuildFileAnnotations(
 	description string,
 	createdBy string,
+	workflowName string,
 ) map[string]string {
 	annotations := map[string]string{
 		CreatedByAnnotation: createdBy,
@@ -107,6 +110,10 @@ func BuildFileAnnotations(
 		annotations[DescriptionAnnotation] = description
 	}
 
+	if workflowName != "" {
+		annotations[WorkflowNameAnnotation] = workflowName
+	}
+
 	return annotations
 }
 
@@ -115,6 +122,7 @@ func UpdateFileAnnotations(
 	existing map[string]string,
 	description string,
 	updatedBy string,
+	workflowName string,
 ) map[string]string {
 	// Keep existing annotations and update specific ones
 	updated := make(map[string]string)
@@ -129,6 +137,12 @@ func UpdateFileAnnotations(
 		updated[DescriptionAnnotation] = description
 	} else {
 		delete(updated, DescriptionAnnotation)
+	}
+
+	if workflowName != "" {
+		updated[WorkflowNameAnnotation] = workflowName
+	} else {
+		delete(updated, WorkflowNameAnnotation)
 	}
 
 	return updated

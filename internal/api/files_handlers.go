@@ -121,6 +121,7 @@ func (h *Handler) CreateFile(w http.ResponseWriter, r *http.Request) {
 	annotations := files.BuildFileAnnotations(
 		req.Description,
 		createdBy,
+		req.WorkflowName, // Empty for regular files, populated for workflows
 	)
 
 	// Create ConfigMap
@@ -387,6 +388,7 @@ func (h *Handler) UpdateFile(w http.ResponseWriter, r *http.Request) {
 		configMap.Annotations,
 		req.Description,
 		updatedBy,
+		req.WorkflowName, // Empty for regular files, populated for workflows
 	)
 
 	// Update data
@@ -775,6 +777,7 @@ func buildFileResponse(configMap *corev1.ConfigMap) files.FileResponse {
 		FileName:       fileName,
 		Content:        content,
 		StudioLayout:   studioLayout,
+		WorkflowName:   configMap.Annotations[files.WorkflowNameAnnotation],
 		Description:    configMap.Annotations[files.DescriptionAnnotation],
 		FileType:       files.ExtractFileTypeFromLabels(configMap.Labels),
 		FilePurpose:    files.ExtractFilePurposeFromLabels(configMap.Labels),
