@@ -8,6 +8,7 @@ on:
 env:
   REGISTRY: quay.io
   CHART_REPO: krkn-chaos/charts
+  IMAGE_REGISTRY: krkn-chaos.docker.scarf.sh/krkn-chaos
 
 jobs:
   release-chart:
@@ -23,16 +24,65 @@ jobs:
         run: |
           echo "${{ secrets.QUAY_PASSWORD }}" | helm registry login ${{ env.REGISTRY }} --username ${{ secrets.QUAY_USERNAME }} --password-stdin
 
+      - name: Install yq
+        run: |
+          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+
+      - name: Fetch latest component versions
+        id: versions
+        run: |
+          # Extract operator version from tag
+          OPERATOR_VERSION=${GITHUB_REF#refs/tags/}
+          echo "operator=${OPERATOR_VERSION}" >> $GITHUB_OUTPUT
+
+          # Fetch latest ACM version (using redirect method to avoid rate limit)
+          ACM_LATEST_URL=$(curl -Ls -o /dev/null -w %{url_effective} https://github.com/krkn-chaos/krkn-operator-acm/releases/latest)
+          ACM_VERSION=$(echo $ACM_LATEST_URL | sed 's|.*/tag/||')
+          echo "acm=${ACM_VERSION}" >> $GITHUB_OUTPUT
+          echo "Latest ACM version: ${ACM_VERSION}"
+
+          # Fetch latest Console version (using redirect method to avoid rate limit)
+          CONSOLE_LATEST_URL=$(curl -Ls -o /dev/null -w %{url_effective} https://github.com/krkn-chaos/krkn-operator-console/releases/latest)
+          CONSOLE_VERSION=$(echo $CONSOLE_LATEST_URL | sed 's|.*/tag/||')
+          echo "console=${CONSOLE_VERSION}" >> $GITHUB_OUTPUT
+          echo "Latest Console version: ${CONSOLE_VERSION}"
+
+      - name: Update Chart metadata and image tags
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          OPERATOR_VERSION=${{ steps.versions.outputs.operator }}
+          ACM_VERSION=${{ steps.versions.outputs.acm }}
+          CONSOLE_VERSION=${{ steps.versions.outputs.console }}
+          IMAGE_REGISTRY="${{ env.IMAGE_REGISTRY }}"
+
+          # Update chart version and appVersion
+          yq eval -i ".version = \"${VERSION}\"" charts/krkn-operator/Chart.yaml
+          yq eval -i ".appVersion = \"${OPERATOR_VERSION}\"" charts/krkn-operator/Chart.yaml
+
+          # Update image tags in values.yaml
+          yq eval -i ".images.operator.image = \"${IMAGE_REGISTRY}/krkn-operator:${OPERATOR_VERSION}\"" charts/krkn-operator/values.yaml
+          yq eval -i ".images.operator.pullPolicy = \"IfNotPresent\"" charts/krkn-operator/values.yaml
+
+          yq eval -i ".images.dataProvider.image = \"${IMAGE_REGISTRY}/krkn-operator-data-provider:${OPERATOR_VERSION}\"" charts/krkn-operator/values.yaml
+          yq eval -i ".images.dataProvider.pullPolicy = \"IfNotPresent\"" charts/krkn-operator/values.yaml
+
+          yq eval -i ".images.acm.image = \"${IMAGE_REGISTRY}/krkn-operator-acm:${ACM_VERSION}\"" charts/krkn-operator/values.yaml
+          yq eval -i ".images.acm.pullPolicy = \"IfNotPresent\"" charts/krkn-operator/values.yaml
+
+          yq eval -i ".images.console.image = \"${IMAGE_REGISTRY}/krkn-operator-console:${CONSOLE_VERSION}\"" charts/krkn-operator/values.yaml
+          yq eval -i ".images.console.pullPolicy = \"IfNotPresent\"" charts/krkn-operator/values.yaml
+
+          echo "Chart version: ${VERSION}"
+          echo "Operator version: ${OPERATOR_VERSION}"
+          echo "ACM version: ${ACM_VERSION}"
+          echo "Console version: ${CONSOLE_VERSION}"
+
       - name: Package and Push Helm Chart
         run: |
-          # Extract version from tag (remove 'v' prefix)
           VERSION=${GITHUB_REF#refs/tags/v}
 
-          # Update chart version
-          sed -i "s/^version:.*/version: ${VERSION}/" charts/krkn-operator/Chart.yaml
-          sed -i "s/^appVersion:.*/appVersion: \"${GITHUB_REF#refs/tags/}\"/" charts/krkn-operator/Chart.yaml
-
-          # Package chart
+          # Package chart with updated values
           helm package charts/krkn-operator
 
           # Push to Quay.io OCI registry

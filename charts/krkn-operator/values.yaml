@@ -7,10 +7,14 @@ global:
   namespaceOverride: ""
 
 ## Images configuration
+# NOTE: Tags are automatically updated during release by CI/CD workflow
+# - Operator & Data Provider: match the release tag (e.g., v0.4.3-beta)
+# - ACM: frozen to latest stable ACM tag at release time
+# - Console: frozen to latest stable Console tag at release time
+# Local development: uses :latest tags for all components
 images:
   operator:
     image: krkn-chaos.docker.scarf.sh/krkn-chaos/krkn-operator:latest
-    # Use Always for :latest to ensure multi-arch images are pulled correctly
     pullPolicy: Always
   dataProvider:
     image: krkn-chaos.docker.scarf.sh/krkn-chaos/krkn-operator-data-provider:latest
