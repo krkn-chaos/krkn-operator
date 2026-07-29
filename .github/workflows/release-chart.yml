@@ -8,6 +8,7 @@ on:
 env:
   REGISTRY: quay.io
   CHART_REPO: krkn-chaos/charts
+  IMAGE_REGISTRY: krkn-chaos.docker.scarf.sh/krkn-chaos
 
 jobs:
   release-chart:
@@ -53,22 +54,23 @@ jobs:
           OPERATOR_VERSION=${{ steps.versions.outputs.operator }}
           ACM_VERSION=${{ steps.versions.outputs.acm }}
           CONSOLE_VERSION=${{ steps.versions.outputs.console }}
+          IMAGE_REGISTRY="${{ env.IMAGE_REGISTRY }}"
 
           # Update chart version and appVersion
           yq eval -i ".version = \"${VERSION}\"" charts/krkn-operator/Chart.yaml
           yq eval -i ".appVersion = \"${OPERATOR_VERSION}\"" charts/krkn-operator/Chart.yaml
 
           # Update image tags in values.yaml
-          yq eval -i ".images.operator.image = \"krkn-chaos.docker.scarf.sh/krkn-chaos/krkn-operator:${OPERATOR_VERSION}\"" charts/krkn-operator/values.yaml
+          yq eval -i ".images.operator.image = \"${IMAGE_REGISTRY}/krkn-operator:${OPERATOR_VERSION}\"" charts/krkn-operator/values.yaml
           yq eval -i ".images.operator.pullPolicy = \"IfNotPresent\"" charts/krkn-operator/values.yaml
 
-          yq eval -i ".images.dataProvider.image = \"krkn-chaos.docker.scarf.sh/krkn-chaos/krkn-operator-data-provider:${OPERATOR_VERSION}\"" charts/krkn-operator/values.yaml
+          yq eval -i ".images.dataProvider.image = \"${IMAGE_REGISTRY}/krkn-operator-data-provider:${OPERATOR_VERSION}\"" charts/krkn-operator/values.yaml
           yq eval -i ".images.dataProvider.pullPolicy = \"IfNotPresent\"" charts/krkn-operator/values.yaml
 
-          yq eval -i ".images.acm.image = \"krkn-chaos.docker.scarf.sh/krkn-chaos/krkn-operator-acm:${ACM_VERSION}\"" charts/krkn-operator/values.yaml
+          yq eval -i ".images.acm.image = \"${IMAGE_REGISTRY}/krkn-operator-acm:${ACM_VERSION}\"" charts/krkn-operator/values.yaml
           yq eval -i ".images.acm.pullPolicy = \"IfNotPresent\"" charts/krkn-operator/values.yaml
 
-          yq eval -i ".images.console.image = \"krkn-chaos.docker.scarf.sh/krkn-chaos/krkn-operator-console:${CONSOLE_VERSION}\"" charts/krkn-operator/values.yaml
+          yq eval -i ".images.console.image = \"${IMAGE_REGISTRY}/krkn-operator-console:${CONSOLE_VERSION}\"" charts/krkn-operator/values.yaml
           yq eval -i ".images.console.pullPolicy = \"IfNotPresent\"" charts/krkn-operator/values.yaml
 
           echo "Chart version: ${VERSION}"
