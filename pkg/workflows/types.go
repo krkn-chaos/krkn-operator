@@ -31,6 +31,9 @@ type CreateWorkflowRequest struct {
 	Description string `json:"description,omitempty"`
 	// Graph is the workflow graph definition (map of node ID to GraphScenarioNode)
 	Graph map[string]krknv1alpha1.GraphScenarioNode `json:"graph"`
+	// StudioLayout is frontend-owned visual canvas data (opaque to backend - just store and return it)
+	// Contains node positions, edges, nextNodeNumber, etc.
+	StudioLayout map[string]interface{} `json:"studioLayout,omitempty"`
 	// FileType is an optional user-defined category (e.g., "pod-chaos", "network-chaos")
 	FileType string `json:"fileType,omitempty"`
 	// Groups is a list of group names that can access this workflow (max 1)
@@ -42,11 +45,15 @@ type CreateWorkflowRequest struct {
 // UpdateWorkflowRequest represents a request to update an existing workflow template.
 type UpdateWorkflowRequest struct {
 	// WorkflowName is a human-readable name for the workflow
+	// Required field (workflow name is mandatory for workflows)
 	WorkflowName string `json:"workflowName"`
 	// Description is an optional description of the workflow
 	Description string `json:"description,omitempty"`
 	// Graph is the workflow graph definition (map of node ID to GraphScenarioNode)
 	Graph map[string]krknv1alpha1.GraphScenarioNode `json:"graph"`
+	// StudioLayout is frontend-owned visual canvas data (opaque to backend - just store and return it)
+	// Contains node positions, edges, nextNodeNumber, etc.
+	StudioLayout map[string]interface{} `json:"studioLayout,omitempty"`
 	// FileType is an optional user-defined category (e.g., "pod-chaos", "network-chaos")
 	FileType string `json:"fileType,omitempty"`
 	// Groups is a list of group names that can access this workflow (max 1)
@@ -65,6 +72,9 @@ type WorkflowResponse struct {
 	Description string `json:"description,omitempty"`
 	// Graph is the workflow graph definition
 	Graph map[string]krknv1alpha1.GraphScenarioNode `json:"graph"`
+	// StudioLayout is frontend-owned visual canvas data (opaque to backend - just store and return it)
+	// Contains node positions, edges, nextNodeNumber, etc.
+	StudioLayout map[string]interface{} `json:"studioLayout,omitempty"`
 	// FileType is the user-defined category
 	FileType string `json:"fileType,omitempty"`
 	// Groups is a list of group names that can access this workflow

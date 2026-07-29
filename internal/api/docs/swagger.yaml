@@ -81,6 +81,14 @@ definitions:
         items:
           type: string
         type: array
+      studioLayout:
+        description: StudioLayout is optional frontend visual layout data (stored
+          as separate ConfigMap entry)
+        type: string
+      workflowName:
+        description: WorkflowName is the user-defined workflow name (only for workflow
+          templates)
+        type: string
     type: object
   github_com_krkn-chaos_krkn-operator_pkg_files.CreateFileResponse:
     properties:
@@ -160,11 +168,18 @@ definitions:
         items:
           type: string
         type: array
+      studioLayout:
+        description: StudioLayout is optional frontend visual layout data
+        type: string
       updatedAt:
         description: UpdatedAt is the timestamp when the file was last updated
         type: string
       updatedBy:
         description: UpdatedBy is the email of the user who last updated the file
+        type: string
+      workflowName:
+        description: WorkflowName is the user-defined workflow name (only for workflow
+          templates)
         type: string
     type: object
   github_com_krkn-chaos_krkn-operator_pkg_files.ListFilesResponse:
@@ -209,6 +224,12 @@ definitions:
         items:
           type: string
         type: array
+      studioLayout:
+        additionalProperties: true
+        description: |-
+          StudioLayout is frontend-owned visual canvas data (opaque to backend - just store and return it)
+          Contains node positions, edges, nextNodeNumber, etc.
+        type: object
       workflowName:
         description: WorkflowName is a human-readable name for the workflow
         type: string
@@ -279,6 +300,12 @@ definitions:
         items:
           type: string
         type: array
+      studioLayout:
+        additionalProperties: true
+        description: |-
+          StudioLayout is frontend-owned visual canvas data (opaque to backend - just store and return it)
+          Contains node positions, edges, nextNodeNumber, etc.
+        type: object
       updatedAt:
         description: UpdatedAt is the timestamp when the workflow was last updated
         type: string
@@ -1288,6 +1315,44 @@ paths:
       security:
       - BearerAuth: []
       summary: Get scenario run status
+      tags:
+      - scenarios
+  /scenarios/run/replay/{jobId}:
+    get:
+      description: Retrieve scenario configuration from a completed job and return
+        payload ready for re-execution via POST /scenarios/run
+      parameters:
+      - description: Job ID (krkn-job-id label value)
+        in: path
+        name: jobId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Scenario configuration ready for replay
+          schema:
+            $ref: '#/definitions/internal_api.ScenarioRunRequest'
+        "400":
+          description: Invalid job ID or job not found
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "403":
+          description: Insufficient permissions
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "404":
+          description: Job or ScenarioRun not found
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Replay a scenario from a completed job
       tags:
       - scenarios
   /targets:

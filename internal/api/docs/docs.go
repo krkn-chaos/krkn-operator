@@ -948,6 +948,64 @@ const docTemplate = `{
                 }
             }
         },
+        "/scenarios/run/replay/{jobId}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Retrieve scenario configuration from a completed job and return payload ready for re-execution via POST /scenarios/run",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "scenarios"
+                ],
+                "summary": "Replay a scenario from a completed job",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Job ID (krkn-job-id label value)",
+                        "name": "jobId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Scenario configuration ready for replay",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ScenarioRunRequest"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid job ID or job not found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Job or ScenarioRun not found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/scenarios/run/{jobID}": {
             "delete": {
                 "security": [
@@ -1562,6 +1620,14 @@ const docTemplate = `{
                     "items": {
                         "type": "string"
                     }
+                },
+                "studioLayout": {
+                    "description": "StudioLayout is optional frontend visual layout data (stored as separate ConfigMap entry)",
+                    "type": "string"
+                },
+                "workflowName": {
+                    "description": "WorkflowName is the user-defined workflow name (only for workflow templates)",
+                    "type": "string"
                 }
             }
         },
@@ -1669,12 +1735,20 @@ const docTemplate = `{
                         "type": "string"
                     }
                 },
+                "studioLayout": {
+                    "description": "StudioLayout is optional frontend visual layout data",
+                    "type": "string"
+                },
                 "updatedAt": {
                     "description": "UpdatedAt is the timestamp when the file was last updated",
                     "type": "string"
                 },
                 "updatedBy": {
                     "description": "UpdatedBy is the email of the user who last updated the file",
+                    "type": "string"
+                },
+                "workflowName": {
+                    "description": "WorkflowName is the user-defined workflow name (only for workflow templates)",
                     "type": "string"
                 }
             }
@@ -1735,6 +1809,11 @@ const docTemplate = `{
                     "items": {
                         "type": "string"
                     }
+                },
+                "studioLayout": {
+                    "description": "StudioLayout is frontend-owned visual canvas data (opaque to backend - just store and return it)\nContains node positions, edges, nextNodeNumber, etc.",
+                    "type": "object",
+                    "additionalProperties": true
                 },
                 "workflowName": {
                     "description": "WorkflowName is a human-readable name for the workflow",
@@ -1832,6 +1911,11 @@ const docTemplate = `{
                     "items": {
                         "type": "string"
                     }
+                },
+                "studioLayout": {
+                    "description": "StudioLayout is frontend-owned visual canvas data (opaque to backend - just store and return it)\nContains node positions, edges, nextNodeNumber, etc.",
+                    "type": "object",
+                    "additionalProperties": true
                 },
                 "updatedAt": {
                     "description": "UpdatedAt is the timestamp when the workflow was last updated",

@@ -25,6 +25,10 @@ type CreateFileRequest struct {
 	FileName string `json:"fileName"`
 	// Content is the file content
 	Content string `json:"content"`
+	// StudioLayout is optional frontend visual layout data (stored as separate ConfigMap entry)
+	StudioLayout string `json:"studioLayout,omitempty"`
+	// WorkflowName is the user-defined workflow name (only for workflow templates)
+	WorkflowName string `json:"workflowName,omitempty"`
 	// Description is an optional description of the file
 	Description string `json:"description,omitempty"`
 	// FileType is an optional file type category (e.g., "config", "script") - for user categorization
@@ -50,6 +54,11 @@ type UpdateFileRequest struct {
 	FileName string `json:"fileName"`
 	// Content is the file content
 	Content string `json:"content"`
+	// StudioLayout is optional frontend visual layout data (stored as separate ConfigMap entry)
+	StudioLayout string `json:"studioLayout,omitempty"`
+	// WorkflowName is the user-defined workflow name (only for workflow templates)
+	// Use pointer to distinguish between omitted (nil) and explicitly set to empty ("")
+	WorkflowName *string `json:"workflowName,omitempty"`
 	// Description is an optional description of the file
 	Description string `json:"description,omitempty"`
 	// FileType is an optional file type category (e.g., "config", "script") - for user categorization
@@ -82,6 +91,10 @@ type FileResponse struct {
 	FileName string `json:"fileName"`
 	// Content is the file content
 	Content string `json:"content"`
+	// StudioLayout is optional frontend visual layout data
+	StudioLayout string `json:"studioLayout,omitempty"`
+	// WorkflowName is the user-defined workflow name (only for workflow templates)
+	WorkflowName string `json:"workflowName,omitempty"`
 	// Description is an optional description of the file
 	Description string `json:"description,omitempty"`
 	// FileType is an optional file type category (e.g., "config", "script") - for user categorization

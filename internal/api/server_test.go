@@ -28,10 +28,11 @@ import (
 // the method guard exists in server.go for /workflows/available endpoint.
 //
 // The actual method guard is in server.go:183-186:
-//   if r.Method != http.MethodGet {
-//       http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-//       return
-//   }
+//
+//	if r.Method != http.MethodGet {
+//	    http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+//	    return
+//	}
 //
 // This test exists to document the requirement. The method guard is tested
 // functionally in workflow_handlers_test.go which tests the handler behavior.

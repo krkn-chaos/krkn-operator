@@ -141,17 +141,17 @@ func TestCreateWorkflow(t *testing.T) {
 			expectInDB:   false,
 		},
 		{
-			name: "reject workflow with empty graph",
+			name: "allow workflow with empty graph (work-in-progress template)",
 			request: workflows.CreateWorkflowRequest{
 				WorkflowName:   "Empty Workflow",
-				Description:    "Workflow with no nodes",
+				Description:    "Workflow with no nodes (work-in-progress)",
 				Graph:          map[string]krknv1alpha1.GraphScenarioNode{},
 				AvailableToAll: true,
 			},
 			userID:       "admin@test.example",
 			isAdmin:      true,
-			expectStatus: http.StatusBadRequest,
-			expectInDB:   false,
+			expectStatus: http.StatusCreated,
+			expectInDB:   true,
 		},
 		{
 			name: "reject workflow with empty name",
@@ -656,5 +656,169 @@ func TestNodeCountAccuracy(t *testing.T) {
 	// Should count only node1 and node2, not _metadata
 	if resp.Workflows[0].NodeCount != 2 {
 		t.Errorf("Expected NodeCount 2 (excluding _metadata), got %d", resp.Workflows[0].NodeCount)
+	}
+}
+
+func TestWorkflowStudioLayout(t *testing.T) {
+	handler := setupWorkflowTestHandler()
+
+	// Create admin user
+	adminUser := &krknv1alpha1.KrknUser{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "krknuser-admin-test-example",
+			Namespace: handler.namespace,
+		},
+		Spec: krknv1alpha1.KrknUserSpec{
+			UserID: "admin@test.example",
+		},
+	}
+	if err := handler.client.Create(context.Background(), adminUser); err != nil {
+		t.Fatalf("Failed to create admin user: %v", err)
+	}
+
+	// Studio layout data (frontend visual canvas)
+	studioLayout := map[string]interface{}{
+		"nodes": []map[string]interface{}{
+			{
+				"nodeId": "node1",
+				"position": map[string]interface{}{
+					"x": 100.0,
+					"y": 200.0,
+				},
+			},
+		},
+		"edges": []map[string]interface{}{
+			{
+				"id":     "edge1",
+				"source": "node1",
+				"target": "node2",
+			},
+		},
+		"nextNodeNumber": 3.0,
+	}
+
+	// Test 1: Create workflow with studioLayout
+	createReq := workflows.CreateWorkflowRequest{
+		WorkflowName:   "Studio Workflow",
+		Description:    "Workflow with studio layout",
+		Graph:          validWorkflowGraph(),
+		StudioLayout:   studioLayout,
+		AvailableToAll: true,
+	}
+
+	body, _ := json.Marshal(createReq)
+	req := httptest.NewRequest(http.MethodPost, WorkflowsPath, bytes.NewReader(body))
+	req = addAdminContext(req)
+
+	rr := httptest.NewRecorder()
+	handler.CreateWorkflow(rr, req)
+
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("Expected status 201, got %d. Body: %s", rr.Code, rr.Body.String())
+	}
+
+	var createResp workflows.CreateWorkflowResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &createResp); err != nil {
+		t.Fatalf("Failed to unmarshal create response: %v", err)
+	}
+
+	workflowID := createResp.WorkflowID
+
+	// Test 2: Get workflow and verify studioLayout is returned
+	getReq := httptest.NewRequest(http.MethodGet, WorkflowsPath+"/"+workflowID, nil)
+	getReq = addAdminContext(getReq)
+
+	getRr := httptest.NewRecorder()
+	handler.GetWorkflow(getRr, getReq)
+
+	if getRr.Code != http.StatusOK {
+		t.Fatalf("Expected status 200, got %d. Body: %s", getRr.Code, getRr.Body.String())
+	}
+
+	var getResp workflows.WorkflowResponse
+	if err := json.Unmarshal(getRr.Body.Bytes(), &getResp); err != nil {
+		t.Fatalf("Failed to unmarshal get response: %v", err)
+	}
+
+	// Verify studioLayout was persisted
+	if getResp.StudioLayout == nil {
+		t.Fatal("Expected studioLayout to be present, got nil")
+	}
+
+	// Verify nodes array exists and has correct length
+	nodes, ok := getResp.StudioLayout["nodes"].([]interface{})
+	if !ok {
+		t.Fatal("Expected nodes to be an array")
+	}
+	if len(nodes) != 1 {
+		t.Errorf("Expected 1 node in studioLayout, got %d", len(nodes))
+	}
+
+	// Verify nextNodeNumber
+	nextNum, ok := getResp.StudioLayout["nextNodeNumber"].(float64)
+	if !ok || nextNum != 3.0 {
+		t.Errorf("Expected nextNodeNumber=3, got %v", getResp.StudioLayout["nextNodeNumber"])
+	}
+
+	// Test 3: Update workflow with new studioLayout
+	updatedLayout := map[string]interface{}{
+		"nodes": []map[string]interface{}{
+			{
+				"nodeId": "node1",
+				"position": map[string]interface{}{
+					"x": 150.0,
+					"y": 250.0,
+				},
+			},
+			{
+				"nodeId": "node2",
+				"position": map[string]interface{}{
+					"x": 300.0,
+					"y": 250.0,
+				},
+			},
+		},
+		"nextNodeNumber": 4.0,
+	}
+
+	updateReq := workflows.UpdateWorkflowRequest{
+		WorkflowName: "Studio Workflow Updated",
+		Graph:        validWorkflowGraph(),
+		StudioLayout: updatedLayout,
+	}
+
+	updateBody, _ := json.Marshal(updateReq)
+	putReq := httptest.NewRequest(http.MethodPut, WorkflowsPath+"/"+workflowID, bytes.NewReader(updateBody))
+	putReq = addAdminContext(putReq)
+
+	putRr := httptest.NewRecorder()
+	handler.UpdateWorkflow(putRr, putReq)
+
+	if putRr.Code != http.StatusOK {
+		t.Fatalf("Expected status 200, got %d. Body: %s", putRr.Code, putRr.Body.String())
+	}
+
+	// Verify updated studioLayout
+	getReq2 := httptest.NewRequest(http.MethodGet, WorkflowsPath+"/"+workflowID, nil)
+	getReq2 = addAdminContext(getReq2)
+
+	getRr2 := httptest.NewRecorder()
+	handler.GetWorkflow(getRr2, getReq2)
+
+	var getResp2 workflows.WorkflowResponse
+	if err := json.Unmarshal(getRr2.Body.Bytes(), &getResp2); err != nil {
+		t.Fatalf("Failed to unmarshal updated response: %v", err)
+	}
+
+	// Verify updated nodes
+	updatedNodes, ok := getResp2.StudioLayout["nodes"].([]interface{})
+	if !ok || len(updatedNodes) != 2 {
+		t.Errorf("Expected 2 nodes after update, got %d", len(updatedNodes))
+	}
+
+	// Verify updated nextNodeNumber
+	updatedNextNum, ok := getResp2.StudioLayout["nextNodeNumber"].(float64)
+	if !ok || updatedNextNum != 4.0 {
+		t.Errorf("Expected nextNodeNumber=4 after update, got %v", getResp2.StudioLayout["nextNodeNumber"])
 	}
 }

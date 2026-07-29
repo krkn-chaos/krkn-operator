@@ -36,10 +36,13 @@ import (
 // - No self-references
 // - At least one root node (no all-dependent graph)
 //
-// Returns an error if the graph is invalid, nil if valid.
+// Empty graphs are allowed (for work-in-progress templates in Chaos Studio).
+// Returns an error if the graph structure is invalid, nil if valid.
 func ValidateWorkflowGraph(scenarioGraph map[string]krknv1alpha1.GraphScenarioNode) error {
+	// Allow empty graphs for work-in-progress templates
+	// The Chaos Studio may save templates with visual layout but no configured nodes yet
 	if len(scenarioGraph) == 0 {
-		return fmt.Errorf("workflow graph cannot be empty")
+		return nil
 	}
 
 	// Reuse existing validation from graph package
@@ -70,4 +73,45 @@ func FromFileContent(content string) (map[string]krknv1alpha1.GraphScenarioNode,
 		return nil, fmt.Errorf("failed to parse workflow graph JSON: %w", err)
 	}
 	return scenarioGraph, nil
+}
+
+// StudioLayoutToJSON marshals studioLayout to JSON string for ConfigMap storage.
+//
+// Returns empty string if studioLayout is nil or empty.
+//
+// Error conditions:
+//   - Returns error when JSON marshaling fails (e.g., circular references, unsupported types like channels/functions)
+//   - Wraps the underlying json.Marshal error with context
+//
+// Example usage:
+//
+//	layout := map[string]interface{}{
+//	    "nodes": map[string]interface{}{"x": 100, "y": 200},
+//	}
+//	jsonStr, err := StudioLayoutToJSON(layout)
+//	if err != nil {
+//	    return fmt.Errorf("failed to serialize layout: %w", err)
+//	}
+func StudioLayoutToJSON(studioLayout map[string]interface{}) (string, error) {
+	if len(studioLayout) == 0 {
+		return "", nil
+	}
+	bytes, err := json.Marshal(studioLayout)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal studioLayout: %w", err)
+	}
+	return string(bytes), nil
+}
+
+// StudioLayoutFromJSON parses studioLayout from JSON string.
+// Returns nil if content is empty, error if JSON is invalid.
+func StudioLayoutFromJSON(content string) (map[string]interface{}, error) {
+	if content == "" {
+		return nil, nil
+	}
+	var studioLayout map[string]interface{}
+	if err := json.Unmarshal([]byte(content), &studioLayout); err != nil {
+		return nil, fmt.Errorf("failed to parse studioLayout JSON: %w", err)
+	}
+	return studioLayout, nil
 }

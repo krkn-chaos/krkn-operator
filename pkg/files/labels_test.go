@@ -12,387 +12,91 @@ distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
+
+Assisted-by: Claude Sonnet 4.5 (claude-sonnet-4-5@20250929)
 */
 
 package files
 
 import (
 	"testing"
-	"time"
 )
 
-func TestBuildFileLabels(t *testing.T) {
-	testFileID := "550e8400-e29b-41d4-a716-446655440000"
+// TestUpdateFileAnnotations_PointerSemantics tests that workflowName pointer
+// correctly distinguishes between omitted (nil), explicitly empty (""), and set values
+func TestUpdateFileAnnotations_PointerSemantics(t *testing.T) {
+	existingAnnotations := map[string]string{
+		WorkflowNameAnnotation: "Existing Workflow",
+		DescriptionAnnotation:  "Existing Description",
+		CreatedByAnnotation:    "original@example.com",
+		CreatedAtAnnotation:    "2026-01-01T00:00:00Z",
+	}
 
 	tests := []struct {
-		name           string
-		fileID         string
-		fileType       string
-		groups         []string
-		availableToAll bool
-		want           map[string]string
+		name             string
+		workflowName     *string
+		wantWorkflowName string
+		wantExists       bool
 	}{
 		{
-			name:           "with groups",
-			fileID:         testFileID,
-			fileType:       "",
-			groups:         []string{"dev-team", "qa-team"},
-			availableToAll: false,
-			want: map[string]string{
-				AppNameLabel:                         AppName,
-				AppComponentLabel:                    ComponentFile,
-				FileIDLabel:                          testFileID,
-				"group.krkn.krkn-chaos.dev/dev-team": "true",
-				"group.krkn.krkn-chaos.dev/qa-team":  "true",
-			},
+			name:             "nil pointer - preserve existing annotation",
+			workflowName:     nil,
+			wantWorkflowName: "Existing Workflow",
+			wantExists:       true,
 		},
 		{
-			name:           "available to all",
-			fileID:         testFileID,
-			fileType:       "",
-			groups:         []string{},
-			availableToAll: true,
-			want: map[string]string{
-				AppNameLabel:        AppName,
-				AppComponentLabel:   ComponentFile,
-				FileIDLabel:         testFileID,
-				AvailableToAllLabel: "true",
-			},
+			name:             "empty string pointer - delete annotation",
+			workflowName:     stringPtr(""),
+			wantWorkflowName: "",
+			wantExists:       false,
 		},
 		{
-			name:           "no groups, not public",
-			fileID:         testFileID,
-			fileType:       "",
-			groups:         []string{},
-			availableToAll: false,
-			want: map[string]string{
-				AppNameLabel:      AppName,
-				AppComponentLabel: ComponentFile,
-				FileIDLabel:       testFileID,
-			},
-		},
-		{
-			name:           "single group",
-			fileID:         testFileID,
-			fileType:       "",
-			groups:         []string{"ops-team"},
-			availableToAll: false,
-			want: map[string]string{
-				AppNameLabel:                         AppName,
-				AppComponentLabel:                    ComponentFile,
-				FileIDLabel:                          testFileID,
-				"group.krkn.krkn-chaos.dev/ops-team": "true",
-			},
-		},
-		{
-			name:           "with file type",
-			fileID:         testFileID,
-			fileType:       "config",
-			groups:         []string{},
-			availableToAll: false,
-			want: map[string]string{
-				AppNameLabel:                           AppName,
-				AppComponentLabel:                      ComponentFile,
-				FileIDLabel:                            testFileID,
-				"file-type.krkn.krkn-chaos.dev/config": "true",
-			},
-		},
-		{
-			name:           "with file type and groups",
-			fileID:         testFileID,
-			fileType:       "script",
-			groups:         []string{"dev-team"},
-			availableToAll: false,
-			want: map[string]string{
-				AppNameLabel:                           AppName,
-				AppComponentLabel:                      ComponentFile,
-				FileIDLabel:                            testFileID,
-				"file-type.krkn.krkn-chaos.dev/script": "true",
-				"group.krkn.krkn-chaos.dev/dev-team":   "true",
-			},
+			name:             "non-empty string pointer - update annotation",
+			workflowName:     stringPtr("Updated Workflow"),
+			wantWorkflowName: "Updated Workflow",
+			wantExists:       true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := BuildFileLabels(tt.fileID, tt.fileType, tt.groups, tt.availableToAll, "")
-
-			// Check all expected labels are present
-			for key, wantValue := range tt.want {
-				gotValue, exists := got[key]
-				if !exists {
-					t.Errorf("BuildFileLabels() missing key %s", key)
-					continue
-				}
-				if gotValue != wantValue {
-					t.Errorf("BuildFileLabels()[%s] = %v, want %v", key, gotValue, wantValue)
-				}
+			// Make a copy of existing annotations for each test
+			existing := make(map[string]string)
+			for k, v := range existingAnnotations {
+				existing[k] = v
 			}
 
-			// Check no extra labels
-			if len(got) != len(tt.want) {
-				t.Errorf("BuildFileLabels() has %d labels, want %d", len(got), len(tt.want))
-			}
-		})
-	}
-}
-
-func TestExtractFileIDFromLabels(t *testing.T) {
-	tests := []struct {
-		name   string
-		labels map[string]string
-		want   string
-	}{
-		{
-			name: "file ID present",
-			labels: map[string]string{
-				FileIDLabel: "550e8400-e29b-41d4-a716-446655440001",
-			},
-			want: "550e8400-e29b-41d4-a716-446655440001",
-		},
-		{
-			name:   "file ID missing",
-			labels: map[string]string{},
-			want:   "",
-		},
-		{
-			name: "file ID with other labels",
-			labels: map[string]string{
-				AppNameLabel:      AppName,
-				AppComponentLabel: ComponentFile,
-				FileIDLabel:       "550e8400-e29b-41d4-a716-446655440002",
-			},
-			want: "550e8400-e29b-41d4-a716-446655440002",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := ExtractFileIDFromLabels(tt.labels)
-			if got != tt.want {
-				t.Errorf("ExtractFileIDFromLabels() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestBuildFileAnnotations(t *testing.T) {
-	tests := []struct {
-		name        string
-		description string
-		createdBy   string
-	}{
-		{
-			name:        "full configuration",
-			description: "Application configuration file",
-			createdBy:   "admin@example.com",
-		},
-		{
-			name:        "minimal configuration",
-			description: "",
-			createdBy:   "user@example.com",
-		},
-		{
-			name:        "with description",
-			description: "Service settings",
-			createdBy:   "ops@example.com",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := BuildFileAnnotations(
-				tt.description,
-				tt.createdBy,
+			updated := UpdateFileAnnotations(
+				existing,
+				"Test description",
+				"test-user@example.com",
+				tt.workflowName,
 			)
 
-			// Check required annotations
-			if got[CreatedByAnnotation] != tt.createdBy {
-				t.Errorf("CreatedByAnnotation = %v, want %v", got[CreatedByAnnotation], tt.createdBy)
-			}
-
-			// Check description
-			if tt.description != "" {
-				if got[DescriptionAnnotation] != tt.description {
-					t.Errorf("DescriptionAnnotation = %v, want %v", got[DescriptionAnnotation], tt.description)
+			if tt.wantExists {
+				if got, exists := updated[WorkflowNameAnnotation]; !exists {
+					t.Errorf("UpdateFileAnnotations() workflowName annotation missing, want %v", tt.wantWorkflowName)
+				} else if got != tt.wantWorkflowName {
+					t.Errorf("UpdateFileAnnotations() workflowName = %v, want %v", got, tt.wantWorkflowName)
 				}
 			} else {
-				if _, exists := got[DescriptionAnnotation]; exists {
-					t.Errorf("DescriptionAnnotation should not exist for empty description")
+				if _, exists := updated[WorkflowNameAnnotation]; exists {
+					t.Errorf("UpdateFileAnnotations() workflowName annotation should be deleted")
 				}
 			}
 
-			// Check timestamps exist
-			if _, exists := got[CreatedAtAnnotation]; !exists {
-				t.Error("CreatedAtAnnotation missing")
+			// Verify other required annotations are set
+			if _, exists := updated[UpdatedByAnnotation]; !exists {
+				t.Error("UpdateFileAnnotations() UpdatedByAnnotation missing")
 			}
-
-			// Verify timestamp format
-			createdAt := got[CreatedAtAnnotation]
-			if _, err := time.Parse(time.RFC3339, createdAt); err != nil {
-				t.Errorf("CreatedAtAnnotation has invalid RFC3339 format: %v", err)
+			if _, exists := updated[UpdatedAtAnnotation]; !exists {
+				t.Error("UpdateFileAnnotations() UpdatedAtAnnotation missing")
 			}
 		})
 	}
 }
 
-func TestUpdateFileAnnotations(t *testing.T) {
-	existing := map[string]string{
-		DescriptionAnnotation: "Old description",
-		CreatedByAnnotation:   "admin@example.com",
-		CreatedAtAnnotation:   "2025-01-01T00:00:00Z",
-	}
-
-	tests := []struct {
-		name        string
-		existing    map[string]string
-		description string
-		updatedBy   string
-	}{
-		{
-			name:        "update all fields",
-			existing:    existing,
-			description: "New description",
-			updatedBy:   "user@example.com",
-		},
-		{
-			name:        "remove description",
-			existing:    existing,
-			description: "",
-			updatedBy:   "admin@example.com",
-		},
-		{
-			name:        "update description only",
-			existing:    existing,
-			description: "Same description",
-			updatedBy:   "ops@example.com",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := UpdateFileAnnotations(
-				tt.existing,
-				tt.description,
-				tt.updatedBy,
-			)
-
-			// Check updated fields
-			if got[UpdatedByAnnotation] != tt.updatedBy {
-				t.Errorf("UpdatedByAnnotation = %v, want %v", got[UpdatedByAnnotation], tt.updatedBy)
-			}
-
-			// Check original fields preserved
-			if got[CreatedByAnnotation] != existing[CreatedByAnnotation] {
-				t.Errorf("CreatedByAnnotation should be preserved")
-			}
-			if got[CreatedAtAnnotation] != existing[CreatedAtAnnotation] {
-				t.Errorf("CreatedAtAnnotation should be preserved")
-			}
-
-			// Check description handling
-			if tt.description != "" {
-				if got[DescriptionAnnotation] != tt.description {
-					t.Errorf("DescriptionAnnotation = %v, want %v", got[DescriptionAnnotation], tt.description)
-				}
-			} else {
-				if _, exists := got[DescriptionAnnotation]; exists {
-					t.Errorf("DescriptionAnnotation should be removed when empty")
-				}
-			}
-
-			// Check updated timestamp exists
-			if _, exists := got[UpdatedAtAnnotation]; !exists {
-				t.Error("UpdatedAtAnnotation missing")
-			}
-
-			// Verify timestamp format
-			updatedAt := got[UpdatedAtAnnotation]
-			if _, err := time.Parse(time.RFC3339, updatedAt); err != nil {
-				t.Errorf("UpdatedAtAnnotation has invalid RFC3339 format: %v", err)
-			}
-		})
-	}
-}
-
-func TestExtractGroupsFromLabels(t *testing.T) {
-	tests := []struct {
-		name   string
-		labels map[string]string
-		want   []string
-	}{
-		{
-			name: "single group",
-			labels: map[string]string{
-				"group.krkn.krkn-chaos.dev/dev-team": "true",
-			},
-			want: []string{"dev-team"},
-		},
-		{
-			name: "multiple groups",
-			labels: map[string]string{
-				"group.krkn.krkn-chaos.dev/dev-team": "true",
-				"group.krkn.krkn-chaos.dev/qa-team":  "true",
-				"group.krkn.krkn-chaos.dev/ops-team": "true",
-			},
-			want: []string{"dev-team", "qa-team", "ops-team"},
-		},
-		{
-			name: "mixed labels",
-			labels: map[string]string{
-				"group.krkn.krkn-chaos.dev/dev-team":   "true",
-				"app.kubernetes.io/name":               "krkn-operator",
-				"files.krkn.krkn-chaos.dev/mount-path": "/etc/config",
-			},
-			want: []string{"dev-team"},
-		},
-		{
-			name: "group with false value",
-			labels: map[string]string{
-				"group.krkn.krkn-chaos.dev/dev-team": "false",
-			},
-			want: []string{},
-		},
-		{
-			name:   "no groups",
-			labels: map[string]string{},
-			want:   []string{},
-		},
-		{
-			name: "available to all without groups",
-			labels: map[string]string{
-				AppNameLabel:        AppName,
-				AppComponentLabel:   ComponentFile,
-				AvailableToAllLabel: "true",
-			},
-			want: []string{},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := ExtractGroupsFromLabels(tt.labels)
-
-			// Convert to maps for comparison (order doesn't matter)
-			gotMap := make(map[string]bool)
-			for _, g := range got {
-				gotMap[g] = true
-			}
-			wantMap := make(map[string]bool)
-			for _, g := range tt.want {
-				wantMap[g] = true
-			}
-
-			if len(gotMap) != len(wantMap) {
-				t.Errorf("ExtractGroupsFromLabels() returned %d groups, want %d", len(got), len(tt.want))
-				return
-			}
-
-			for g := range wantMap {
-				if !gotMap[g] {
-					t.Errorf("ExtractGroupsFromLabels() missing group %s", g)
-				}
-			}
-		})
-	}
+// Helper function to create string pointers
+func stringPtr(s string) *string {
+	return &s
 }

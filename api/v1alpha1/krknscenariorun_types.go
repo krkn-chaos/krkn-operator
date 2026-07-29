@@ -30,6 +30,9 @@ type FileMount struct {
 	Content string `json:"content"`
 	// MountPath is the absolute path where the file should be mounted
 	MountPath string `json:"mountPath"`
+	// FileID is the UUID of the source ConfigMap (optional, preserved for replay functionality)
+	// +optional
+	FileID string `json:"fileId,omitempty"`
 }
 
 // ClusterJobStatus represents the status of a scenario job for a specific cluster

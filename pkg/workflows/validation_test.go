@@ -31,9 +31,9 @@ func TestValidateWorkflowGraph(t *testing.T) {
 		expectError bool
 	}{
 		{
-			name:        "empty graph",
+			name:        "empty graph (allowed for work-in-progress templates)",
 			graph:       map[string]krknv1alpha1.GraphScenarioNode{},
-			expectError: true,
+			expectError: false,
 		},
 		{
 			name: "valid single node",

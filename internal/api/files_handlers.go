@@ -121,6 +121,7 @@ func (h *Handler) CreateFile(w http.ResponseWriter, r *http.Request) {
 	annotations := files.BuildFileAnnotations(
 		req.Description,
 		createdBy,
+		req.WorkflowName, // Empty for regular files, populated for workflows
 	)
 
 	// Create ConfigMap
@@ -387,6 +388,7 @@ func (h *Handler) UpdateFile(w http.ResponseWriter, r *http.Request) {
 		configMap.Annotations,
 		req.Description,
 		updatedBy,
+		req.WorkflowName, // Pointer: nil preserves existing, non-nil updates/deletes
 	)
 
 	// Update data
@@ -756,19 +758,33 @@ func (h *Handler) isFileOwnerOrAdmin(ctx context.Context, configMap *corev1.Conf
 
 // buildFileResponse builds a FileResponse from a ConfigMap
 func buildFileResponse(configMap *corev1.ConfigMap) files.FileResponse {
-	// Extract first file name and content from data
+	// Extract file name, content, and studioLayout from data
+	// studioLayout.json is separate from the main file content
 	fileName := ""
 	content := ""
+	studioLayout := ""
 	for k, v := range configMap.Data {
-		fileName = k
-		content = v
-		break
+		if k == "studioLayout.json" {
+			studioLayout = v
+		} else {
+			fileName = k
+			content = v
+		}
+	}
+
+	// Get workflow name with backwards-compatible fallback
+	workflowName := configMap.Annotations[files.WorkflowNameAnnotation]
+	if workflowName == "" && files.ExtractFilePurposeFromLabels(configMap.Labels) == "workflow-template" {
+		// Fallback for workflows created before workflowName annotation was added
+		workflowName = fileName
 	}
 
 	return files.FileResponse{
 		FileID:         files.ExtractFileIDFromLabels(configMap.Labels),
 		FileName:       fileName,
 		Content:        content,
+		StudioLayout:   studioLayout,
+		WorkflowName:   workflowName,
 		Description:    configMap.Annotations[files.DescriptionAnnotation],
 		FileType:       files.ExtractFileTypeFromLabels(configMap.Labels),
 		FilePurpose:    files.ExtractFilePurposeFromLabels(configMap.Labels),
@@ -783,11 +799,13 @@ func buildFileResponse(configMap *corev1.ConfigMap) files.FileResponse {
 
 // buildFileInfo builds a FileInfo from a ConfigMap (minimal user-facing info)
 func buildFileInfo(configMap *corev1.ConfigMap) files.FileInfo {
-	// Extract first file name from data
+	// Extract primary file name from data (exclude studioLayout.json)
 	fileName := ""
 	for k := range configMap.Data {
-		fileName = k
-		break
+		if k != "studioLayout.json" {
+			fileName = k
+			break
+		}
 	}
 
 	return files.FileInfo{
