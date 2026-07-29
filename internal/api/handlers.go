@@ -2490,6 +2490,16 @@ func (h *Handler) ScenariosRunRouter(w http.ResponseWriter, r *http.Request) {
 		// Note: WebSocket logs endpoint (/jobs/{jobID}/logs) is handled in server.go
 		// before reaching this router, so no need to check for it here
 
+		// Check for /replay/{jobID} pattern (GET only - scenario replay)
+		if strings.HasPrefix(path, ScenariosRunPath+"/replay/") {
+			if r.Method == http.MethodGet {
+				h.GetScenarioReplay(w, r)
+			} else {
+				http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			}
+			return
+		}
+
 		// Check for /jobs/{jobID} pattern (GET or DELETE single job)
 		if strings.HasPrefix(path, ScenariosRunJobsPath+"/") {
 			switch r.Method {
