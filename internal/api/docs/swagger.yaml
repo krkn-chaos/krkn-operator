@@ -1,3 +1,4 @@
+basePath: /api/v1
 definitions:
   github_com_krkn-chaos_krkn-operator_api_v1alpha1.ClusterTarget:
     properties:
@@ -611,8 +612,33 @@ definitions:
         description: '"run", "graphrun", "dashboard"'
         type: string
     type: object
+host: localhost:8080
 info:
-  contact: {}
+  contact:
+    email: krkn-chaos@googlegroups.com
+    name: Krkn Team
+    url: https://github.com/krkn-chaos/krkn-operator
+  description: |-
+    REST and WebSocket API for Krkn chaos engineering operator.
+
+    **API Versions:**
+    - **v1** - REST API with polling (deprecated but maintained)
+    - **v2** - REST API (same as v1) + WebSocket real-time updates
+
+    **WebSocket Authentication (v2):**
+    WebSocket endpoints use JWT via subprotocol header:
+    - JavaScript: `new WebSocket(url, 'access_token.' + jwtToken)`
+    - Header: `Sec-WebSocket-Protocol: access_token.<jwt_token>`
+
+    **Migration Path:**
+    1. v1 REST → v2 REST (no changes, just update base path)
+    2. v2 REST → v2 WebSocket (replace polling with multiplexed WebSocket)
+  license:
+    name: Apache 2.0
+    url: http://www.apache.org/licenses/LICENSE-2.0.html
+  termsOfService: https://krkn-chaos.dev/terms
+  title: Krkn Operator API
+  version: "2.0"
 paths:
   /auth/is-registered:
     get:
@@ -1291,6 +1317,44 @@ paths:
       summary: Get scenario run status
       tags:
       - scenarios
+  /scenarios/run/replay/{jobId}:
+    get:
+      description: Retrieve scenario configuration from a completed job and return
+        payload ready for re-execution via POST /scenarios/run
+      parameters:
+      - description: Job ID (krkn-job-id label value)
+        in: path
+        name: jobId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Scenario configuration ready for replay
+          schema:
+            $ref: '#/definitions/internal_api.ScenarioRunRequest'
+        "400":
+          description: Invalid job ID or job not found
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "403":
+          description: Insufficient permissions
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "404":
+          description: Job or ScenarioRun not found
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Replay a scenario from a completed job
+      tags:
+      - scenarios
   /targets:
     post:
       consumes:
@@ -1644,4 +1708,11 @@ paths:
       summary: List available workflow templates
       tags:
       - workflows
+securityDefinitions:
+  BearerAuth:
+    description: 'JWT token obtained from /api/v1/auth/login or /api/v2/auth/login.
+      Format: "Bearer {token}"'
+    in: header
+    name: Authorization
+    type: apiKey
 swagger: "2.0"
