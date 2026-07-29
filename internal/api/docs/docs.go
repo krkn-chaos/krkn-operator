@@ -1557,6 +1557,10 @@ const docTemplate = `{
                 "studioLayout": {
                     "description": "StudioLayout is optional frontend visual layout data (stored as separate ConfigMap entry)",
                     "type": "string"
+                },
+                "workflowName": {
+                    "description": "WorkflowName is the user-defined workflow name (only for workflow templates)",
+                    "type": "string"
                 }
             }
         },
@@ -1674,6 +1678,10 @@ const docTemplate = `{
                 },
                 "updatedBy": {
                     "description": "UpdatedBy is the email of the user who last updated the file",
+                    "type": "string"
+                },
+                "workflowName": {
+                    "description": "WorkflowName is the user-defined workflow name (only for workflow templates)",
                     "type": "string"
                 }
             }

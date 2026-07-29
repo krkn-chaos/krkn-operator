@@ -84,6 +84,10 @@ definitions:
         description: StudioLayout is optional frontend visual layout data (stored
           as separate ConfigMap entry)
         type: string
+      workflowName:
+        description: WorkflowName is the user-defined workflow name (only for workflow
+          templates)
+        type: string
     type: object
   github_com_krkn-chaos_krkn-operator_pkg_files.CreateFileResponse:
     properties:
@@ -171,6 +175,10 @@ definitions:
         type: string
       updatedBy:
         description: UpdatedBy is the email of the user who last updated the file
+        type: string
+      workflowName:
+        description: WorkflowName is the user-defined workflow name (only for workflow
+          templates)
         type: string
     type: object
   github_com_krkn-chaos_krkn-operator_pkg_files.ListFilesResponse:
