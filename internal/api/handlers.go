@@ -1316,6 +1316,7 @@ func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
 				Name:      f.Name,
 				Content:   f.Content,
 				MountPath: f.MountPath,
+				FileID:    f.FileID, // Preserve FileID for replay functionality
 			}
 		}
 	}
