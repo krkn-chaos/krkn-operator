@@ -43,7 +43,7 @@ func TestBuildFileInfo_ExcludesStudioLayout(t *testing.T) {
 					},
 				},
 				Data: map[string]string{
-					"workflow.json":      `{"node1": {}}`,
+					"workflow.json":     `{"node1": {}}`,
 					"studioLayout.json": `{"positions": {}}`,
 				},
 			},
@@ -218,4 +218,3 @@ func TestUpdateFileAnnotations_PointerSemantics(t *testing.T) {
 		})
 	}
 }
-

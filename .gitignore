@@ -41,3 +41,4 @@ venv/
 .beads
 PROMPT
 
+**/__pycache__/**

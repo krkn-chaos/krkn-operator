@@ -87,6 +87,10 @@ type KrknScenarioRunSpec struct {
 	// +optional
 	OwnerUserID string `json:"ownerUserId,omitempty"`
 
+	// CustomRunName is a user-provided label for the run, displayed in the console
+	// +optional
+	CustomRunName string `json:"customRunName,omitempty"`
+
 	// TargetClusters is a map of provider-name to list of cluster names
 	// Example: {"krkn-operator": ["cluster1", "cluster2"], "krkn-operator-acm": ["cluster3"]}
 	// +kubebuilder:validation:MinProperties=1

@@ -234,7 +234,7 @@ func main() {
 		// LeaderElectionReleaseOnCancel: true,
 		Cache: cache.Options{
 			DefaultNamespaces: map[string]cache.Config{
-				operatorNamespace: {}, // Watch only the operator's own namespace
+				operatorNamespace: {},
 			},
 		},
 	})

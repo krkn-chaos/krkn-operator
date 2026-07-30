@@ -29,6 +29,8 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/sync/errgroup"
+
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -77,6 +79,23 @@ type preparedJobResources struct {
 	imagePullSecrets  []corev1.LocalObjectReference
 	createdConfigMaps []string // names of created ConfigMaps for cleanup
 	createdSecrets    []string // names of created Secrets for cleanup
+}
+
+// clusterTarget holds the per-cluster parameters needed to create a scenario job.
+type clusterTarget struct {
+	providerName     string
+	clusterName      string
+	clusterAPIURL    string
+	existingJobIndex int // -1 for new jobs, ≥ 0 for retry jobs
+}
+
+// jobOutcome captures the result of a parallel job-creation attempt.
+type jobOutcome struct {
+	target  clusterTarget
+	jobID   string
+	podName string
+	image   string
+	err     error
 }
 
 // getOwnerLabel returns the sanitized owner label value for a scenario run.
@@ -169,11 +188,16 @@ func (r *KrknScenarioRunReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		}
 	}
 
-	// Process each provider and their clusters
-	jobsCreated := 0
+	// Snapshot status BEFORE any job creation so that appended failure entries are
+	// detected as changes and persisted to the API server at the end of the reconcile.
+	originalStatus := scenarioRun.Status.DeepCopy()
+
+	// Collect targets that need job creation (serial — reads Status.ClusterJobs safely).
+	// getClusterAPIURL is called once per cluster here so the error-handler below can
+	// reuse the result without a second API round-trip to KrknTargetRequest.
+	var targets []clusterTarget
 	for providerName, clusterNames := range scenarioRun.Spec.TargetClusters {
 		for _, clusterName := range clusterNames {
-			// Check if job already exists for this cluster
 			if r.jobExistsForCluster(&scenarioRun, clusterName) {
 				logger.V(1).Info("job already exists for cluster, skipping",
 					"provider", providerName,
@@ -181,22 +205,121 @@ func (r *KrknScenarioRunReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 					"scenarioRun", scenarioRun.Name)
 				continue
 			}
-
+			existingJobIndex := -1
+			for i, job := range scenarioRun.Status.ClusterJobs {
+				if job.ClusterName == clusterName && job.Phase == "Retrying" {
+					existingJobIndex = i
+					break
+				}
+			}
+			clusterAPIURL := r.getClusterAPIURL(ctx, &scenarioRun, providerName, clusterName)
+			targets = append(targets, clusterTarget{
+				providerName:     providerName,
+				clusterName:      clusterName,
+				clusterAPIURL:    clusterAPIURL,
+				existingJobIndex: existingJobIndex,
+			})
 			logger.Info("creating job for cluster",
 				"provider", providerName,
 				"cluster", clusterName,
 				"scenarioRun", scenarioRun.Name)
+		}
+	}
 
-			// Create new job for this cluster
-			if err := r.createClusterJob(ctx, &scenarioRun, providerName, clusterName); err != nil {
-				logger.Error(err, "failed to create cluster job",
-					"provider", providerName,
-					"cluster", clusterName,
-					"scenarioRun", scenarioRun.Name)
-				// Continue with best-effort approach for other clusters
-			} else {
-				jobsCreated++
+	// Prepare resources and create pods in parallel — each goroutine only creates
+	// Kubernetes resources (ConfigMaps, Secrets, Pod); no shared state is mutated.
+	// Status writes happen serially below after g.Wait().
+	outcomes := make([]jobOutcome, len(targets))
+	g, gCtx := errgroup.WithContext(ctx)
+	for i, target := range targets {
+		i, target := i, target
+		g.Go(func() error {
+			resources, err := r.prepareJobResources(gCtx, &scenarioRun, target.providerName, target.clusterName, target.clusterAPIURL)
+			if err != nil {
+				outcomes[i] = jobOutcome{target: target, err: err}
+				return nil
 			}
+			podName, err := r.submitScenarioPod(gCtx, &scenarioRun, resources)
+			if err != nil {
+				outcomes[i] = jobOutcome{target: target, err: err}
+				return nil
+			}
+			outcomes[i] = jobOutcome{
+				target:  target,
+				jobID:   resources.jobID,
+				podName: podName,
+				image:   resources.containerImage,
+			}
+			return nil
+		})
+	}
+	if err := g.Wait(); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	// Apply outcomes serially to avoid concurrent slice mutations.
+	// Track the failure in status so jobExistsForCluster returns true on
+	// subsequent reconciles and we don't retry on every reconcile cycle.
+	// Without this, partial resource creates (ConfigMaps) followed by cleanup
+	// deletes drive an infinite reconcile loop via the Owns() watch.
+	//
+	// ClusterAPIURL must be populated even on failure: the API layer uses it to
+	// authorize and filter jobs for non-admin users. Without it, non-admins
+	// cannot see the failed job (and the run may appear stuck in "not processed").
+	jobsCreated := 0
+	for _, outcome := range outcomes {
+		if outcome.err != nil {
+			logger.Error(outcome.err, "failed to create cluster job",
+				"provider", outcome.target.providerName,
+				"cluster", outcome.target.clusterName,
+				"scenarioRun", scenarioRun.Name)
+			now := metav1.Now()
+			scenarioRun.Status.ClusterJobs = append(scenarioRun.Status.ClusterJobs, krknv1alpha1.ClusterJobStatus{
+				ProviderName:   outcome.target.providerName,
+				ClusterName:    outcome.target.clusterName,
+				ClusterAPIURL:  outcome.target.clusterAPIURL,
+				JobID:          uuid.New().String(),
+				Phase:          "Failed",
+				Message:        fmt.Sprintf("Job creation failed: %v", outcome.err),
+				FailureReason:  "JobCreationFailed",
+				StartTime:      &now,
+				CompletionTime: &now,
+			})
+		} else {
+			now := metav1.Now()
+			if outcome.target.existingJobIndex >= 0 {
+				idx := outcome.target.existingJobIndex
+				scenarioRun.Status.ClusterJobs[idx].JobID = outcome.jobID
+				scenarioRun.Status.ClusterJobs[idx].PodName = outcome.podName
+				scenarioRun.Status.ClusterJobs[idx].ContainerImage = outcome.image
+				scenarioRun.Status.ClusterJobs[idx].Phase = "Pending"
+				scenarioRun.Status.ClusterJobs[idx].StartTime = &now
+				scenarioRun.Status.ClusterJobs[idx].CompletionTime = nil
+				scenarioRun.Status.ClusterJobs[idx].Message = ""
+				logger.Info("updated retry job in status",
+					"cluster", outcome.target.clusterName,
+					"newJobId", outcome.jobID,
+					"retryAttempt", scenarioRun.Status.ClusterJobs[idx].RetryCount)
+			} else {
+				scenarioRun.Status.ClusterJobs = append(scenarioRun.Status.ClusterJobs, krknv1alpha1.ClusterJobStatus{
+					ProviderName:   outcome.target.providerName,
+					ClusterName:    outcome.target.clusterName,
+					ClusterAPIURL:  outcome.target.clusterAPIURL,
+					JobID:          outcome.jobID,
+					PodName:        outcome.podName,
+					ContainerImage: outcome.image,
+					Phase:          "Pending",
+					StartTime:      &now,
+					RetryCount:     0,
+					MaxRetries:     0,
+				})
+				logger.Info("created new cluster job",
+					"cluster", outcome.target.clusterName,
+					"jobID", outcome.jobID,
+					"pod", outcome.podName,
+					"clusterAPIURL", outcome.target.clusterAPIURL)
+			}
+			jobsCreated++
 		}
 	}
 
@@ -209,9 +332,6 @@ func (r *KrknScenarioRunReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	logger.V(1).Info("updating cluster job statuses",
 		"scenarioRun", scenarioRun.Name,
 		"totalJobs", len(scenarioRun.Status.ClusterJobs))
-
-	// Save original status to detect changes
-	originalStatus := scenarioRun.Status.DeepCopy()
 
 	// Update status for all jobs
 	if err := r.updateClusterJobStatuses(ctx, &scenarioRun); err != nil {
@@ -284,6 +404,7 @@ func (r *KrknScenarioRunReconciler) prepareJobResources(
 	scenarioRun *krknv1alpha1.KrknScenarioRun,
 	providerName string,
 	clusterName string,
+	clusterAPIURL string,
 ) (*preparedJobResources, error) {
 	logger := log.FromContext(ctx)
 
@@ -319,34 +440,11 @@ func (r *KrknScenarioRunReconciler) prepareJobResources(
 		return nil, fmt.Errorf("failed to decode kubeconfig: %w", err)
 	}
 
-	// Fetch KrknTargetRequest to extract ClusterAPIURL for permission checks
-	var targetRequest krknv1alpha1.KrknTargetRequest
-	if err := r.Get(ctx, types.NamespacedName{
-		Name:      scenarioRun.Spec.TargetRequestID,
-		Namespace: r.Namespace,
-	}, &targetRequest); err != nil {
-		logger.Error(err, "Failed to fetch KrknTargetRequest for ClusterAPIURL extraction",
-			"targetRequestId", scenarioRun.Spec.TargetRequestID)
-		// Non-fatal - continue without ClusterAPIURL (defensive)
-	}
-
-	// Extract ClusterAPIURL for this specific cluster
-	var clusterAPIURL string
-	if providerTargets, exists := targetRequest.Status.TargetData[providerName]; exists {
-		for _, cluster := range providerTargets {
-			if cluster.ClusterName == clusterName {
-				clusterAPIURL = cluster.ClusterAPIURL
-				break
-			}
-		}
-	}
-
 	if clusterAPIURL == "" {
 		logger.Error(nil, "ClusterAPIURL not found for cluster - job will not be visible to non-admins",
 			"providerName", providerName,
 			"clusterName", clusterName,
 			"targetRequestId", scenarioRun.Spec.TargetRequestID)
-		// Continue anyway - job will be created but won't be visible to non-admins
 	} else {
 		logger.V(1).Info("Extracted ClusterAPIURL for job",
 			"clusterName", clusterName,
@@ -661,23 +759,18 @@ func (r *KrknScenarioRunReconciler) cleanupPreparedResources(ctx context.Context
 	}
 }
 
-// executeScenarioPod creates the scenario pod using prepared resources and updates the scenario run status.
-// Takes the container image as a parameter to avoid reconstruction logic.
-func (r *KrknScenarioRunReconciler) executeScenarioPod(
+// submitScenarioPod builds and creates the scenario Pod from prepared resources.
+// On failure it cleans up all prepared ConfigMaps and Secrets and returns an error.
+// Status updates are the caller's responsibility.
+func (r *KrknScenarioRunReconciler) submitScenarioPod(
 	ctx context.Context,
 	scenarioRun *krknv1alpha1.KrknScenarioRun,
-	providerName string,
 	resources *preparedJobResources,
-	existingJobIndex int,
-) error {
-	logger := log.FromContext(ctx)
-
-	// SecurityContext for running as krkn user (UID 1001)
+) (string, error) {
 	var runAsUser int64 = 1001
 	var runAsGroup int64 = 1001
 	var fsGroup int64 = 1001
 
-	// Create the pod
 	podName := fmt.Sprintf("krkn-job-%s", resources.jobID)
 	podLabels := map[string]string{
 		"app":                 "krkn-scenario",
@@ -719,60 +812,17 @@ func (r *KrknScenarioRunReconciler) executeScenarioPod(
 		},
 	}
 
-	// Set owner reference
 	if err := controllerutil.SetControllerReference(scenarioRun, pod, r.Scheme); err != nil {
-		// Cleanup resources on failure
 		r.cleanupPreparedResources(ctx, resources)
-		return fmt.Errorf("failed to set owner reference on pod: %w", err)
+		return "", fmt.Errorf("failed to set owner reference on pod: %w", err)
 	}
 
 	if err := r.Create(ctx, pod); err != nil {
-		// Cleanup resources on failure
 		r.cleanupPreparedResources(ctx, resources)
-		return fmt.Errorf("failed to create pod: %w", err)
+		return "", fmt.Errorf("failed to create pod: %w", err)
 	}
 
-	// Update status - either update existing entry (retry) or add new entry
-	now := metav1.Now()
-	if existingJobIndex >= 0 {
-		// Update existing entry (retry case)
-		// Preserve ClusterAPIURL - it should already be set from first attempt
-		scenarioRun.Status.ClusterJobs[existingJobIndex].JobID = resources.jobID
-		scenarioRun.Status.ClusterJobs[existingJobIndex].PodName = podName
-		scenarioRun.Status.ClusterJobs[existingJobIndex].ContainerImage = resources.containerImage
-		scenarioRun.Status.ClusterJobs[existingJobIndex].Phase = "Pending"
-		scenarioRun.Status.ClusterJobs[existingJobIndex].StartTime = &now
-		scenarioRun.Status.ClusterJobs[existingJobIndex].CompletionTime = nil
-		scenarioRun.Status.ClusterJobs[existingJobIndex].Message = ""
-
-		logger.Info("updated retry job in status",
-			"cluster", resources.clusterName,
-			"newJobId", resources.jobID,
-			"retryAttempt", scenarioRun.Status.ClusterJobs[existingJobIndex].RetryCount)
-	} else {
-		// New job (first attempt)
-		jobStatus := krknv1alpha1.ClusterJobStatus{
-			ProviderName:   providerName,
-			ClusterName:    resources.clusterName,
-			ClusterAPIURL:  resources.clusterAPIURL,
-			JobID:          resources.jobID,
-			PodName:        podName,
-			ContainerImage: resources.containerImage,
-			Phase:          "Pending",
-			StartTime:      &now,
-			RetryCount:     0,
-			MaxRetries:     0, // Will be set from spec on first failure
-		}
-		scenarioRun.Status.ClusterJobs = append(scenarioRun.Status.ClusterJobs, jobStatus)
-
-		logger.Info("created new cluster job",
-			"cluster", resources.clusterName,
-			"jobID", resources.jobID,
-			"pod", podName,
-			"clusterAPIURL", resources.clusterAPIURL)
-	}
-
-	return nil
+	return podName, nil
 }
 
 // createClusterJob creates all resources needed for a single cluster scenario job.
@@ -793,13 +843,53 @@ func (r *KrknScenarioRunReconciler) createClusterJob(
 	}
 
 	// Step 1: Prepare all resources (ConfigMaps, Secrets, Volumes, EnvVars, container image)
-	resources, err := r.prepareJobResources(ctx, scenarioRun, providerName, clusterName)
+	clusterAPIURL := r.getClusterAPIURL(ctx, scenarioRun, providerName, clusterName)
+	resources, err := r.prepareJobResources(ctx, scenarioRun, providerName, clusterName, clusterAPIURL)
 	if err != nil {
 		return err
 	}
 
-	// Step 2: Create the pod and update status
-	return r.executeScenarioPod(ctx, scenarioRun, providerName, resources, existingJobIndex)
+	// Step 2: Create the pod
+	logger := log.FromContext(ctx)
+	podName, err := r.submitScenarioPod(ctx, scenarioRun, resources)
+	if err != nil {
+		return err
+	}
+
+	// Step 3: Update status - either update existing entry (retry) or add new entry
+	now := metav1.Now()
+	if existingJobIndex >= 0 {
+		scenarioRun.Status.ClusterJobs[existingJobIndex].JobID = resources.jobID
+		scenarioRun.Status.ClusterJobs[existingJobIndex].PodName = podName
+		scenarioRun.Status.ClusterJobs[existingJobIndex].ContainerImage = resources.containerImage
+		scenarioRun.Status.ClusterJobs[existingJobIndex].Phase = "Pending"
+		scenarioRun.Status.ClusterJobs[existingJobIndex].StartTime = &now
+		scenarioRun.Status.ClusterJobs[existingJobIndex].CompletionTime = nil
+		scenarioRun.Status.ClusterJobs[existingJobIndex].Message = ""
+		logger.Info("updated retry job in status",
+			"cluster", resources.clusterName,
+			"newJobId", resources.jobID,
+			"retryAttempt", scenarioRun.Status.ClusterJobs[existingJobIndex].RetryCount)
+	} else {
+		scenarioRun.Status.ClusterJobs = append(scenarioRun.Status.ClusterJobs, krknv1alpha1.ClusterJobStatus{
+			ProviderName:   providerName,
+			ClusterName:    resources.clusterName,
+			ClusterAPIURL:  resources.clusterAPIURL,
+			JobID:          resources.jobID,
+			PodName:        podName,
+			ContainerImage: resources.containerImage,
+			Phase:          "Pending",
+			StartTime:      &now,
+			RetryCount:     0,
+			MaxRetries:     0,
+		})
+		logger.Info("created new cluster job",
+			"cluster", resources.clusterName,
+			"jobID", resources.jobID,
+			"pod", podName,
+			"clusterAPIURL", resources.clusterAPIURL)
+	}
+	return nil
 }
 
 // updateClusterJobStatuses updates the status of all cluster jobs by querying their pods
@@ -1151,6 +1241,32 @@ func (r *KrknScenarioRunReconciler) jobExistsForCluster(scenarioRun *krknv1alpha
 	return false
 }
 
+// getClusterAPIURL retrieves the ClusterAPIURL for a specific provider/cluster pair from the
+// KrknTargetRequest referenced by the scenarioRun. Returns an empty string if the URL cannot
+// be found, which callers must handle (job visibility to non-admins depends on this field).
+func (r *KrknScenarioRunReconciler) getClusterAPIURL(
+	ctx context.Context,
+	scenarioRun *krknv1alpha1.KrknScenarioRun,
+	providerName string,
+	clusterName string,
+) string {
+	var targetRequest krknv1alpha1.KrknTargetRequest
+	if err := r.Get(ctx, types.NamespacedName{
+		Name:      scenarioRun.Spec.TargetRequestID,
+		Namespace: r.Namespace,
+	}, &targetRequest); err != nil {
+		return ""
+	}
+	if providerTargets, exists := targetRequest.Status.TargetData[providerName]; exists {
+		for _, cluster := range providerTargets {
+			if cluster.ClusterName == clusterName {
+				return cluster.ClusterAPIURL
+			}
+		}
+	}
+	return ""
+}
+
 // calculateOverallStatus computes the overall phase and counters
 func (r *KrknScenarioRunReconciler) calculateOverallStatus(scenarioRun *krknv1alpha1.KrknScenarioRun) {
 	var successfulJobs, failedJobs, runningJobs, pendingJobs int
@@ -1361,10 +1477,12 @@ func countJobPhaseChanges(oldJobs, newJobs []krknv1alpha1.ClusterJobStatus) int 
 
 // SetupWithManager sets up the controller with the Manager
 func (r *KrknScenarioRunReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	// Only watch Pod events to track job completion — ConfigMap/Secret changes
+	// don't affect reconciliation logic and including them caused infinite loops
+	// when partial resource creates were cleaned up on pod-creation failure.
+	// Owner references on ConfigMaps/Secrets still ensure GC when the CR is deleted.
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&krknv1alpha1.KrknScenarioRun{}).
 		Owns(&corev1.Pod{}).
-		Owns(&corev1.ConfigMap{}).
-		Owns(&corev1.Secret{}).
 		Complete(r)
 }
