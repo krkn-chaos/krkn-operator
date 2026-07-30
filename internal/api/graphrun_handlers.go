@@ -601,7 +601,28 @@ func (h *Handler) DeleteGraphRun(w http.ResponseWriter, r *http.Request) {
 
 // Helper functions
 
+// convertGraphClusterScores converts GraphClusterScore array to API response format
+func convertGraphClusterScores(scores []krknv1alpha1.GraphClusterScore) []GraphClusterScoreResponse {
+	if scores == nil {
+		return nil
+	}
+
+	result := make([]GraphClusterScoreResponse, len(scores))
+	for i, score := range scores {
+		result[i] = GraphClusterScoreResponse{
+			ClusterName:       score.ClusterName,
+			Calculated:        score.Calculated,
+			Baseline:          score.Baseline,
+			Status:            score.Status,
+			Message:           score.Message,
+			NodeContributions: score.NodeContributions,
+		}
+	}
+	return result
+}
+
 // convertResiliencyScore converts ResiliencyScoreResult to API response format
+// DEPRECATED: Use convertGraphClusterScores
 func convertResiliencyScore(score *krknv1alpha1.ResiliencyScoreResult) *ResiliencyScoreResponse {
 	if score == nil {
 		return nil

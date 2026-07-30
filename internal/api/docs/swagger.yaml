@@ -319,6 +319,13 @@ definitions:
         description: WorkflowName is a human-readable name for the workflow
         type: string
     type: object
+  internal_api.ClusterResiliencyScoreResponse:
+    properties:
+      clusterName:
+        type: string
+      score:
+        type: number
+    type: object
   internal_api.ClustersResponse:
     properties:
       status:
@@ -495,6 +502,12 @@ definitions:
         type: string
       phase:
         type: string
+      resiliencyScoreAvg:
+        type: number
+      resiliencyScores:
+        items:
+          $ref: '#/definitions/internal_api.ClusterResiliencyScoreResponse'
+        type: array
       scenarioRunRef:
         type: string
       startTime:

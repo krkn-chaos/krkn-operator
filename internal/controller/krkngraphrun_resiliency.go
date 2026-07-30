@@ -75,8 +75,8 @@ func (r *KrknGraphRunReconciler) calculateResiliencyScore(
 			continue
 		}
 
-		// Track if we found any valid score for this scenario run
-		var nodeScore *float64
+		// Track cluster scores for this scenario run
+		var clusterScores []krknv1alpha1.ClusterResiliencyScore
 
 		// Process all cluster jobs for this scenario run
 		for _, jobStatus := range scenarioRun.Status.ClusterJobs {
@@ -126,30 +126,28 @@ func (r *KrknGraphRunReconciler) calculateResiliencyScore(
 
 			reports = append(reports, *report)
 
-			// Store the score for this node (use the first valid score found)
-			if nodeScore == nil {
-				score := report.OverallReport.ResiliencyScore
-				nodeScore = &score
+			// Store score per cluster for this node
+			clusterScore := krknv1alpha1.ClusterResiliencyScore{
+				ClusterName: jobStatus.ClusterName,
+				Score:       report.OverallReport.ResiliencyScore,
 			}
+			clusterScores = append(clusterScores, clusterScore)
 		}
 
-		// Update the scenario run with the individual node score
-		if nodeScore != nil && scenarioRun.Status.ResiliencyScore == nil {
-			scenarioRun.Status.ResiliencyScore = nodeScore
+		// Update the scenario run with per-cluster scores
+		if len(clusterScores) > 0 && len(scenarioRun.Status.ResiliencyScores) == 0 {
+			scenarioRun.Status.ResiliencyScores = clusterScores
 			if err := r.Status().Update(ctx, scenarioRun); err != nil {
-				logger.Error(err, "failed to update scenario run with resiliency score",
+				logger.Error(err, "failed to update scenario run with resiliency scores",
 					"nodeID", nodeStatus.NodeID,
 					"scenarioRun", scenarioRun.Name,
-					"score", *nodeScore,
-					"clusterJobsCount", len(scenarioRun.Status.ClusterJobs))
+					"clusterCount", len(clusterScores))
 				// Don't fail the entire calculation, just log the error
 			} else {
-				logger.Info("updated scenario run with individual resiliency score",
+				logger.Info("updated scenario run with per-cluster resiliency scores",
 					"nodeID", nodeStatus.NodeID,
 					"scenarioRun", scenarioRun.Name,
-					"score", *nodeScore,
-					"clusterJobsCount", len(scenarioRun.Status.ClusterJobs),
-					"note", "This is the FIRST cluster's score only - multi-cluster aggregation not yet implemented")
+					"clusterCount", len(clusterScores))
 			}
 		}
 	}
@@ -159,46 +157,81 @@ func (r *KrknGraphRunReconciler) calculateResiliencyScore(
 		return fmt.Errorf("no resiliency reports found in any scenario run logs")
 	}
 
-	// Aggregate all reports using krknctl
-	finalReport := resiliency.AggregateReports(reports)
+	// Aggregate scores PER CLUSTER
+	// Build map: cluster -> list of (nodeID, score)
+	clusterNodeScores := make(map[string]map[string]float64)
 
-	logger.Info("aggregated resiliency score calculated",
-		"graphRun", graphRun.Name,
-		"totalScenarios", len(finalReport.Scenarios),
-		"finalScore", finalReport.ResiliencyScore,
-		"passedSlos", finalReport.PassedSlos,
-		"totalSlos", finalReport.TotalSlos)
-
-	// Determine status based on baseline comparison
-	status := "no-baseline"
-	var message string
-
-	if graphRun.Spec.ResiliencyScoreBaseline != nil {
-		baseline := *graphRun.Spec.ResiliencyScoreBaseline
-		if finalReport.ResiliencyScore >= baseline {
-			status = "pass"
-			message = fmt.Sprintf("Score %.2f meets baseline %.2f", finalReport.ResiliencyScore, baseline)
-		} else {
-			status = "fail"
-			message = fmt.Sprintf("Score %.2f is below baseline %.2f", finalReport.ResiliencyScore, baseline)
+	for _, nodeStatus := range graphRun.Status.NodeStatuses {
+		if nodeStatus.Phase != "Completed" {
+			continue
 		}
-	} else {
-		message = fmt.Sprintf("Score %.2f calculated (no baseline specified)", finalReport.ResiliencyScore)
+
+		sanitizedNodeID := sanitizeNodeID(nodeStatus.NodeID)
+		scenarioRun, found := existingRuns[sanitizedNodeID]
+		if !found {
+			continue
+		}
+
+		// Add this node's scores to each cluster
+		for _, clusterScore := range scenarioRun.Status.ResiliencyScores {
+			if clusterNodeScores[clusterScore.ClusterName] == nil {
+				clusterNodeScores[clusterScore.ClusterName] = make(map[string]float64)
+			}
+			clusterNodeScores[clusterScore.ClusterName][nodeStatus.NodeID] = clusterScore.Score
+		}
 	}
 
-	// Populate immutable resiliency score result
-	graphRun.Status.ResiliencyScore = &krknv1alpha1.ResiliencyScoreResult{
-		Calculated: finalReport.ResiliencyScore,
-		Baseline:   graphRun.Spec.ResiliencyScoreBaseline,
-		Status:     status,
-		Message:    message,
+	// Calculate final GraphClusterScores
+	var graphClusterScores []krknv1alpha1.GraphClusterScore
+
+	for clusterName, nodeScores := range clusterNodeScores {
+		// Calculate average score for this cluster
+		var sum float64
+		for _, score := range nodeScores {
+			sum += score
+		}
+		avgScore := sum / float64(len(nodeScores))
+
+		// Determine status based on baseline
+		status := "no-baseline"
+		var message string
+
+		if graphRun.Spec.ResiliencyScoreBaseline != nil {
+			baseline := *graphRun.Spec.ResiliencyScoreBaseline
+			if avgScore >= baseline {
+				status = "pass"
+				message = fmt.Sprintf("Score %.2f meets baseline %.2f", avgScore, baseline)
+			} else {
+				status = "fail"
+				message = fmt.Sprintf("Score %.2f is below baseline %.2f", avgScore, baseline)
+			}
+		} else {
+			message = fmt.Sprintf("Score %.2f calculated (no baseline specified)", avgScore)
+		}
+
+		graphClusterScores = append(graphClusterScores, krknv1alpha1.GraphClusterScore{
+			ClusterName:       clusterName,
+			Calculated:        avgScore,
+			Baseline:          graphRun.Spec.ResiliencyScoreBaseline,
+			Status:            status,
+			Message:           message,
+			NodeContributions: nodeScores,
+		})
+
+		logger.Info("calculated cluster resiliency score",
+			"graphRun", graphRun.Name,
+			"clusterName", clusterName,
+			"avgScore", avgScore,
+			"nodeCount", len(nodeScores),
+			"status", status)
 	}
 
-	logger.Info("resiliency score result set",
+	// Populate immutable resiliency score results
+	graphRun.Status.ResiliencyScores = graphClusterScores
+
+	logger.Info("resiliency scores calculated for all clusters",
 		"graphRun", graphRun.Name,
-		"calculated", finalReport.ResiliencyScore,
-		"baseline", graphRun.Spec.ResiliencyScoreBaseline,
-		"status", status,
+		"clusterCount", len(graphClusterScores),
 		"message", message)
 
 	return nil
