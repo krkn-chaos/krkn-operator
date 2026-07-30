@@ -55,13 +55,15 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: metadata.namespace
+        {{- with .Values.acm.extraEnv }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+        # SERVICE_ACCOUNT_NAME must come AFTER extraEnv to prevent user override footgun
+        # If placed before extraEnv, a duplicate entry in extraEnv would silently win
         - name: SERVICE_ACCOUNT_NAME
           valueFrom:
             fieldRef:
               fieldPath: spec.serviceAccountName
-        {{- with .Values.acm.extraEnv }}
-        {{- toYaml . | nindent 8 }}
-        {{- end }}
         resources:
           {{- toYaml .Values.acm.resources | nindent 10 }}
         livenessProbe:
