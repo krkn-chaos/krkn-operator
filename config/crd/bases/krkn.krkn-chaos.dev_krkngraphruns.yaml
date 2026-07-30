@@ -289,7 +289,7 @@ spec:
                 - Failed
                 - PartiallyFailed
                 type: string
-              resiliencyScore:
+              resiliencyScores:
                 description: |-
                   ResiliencyScore contains the calculated resiliency score and baseline comparison.
                   This field is populated by the controller when:
@@ -298,35 +298,59 @@ spec:
 
                   The score is calculated ONCE and is IMMUTABLE to preserve historical accuracy.
                   Each run represents an invariant result that can be compared over time.
-                properties:
-                  baseline:
-                    description: |-
-                      Baseline is the user-defined minimum acceptable score (from Spec.ResiliencyScoreBaseline)
-                      Used for pass/fail determination
-                    type: number
-                  calculated:
-                    description: |-
-                      Calculated is the final computed resiliency score
-                      This value is calculated by aggregating metrics from all nodes in the graph run
-                    type: number
-                  message:
-                    description: |-
-                      Message provides a human-readable description of the result
-                      Example: "Score 8.5 is below baseline 9.0"
-                    type: string
-                  status:
-                    description: |-
-                      Status indicates whether the run met the baseline requirements
-                      Possible values:
-                      - "pass": calculated score >= baseline
-                      - "fail": calculated score < baseline
-                      - "no-baseline": no baseline was specified, score calculated but not compared
-                      - "error": score calculation failed (e.g., pod logs unavailable, no reports found)
-                    type: string
-                required:
-                - calculated
-                - status
-                type: object
+
+                  When a graph run executes on multiple clusters, this array will contain one entry per cluster.
+                  For single-cluster runs, the array will have exactly one element.
+                items:
+                  description: |-
+                    GraphClusterScore represents the resiliency score for a specific cluster in a graph run.
+                    When a graph run executes on multiple clusters, this structure tracks the score contribution
+                    from each cluster, along with per-node breakdown.
+                  properties:
+                    baseline:
+                      description: |-
+                        Baseline is the user-defined minimum acceptable score (from Spec.ResiliencyScoreBaseline)
+                        Used for pass/fail determination
+                      type: number
+                    calculated:
+                      description: |-
+                        Calculated is the aggregated resiliency score for this cluster (0-100)
+                        This is calculated by averaging the scores from all nodes that ran on this cluster
+                      type: number
+                    clusterName:
+                      description: ClusterName is the name of the cluster this score
+                        applies to
+                      type: string
+                    message:
+                      description: Message provides human-readable context about the
+                        score (e.g., "Score 85.0 meets baseline 80.0")
+                      type: string
+                    nodeContributions:
+                      additionalProperties:
+                        type: number
+                      description: |-
+                        NodeContributions maps each node ID to its individual resiliency score on this cluster
+                        This allows the frontend to show which nodes contributed what score
+                        Example: {"node-1": 85.5, "node-2": 92.3}
+                      type: object
+                    status:
+                      description: |-
+                        Status indicates whether this cluster's score met the baseline requirements
+                        Possible values:
+                        - "pass": calculated score >= baseline
+                        - "fail": calculated score < baseline
+                        - "no-baseline": no baseline was specified, score calculated but not compared
+                      enum:
+                      - pass
+                      - fail
+                      - no-baseline
+                      type: string
+                  required:
+                  - calculated
+                  - clusterName
+                  - status
+                  type: object
+                type: array
               resolvedLevels:
                 description: |-
                   ResolvedLevels contains the pre-computed topological levels for frontend rendering

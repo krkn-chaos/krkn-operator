@@ -125,9 +125,47 @@ type GraphRunSummary struct {
 	PendingNodes int `json:"pendingNodes"`
 }
 
+// GraphClusterScore represents the resiliency score for a specific cluster in a graph run.
+// When a graph run executes on multiple clusters, this structure tracks the score contribution
+// from each cluster, along with per-node breakdown.
+type GraphClusterScore struct {
+	// ClusterName is the name of the cluster this score applies to
+	ClusterName string `json:"clusterName"`
+
+	// Calculated is the aggregated resiliency score for this cluster (0-100)
+	// This is calculated by averaging the scores from all nodes that ran on this cluster
+	Calculated float64 `json:"calculated"`
+
+	// Baseline is the user-defined minimum acceptable score (from Spec.ResiliencyScoreBaseline)
+	// Used for pass/fail determination
+	// +optional
+	Baseline *float64 `json:"baseline,omitempty"`
+
+	// Status indicates whether this cluster's score met the baseline requirements
+	// Possible values:
+	// - "pass": calculated score >= baseline
+	// - "fail": calculated score < baseline
+	// - "no-baseline": no baseline was specified, score calculated but not compared
+	// +kubebuilder:validation:Enum=pass;fail;no-baseline
+	Status string `json:"status"`
+
+	// Message provides human-readable context about the score (e.g., "Score 85.0 meets baseline 80.0")
+	// +optional
+	Message string `json:"message,omitempty"`
+
+	// NodeContributions maps each node ID to its individual resiliency score on this cluster
+	// This allows the frontend to show which nodes contributed what score
+	// Example: {"node-1": 85.5, "node-2": 92.3}
+	// +optional
+	NodeContributions map[string]float64 `json:"nodeContributions,omitempty"`
+}
+
 // ResiliencyScoreResult contains the calculated resiliency score and comparison with baseline.
 // This is IMMUTABLE - calculated once when the GraphRun completes and never recalculated.
 // Each run represents an invariant result over time for historical comparison and trend analysis.
+//
+// DEPRECATED: Use ResiliencyScores (array of GraphClusterScore) for multi-cluster support.
+// This struct is kept for backward compatibility with single-cluster workflows.
 type ResiliencyScoreResult struct {
 	// Calculated is the final computed resiliency score
 	// This value is calculated by aggregating metrics from all nodes in the graph run
@@ -258,8 +296,11 @@ type KrknGraphRunStatus struct {
 	//
 	// The score is calculated ONCE and is IMMUTABLE to preserve historical accuracy.
 	// Each run represents an invariant result that can be compared over time.
+	//
+	// When a graph run executes on multiple clusters, this array will contain one entry per cluster.
+	// For single-cluster runs, the array will have exactly one element.
 	// +optional
-	ResiliencyScore *ResiliencyScoreResult `json:"resiliencyScore,omitempty"`
+	ResiliencyScores []GraphClusterScore `json:"resiliencyScores,omitempty"`
 
 	// Conditions represent the latest available observations of the graph run's state
 	// +optional

@@ -312,13 +312,29 @@ spec:
                 - PartiallyFailed
                 - Failed
                 type: string
-              resiliencyScore:
+              resiliencyScores:
                 description: |-
-                  ResiliencyScore contains the calculated resiliency score for this individual scenario run.
-                  This score is extracted from the pod logs during graph run execution and represents
-                  this node's contribution to the overall graph resiliency score.
+                  ResiliencyScores contains per-cluster resiliency scores for this scenario run.
+                  Each entry represents the score calculated from the pod logs of a specific cluster.
+                  When a scenario runs on multiple clusters, this array will contain one entry per cluster.
                   Populated only when the parent KrknGraphRun has Spec.ResiliencyScoreEnabled set to true.
-                type: number
+                items:
+                  description: ClusterResiliencyScore represents the resiliency score
+                    for a specific cluster
+                  properties:
+                    clusterName:
+                      description: ClusterName is the name of the cluster this score
+                        applies to
+                      type: string
+                    score:
+                      description: Score is the calculated resiliency score for this
+                        cluster (0-100)
+                      type: number
+                  required:
+                  - clusterName
+                  - score
+                  type: object
+                type: array
               runningJobs:
                 description: RunningJobs is the number of currently running jobs
                 type: integer
