@@ -124,7 +124,7 @@ func TestBroadcastGraphRunUpdate(t *testing.T) {
 		},
 	}
 
-	// Broadcast update
+	// First broadcast - should be "created"
 	broadcaster.BroadcastGraphRunUpdate(graphRun)
 
 	// Verify client received message
@@ -143,12 +143,31 @@ func TestBroadcastGraphRunUpdate(t *testing.T) {
 			t.Errorf("Expected ID 'graphrun-1', got '%s'", serverMsg.ID)
 		}
 
-		if serverMsg.Event != "updated" {
-			t.Errorf("Expected event 'updated', got '%s'", serverMsg.Event)
+		if serverMsg.Event != "created" {
+			t.Errorf("Expected event 'created' for first broadcast, got '%s'", serverMsg.Event)
 		}
 
 	case <-time.After(100 * time.Millisecond):
 		t.Error("Timeout waiting for broadcast message")
+	}
+
+	// Second broadcast - should be "updated"
+	graphRun.Status.Phase = "Completed"
+	broadcaster.BroadcastGraphRunUpdate(graphRun)
+
+	select {
+	case msg := <-client.send:
+		var serverMsg ServerMessage
+		if err := json.Unmarshal(msg, &serverMsg); err != nil {
+			t.Fatalf("Failed to unmarshal server message: %v", err)
+		}
+
+		if serverMsg.Event != "updated" {
+			t.Errorf("Expected event 'updated' for subsequent broadcast, got '%s'", serverMsg.Event)
+		}
+
+	case <-time.After(100 * time.Millisecond):
+		t.Error("Timeout waiting for second broadcast message")
 	}
 }
 

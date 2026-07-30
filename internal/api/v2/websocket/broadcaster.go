@@ -230,10 +230,17 @@ func (b *Broadcaster) BroadcastGraphRunUpdate(graphRun *krknv1alpha1.KrknGraphRu
 		ResiliencyScore: b.convertResiliencyScore(graphRun.Status.ResiliencyScore),
 	}
 
+	// Determine event type based on cache existence
+	// If this is the first time we're broadcasting this run, it's a "created" event
+	event := "updated"
+	if !exists {
+		event = "created"
+	}
+
 	msg := ServerMessage{
 		Resource: "graphrun",
 		ID:       graphRun.Name,
-		Event:    "updated",
+		Event:    event,
 		Data:     response,
 	}
 
