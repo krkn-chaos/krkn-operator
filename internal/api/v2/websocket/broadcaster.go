@@ -185,7 +185,8 @@ func (b *Broadcaster) BroadcastScenarioRunDetailUpdate(scenarioRun *krknv1alpha1
 }
 
 // BroadcastGraphRunUpdate broadcasts a graph run update to subscribed clients
-func (b *Broadcaster) BroadcastGraphRunUpdate(graphRun *krknv1alpha1.KrknGraphRun) {
+// event should be "created" for OnAdd or "updated" for OnUpdate
+func (b *Broadcaster) BroadcastGraphRunUpdate(graphRun *krknv1alpha1.KrknGraphRun, event string) {
 	logger := log.Log.WithName("websocket-broadcast")
 
 	// Calculate fingerprint of current status
@@ -230,17 +231,10 @@ func (b *Broadcaster) BroadcastGraphRunUpdate(graphRun *krknv1alpha1.KrknGraphRu
 		ResiliencyScore: b.convertResiliencyScore(graphRun.Status.ResiliencyScore),
 	}
 
-	// Determine event type based on cache existence
-	// If this is the first time we're broadcasting this run, it's a "created" event
-	event := "updated"
-	if !exists {
-		event = "created"
-	}
-
 	msg := ServerMessage{
 		Resource: "graphrun",
 		ID:       graphRun.Name,
-		Event:    event,
+		Event:    event, // Passed as parameter from watcher
 		Data:     response,
 	}
 

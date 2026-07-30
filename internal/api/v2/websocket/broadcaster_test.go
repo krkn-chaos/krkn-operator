@@ -108,11 +108,12 @@ func TestBroadcastGraphRunUpdate(t *testing.T) {
 	hub.register <- client
 	time.Sleep(10 * time.Millisecond)
 
-	// Create test graph run
+	// Create test graph run with recent creation timestamp
 	graphRun := &krknv1alpha1.KrknGraphRun{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "graphrun-1",
-			Namespace: "default",
+			Name:              "graphrun-1",
+			Namespace:         "default",
+			CreationTimestamp: metav1.Now(), // Recent timestamp for "created" event
 		},
 		Status: krknv1alpha1.KrknGraphRunStatus{
 			Phase: "Running",
@@ -125,7 +126,7 @@ func TestBroadcastGraphRunUpdate(t *testing.T) {
 	}
 
 	// First broadcast - should be "created"
-	broadcaster.BroadcastGraphRunUpdate(graphRun)
+	broadcaster.BroadcastGraphRunUpdate(graphRun, "created")
 
 	// Verify client received message
 	select {
@@ -153,7 +154,7 @@ func TestBroadcastGraphRunUpdate(t *testing.T) {
 
 	// Second broadcast - should be "updated"
 	graphRun.Status.Phase = "Completed"
-	broadcaster.BroadcastGraphRunUpdate(graphRun)
+	broadcaster.BroadcastGraphRunUpdate(graphRun, "updated")
 
 	select {
 	case msg := <-client.send:

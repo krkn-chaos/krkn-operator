@@ -159,7 +159,7 @@ type graphRunEventHandler struct {
 func (h *graphRunEventHandler) OnAdd(obj interface{}, _ bool) {
 	run := obj.(*krknv1alpha1.KrknGraphRun)
 	h.logger.V(1).Info("GraphRun added", "name", run.Name)
-	h.broadcaster.BroadcastGraphRunUpdate(run)
+	h.broadcaster.BroadcastGraphRunUpdate(run, "created")
 }
 
 func (h *graphRunEventHandler) OnUpdate(oldObj, newObj interface{}) {
@@ -180,7 +180,7 @@ func (h *graphRunEventHandler) OnUpdate(oldObj, newObj interface{}) {
 		"newPhase", newRun.Status.Phase,
 		"completedNodes", newRun.Status.Summary.CompletedNodes)
 
-	h.broadcaster.BroadcastGraphRunUpdate(newRun)
+	h.broadcaster.BroadcastGraphRunUpdate(newRun, "updated")
 }
 
 func (h *graphRunEventHandler) OnDelete(obj interface{}) {
