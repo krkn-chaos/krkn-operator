@@ -109,12 +109,20 @@ func (r *KrknGraphRunReconciler) calculateResiliencyScore(
 				continue
 			}
 
+			// Log detailed scenario breakdown for debugging
+			scenarioNames := []string{}
+			for name := range report.OverallReport.Scenarios {
+				scenarioNames = append(scenarioNames, name)
+			}
+
 			logger.Info("parsed resiliency report from pod",
 				"nodeID", nodeStatus.NodeID,
 				"podName", jobStatus.PodName,
 				"clusterName", jobStatus.ClusterName,
-				"scenarios", len(report.OverallReport.Scenarios),
-				"score", report.OverallReport.ResiliencyScore)
+				"scenarioCount", len(report.OverallReport.Scenarios),
+				"scenarioNames", scenarioNames,
+				"scenariosMap", report.OverallReport.Scenarios,
+				"aggregatedScore", report.OverallReport.ResiliencyScore)
 
 			reports = append(reports, *report)
 
@@ -132,13 +140,16 @@ func (r *KrknGraphRunReconciler) calculateResiliencyScore(
 				logger.Error(err, "failed to update scenario run with resiliency score",
 					"nodeID", nodeStatus.NodeID,
 					"scenarioRun", scenarioRun.Name,
-					"score", *nodeScore)
+					"score", *nodeScore,
+					"clusterJobsCount", len(scenarioRun.Status.ClusterJobs))
 				// Don't fail the entire calculation, just log the error
 			} else {
 				logger.Info("updated scenario run with individual resiliency score",
 					"nodeID", nodeStatus.NodeID,
 					"scenarioRun", scenarioRun.Name,
-					"score", *nodeScore)
+					"score", *nodeScore,
+					"clusterJobsCount", len(scenarioRun.Status.ClusterJobs),
+					"note", "This is the FIRST cluster's score only - multi-cluster aggregation not yet implemented")
 			}
 		}
 	}
