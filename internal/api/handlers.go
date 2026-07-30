@@ -1551,7 +1551,7 @@ func (h *Handler) GetScenarioRunStatus(w http.ResponseWriter, r *http.Request) {
 		GraphRunName:     scenarioRun.Labels["krkn.dev/graph-run"],
 		GraphNodeID:      scenarioRun.Labels["krkn.dev/graph-node"],
 		CustomRunName:    scenarioRun.Spec.CustomRunName,
-		ResiliencyScore:  scenarioRun.Status.ResiliencyScore,
+		ResiliencyScore:  averageResiliencyScore(scenarioRun.Status.ResiliencyScores),
 		ResiliencyScores: convertClusterResiliencyScores(scenarioRun.Status.ResiliencyScores),
 	}
 
@@ -2068,7 +2068,7 @@ func (h *Handler) ListScenarioRuns(w http.ResponseWriter, r *http.Request) {
 			GraphRunName:     sr.Labels["krkn.dev/graph-run"],
 			GraphNodeID:      sr.Labels["krkn.dev/graph-node"],
 			CustomRunName:    sr.Spec.CustomRunName,
-			ResiliencyScore:  sr.Status.ResiliencyScore,
+			ResiliencyScore:  averageResiliencyScore(sr.Status.ResiliencyScores),
 			ResiliencyScores: convertClusterResiliencyScores(sr.Status.ResiliencyScores),
 		}
 
@@ -2581,6 +2581,20 @@ func convertMetaTime(mt *metav1.Time) *time.Time {
 	}
 	t := mt.Time
 	return &t
+}
+
+// averageResiliencyScore returns the average score from per-cluster resiliency scores,
+// or nil if the slice is empty.
+func averageResiliencyScore(scores []krknv1alpha1.ClusterResiliencyScore) *float64 {
+	if len(scores) == 0 {
+		return nil
+	}
+	var sum float64
+	for _, s := range scores {
+		sum += s.Score
+	}
+	avg := sum / float64(len(scores))
+	return &avg
 }
 
 // NOTE: deleteTargetRequest was removed - KrknTargetRequest is now owned by ScenarioRun
