@@ -785,14 +785,15 @@ type GraphRunSummaryResponse struct {
 
 // NodeStatusResponse represents the status of a single node in the graph
 type NodeStatusResponse struct {
-	NodeID         string       `json:"nodeId"`
-	NodeName       string       `json:"nodeName"`
-	Phase          string       `json:"phase"`
-	ScenarioRunRef string       `json:"scenarioRunRef,omitempty"`
-	StartTime      *metav1.Time `json:"startTime,omitempty"`
-	CompletionTime *metav1.Time `json:"completionTime,omitempty"`
-	DependsOn      []string     `json:"dependsOn,omitempty"`
-	Message        string       `json:"message,omitempty"`
+	NodeID          string       `json:"nodeId"`
+	NodeName        string       `json:"nodeName"`
+	Phase           string       `json:"phase"`
+	ScenarioRunRef  string       `json:"scenarioRunRef,omitempty"`
+	StartTime       *metav1.Time `json:"startTime,omitempty"`
+	CompletionTime  *metav1.Time `json:"completionTime,omitempty"`
+	DependsOn       []string     `json:"dependsOn,omitempty"`
+	Message         string       `json:"message,omitempty"`
+	ResiliencyScore *float64     `json:"resiliencyScore,omitempty"`
 }
 
 // ResiliencyScoreResponse represents the calculated resiliency score

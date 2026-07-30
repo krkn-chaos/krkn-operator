@@ -221,12 +221,13 @@ func (b *Broadcaster) BroadcastGraphRunUpdate(graphRun *krknv1alpha1.KrknGraphRu
 			FailedNodes:    graphRun.Status.Summary.FailedNodes,
 			PendingNodes:   graphRun.Status.Summary.PendingNodes,
 		},
-		NodeStatuses:   nil, // WebSocket doesn't send full node details
-		ResolvedLevels: graphRun.Status.ResolvedLevels,
-		StartTime:      graphRun.Status.StartTime,
-		CompletionTime: graphRun.Status.CompletionTime,
-		OwnerUserID:    graphRun.Spec.OwnerUserID,
-		CreatedAt:      graphRun.CreationTimestamp.Format(time.RFC3339),
+		NodeStatuses:    b.convertNodeStatusesWithScores(context.Background(), graphRun.Status.NodeStatuses),
+		ResolvedLevels:  graphRun.Status.ResolvedLevels,
+		StartTime:       graphRun.Status.StartTime,
+		CompletionTime:  graphRun.Status.CompletionTime,
+		OwnerUserID:     graphRun.Spec.OwnerUserID,
+		CreatedAt:       graphRun.CreationTimestamp.Format(time.RFC3339),
+		ResiliencyScore: b.convertResiliencyScore(graphRun.Status.ResiliencyScore),
 	}
 
 	msg := ServerMessage{
@@ -392,5 +393,64 @@ func (b *Broadcaster) makeGraphRunAuthzCheck(graphRun *krknv1alpha1.KrknGraphRun
 
 		// If the run was filtered out, user doesn't have permission
 		return len(filtered) > 0
+	}
+}
+
+// convertNodeStatusesWithScores converts Kubernetes NodeStatus to WebSocket response format
+// and enriches each node with its individual resiliency score from the associated KrknScenarioRun
+func (b *Broadcaster) convertNodeStatusesWithScores(ctx context.Context, nodeStatuses []krknv1alpha1.NodeStatus) []NodeStatusResponse {
+	if nodeStatuses == nil {
+		return []NodeStatusResponse{}
+	}
+
+	logger := log.Log.WithName("websocket-broadcast")
+	result := make([]NodeStatusResponse, 0, len(nodeStatuses))
+
+	for _, ns := range nodeStatuses {
+		response := NodeStatusResponse{
+			NodeID:         ns.NodeID,
+			NodeName:       ns.NodeName,
+			Phase:          ns.Phase,
+			ScenarioRunRef: ns.ScenarioRunRef,
+			StartTime:      ns.StartTime,
+			CompletionTime: ns.CompletionTime,
+			DependsOn:      ns.DependsOn,
+			Message:        ns.Message,
+		}
+
+		// Fetch resiliency score from the associated KrknScenarioRun if available
+		if ns.ScenarioRunRef != "" {
+			var scenarioRun krknv1alpha1.KrknScenarioRun
+			if err := b.k8sClient.Get(ctx, k8sclient.ObjectKey{
+				Name:      ns.ScenarioRunRef,
+				Namespace: b.namespace,
+			}, &scenarioRun); err != nil {
+				// Log error but don't fail - the node status is still valid without the score
+				logger.V(1).Info("Failed to fetch scenario run for resiliency score",
+					"scenarioRunRef", ns.ScenarioRunRef,
+					"nodeID", ns.NodeID,
+					"error", err.Error())
+			} else {
+				// Add the resiliency score if it exists
+				response.ResiliencyScore = scenarioRun.Status.ResiliencyScore
+			}
+		}
+
+		result = append(result, response)
+	}
+
+	return result
+}
+
+// convertResiliencyScore converts Kubernetes ResiliencyScoreResult to WebSocket response format
+func (b *Broadcaster) convertResiliencyScore(score *krknv1alpha1.ResiliencyScoreResult) *ResiliencyScoreResponse {
+	if score == nil {
+		return nil
+	}
+	return &ResiliencyScoreResponse{
+		Calculated: score.Calculated,
+		Baseline:   score.Baseline,
+		Status:     score.Status,
+		Message:    score.Message,
 	}
 }

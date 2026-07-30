@@ -19,6 +19,7 @@ Assisted-by: Claude Sonnet 4.5 (claude-sonnet-4-5@20250929)
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -209,7 +210,7 @@ func (h *Handler) GetGraphRun(w http.ResponseWriter, r *http.Request) {
 				FailedNodes:    graphRun.Status.Summary.FailedNodes,
 				PendingNodes:   graphRun.Status.Summary.PendingNodes,
 			},
-			NodeStatuses:    convertNodeStatuses(graphRun.Status.NodeStatuses),
+			NodeStatuses:    h.convertNodeStatusesWithScores(ctx, graphRun.Status.NodeStatuses),
 			ResolvedLevels:  graphRun.Status.ResolvedLevels,
 			StartTime:       graphRun.Status.StartTime,
 			CompletionTime:  graphRun.Status.CompletionTime,
@@ -615,6 +616,54 @@ func convertResiliencyScore(score *krknv1alpha1.ResiliencyScoreResult) *Resilien
 }
 
 // convertNodeStatuses converts Kubernetes NodeStatus to API response format
+// convertNodeStatusesWithScores converts Kubernetes NodeStatus to API response format
+// and enriches each node with its individual resiliency score from the associated KrknScenarioRun
+func (h *Handler) convertNodeStatusesWithScores(ctx context.Context, nodeStatuses []krknv1alpha1.NodeStatus) []NodeStatusResponse {
+	if nodeStatuses == nil {
+		return []NodeStatusResponse{}
+	}
+
+	logger := log.FromContext(ctx)
+	result := make([]NodeStatusResponse, 0, len(nodeStatuses))
+
+	for _, ns := range nodeStatuses {
+		response := NodeStatusResponse{
+			NodeID:         ns.NodeID,
+			NodeName:       ns.NodeName,
+			Phase:          ns.Phase,
+			ScenarioRunRef: ns.ScenarioRunRef,
+			StartTime:      ns.StartTime,
+			CompletionTime: ns.CompletionTime,
+			DependsOn:      ns.DependsOn,
+			Message:        ns.Message,
+		}
+
+		// Fetch resiliency score from the associated KrknScenarioRun if available
+		if ns.ScenarioRunRef != "" {
+			var scenarioRun krknv1alpha1.KrknScenarioRun
+			if err := h.client.Get(ctx, types.NamespacedName{
+				Name:      ns.ScenarioRunRef,
+				Namespace: h.namespace,
+			}, &scenarioRun); err != nil {
+				// Log error but don't fail - the node status is still valid without the score
+				logger.V(1).Info("Failed to fetch scenario run for resiliency score",
+					"scenarioRunRef", ns.ScenarioRunRef,
+					"nodeID", ns.NodeID,
+					"error", err.Error())
+			} else {
+				// Add the resiliency score if it exists
+				response.ResiliencyScore = scenarioRun.Status.ResiliencyScore
+			}
+		}
+
+		result = append(result, response)
+	}
+
+	return result
+}
+
+// convertNodeStatuses converts Kubernetes NodeStatus to API response format
+// Deprecated: Use convertNodeStatusesWithScores for enriched responses with resiliency scores
 func convertNodeStatuses(nodeStatuses []krknv1alpha1.NodeStatus) []NodeStatusResponse {
 	if nodeStatuses == nil {
 		return []NodeStatusResponse{}
