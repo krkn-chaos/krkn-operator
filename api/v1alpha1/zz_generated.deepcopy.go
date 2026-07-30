@@ -805,6 +805,11 @@ func (in *KrknScenarioRunStatus) DeepCopyInto(out *KrknScenarioRunStatus) {
 			(*in)[i].DeepCopyInto(&(*out)[i])
 		}
 	}
+	if in.ResiliencyScore != nil {
+		in, out := &in.ResiliencyScore, &out.ResiliencyScore
+		*out = new(float64)
+		**out = **in
+	}
 	if in.Conditions != nil {
 		in, out := &in.Conditions, &out.Conditions
 		*out = make([]v1.Condition, len(*in))

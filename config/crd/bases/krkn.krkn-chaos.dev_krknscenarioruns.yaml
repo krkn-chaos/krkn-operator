@@ -316,6 +316,13 @@ spec:
                 - PartiallyFailed
                 - Failed
                 type: string
+              resiliencyScore:
+                description: |-
+                  ResiliencyScore contains the calculated resiliency score for this individual scenario run.
+                  This score is extracted from the pod logs during graph run execution and represents
+                  this node's contribution to the overall graph resiliency score.
+                  Populated only when the parent KrknGraphRun has Spec.ResiliencyScoreEnabled set to true.
+                type: number
               runningJobs:
                 description: RunningJobs is the number of currently running jobs
                 type: integer

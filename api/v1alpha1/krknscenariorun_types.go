@@ -178,6 +178,13 @@ type KrknScenarioRunStatus struct {
 	// +optional
 	ClusterJobs []ClusterJobStatus `json:"clusterJobs,omitempty"`
 
+	// ResiliencyScore contains the calculated resiliency score for this individual scenario run.
+	// This score is extracted from the pod logs during graph run execution and represents
+	// this node's contribution to the overall graph resiliency score.
+	// Populated only when the parent KrknGraphRun has Spec.ResiliencyScoreEnabled set to true.
+	// +optional
+	ResiliencyScore *float64 `json:"resiliencyScore,omitempty"`
+
 	// Conditions represent the latest available observations of the scenario run's state
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`

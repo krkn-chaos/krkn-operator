@@ -315,6 +315,8 @@ type ScenarioRunStatusResponse struct {
 	GraphNodeID string `json:"graphNodeId,omitempty"`
 	// CustomRunName is the user-provided label for this run
 	CustomRunName string `json:"customRunName,omitempty"`
+	// ResiliencyScore is the individual resiliency score for this scenario run node
+	ResiliencyScore *float64 `json:"resiliencyScore,omitempty"`
 }
 
 // ClusterJobStatusResponse represents the status of a job for a specific cluster
@@ -373,6 +375,8 @@ type ScenarioRunListItem struct {
 	GraphNodeID string `json:"graphNodeId,omitempty"`
 	// CustomRunName is the user-provided label for this run
 	CustomRunName string `json:"customRunName,omitempty"`
+	// ResiliencyScore is the individual resiliency score for this scenario run node
+	ResiliencyScore *float64 `json:"resiliencyScore,omitempty"`
 }
 
 // ScenarioRunListResponse represents the response for GET /scenarios/run

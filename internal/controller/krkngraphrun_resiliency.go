@@ -75,6 +75,9 @@ func (r *KrknGraphRunReconciler) calculateResiliencyScore(
 			continue
 		}
 
+		// Track if we found any valid score for this scenario run
+		var nodeScore *float64
+
 		// Process all cluster jobs for this scenario run
 		for _, jobStatus := range scenarioRun.Status.ClusterJobs {
 			// Skip if pod name is not set
@@ -114,6 +117,29 @@ func (r *KrknGraphRunReconciler) calculateResiliencyScore(
 				"score", report.OverallReport.ResiliencyScore)
 
 			reports = append(reports, *report)
+
+			// Store the score for this node (use the first valid score found)
+			if nodeScore == nil {
+				score := report.OverallReport.ResiliencyScore
+				nodeScore = &score
+			}
+		}
+
+		// Update the scenario run with the individual node score
+		if nodeScore != nil && scenarioRun.Status.ResiliencyScore == nil {
+			scenarioRun.Status.ResiliencyScore = nodeScore
+			if err := r.Status().Update(ctx, scenarioRun); err != nil {
+				logger.Error(err, "failed to update scenario run with resiliency score",
+					"nodeID", nodeStatus.NodeID,
+					"scenarioRun", scenarioRun.Name,
+					"score", *nodeScore)
+				// Don't fail the entire calculation, just log the error
+			} else {
+				logger.Info("updated scenario run with individual resiliency score",
+					"nodeID", nodeStatus.NodeID,
+					"scenarioRun", scenarioRun.Name,
+					"score", *nodeScore)
+			}
 		}
 	}
 

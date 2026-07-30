@@ -1502,6 +1502,7 @@ func (h *Handler) GetScenarioRunStatus(w http.ResponseWriter, r *http.Request) {
 					RegistryName:    scenarioRun.Spec.RegistryName,
 					GraphRunName:    scenarioRun.Labels["krkn.dev/graph-run"],
 					GraphNodeID:     scenarioRun.Labels["krkn.dev/graph-node"],
+					ResiliencyScore: scenarioRun.Status.ResiliencyScore,
 				}
 				writeJSON(w, http.StatusCreated, response)
 				return
@@ -1550,6 +1551,7 @@ func (h *Handler) GetScenarioRunStatus(w http.ResponseWriter, r *http.Request) {
 		GraphRunName:    scenarioRun.Labels["krkn.dev/graph-run"],
 		GraphNodeID:     scenarioRun.Labels["krkn.dev/graph-node"],
 		CustomRunName:   scenarioRun.Spec.CustomRunName,
+		ResiliencyScore: scenarioRun.Status.ResiliencyScore,
 	}
 
 	writeJSON(w, http.StatusOK, response)
@@ -2065,6 +2067,7 @@ func (h *Handler) ListScenarioRuns(w http.ResponseWriter, r *http.Request) {
 			GraphRunName:    sr.Labels["krkn.dev/graph-run"],
 			GraphNodeID:     sr.Labels["krkn.dev/graph-node"],
 			CustomRunName:   sr.Spec.CustomRunName,
+			ResiliencyScore: sr.Status.ResiliencyScore,
 		}
 
 		runs = append(runs, run)
