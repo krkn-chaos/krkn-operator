@@ -30,13 +30,9 @@ import (
 // TestBroadcasterLogic_CreatedVsUpdated verifies the logic for determining
 // "created" vs "updated" events based on cache existence
 func TestBroadcasterLogic_CreatedVsUpdated(t *testing.T) {
-	// This test verifies the logic we added to BroadcastGraphRunUpdate:
-	// - First broadcast (cache miss) = "created" event
-	// - Subsequent broadcasts (cache hit) = "updated" event
-
 	baseline := 9.0
 
-	// Test Case 1: ResiliencyScore nil initially
+	// Test Case 1: ResiliencyScores nil initially
 	graphRunNoScore := &krknv1alpha1.KrknGraphRun{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:              "test-run-no-score",
@@ -48,15 +44,15 @@ func TestBroadcasterLogic_CreatedVsUpdated(t *testing.T) {
 			ResiliencyScoreBaseline: &baseline,
 		},
 		Status: krknv1alpha1.KrknGraphRunStatus{
-			Phase:           "Completed",
-			ResiliencyScore: nil, // Not yet calculated
+			Phase:            "Completed",
+			ResiliencyScores: nil,
 		},
 	}
 
-	assert.Nil(t, graphRunNoScore.Status.ResiliencyScore,
-		"ResiliencyScore should be nil when not calculated")
+	assert.Nil(t, graphRunNoScore.Status.ResiliencyScores,
+		"ResiliencyScores should be nil when not calculated")
 
-	// Test Case 2: ResiliencyScore populated
+	// Test Case 2: ResiliencyScores populated
 	graphRunWithScore := &krknv1alpha1.KrknGraphRun{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:              "test-run-with-score",
@@ -69,17 +65,20 @@ func TestBroadcasterLogic_CreatedVsUpdated(t *testing.T) {
 		},
 		Status: krknv1alpha1.KrknGraphRunStatus{
 			Phase: "Completed",
-			ResiliencyScore: &krknv1alpha1.ResiliencyScoreResult{
-				Calculated: 8.5,
-				Baseline:   &baseline,
-				Status:     "fail",
-				Message:    "Score 8.5 is below baseline 9.0",
+			ResiliencyScores: []krknv1alpha1.GraphClusterScore{
+				{
+					ClusterName: "cluster1",
+					Calculated:  8.5,
+					Baseline:    &baseline,
+					Status:      "fail",
+					Message:     "Score 8.5 is below baseline 9.0",
+				},
 			},
 		},
 	}
 
-	assert.NotNil(t, graphRunWithScore.Status.ResiliencyScore,
-		"ResiliencyScore should be populated after calculation")
-	assert.Equal(t, 8.5, graphRunWithScore.Status.ResiliencyScore.Calculated)
-	assert.Equal(t, "fail", graphRunWithScore.Status.ResiliencyScore.Status)
+	assert.NotEmpty(t, graphRunWithScore.Status.ResiliencyScores,
+		"ResiliencyScores should be populated after calculation")
+	assert.Equal(t, 8.5, graphRunWithScore.Status.ResiliencyScores[0].Calculated)
+	assert.Equal(t, "fail", graphRunWithScore.Status.ResiliencyScores[0].Status)
 }

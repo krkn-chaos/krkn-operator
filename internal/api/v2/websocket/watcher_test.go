@@ -212,28 +212,31 @@ func TestHasGraphRunStatusChanged_NodeStatusChange(t *testing.T) {
 	}
 }
 
-func TestHasGraphRunStatusChanged_ResiliencyScoreChange(t *testing.T) {
+func TestHasGraphRunStatusChanged_ResiliencyScoresChange(t *testing.T) {
 	baseline := 90.0
 	old := &krknv1alpha1.KrknGraphRun{
 		Status: krknv1alpha1.KrknGraphRunStatus{
-			Phase:           "Succeeded",
-			ResiliencyScore: nil,
+			Phase:            "Succeeded",
+			ResiliencyScores: nil,
 		},
 	}
 
 	new := &krknv1alpha1.KrknGraphRun{
 		Status: krknv1alpha1.KrknGraphRunStatus{
 			Phase: "Succeeded",
-			ResiliencyScore: &krknv1alpha1.ResiliencyScoreResult{
-				Calculated: 85.5,
-				Baseline:   &baseline,
-				Status:     "success",
+			ResiliencyScores: []krknv1alpha1.GraphClusterScore{
+				{
+					ClusterName: "cluster1",
+					Calculated:  85.5,
+					Baseline:    &baseline,
+					Status:      "pass",
+				},
 			},
 		},
 	}
 
 	if !hasGraphRunStatusChanged(old, new) {
-		t.Error("Expected status changed when resiliency score calculated")
+		t.Error("Expected status changed when resiliency scores calculated")
 	}
 }
 

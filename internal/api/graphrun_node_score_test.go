@@ -35,7 +35,7 @@ import (
 )
 
 // TestGetGraphRun_WithNodeResiliencyScores verifies that the GetGraphRun API
-// returns resiliency scores for each node in the graph
+// returns per-cluster resiliency scores for each node in the graph
 func TestGetGraphRun_WithNodeResiliencyScores(t *testing.T) {
 	ctx := context.Background()
 
@@ -44,10 +44,8 @@ func TestGetGraphRun_WithNodeResiliencyScores(t *testing.T) {
 	_ = krknv1alpha1.AddToScheme(scheme)
 
 	baseline := 9.0
-	node1Score := 8.5
-	node2Score := 9.3
 
-	// Create scenario runs with resiliency scores
+	// Create scenario runs with per-cluster resiliency scores
 	scenarioRun1 := &krknv1alpha1.KrknScenarioRun{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "scenario-run-node-1",
@@ -60,8 +58,10 @@ func TestGetGraphRun_WithNodeResiliencyScores(t *testing.T) {
 			ScenarioImage:   "quay.io/krkn-chaos/krkn-hub:pod-scenarios",
 		},
 		Status: krknv1alpha1.KrknScenarioRunStatus{
-			Phase:           "Succeeded",
-			ResiliencyScore: &node1Score,
+			Phase: "Succeeded",
+			ResiliencyScores: []krknv1alpha1.ClusterResiliencyScore{
+				{ClusterName: "cluster1", Score: 8.5},
+			},
 		},
 	}
 
@@ -77,12 +77,14 @@ func TestGetGraphRun_WithNodeResiliencyScores(t *testing.T) {
 			ScenarioImage:   "quay.io/krkn-chaos/krkn-hub:network-scenarios",
 		},
 		Status: krknv1alpha1.KrknScenarioRunStatus{
-			Phase:           "Succeeded",
-			ResiliencyScore: &node2Score,
+			Phase: "Succeeded",
+			ResiliencyScores: []krknv1alpha1.ClusterResiliencyScore{
+				{ClusterName: "cluster1", Score: 9.3},
+			},
 		},
 	}
 
-	// Create a graph run with resiliency enabled
+	// Create a graph run with per-cluster resiliency scores
 	graphRun := &krknv1alpha1.KrknGraphRun{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-graphrun-with-scores",
@@ -122,11 +124,18 @@ func TestGetGraphRun_WithNodeResiliencyScores(t *testing.T) {
 					DependsOn:      []string{"node-1"},
 				},
 			},
-			ResiliencyScore: &krknv1alpha1.ResiliencyScoreResult{
-				Calculated: 8.9,
-				Baseline:   &baseline,
-				Status:     "fail",
-				Message:    "Score 8.9 is below baseline 9.0",
+			ResiliencyScores: []krknv1alpha1.GraphClusterScore{
+				{
+					ClusterName: "cluster1",
+					Calculated:  8.9,
+					Baseline:    &baseline,
+					Status:      "fail",
+					Message:     "Score 8.90 is below baseline 9.00",
+					NodeContributions: map[string]float64{
+						"node-1": 8.5,
+						"node-2": 9.3,
+					},
+				},
 			},
 		},
 	}
@@ -162,13 +171,14 @@ func TestGetGraphRun_WithNodeResiliencyScores(t *testing.T) {
 	// Verify overall graph run fields
 	assert.Equal(t, "test-graphrun-with-scores", response.Name)
 	assert.Equal(t, "Completed", response.Status.Phase)
-	assert.NotNil(t, response.Status.ResiliencyScore)
-	assert.Equal(t, 8.9, response.Status.ResiliencyScore.Calculated)
+	assert.Len(t, response.Status.ResiliencyScores, 1)
+	assert.Equal(t, 8.9, response.Status.ResiliencyScores[0].Calculated)
+	assert.Equal(t, "fail", response.Status.ResiliencyScores[0].Status)
 
-	// Verify node statuses include resiliency scores
+	// Verify node statuses include per-cluster resiliency scores
 	assert.Len(t, response.Status.NodeStatuses, 2)
 
-	// Find node-1 and verify its score
+	// Find node-1 and verify its scores
 	var node1, node2 *NodeStatusResponse
 	for i := range response.Status.NodeStatuses {
 		if response.Status.NodeStatuses[i].NodeID == "node-1" {
@@ -182,22 +192,22 @@ func TestGetGraphRun_WithNodeResiliencyScores(t *testing.T) {
 	assert.NotNil(t, node1, "node-1 should be present in response")
 	assert.NotNil(t, node2, "node-2 should be present in response")
 
-	// Verify node-1 has its individual score
-	assert.NotNil(t, node1.ResiliencyScore, "node-1 should have resiliency score")
-	assert.Equal(t, 8.5, *node1.ResiliencyScore)
-	assert.Equal(t, "scenario-run-node-1", node1.ScenarioRunRef)
-	assert.Equal(t, "Completed", node1.Phase)
+	// Verify node-1 has per-cluster scores and average
+	assert.Len(t, node1.ResiliencyScores, 1, "node-1 should have one cluster score")
+	assert.Equal(t, 8.5, node1.ResiliencyScores[0].Score)
+	assert.Equal(t, "cluster1", node1.ResiliencyScores[0].ClusterName)
+	assert.NotNil(t, node1.ResiliencyScoreAvg)
+	assert.Equal(t, 8.5, *node1.ResiliencyScoreAvg)
 
-	// Verify node-2 has its individual score
-	assert.NotNil(t, node2.ResiliencyScore, "node-2 should have resiliency score")
-	assert.Equal(t, 9.3, *node2.ResiliencyScore)
-	assert.Equal(t, "scenario-run-node-2", node2.ScenarioRunRef)
-	assert.Equal(t, "Completed", node2.Phase)
+	// Verify node-2 has per-cluster scores and average
+	assert.Len(t, node2.ResiliencyScores, 1, "node-2 should have one cluster score")
+	assert.Equal(t, 9.3, node2.ResiliencyScores[0].Score)
+	assert.NotNil(t, node2.ResiliencyScoreAvg)
+	assert.Equal(t, 9.3, *node2.ResiliencyScoreAvg)
 }
 
 // TestGetGraphRun_NodeWithoutResiliencyScore verifies that nodes without
-// resiliency scores (e.g., running nodes or nodes from runs without scoring enabled)
-// correctly return nil for the resiliencyScore field
+// resiliency scores correctly return empty arrays
 func TestGetGraphRun_NodeWithoutResiliencyScore(t *testing.T) {
 	ctx := context.Background()
 
@@ -205,7 +215,7 @@ func TestGetGraphRun_NodeWithoutResiliencyScore(t *testing.T) {
 	scheme := runtime.NewScheme()
 	_ = krknv1alpha1.AddToScheme(scheme)
 
-	// Create a scenario run WITHOUT a resiliency score
+	// Create a scenario run WITHOUT resiliency scores
 	scenarioRun := &krknv1alpha1.KrknScenarioRun{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "scenario-run-no-score",
@@ -218,8 +228,7 @@ func TestGetGraphRun_NodeWithoutResiliencyScore(t *testing.T) {
 			ScenarioImage:   "quay.io/krkn-chaos/krkn-hub:pod-scenarios",
 		},
 		Status: krknv1alpha1.KrknScenarioRunStatus{
-			Phase:           "Running",
-			ResiliencyScore: nil, // No score yet
+			Phase: "Running",
 		},
 	}
 
@@ -281,8 +290,10 @@ func TestGetGraphRun_NodeWithoutResiliencyScore(t *testing.T) {
 	err := json.Unmarshal(w.Body.Bytes(), &response)
 	assert.NoError(t, err)
 
-	// Verify node status does not have a score
+	// Verify node status does not have scores
 	assert.Len(t, response.Status.NodeStatuses, 1)
-	assert.Nil(t, response.Status.NodeStatuses[0].ResiliencyScore,
-		"Node without resiliency score should have nil resiliencyScore field")
+	assert.Empty(t, response.Status.NodeStatuses[0].ResiliencyScores,
+		"Node without resiliency scores should have empty array")
+	assert.Nil(t, response.Status.NodeStatuses[0].ResiliencyScoreAvg,
+		"Node without resiliency scores should have nil average")
 }

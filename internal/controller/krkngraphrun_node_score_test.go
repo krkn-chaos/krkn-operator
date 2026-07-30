@@ -144,20 +144,14 @@ func TestCalculateResiliencyScore_StoresNodeScores(t *testing.T) {
 		"node-1": scenarioRun,
 	}
 
-	// Manually add pod logs to the fake clientset
-	// Note: In a real test, we would need to mock the pod logs stream
-	// For this unit test, we'll verify the structure is correct
-
 	// Call calculateResiliencyScore
 	err := reconciler.calculateResiliencyScore(ctx, graphRun, existingRuns)
 
 	// We expect an error because pod logs won't contain the resiliency report marker
-	// in this unit test (we'd need integration tests with real logs)
-	// But the important thing is that the structure is in place
 	assert.Error(t, err, "Expected error when no resiliency reports found")
 	assert.Contains(t, err.Error(), "no resiliency reports found")
 
-	// Verify that the ResiliencyScore field exists in the status (even if nil)
+	// Verify that the ResiliencyScores field exists in the status (even if nil)
 	var updatedScenarioRun krknv1alpha1.KrknScenarioRun
 	err = fakeClient.Get(ctx, client.ObjectKey{
 		Name:      "test-scenario-run-node-1",
@@ -165,43 +159,44 @@ func TestCalculateResiliencyScore_StoresNodeScores(t *testing.T) {
 	}, &updatedScenarioRun)
 	assert.NoError(t, err)
 
-	// The score should be nil because we didn't provide valid logs
-	assert.Nil(t, updatedScenarioRun.Status.ResiliencyScore,
-		"Score should be nil when no valid resiliency report is found")
+	// The scores should be empty because we didn't provide valid logs
+	assert.Empty(t, updatedScenarioRun.Status.ResiliencyScores,
+		"Scores should be empty when no valid resiliency report is found")
 }
 
-// TestScenarioRunStatus_ResiliencyScoreField verifies that the ResiliencyScore
+// TestScenarioRunStatus_ResiliencyScoresField verifies that the ResiliencyScores
 // field is properly defined in the KrknScenarioRunStatus struct and can be set
-func TestScenarioRunStatus_ResiliencyScoreField(t *testing.T) {
-	score := 9.5
-
-	// Create a scenario run with a resiliency score
+func TestScenarioRunStatus_ResiliencyScoresField(t *testing.T) {
+	// Create a scenario run with per-cluster resiliency scores
 	scenarioRun := &krknv1alpha1.KrknScenarioRun{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-scenario-run",
 			Namespace: "default",
 		},
 		Status: krknv1alpha1.KrknScenarioRunStatus{
-			Phase:           "Succeeded",
-			ResiliencyScore: &score,
+			Phase: "Succeeded",
+			ResiliencyScores: []krknv1alpha1.ClusterResiliencyScore{
+				{ClusterName: "cluster1", Score: 9.5},
+				{ClusterName: "cluster2", Score: 8.0},
+			},
 		},
 	}
 
 	// Verify the field is set correctly
-	assert.NotNil(t, scenarioRun.Status.ResiliencyScore)
-	assert.Equal(t, 9.5, *scenarioRun.Status.ResiliencyScore)
+	assert.Len(t, scenarioRun.Status.ResiliencyScores, 2)
+	assert.Equal(t, 9.5, scenarioRun.Status.ResiliencyScores[0].Score)
+	assert.Equal(t, "cluster1", scenarioRun.Status.ResiliencyScores[0].ClusterName)
 
-	// Verify nil score is also valid
+	// Verify nil scores is also valid
 	scenarioRunNoScore := &krknv1alpha1.KrknScenarioRun{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-scenario-run-no-score",
 			Namespace: "default",
 		},
 		Status: krknv1alpha1.KrknScenarioRunStatus{
-			Phase:           "Running",
-			ResiliencyScore: nil,
+			Phase: "Running",
 		},
 	}
 
-	assert.Nil(t, scenarioRunNoScore.Status.ResiliencyScore)
+	assert.Empty(t, scenarioRunNoScore.Status.ResiliencyScores)
 }

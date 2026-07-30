@@ -231,8 +231,7 @@ func (r *KrknGraphRunReconciler) calculateResiliencyScore(
 
 	logger.Info("resiliency scores calculated for all clusters",
 		"graphRun", graphRun.Name,
-		"clusterCount", len(graphClusterScores),
-		"message", message)
+		"clusterCount", len(graphClusterScores))
 
 	return nil
 }

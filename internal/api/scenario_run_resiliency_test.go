@@ -33,92 +33,86 @@ import (
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
 )
 
-// TestScenarioRunStatusResponse_ResiliencyScoreField verifies that the
-// ScenarioRunStatusResponse struct correctly includes the ResiliencyScore field
-func TestScenarioRunStatusResponse_ResiliencyScoreField(t *testing.T) {
-	score := 9.5
-
-	// Create a response with a resiliency score
+// TestScenarioRunStatusResponse_ResiliencyScoresField verifies that the
+// ScenarioRunStatusResponse struct correctly includes the ResiliencyScores field
+func TestScenarioRunStatusResponse_ResiliencyScoresField(t *testing.T) {
+	// Create a response with per-cluster resiliency scores
 	response := ScenarioRunStatusResponse{
 		ScenarioRunName: "test-scenario-run",
 		Phase:           "Succeeded",
 		TotalTargets:    1,
 		SuccessfulJobs:  1,
-		ResiliencyScore: &score,
+		ResiliencyScores: []ClusterResiliencyScoreResponse{
+			{ClusterName: "cluster1", Score: 9.5},
+		},
 	}
 
 	// Verify the field is set correctly
-	assert.NotNil(t, response.ResiliencyScore)
-	assert.Equal(t, 9.5, *response.ResiliencyScore)
+	assert.Len(t, response.ResiliencyScores, 1)
+	assert.Equal(t, 9.5, response.ResiliencyScores[0].Score)
 
-	// Verify nil score is also valid
+	// Verify nil scores is also valid
 	responseNoScore := ScenarioRunStatusResponse{
 		ScenarioRunName: "test-scenario-run-no-score",
 		Phase:           "Running",
 		RunningJobs:     1,
-		ResiliencyScore: nil,
 	}
 
-	assert.Nil(t, responseNoScore.ResiliencyScore)
+	assert.Empty(t, responseNoScore.ResiliencyScores)
 
 	// Verify JSON serialization includes the field
 	jsonData, err := json.Marshal(response)
 	assert.NoError(t, err)
-	assert.Contains(t, string(jsonData), "resiliencyScore")
+	assert.Contains(t, string(jsonData), "resiliencyScores")
 	assert.Contains(t, string(jsonData), "9.5")
 
-	// Verify JSON serialization with nil score (should be omitted or null)
+	// Verify JSON serialization with no scores (should be omitted)
 	jsonDataNoScore, err := json.Marshal(responseNoScore)
 	assert.NoError(t, err)
-	// The field should either be omitted or be null due to omitempty
 	assert.NotContains(t, string(jsonDataNoScore), "9.5")
 }
 
-// TestScenarioRunListItem_ResiliencyScoreField verifies that the
-// ScenarioRunListItem struct correctly includes the ResiliencyScore field
-func TestScenarioRunListItem_ResiliencyScoreField(t *testing.T) {
-	score := 8.7
-
-	// Create a list item with a resiliency score
+// TestScenarioRunListItem_ResiliencyScoresField verifies that the
+// ScenarioRunListItem struct correctly includes the ResiliencyScores field
+func TestScenarioRunListItem_ResiliencyScoresField(t *testing.T) {
+	// Create a list item with per-cluster resiliency scores
 	listItem := ScenarioRunListItem{
 		ScenarioRunName: "test-run",
 		ScenarioName:    "test-scenario",
 		Phase:           "Succeeded",
-		ResiliencyScore: &score,
+		ResiliencyScores: []ClusterResiliencyScoreResponse{
+			{ClusterName: "cluster1", Score: 8.7},
+		},
 	}
 
 	// Verify the field is set correctly
-	assert.NotNil(t, listItem.ResiliencyScore)
-	assert.Equal(t, 8.7, *listItem.ResiliencyScore)
+	assert.Len(t, listItem.ResiliencyScores, 1)
+	assert.Equal(t, 8.7, listItem.ResiliencyScores[0].Score)
 
-	// Verify nil score is also valid
+	// Verify empty scores is also valid
 	listItemNoScore := ScenarioRunListItem{
 		ScenarioRunName: "test-run-no-score",
 		ScenarioName:    "test-scenario",
 		Phase:           "Running",
-		ResiliencyScore: nil,
 	}
 
-	assert.Nil(t, listItemNoScore.ResiliencyScore)
+	assert.Empty(t, listItemNoScore.ResiliencyScores)
 
 	// Verify JSON serialization
 	jsonData, err := json.Marshal(listItem)
 	assert.NoError(t, err)
-	assert.Contains(t, string(jsonData), "resiliencyScore")
+	assert.Contains(t, string(jsonData), "resiliencyScores")
 	assert.Contains(t, string(jsonData), "8.7")
 }
 
-// TestListScenarioRuns_WithResiliencyScore verifies that the list endpoint
-// correctly includes resiliency scores for scenario runs
-func TestListScenarioRuns_WithResiliencyScore(t *testing.T) {
+// TestListScenarioRuns_WithResiliencyScores verifies that the list endpoint
+// correctly includes per-cluster resiliency scores for scenario runs
+func TestListScenarioRuns_WithResiliencyScores(t *testing.T) {
 	// Setup scheme
 	scheme := runtime.NewScheme()
 	_ = krknv1alpha1.AddToScheme(scheme)
 
-	score1 := 8.5
-	score2 := 9.2
-
-	// Create scenario runs with different scores
+	// Create scenario runs with different per-cluster scores
 	scenarioRun1 := &krknv1alpha1.KrknScenarioRun{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "scenario-run-1",
@@ -131,8 +125,10 @@ func TestListScenarioRuns_WithResiliencyScore(t *testing.T) {
 			ScenarioImage:   "quay.io/krkn-chaos/krkn-hub:test",
 		},
 		Status: krknv1alpha1.KrknScenarioRunStatus{
-			Phase:           "Succeeded",
-			ResiliencyScore: &score1,
+			Phase: "Succeeded",
+			ResiliencyScores: []krknv1alpha1.ClusterResiliencyScore{
+				{ClusterName: "cluster1", Score: 8.5},
+			},
 		},
 	}
 
@@ -148,8 +144,10 @@ func TestListScenarioRuns_WithResiliencyScore(t *testing.T) {
 			ScenarioImage:   "quay.io/krkn-chaos/krkn-hub:test",
 		},
 		Status: krknv1alpha1.KrknScenarioRunStatus{
-			Phase:           "Succeeded",
-			ResiliencyScore: &score2,
+			Phase: "Succeeded",
+			ResiliencyScores: []krknv1alpha1.ClusterResiliencyScore{
+				{ClusterName: "cluster2", Score: 9.2},
+			},
 		},
 	}
 
@@ -165,8 +163,7 @@ func TestListScenarioRuns_WithResiliencyScore(t *testing.T) {
 			ScenarioImage:   "quay.io/krkn-chaos/krkn-hub:test",
 		},
 		Status: krknv1alpha1.KrknScenarioRunStatus{
-			Phase:           "Running",
-			ResiliencyScore: nil, // No score yet
+			Phase: "Running",
 		},
 	}
 
@@ -201,16 +198,16 @@ func TestListScenarioRuns_WithResiliencyScore(t *testing.T) {
 	assert.Len(t, response.ScenarioRuns, 3)
 
 	// Find and verify each run
-	scoreMap := make(map[string]*float64)
+	scoreMap := make(map[string][]ClusterResiliencyScoreResponse)
 	for _, run := range response.ScenarioRuns {
-		scoreMap[run.ScenarioRunName] = run.ResiliencyScore
+		scoreMap[run.ScenarioRunName] = run.ResiliencyScores
 	}
 
-	assert.NotNil(t, scoreMap["scenario-run-1"])
-	assert.Equal(t, 8.5, *scoreMap["scenario-run-1"])
+	assert.Len(t, scoreMap["scenario-run-1"], 1)
+	assert.Equal(t, 8.5, scoreMap["scenario-run-1"][0].Score)
 
-	assert.NotNil(t, scoreMap["scenario-run-2"])
-	assert.Equal(t, 9.2, *scoreMap["scenario-run-2"])
+	assert.Len(t, scoreMap["scenario-run-2"], 1)
+	assert.Equal(t, 9.2, scoreMap["scenario-run-2"][0].Score)
 
-	assert.Nil(t, scoreMap["scenario-run-3"])
+	assert.Empty(t, scoreMap["scenario-run-3"])
 }

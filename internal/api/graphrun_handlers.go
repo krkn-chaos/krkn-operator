@@ -104,7 +104,7 @@ func (h *Handler) ListGraphRuns(w http.ResponseWriter, r *http.Request) {
 			CompletionTime:          run.Status.CompletionTime,
 			ResiliencyScoreEnabled:  run.Spec.ResiliencyScoreEnabled,
 			ResiliencyScoreBaseline: run.Spec.ResiliencyScoreBaseline,
-			ResiliencyScore:         convertResiliencyScore(run.Status.ResiliencyScore),
+			ResiliencyScores:        convertGraphClusterScores(run.Status.ResiliencyScores),
 		})
 	}
 
@@ -210,11 +210,11 @@ func (h *Handler) GetGraphRun(w http.ResponseWriter, r *http.Request) {
 				FailedNodes:    graphRun.Status.Summary.FailedNodes,
 				PendingNodes:   graphRun.Status.Summary.PendingNodes,
 			},
-			NodeStatuses:    h.convertNodeStatusesWithScores(ctx, graphRun.Status.NodeStatuses),
-			ResolvedLevels:  graphRun.Status.ResolvedLevels,
-			StartTime:       graphRun.Status.StartTime,
-			CompletionTime:  graphRun.Status.CompletionTime,
-			ResiliencyScore: convertResiliencyScore(graphRun.Status.ResiliencyScore),
+			NodeStatuses:     h.convertNodeStatusesWithScores(ctx, graphRun.Status.NodeStatuses),
+			ResolvedLevels:   graphRun.Status.ResolvedLevels,
+			StartTime:        graphRun.Status.StartTime,
+			CompletionTime:   graphRun.Status.CompletionTime,
+			ResiliencyScores: convertGraphClusterScores(graphRun.Status.ResiliencyScores),
 		},
 	}
 
@@ -601,6 +601,22 @@ func (h *Handler) DeleteGraphRun(w http.ResponseWriter, r *http.Request) {
 
 // Helper functions
 
+// convertClusterResiliencyScores converts ClusterResiliencyScore array to API response format
+func convertClusterResiliencyScores(scores []krknv1alpha1.ClusterResiliencyScore) []ClusterResiliencyScoreResponse {
+	if scores == nil {
+		return nil
+	}
+
+	result := make([]ClusterResiliencyScoreResponse, len(scores))
+	for i, score := range scores {
+		result[i] = ClusterResiliencyScoreResponse{
+			ClusterName: score.ClusterName,
+			Score:       score.Score,
+		}
+	}
+	return result
+}
+
 // convertGraphClusterScores converts GraphClusterScore array to API response format
 func convertGraphClusterScores(scores []krknv1alpha1.GraphClusterScore) []GraphClusterScoreResponse {
 	if scores == nil {
@@ -672,8 +688,21 @@ func (h *Handler) convertNodeStatusesWithScores(ctx context.Context, nodeStatuse
 					"nodeID", ns.NodeID,
 					"error", err.Error())
 			} else {
-				// Add the resiliency score if it exists
-				response.ResiliencyScore = scenarioRun.Status.ResiliencyScore
+				// Add per-cluster resiliency scores if they exist
+				if len(scenarioRun.Status.ResiliencyScores) > 0 {
+					scores := make([]ClusterResiliencyScoreResponse, len(scenarioRun.Status.ResiliencyScores))
+					var sum float64
+					for i, cs := range scenarioRun.Status.ResiliencyScores {
+						scores[i] = ClusterResiliencyScoreResponse{
+							ClusterName: cs.ClusterName,
+							Score:       cs.Score,
+						}
+						sum += cs.Score
+					}
+					response.ResiliencyScores = scores
+					avg := sum / float64(len(scenarioRun.Status.ResiliencyScores))
+					response.ResiliencyScoreAvg = &avg
+				}
 			}
 		}
 

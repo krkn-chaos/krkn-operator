@@ -300,8 +300,8 @@ func hasGraphRunStatusChanged(old, new *krknv1alpha1.KrknGraphRun) bool {
 		}
 	}
 
-	// ResiliencyScore changed (from nil to calculated, or status changed)
-	if !reflect.DeepEqual(old.Status.ResiliencyScore, new.Status.ResiliencyScore) {
+	// ResiliencyScores changed (from nil to calculated, or status changed)
+	if !reflect.DeepEqual(old.Status.ResiliencyScores, new.Status.ResiliencyScores) {
 		return true
 	}
 

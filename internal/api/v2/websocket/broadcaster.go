@@ -222,13 +222,13 @@ func (b *Broadcaster) BroadcastGraphRunUpdate(graphRun *krknv1alpha1.KrknGraphRu
 			FailedNodes:    graphRun.Status.Summary.FailedNodes,
 			PendingNodes:   graphRun.Status.Summary.PendingNodes,
 		},
-		NodeStatuses:    b.convertNodeStatusesWithScores(context.Background(), graphRun.Status.NodeStatuses),
-		ResolvedLevels:  graphRun.Status.ResolvedLevels,
-		StartTime:       graphRun.Status.StartTime,
-		CompletionTime:  graphRun.Status.CompletionTime,
-		OwnerUserID:     graphRun.Spec.OwnerUserID,
-		CreatedAt:       graphRun.CreationTimestamp.Format(time.RFC3339),
-		ResiliencyScore: b.convertResiliencyScore(graphRun.Status.ResiliencyScore),
+		NodeStatuses:     b.convertNodeStatusesWithScores(context.Background(), graphRun.Status.NodeStatuses),
+		ResolvedLevels:   graphRun.Status.ResolvedLevels,
+		StartTime:        graphRun.Status.StartTime,
+		CompletionTime:   graphRun.Status.CompletionTime,
+		OwnerUserID:      graphRun.Spec.OwnerUserID,
+		CreatedAt:        graphRun.CreationTimestamp.Format(time.RFC3339),
+		ResiliencyScores: b.convertGraphClusterScores(graphRun.Status.ResiliencyScores),
 	}
 
 	msg := ServerMessage{
@@ -432,8 +432,21 @@ func (b *Broadcaster) convertNodeStatusesWithScores(ctx context.Context, nodeSta
 					"nodeID", ns.NodeID,
 					"error", err.Error())
 			} else {
-				// Add the resiliency score if it exists
-				response.ResiliencyScore = scenarioRun.Status.ResiliencyScore
+				// Add per-cluster resiliency scores if they exist
+				if len(scenarioRun.Status.ResiliencyScores) > 0 {
+					scores := make([]ClusterResiliencyScoreResponse, len(scenarioRun.Status.ResiliencyScores))
+					var sum float64
+					for i, cs := range scenarioRun.Status.ResiliencyScores {
+						scores[i] = ClusterResiliencyScoreResponse{
+							ClusterName: cs.ClusterName,
+							Score:       cs.Score,
+						}
+						sum += cs.Score
+					}
+					response.ResiliencyScores = scores
+					avg := sum / float64(len(scenarioRun.Status.ResiliencyScores))
+					response.ResiliencyScoreAvg = &avg
+				}
 			}
 		}
 
@@ -443,15 +456,21 @@ func (b *Broadcaster) convertNodeStatusesWithScores(ctx context.Context, nodeSta
 	return result
 }
 
-// convertResiliencyScore converts Kubernetes ResiliencyScoreResult to WebSocket response format
-func (b *Broadcaster) convertResiliencyScore(score *krknv1alpha1.ResiliencyScoreResult) *ResiliencyScoreResponse {
-	if score == nil {
+// convertGraphClusterScores converts GraphClusterScore array to WebSocket response format
+func (b *Broadcaster) convertGraphClusterScores(scores []krknv1alpha1.GraphClusterScore) []GraphClusterScoreResponse {
+	if scores == nil {
 		return nil
 	}
-	return &ResiliencyScoreResponse{
-		Calculated: score.Calculated,
-		Baseline:   score.Baseline,
-		Status:     score.Status,
-		Message:    score.Message,
+	result := make([]GraphClusterScoreResponse, len(scores))
+	for i, score := range scores {
+		result[i] = GraphClusterScoreResponse{
+			ClusterName:       score.ClusterName,
+			Calculated:        score.Calculated,
+			Baseline:          score.Baseline,
+			Status:            score.Status,
+			Message:           score.Message,
+			NodeContributions: score.NodeContributions,
+		}
 	}
+	return result
 }
