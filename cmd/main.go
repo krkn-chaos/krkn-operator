@@ -213,6 +213,13 @@ func main() {
 	}
 	setupLog.Info("KrknTargetRequest namespace", "namespace", krknNamespace)
 
+	cacheNamespaces := map[string]cache.Config{
+		operatorNamespace: {},
+	}
+	if krknNamespace != operatorNamespace {
+		cacheNamespaces[krknNamespace] = cache.Config{}
+	}
+
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 		Scheme:                  scheme,
 		Metrics:                 metricsServerOptions,
