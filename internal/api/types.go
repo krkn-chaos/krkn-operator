@@ -816,12 +816,3 @@ type GraphClusterScoreResponse struct {
 	Message           string             `json:"message,omitempty"`
 	NodeContributions map[string]float64 `json:"nodeContributions,omitempty"`
 }
-
-// ResiliencyScoreResponse represents the calculated resiliency score
-// DEPRECATED: Use GraphClusterScoreResponse for multi-cluster support
-type ResiliencyScoreResponse struct {
-	Calculated float64  `json:"calculated"`
-	Baseline   *float64 `json:"baseline,omitempty"`
-	Status     string   `json:"status"`
-	Message    string   `json:"message,omitempty"`
-}

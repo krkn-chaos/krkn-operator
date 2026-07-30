@@ -140,7 +140,7 @@ spec:
                   1. RESILIENCY_SCORE=true environment variable is set in all scenario pods
                   2. If ResiliencyMountPath is specified, the controller identifies the resiliency metrics file
                      by matching the mount path in node.Volumes and sets RESILIENCY_FILE=<path> env var
-                  3. Upon completion, the controller calculates the final score and stores it in Status.ResiliencyScore
+                  3. Upon completion, the controller calculates the final score and stores it in Status.ResiliencyScores
 
                   Populated from HTTP header: X-Resiliency-Score
                   When enabled, X-Resiliency-Baseline header is REQUIRED

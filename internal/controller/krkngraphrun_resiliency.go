@@ -41,7 +41,7 @@ import (
 // 3. Parses the KRKN_RESILIENCY_REPORT_JSON marker from logs using krknctl
 // 4. Aggregates all reports into a single final score using krknctl
 // 5. Compares the calculated score against the baseline
-// 6. Populates GraphRun.Status.ResiliencyScore (immutable once set)
+// 6. Populates GraphRun.Status.ResiliencyScores (immutable once set)
 func (r *KrknGraphRunReconciler) calculateResiliencyScore(
 	ctx context.Context,
 	graphRun *krknv1alpha1.KrknGraphRun,
@@ -109,20 +109,11 @@ func (r *KrknGraphRunReconciler) calculateResiliencyScore(
 				continue
 			}
 
-			// Log detailed scenario breakdown for debugging
-			scenarioNames := []string{}
-			for name := range report.OverallReport.Scenarios {
-				scenarioNames = append(scenarioNames, name)
-			}
-
-			logger.Info("parsed resiliency report from pod",
+			logger.V(1).Info("parsed resiliency report from pod",
 				"nodeID", nodeStatus.NodeID,
 				"podName", jobStatus.PodName,
 				"clusterName", jobStatus.ClusterName,
-				"scenarioCount", len(report.OverallReport.Scenarios),
-				"scenarioNames", scenarioNames,
-				"scenariosMap", report.OverallReport.Scenarios,
-				"aggregatedScore", report.OverallReport.ResiliencyScore)
+				"score", report.OverallReport.ResiliencyScore)
 
 			reports = append(reports, *report)
 

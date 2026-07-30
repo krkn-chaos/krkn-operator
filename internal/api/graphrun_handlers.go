@@ -637,21 +637,6 @@ func convertGraphClusterScores(scores []krknv1alpha1.GraphClusterScore) []GraphC
 	return result
 }
 
-// convertResiliencyScore converts ResiliencyScoreResult to API response format
-// DEPRECATED: Use convertGraphClusterScores
-func convertResiliencyScore(score *krknv1alpha1.ResiliencyScoreResult) *ResiliencyScoreResponse {
-	if score == nil {
-		return nil
-	}
-
-	return &ResiliencyScoreResponse{
-		Calculated: score.Calculated,
-		Baseline:   score.Baseline,
-		Status:     score.Status,
-		Message:    score.Message,
-	}
-}
-
 // convertNodeStatuses converts Kubernetes NodeStatus to API response format
 // convertNodeStatusesWithScores converts Kubernetes NodeStatus to API response format
 // and enriches each node with its individual resiliency score from the associated KrknScenarioRun

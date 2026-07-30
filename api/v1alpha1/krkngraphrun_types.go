@@ -160,36 +160,6 @@ type GraphClusterScore struct {
 	NodeContributions map[string]float64 `json:"nodeContributions,omitempty"`
 }
 
-// ResiliencyScoreResult contains the calculated resiliency score and comparison with baseline.
-// This is IMMUTABLE - calculated once when the GraphRun completes and never recalculated.
-// Each run represents an invariant result over time for historical comparison and trend analysis.
-//
-// DEPRECATED: Use ResiliencyScores (array of GraphClusterScore) for multi-cluster support.
-// This struct is kept for backward compatibility with single-cluster workflows.
-type ResiliencyScoreResult struct {
-	// Calculated is the final computed resiliency score
-	// This value is calculated by aggregating metrics from all nodes in the graph run
-	Calculated float64 `json:"calculated"`
-
-	// Baseline is the user-defined minimum acceptable score (from Spec.ResiliencyScoreBaseline)
-	// Used for pass/fail determination
-	// +optional
-	Baseline *float64 `json:"baseline,omitempty"`
-
-	// Status indicates whether the run met the baseline requirements
-	// Possible values:
-	// - "pass": calculated score >= baseline
-	// - "fail": calculated score < baseline
-	// - "no-baseline": no baseline was specified, score calculated but not compared
-	// - "error": score calculation failed (e.g., pod logs unavailable, no reports found)
-	Status string `json:"status"`
-
-	// Message provides a human-readable description of the result
-	// Example: "Score 8.5 is below baseline 9.0"
-	// +optional
-	Message string `json:"message,omitempty"`
-}
-
 // KrknGraphRunSpec defines the desired state of KrknGraphRun
 type KrknGraphRunSpec struct {
 	// Graph is the dependency graph of scenarios to execute
@@ -216,7 +186,7 @@ type KrknGraphRunSpec struct {
 	// 1. RESILIENCY_SCORE=true environment variable is set in all scenario pods
 	// 2. If ResiliencyMountPath is specified, the controller identifies the resiliency metrics file
 	//    by matching the mount path in node.Volumes and sets RESILIENCY_FILE=<path> env var
-	// 3. Upon completion, the controller calculates the final score and stores it in Status.ResiliencyScore
+	// 3. Upon completion, the controller calculates the final score and stores it in Status.ResiliencyScores
 	//
 	// Populated from HTTP header: X-Resiliency-Score
 	// When enabled, X-Resiliency-Baseline header is REQUIRED
