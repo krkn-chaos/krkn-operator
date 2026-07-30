@@ -48,6 +48,7 @@ import (
 // @Success 201 {object} files.CreateFileResponse "File created"
 // @Failure 400 {object} ErrorResponse "Invalid request or validation error"
 // @Failure 401 {object} ErrorResponse "Unauthorized"
+// @Failure 409 {object} ErrorResponse "File name already exists"
 // @Failure 500 {object} ErrorResponse "Internal server error"
 // @Router /files [post]
 func (h *Handler) CreateFile(w http.ResponseWriter, r *http.Request) {
@@ -90,11 +91,44 @@ func (h *Handler) CreateFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Default filePurpose to "file" if not specified
+	if req.FilePurpose == "" {
+		req.FilePurpose = files.FilePurposeFile
+	}
+
 	// Validate filePurpose - only workflow API can create workflow-template files
-	if req.FilePurpose == "workflow-template" {
+	if req.FilePurpose == files.FilePurposeWorkflow {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
 			Error:   "bad_request",
 			Message: "Use POST /api/v1/workflows to create workflow templates",
+		})
+		return
+	}
+
+	// Validate filePurpose is a known value
+	if !files.IsValidFilePurpose(req.FilePurpose) {
+		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+			Error:   "bad_request",
+			Message: fmt.Sprintf("Invalid filePurpose '%s'. Valid values: %s", req.FilePurpose, strings.Join(files.ValidFilePurposes(), ", ")),
+		})
+		return
+	}
+
+	// Check for duplicate logical name (global uniqueness)
+	logicalName := deriveLogicalName(req.FileName, req.WorkflowName)
+	existingID, err := h.checkDuplicateLogicalName(ctx, logicalName, "")
+	if err != nil {
+		logger.Error(err, "Failed to check for duplicate file name", "logicalName", logicalName)
+		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+			Error:   "internal_error",
+			Message: "Failed to validate file name uniqueness",
+		})
+		return
+	}
+	if existingID != "" {
+		writeJSONError(w, http.StatusConflict, ErrorResponse{
+			Error:   "conflict",
+			Message: fmt.Sprintf("A file with name '%s' already exists (ID: %s)", logicalName, existingID),
 		})
 		return
 	}
@@ -161,7 +195,7 @@ func (h *Handler) CreateFile(w http.ResponseWriter, r *http.Request) {
 // @Tags files
 // @Produce json
 // @Security BearerAuth
-// @Param filePurpose query string false "Filter by file purpose (e.g., workflow-template)"
+// @Param filePurpose query string false "Filter by file purpose (file, workflow-template, resiliency-score)"
 // @Success 200 {object} files.ListFilesResponse "List of files"
 // @Failure 401 {object} ErrorResponse "Unauthorized"
 // @Failure 403 {object} ErrorResponse "Forbidden (admin only)"
@@ -371,6 +405,29 @@ func (h *Handler) UpdateFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Check for duplicate logical name on rename (exclude current file)
+	workflowName := ""
+	if req.WorkflowName != nil {
+		workflowName = *req.WorkflowName
+	}
+	logicalName := deriveLogicalName(req.FileName, workflowName)
+	existingID, err := h.checkDuplicateLogicalName(ctx, logicalName, fileID)
+	if err != nil {
+		logger.Error(err, "Failed to check for duplicate file name", "logicalName", logicalName)
+		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+			Error:   "internal_error",
+			Message: "Failed to validate file name uniqueness",
+		})
+		return
+	}
+	if existingID != "" {
+		writeJSONError(w, http.StatusConflict, ErrorResponse{
+			Error:   "conflict",
+			Message: fmt.Sprintf("A file with name '%s' already exists (ID: %s)", logicalName, existingID),
+		})
+		return
+	}
+
 	// Get current user for audit trail
 	updatedBy := claims.UserID
 
@@ -491,7 +548,7 @@ func (h *Handler) DeleteFile(w http.ResponseWriter, r *http.Request) {
 // @Tags files
 // @Produce json
 // @Security BearerAuth
-// @Param filePurpose query string false "Filter by file purpose (e.g., workflow-template)"
+// @Param filePurpose query string false "Filter by file purpose (file, workflow-template, resiliency-score)"
 // @Success 200 {object} files.AvailableFilesResponse "List of accessible files"
 // @Failure 401 {object} ErrorResponse "Unauthorized"
 // @Failure 500 {object} ErrorResponse "Internal server error"
@@ -774,7 +831,7 @@ func buildFileResponse(configMap *corev1.ConfigMap) files.FileResponse {
 
 	// Get workflow name with backwards-compatible fallback
 	workflowName := configMap.Annotations[files.WorkflowNameAnnotation]
-	if workflowName == "" && files.ExtractFilePurposeFromLabels(configMap.Labels) == "workflow-template" {
+	if workflowName == "" && files.ExtractFilePurposeFromLabels(configMap.Labels) == files.FilePurposeWorkflow {
 		// Fallback for workflows created before workflowName annotation was added
 		workflowName = fileName
 	}
@@ -817,6 +874,61 @@ func buildFileInfo(configMap *corev1.ConfigMap) files.FileInfo {
 		CreatedAt:   configMap.Annotations[files.CreatedAtAnnotation],
 		UpdatedAt:   configMap.Annotations[files.UpdatedAtAnnotation],
 	}
+}
+
+// extractLogicalName derives the logical name from an existing file ConfigMap.
+// For workflows, the logical name is the workflowName annotation.
+// For regular files, it is the primary Data key (excluding studioLayout.json).
+func extractLogicalName(cm *corev1.ConfigMap) string {
+	if wn := cm.Annotations[files.WorkflowNameAnnotation]; wn != "" {
+		return wn
+	}
+	for k := range cm.Data {
+		if k != "studioLayout.json" {
+			return k
+		}
+	}
+	return ""
+}
+
+// deriveLogicalName derives the logical name from request fields.
+// If workflowName is set, it takes precedence (workflow identity).
+// Otherwise, fileName is used (regular file identity).
+func deriveLogicalName(fileName, workflowName string) string {
+	if workflowName != "" {
+		return workflowName
+	}
+	return fileName
+}
+
+// checkDuplicateLogicalName checks if a file with the same logical name already exists.
+// The check is global across all filePurpose values.
+// excludeFileID can be set to skip a specific file (for update operations).
+// Returns the existing file's ID if a duplicate is found, or empty string if no conflict.
+func (h *Handler) checkDuplicateLogicalName(ctx context.Context, logicalName, excludeFileID string) (string, error) {
+	var configMapList corev1.ConfigMapList
+	err := h.client.List(ctx, &configMapList,
+		client.InNamespace(h.namespace),
+		client.MatchingLabels{
+			files.AppNameLabel:      files.AppName,
+			files.AppComponentLabel: files.ComponentFile,
+		},
+	)
+	if err != nil {
+		return "", fmt.Errorf("failed to list file ConfigMaps for duplicate check: %w", err)
+	}
+
+	for i := range configMapList.Items {
+		cm := &configMapList.Items[i]
+		existingID := files.ExtractFileIDFromLabels(cm.Labels)
+		if excludeFileID != "" && existingID == excludeFileID {
+			continue
+		}
+		if extractLogicalName(cm) == logicalName {
+			return existingID, nil
+		}
+	}
+	return "", nil
 }
 
 // validateCreateFileRequest validates a CreateFileRequest

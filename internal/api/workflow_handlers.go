@@ -21,6 +21,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -46,6 +47,7 @@ import (
 // @Success 201 {object} workflows.CreateWorkflowResponse "Workflow created"
 // @Failure 400 {object} ErrorResponse "Invalid request or graph validation error"
 // @Failure 401 {object} ErrorResponse "Unauthorized"
+// @Failure 409 {object} ErrorResponse "Workflow name already exists"
 // @Failure 500 {object} ErrorResponse "Internal server error"
 // @Router /workflows [post]
 func (h *Handler) CreateWorkflow(w http.ResponseWriter, r *http.Request) {
@@ -122,17 +124,24 @@ func (h *Handler) CreateWorkflow(w http.ResponseWriter, r *http.Request) {
 		StudioLayout:   studioLayoutJSON, // Studio visual layout (optional)
 		WorkflowName:   req.WorkflowName, // User-defined workflow name
 		Description:    req.Description,
-		FileType:       req.FileType,        // User categorization (optional)
-		Groups:         req.Groups,          // RBAC groups
-		AvailableToAll: req.AvailableToAll,  // Public flag
-		FilePurpose:    "workflow-template", // System marker
+		FileType:       req.FileType,              // User categorization (optional)
+		Groups:         req.Groups,                // RBAC groups
+		AvailableToAll: req.AvailableToAll,        // Public flag
+		FilePurpose:    files.FilePurposeWorkflow, // System marker
 	}
 
 	// Call existing CreateFile handler logic
 	fileResp, err := h.createFileInternal(ctx, fileReq)
 	if err != nil {
+		var dupErr *DuplicateFileError
+		if errors.As(err, &dupErr) {
+			writeJSONError(w, http.StatusConflict, ErrorResponse{
+				Error:   "conflict",
+				Message: dupErr.Error(),
+			})
+			return
+		}
 		// Distinguish validation errors (4xx) from internal errors (5xx)
-		// Only known validation errors should return 400
 		statusCode := http.StatusInternalServerError
 		errorCode := "internal_error"
 		if strings.Contains(err.Error(), "you can only assign files to your own group") {
@@ -212,7 +221,7 @@ func (h *Handler) ListWorkflows(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Call file list with filePurpose filter
-	fileList, err := h.listFilesInternal(ctx, "workflow-template")
+	fileList, err := h.listFilesInternal(ctx, files.FilePurposeWorkflow)
 	if err != nil {
 		logger.Error(err, "Failed to list workflow files")
 		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
@@ -265,7 +274,7 @@ func (h *Handler) ListAvailableWorkflows(w http.ResponseWriter, r *http.Request)
 	}
 
 	// Call file list with filePurpose filter (returns ConfigMaps)
-	configMaps, err := h.listAvailableFilesInternal(ctx, "workflow-template")
+	configMaps, err := h.listAvailableFilesInternal(ctx, files.FilePurposeWorkflow)
 	if err != nil {
 		logger.Error(err, "Failed to list available workflow files")
 		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
@@ -315,7 +324,7 @@ func (h *Handler) GetWorkflow(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Verify it's a workflow file
-	if fileResp.FilePurpose != "workflow-template" {
+	if fileResp.FilePurpose != files.FilePurposeWorkflow {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
 			Error:   "bad_request",
 			Message: "File is not a workflow template",
@@ -418,11 +427,19 @@ func (h *Handler) UpdateWorkflow(w http.ResponseWriter, r *http.Request) {
 		FileType:       req.FileType,
 		Groups:         req.Groups,
 		AvailableToAll: req.AvailableToAll,
-		FilePurpose:    "workflow-template",
+		FilePurpose:    files.FilePurposeWorkflow,
 	}
 
 	err = h.updateFileInternal(ctx, workflowID, fileReq)
 	if err != nil {
+		var dupErr *DuplicateFileError
+		if errors.As(err, &dupErr) {
+			writeJSONError(w, http.StatusConflict, ErrorResponse{
+				Error:   "conflict",
+				Message: dupErr.Error(),
+			})
+			return
+		}
 		logger.Error(err, "Failed to update workflow", "workflowID", workflowID)
 		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
 			Error:   "internal_error",
@@ -466,7 +483,7 @@ func (h *Handler) DeleteWorkflow(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Check file purpose
-	if files.ExtractFilePurposeFromLabels(configMap.Labels) != "workflow-template" {
+	if files.ExtractFilePurposeFromLabels(configMap.Labels) != files.FilePurposeWorkflow {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
 			Error:   "bad_request",
 			Message: "File is not a workflow template",
@@ -571,6 +588,16 @@ func (h *Handler) createFileInternal(ctx context.Context, req files.CreateFileRe
 	// Validate request
 	if err := validateCreateFileRequest(ctx, h.client, &req, h.namespace, isAdmin, claims.UserID); err != nil {
 		return nil, err
+	}
+
+	// Check for duplicate logical name (global uniqueness)
+	logicalName := deriveLogicalName(req.FileName, req.WorkflowName)
+	existingID, err := h.checkDuplicateLogicalName(ctx, logicalName, "")
+	if err != nil {
+		return nil, fmt.Errorf("failed to check for duplicate file name: %w", err)
+	}
+	if existingID != "" {
+		return nil, &DuplicateFileError{Name: logicalName, ExistingID: existingID}
 	}
 
 	// Generate unique file ID (UUID)
@@ -770,9 +797,9 @@ func (h *Handler) updateFileInternal(ctx context.Context, fileID string, req fil
 
 	// Verify file purpose matches expected type (only for workflow operations)
 	// This prevents workflow endpoints from mutating non-workflow files
-	if req.FilePurpose == "workflow-template" {
+	if req.FilePurpose == files.FilePurposeWorkflow {
 		existingPurpose := files.ExtractFilePurposeFromLabels(configMap.Labels)
-		if existingPurpose != "workflow-template" {
+		if existingPurpose != files.FilePurposeWorkflow {
 			return fmt.Errorf("cannot update non-workflow file via workflow API")
 		}
 	}
@@ -784,6 +811,20 @@ func (h *Handler) updateFileInternal(ctx context.Context, fileID string, req fil
 	}
 	if !isOwner {
 		return fmt.Errorf("only the workflow owner or an admin can update this workflow")
+	}
+
+	// Check for duplicate logical name on rename (exclude current file)
+	workflowName := ""
+	if req.WorkflowName != nil {
+		workflowName = *req.WorkflowName
+	}
+	logicalName := deriveLogicalName(req.FileName, workflowName)
+	existingID, err := h.checkDuplicateLogicalName(ctx, logicalName, fileID)
+	if err != nil {
+		return fmt.Errorf("failed to check for duplicate file name: %w", err)
+	}
+	if existingID != "" {
+		return &DuplicateFileError{Name: logicalName, ExistingID: existingID}
 	}
 
 	// Get current user for audit trail

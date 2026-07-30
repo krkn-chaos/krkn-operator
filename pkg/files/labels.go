@@ -55,6 +55,13 @@ const (
 	AppName = "krkn-operator"
 	// ComponentFile is the value for AppComponentLabel
 	ComponentFile = "file"
+
+	// FilePurposeFile is the filePurpose value for generic user files
+	FilePurposeFile = "file"
+	// FilePurposeWorkflow is the filePurpose value for workflow graph templates
+	FilePurposeWorkflow = "workflow-template"
+	// FilePurposeResiliency is the filePurpose value for resiliency scoring metric definitions
+	FilePurposeResiliency = "resiliency-score"
 )
 
 // BuildFileLabels creates the labels map for a file ConfigMap
@@ -209,4 +216,19 @@ func ExtractFileTypeFromLabels(labels map[string]string) string {
 // Returns empty string if no file purpose label is found
 func ExtractFilePurposeFromLabels(labels map[string]string) string {
 	return labels[FilePurposeLabel]
+}
+
+// ValidFilePurposes returns all valid filePurpose values
+func ValidFilePurposes() []string {
+	return []string{FilePurposeFile, FilePurposeWorkflow, FilePurposeResiliency}
+}
+
+// IsValidFilePurpose checks if a filePurpose value is valid
+func IsValidFilePurpose(purpose string) bool {
+	for _, valid := range ValidFilePurposes() {
+		if purpose == valid {
+			return true
+		}
+	}
+	return false
 }

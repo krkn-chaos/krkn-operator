@@ -17,6 +17,7 @@ limitations under the License.
 package api
 
 import (
+	"fmt"
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -43,6 +44,16 @@ type NodesResponse struct {
 type ErrorResponse struct {
 	Error   string `json:"error"`
 	Message string `json:"message"`
+}
+
+// DuplicateFileError is returned when a file with the same logical name already exists
+type DuplicateFileError struct {
+	Name       string
+	ExistingID string
+}
+
+func (e *DuplicateFileError) Error() string {
+	return fmt.Sprintf("a file with name '%s' already exists (ID: %s)", e.Name, e.ExistingID)
 }
 
 // ScenariosRequest represents the optional request body for POST /scenarios
