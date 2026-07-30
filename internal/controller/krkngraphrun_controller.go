@@ -211,9 +211,10 @@ func (r *KrknGraphRunReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		r.calculateGlobalStatus(&graphRun)
 
 		// 7.1. Calculate resiliency score if enabled and GraphRun is in terminal state
+		// Check for sentinel values (calculated == -1) or empty scores
 		if graphRun.Spec.ResiliencyScoreEnabled &&
 			r.isTerminalPhase(graphRun.Status.Phase) &&
-			len(graphRun.Status.ResiliencyScores) == 0 {
+			r.hasOnlySentinelScores(graphRun.Status.ResiliencyScores) {
 			if err := r.calculateResiliencyScore(ctx, &graphRun, existingRuns); err != nil {
 				logger.Error(err, "failed to calculate resiliency score", "graphRun", graphRun.Name)
 
@@ -275,9 +276,28 @@ func (r *KrknGraphRunReconciler) initializeStatus(ctx context.Context, graphRun 
 		FailedNodes:    0,
 	}
 
+	// Populate sentinel resiliency scores (calculated: -1) so the frontend
+	// can show "Calculating..." from the start instead of "N/A"
+	if graphRun.Spec.ResiliencyScoreEnabled {
+		var sentinelScores []krknv1alpha1.GraphClusterScore
+		for _, clusters := range graphRun.Spec.TargetClusters {
+			for _, clusterName := range clusters {
+				sentinelScores = append(sentinelScores, krknv1alpha1.GraphClusterScore{
+					ClusterName: clusterName,
+					Calculated:  -1,
+					Baseline:    graphRun.Spec.ResiliencyScoreBaseline,
+					Status:      "calculating",
+					Message:     "Score calculation in progress",
+				})
+			}
+		}
+		graphRun.Status.ResiliencyScores = sentinelScores
+	}
+
 	logger.Info("initializing graphRun status",
 		"graphRun", graphRun.Name,
-		"totalNodes", totalNodes)
+		"totalNodes", totalNodes,
+		"resiliencyScoreEnabled", graphRun.Spec.ResiliencyScoreEnabled)
 
 	// Update with conflict retry
 	if err := r.Status().Update(ctx, graphRun); err != nil {
@@ -768,6 +788,21 @@ func (r *KrknGraphRunReconciler) updateStatusWithError(
 // isTerminalPhase returns true if the phase indicates the GraphRun has completed execution
 func (r *KrknGraphRunReconciler) isTerminalPhase(phase string) bool {
 	return phase == "Completed" || phase == "Failed" || phase == "PartiallyFailed"
+}
+
+// hasOnlySentinelScores returns true if the scores slice is empty or contains
+// only sentinel values (calculated == -1), meaning real scores haven't been
+// calculated yet.
+func (r *KrknGraphRunReconciler) hasOnlySentinelScores(scores []krknv1alpha1.GraphClusterScore) bool {
+	if len(scores) == 0 {
+		return true
+	}
+	for _, s := range scores {
+		if s.Calculated != -1 {
+			return false
+		}
+	}
+	return true
 }
 
 // translateVolumesToFileMounts translates GraphScenarioNode.Volumes (UUID->mountPath) to FileMount objects.

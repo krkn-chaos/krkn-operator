@@ -99,7 +99,7 @@ func (b *Broadcaster) BroadcastScenarioRunUpdate(scenarioRun *krknv1alpha1.KrknS
 		RegistryName:    scenarioRun.Spec.RegistryName,
 		GraphRunName:    scenarioRun.Labels["krkn.dev/graph-run"],
 		GraphNodeID:     scenarioRun.Labels["krkn.dev/graph-node"],
-		CreatedAt:       scenarioRun.CreationTimestamp.Format(time.RFC3339),
+		CreationTimestamp: scenarioRun.CreationTimestamp.Format(time.RFC3339),
 	}
 
 	msg := ServerMessage{
@@ -227,7 +227,7 @@ func (b *Broadcaster) BroadcastGraphRunUpdate(graphRun *krknv1alpha1.KrknGraphRu
 		StartTime:        graphRun.Status.StartTime,
 		CompletionTime:   graphRun.Status.CompletionTime,
 		OwnerUserID:      graphRun.Spec.OwnerUserID,
-		CreatedAt:        graphRun.CreationTimestamp.Format(time.RFC3339),
+		CreationTimestamp: graphRun.CreationTimestamp.Format(time.RFC3339),
 		ResiliencyScores: b.convertGraphClusterScores(graphRun.Status.ResiliencyScores),
 	}
 

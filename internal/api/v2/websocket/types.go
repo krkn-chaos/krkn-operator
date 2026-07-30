@@ -17,7 +17,7 @@ type ScenarioRunStatusResponse struct {
 	RegistryName    string      `json:"registryName,omitempty"`
 	GraphRunName    string      `json:"graphRunName,omitempty"`
 	GraphNodeID     string      `json:"graphNodeId,omitempty"`
-	CreatedAt       string      `json:"createdAt,omitempty"`
+	CreationTimestamp string     `json:"creationTimestamp,omitempty"`
 }
 
 // GraphRunResponse - WebSocket response for GraphRun (same fields as REST API)
@@ -30,7 +30,7 @@ type GraphRunResponse struct {
 	StartTime        *metav1.Time                `json:"startTime,omitempty"`
 	CompletionTime   *metav1.Time                `json:"completionTime,omitempty"`
 	OwnerUserID      string                      `json:"ownerUserId,omitempty"`
-	CreatedAt        string                      `json:"createdAt,omitempty"`
+	CreationTimestamp string                      `json:"creationTimestamp,omitempty"`
 	ResiliencyScores []GraphClusterScoreResponse `json:"resiliencyScores,omitempty"`
 }
 

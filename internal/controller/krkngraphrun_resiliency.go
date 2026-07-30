@@ -53,11 +53,14 @@ func (r *KrknGraphRunReconciler) calculateResiliencyScore(
 		"graphRun", graphRun.Name,
 		"totalNodes", len(graphRun.Status.NodeStatuses))
 
-	// Collect resiliency reports from all completed scenario runs
+	// Collect resiliency reports from all completed scenario runs.
+	// clusterNodeScores is built in this single pass to avoid re-reading from
+	// ScenarioRun objects after Status().Update() (which overwrites the local
+	// object with the server response and may strip unrecognized fields).
 	var reports []resiliency.DetailedScenarioReport
+	clusterNodeScores := make(map[string]map[string]float64)
 
 	for _, nodeStatus := range graphRun.Status.NodeStatuses {
-		// Only process completed nodes
 		if nodeStatus.Phase != "Completed" {
 			logger.V(1).Info("skipping node - not completed",
 				"nodeID", nodeStatus.NodeID,
@@ -65,7 +68,6 @@ func (r *KrknGraphRunReconciler) calculateResiliencyScore(
 			continue
 		}
 
-		// Get the scenario run for this node
 		sanitizedNodeID := sanitizeNodeID(nodeStatus.NodeID)
 		scenarioRun, found := existingRuns[sanitizedNodeID]
 		if !found {
@@ -75,12 +77,9 @@ func (r *KrknGraphRunReconciler) calculateResiliencyScore(
 			continue
 		}
 
-		// Track cluster scores for this scenario run
 		var clusterScores []krknv1alpha1.ClusterResiliencyScore
 
-		// Process all cluster jobs for this scenario run
 		for _, jobStatus := range scenarioRun.Status.ClusterJobs {
-			// Skip if pod name is not set
 			if jobStatus.PodName == "" {
 				logger.V(1).Info("pod name not set for cluster job",
 					"nodeID", nodeStatus.NodeID,
@@ -88,7 +87,6 @@ func (r *KrknGraphRunReconciler) calculateResiliencyScore(
 				continue
 			}
 
-			// Fetch pod logs
 			podLogs, err := r.fetchPodLogs(ctx, scenarioRun.Namespace, jobStatus.PodName)
 			if err != nil {
 				logger.Error(err, "failed to fetch pod logs",
@@ -98,7 +96,6 @@ func (r *KrknGraphRunReconciler) calculateResiliencyScore(
 				continue
 			}
 
-			// Parse resiliency report from logs using krknctl
 			report, err := resiliency.ParseResiliencyReport(podLogs)
 			if err != nil {
 				logger.V(1).Info("no resiliency report found in pod logs",
@@ -117,15 +114,21 @@ func (r *KrknGraphRunReconciler) calculateResiliencyScore(
 
 			reports = append(reports, *report)
 
-			// Store score per cluster for this node
 			clusterScore := krknv1alpha1.ClusterResiliencyScore{
 				ClusterName: jobStatus.ClusterName,
 				Score:       report.OverallReport.ResiliencyScore,
 			}
 			clusterScores = append(clusterScores, clusterScore)
+
+			// Build aggregation map in-place (avoids a second pass that would
+			// read from scenarioRun.Status after Status().Update() overwrites it)
+			if clusterNodeScores[jobStatus.ClusterName] == nil {
+				clusterNodeScores[jobStatus.ClusterName] = make(map[string]float64)
+			}
+			clusterNodeScores[jobStatus.ClusterName][nodeStatus.NodeID] = report.OverallReport.ResiliencyScore
 		}
 
-		// Update the scenario run with per-cluster scores
+		// Persist per-cluster scores on the ScenarioRun (best-effort)
 		if len(clusterScores) > 0 && len(scenarioRun.Status.ResiliencyScores) == 0 {
 			scenarioRun.Status.ResiliencyScores = clusterScores
 			if err := r.Status().Update(ctx, scenarioRun); err != nil {
@@ -133,7 +136,6 @@ func (r *KrknGraphRunReconciler) calculateResiliencyScore(
 					"nodeID", nodeStatus.NodeID,
 					"scenarioRun", scenarioRun.Name,
 					"clusterCount", len(clusterScores))
-				// Don't fail the entire calculation, just log the error
 			} else {
 				logger.Info("updated scenario run with per-cluster resiliency scores",
 					"nodeID", nodeStatus.NodeID,
@@ -143,33 +145,8 @@ func (r *KrknGraphRunReconciler) calculateResiliencyScore(
 		}
 	}
 
-	// Check if we found any reports
 	if len(reports) == 0 {
 		return fmt.Errorf("no resiliency reports found in any scenario run logs")
-	}
-
-	// Aggregate scores PER CLUSTER
-	// Build map: cluster -> list of (nodeID, score)
-	clusterNodeScores := make(map[string]map[string]float64)
-
-	for _, nodeStatus := range graphRun.Status.NodeStatuses {
-		if nodeStatus.Phase != "Completed" {
-			continue
-		}
-
-		sanitizedNodeID := sanitizeNodeID(nodeStatus.NodeID)
-		scenarioRun, found := existingRuns[sanitizedNodeID]
-		if !found {
-			continue
-		}
-
-		// Add this node's scores to each cluster
-		for _, clusterScore := range scenarioRun.Status.ResiliencyScores {
-			if clusterNodeScores[clusterScore.ClusterName] == nil {
-				clusterNodeScores[clusterScore.ClusterName] = make(map[string]float64)
-			}
-			clusterNodeScores[clusterScore.ClusterName][nodeStatus.NodeID] = clusterScore.Score
-		}
 	}
 
 	// Calculate final GraphClusterScores
