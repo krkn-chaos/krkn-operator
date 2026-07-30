@@ -57,8 +57,14 @@ func (r *KrknGraphRunReconciler) calculateResiliencyScore(
 	// clusterNodeScores is built in this single pass to avoid re-reading from
 	// ScenarioRun objects after Status().Update() (which overwrites the local
 	// object with the server response and may strip unrecognized fields).
-	var reports []resiliency.DetailedScenarioReport
-	clusterNodeScores := make(map[string]map[string]float64)
+	type clusterAggregation struct {
+		providerName string
+		clusterName  string
+		nodeScores   map[string]float64
+	}
+	foundReports := false
+	// Key: "providerName/clusterName" to avoid collisions across providers
+	clusterAggs := make(map[string]*clusterAggregation)
 
 	for _, nodeStatus := range graphRun.Status.NodeStatuses {
 		if nodeStatus.Phase != "Completed" {
@@ -112,7 +118,7 @@ func (r *KrknGraphRunReconciler) calculateResiliencyScore(
 				"clusterName", jobStatus.ClusterName,
 				"score", report.OverallReport.ResiliencyScore)
 
-			reports = append(reports, *report)
+			foundReports = true
 
 			clusterScore := krknv1alpha1.ClusterResiliencyScore{
 				ClusterName: jobStatus.ClusterName,
@@ -120,12 +126,19 @@ func (r *KrknGraphRunReconciler) calculateResiliencyScore(
 			}
 			clusterScores = append(clusterScores, clusterScore)
 
-			// Build aggregation map in-place (avoids a second pass that would
-			// read from scenarioRun.Status after Status().Update() overwrites it)
-			if clusterNodeScores[jobStatus.ClusterName] == nil {
-				clusterNodeScores[jobStatus.ClusterName] = make(map[string]float64)
+			// Build aggregation map in-place, keyed by provider/cluster to
+			// avoid collisions when different providers share a cluster name
+			aggKey := jobStatus.ProviderName + "/" + jobStatus.ClusterName
+			agg, exists := clusterAggs[aggKey]
+			if !exists {
+				agg = &clusterAggregation{
+					providerName: jobStatus.ProviderName,
+					clusterName:  jobStatus.ClusterName,
+					nodeScores:   make(map[string]float64),
+				}
+				clusterAggs[aggKey] = agg
 			}
-			clusterNodeScores[jobStatus.ClusterName][nodeStatus.NodeID] = report.OverallReport.ResiliencyScore
+			agg.nodeScores[nodeStatus.NodeID] = report.OverallReport.ResiliencyScore
 		}
 
 		// Persist per-cluster scores on the ScenarioRun (best-effort)
@@ -145,22 +158,20 @@ func (r *KrknGraphRunReconciler) calculateResiliencyScore(
 		}
 	}
 
-	if len(reports) == 0 {
+	if !foundReports {
 		return fmt.Errorf("no resiliency reports found in any scenario run logs")
 	}
 
 	// Calculate final GraphClusterScores
 	var graphClusterScores []krknv1alpha1.GraphClusterScore
 
-	for clusterName, nodeScores := range clusterNodeScores {
-		// Calculate average score for this cluster
+	for _, agg := range clusterAggs {
 		var sum float64
-		for _, score := range nodeScores {
+		for _, score := range agg.nodeScores {
 			sum += score
 		}
-		avgScore := sum / float64(len(nodeScores))
+		avgScore := sum / float64(len(agg.nodeScores))
 
-		// Determine status based on baseline
 		status := "no-baseline"
 		var message string
 
@@ -178,20 +189,46 @@ func (r *KrknGraphRunReconciler) calculateResiliencyScore(
 		}
 
 		graphClusterScores = append(graphClusterScores, krknv1alpha1.GraphClusterScore{
-			ClusterName:       clusterName,
+			ProviderName:      agg.providerName,
+			ClusterName:       agg.clusterName,
 			Calculated:        avgScore,
 			Baseline:          graphRun.Spec.ResiliencyScoreBaseline,
 			Status:            status,
 			Message:           message,
-			NodeContributions: nodeScores,
+			NodeContributions: agg.nodeScores,
 		})
 
 		logger.Info("calculated cluster resiliency score",
 			"graphRun", graphRun.Name,
-			"clusterName", clusterName,
+			"providerName", agg.providerName,
+			"clusterName", agg.clusterName,
 			"avgScore", avgScore,
-			"nodeCount", len(nodeScores),
+			"nodeCount", len(agg.nodeScores),
 			"status", status)
+	}
+
+	// Ensure every target cluster has a score entry (even if no reports were parsed)
+	scoredKeys := make(map[string]bool)
+	for _, gs := range graphClusterScores {
+		scoredKeys[gs.ProviderName+"/"+gs.ClusterName] = true
+	}
+	for providerName, clusters := range graphRun.Spec.TargetClusters {
+		for _, clusterName := range clusters {
+			if !scoredKeys[providerName+"/"+clusterName] {
+				graphClusterScores = append(graphClusterScores, krknv1alpha1.GraphClusterScore{
+					ProviderName: providerName,
+					ClusterName:  clusterName,
+					Calculated:   0,
+					Baseline:     graphRun.Spec.ResiliencyScoreBaseline,
+					Status:       "error",
+					Message:      "No resiliency reports found for this cluster",
+				})
+				logger.Info("no resiliency reports for cluster, adding error entry",
+					"graphRun", graphRun.Name,
+					"providerName", providerName,
+					"clusterName", clusterName)
+			}
+		}
 	}
 
 	// Populate immutable resiliency score results

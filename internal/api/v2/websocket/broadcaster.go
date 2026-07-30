@@ -222,7 +222,7 @@ func (b *Broadcaster) BroadcastGraphRunUpdate(graphRun *krknv1alpha1.KrknGraphRu
 			FailedNodes:    graphRun.Status.Summary.FailedNodes,
 			PendingNodes:   graphRun.Status.Summary.PendingNodes,
 		},
-		NodeStatuses:     b.convertNodeStatusesWithScores(context.Background(), graphRun.Status.NodeStatuses),
+		NodeStatuses:     convertNodeStatusesWithScores(graphRun.Status.NodeStatuses, graphRun.Status.ResiliencyScores),
 		ResolvedLevels:   graphRun.Status.ResolvedLevels,
 		StartTime:        graphRun.Status.StartTime,
 		CompletionTime:   graphRun.Status.CompletionTime,
@@ -398,15 +398,24 @@ func (b *Broadcaster) makeGraphRunAuthzCheck(graphRun *krknv1alpha1.KrknGraphRun
 }
 
 // convertNodeStatusesWithScores converts Kubernetes NodeStatus to WebSocket response format
-// and enriches each node with its individual resiliency score from the associated KrknScenarioRun
-func (b *Broadcaster) convertNodeStatusesWithScores(ctx context.Context, nodeStatuses []krknv1alpha1.NodeStatus) []NodeStatusResponse {
+// and enriches each node with its resiliency scores derived from GraphClusterScore.NodeContributions
+func convertNodeStatusesWithScores(nodeStatuses []krknv1alpha1.NodeStatus, graphScores []krknv1alpha1.GraphClusterScore) []NodeStatusResponse {
 	if nodeStatuses == nil {
 		return []NodeStatusResponse{}
 	}
 
-	logger := log.Log.WithName("websocket-broadcast")
-	result := make([]NodeStatusResponse, 0, len(nodeStatuses))
+	// Precompute nodeID → per-cluster scores from GraphClusterScore.NodeContributions
+	nodeScoreMap := make(map[string][]ClusterResiliencyScoreResponse)
+	for _, gs := range graphScores {
+		for nodeID, score := range gs.NodeContributions {
+			nodeScoreMap[nodeID] = append(nodeScoreMap[nodeID], ClusterResiliencyScoreResponse{
+				ClusterName: gs.ClusterName,
+				Score:       score,
+			})
+		}
+	}
 
+	result := make([]NodeStatusResponse, 0, len(nodeStatuses))
 	for _, ns := range nodeStatuses {
 		response := NodeStatusResponse{
 			NodeID:         ns.NodeID,
@@ -419,35 +428,14 @@ func (b *Broadcaster) convertNodeStatusesWithScores(ctx context.Context, nodeSta
 			Message:        ns.Message,
 		}
 
-		// Fetch resiliency score from the associated KrknScenarioRun if available
-		if ns.ScenarioRunRef != "" {
-			var scenarioRun krknv1alpha1.KrknScenarioRun
-			if err := b.k8sClient.Get(ctx, k8sclient.ObjectKey{
-				Name:      ns.ScenarioRunRef,
-				Namespace: b.namespace,
-			}, &scenarioRun); err != nil {
-				// Log error but don't fail - the node status is still valid without the score
-				logger.V(1).Info("Failed to fetch scenario run for resiliency score",
-					"scenarioRunRef", ns.ScenarioRunRef,
-					"nodeID", ns.NodeID,
-					"error", err.Error())
-			} else {
-				// Add per-cluster resiliency scores if they exist
-				if len(scenarioRun.Status.ResiliencyScores) > 0 {
-					scores := make([]ClusterResiliencyScoreResponse, len(scenarioRun.Status.ResiliencyScores))
-					var sum float64
-					for i, cs := range scenarioRun.Status.ResiliencyScores {
-						scores[i] = ClusterResiliencyScoreResponse{
-							ClusterName: cs.ClusterName,
-							Score:       cs.Score,
-						}
-						sum += cs.Score
-					}
-					response.ResiliencyScores = scores
-					avg := sum / float64(len(scenarioRun.Status.ResiliencyScores))
-					response.ResiliencyScoreAvg = &avg
-				}
+		if scores, ok := nodeScoreMap[ns.NodeID]; ok {
+			response.ResiliencyScores = scores
+			var sum float64
+			for _, s := range scores {
+				sum += s.Score
 			}
+			avg := sum / float64(len(scores))
+			response.ResiliencyScoreAvg = &avg
 		}
 
 		result = append(result, response)
@@ -464,6 +452,7 @@ func (b *Broadcaster) convertGraphClusterScores(scores []krknv1alpha1.GraphClust
 	result := make([]GraphClusterScoreResponse, len(scores))
 	for i, score := range scores {
 		result[i] = GraphClusterScoreResponse{
+			ProviderName:      score.ProviderName,
 			ClusterName:       score.ClusterName,
 			Calculated:        score.Calculated,
 			Baseline:          score.Baseline,

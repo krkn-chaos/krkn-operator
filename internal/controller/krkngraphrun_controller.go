@@ -218,16 +218,12 @@ func (r *KrknGraphRunReconciler) Reconcile(ctx context.Context, req ctrl.Request
 			if err := r.calculateResiliencyScore(ctx, &graphRun, existingRuns); err != nil {
 				logger.Error(err, "failed to calculate resiliency score", "graphRun", graphRun.Name)
 
-				// Set sentinel value to prevent retries and preserve immutability
-				// Once we attempt calculation, we never retry to ensure score consistency
-				graphRun.Status.ResiliencyScores = []krknv1alpha1.GraphClusterScore{
-					{
-						ClusterName: "error",
-						Calculated:  0,
-						Baseline:    graphRun.Spec.ResiliencyScoreBaseline,
-						Status:      "error",
-						Message:     fmt.Sprintf("Failed to calculate resiliency score: %v", err),
-					},
+				// Mark every existing sentinel score as error to prevent retries
+				errMsg := fmt.Sprintf("Failed to calculate resiliency score: %v", err)
+				for i := range graphRun.Status.ResiliencyScores {
+					graphRun.Status.ResiliencyScores[i].Calculated = 0
+					graphRun.Status.ResiliencyScores[i].Status = "error"
+					graphRun.Status.ResiliencyScores[i].Message = errMsg
 				}
 			}
 		}
@@ -280,14 +276,15 @@ func (r *KrknGraphRunReconciler) initializeStatus(ctx context.Context, graphRun 
 	// can show "Calculating..." from the start instead of "N/A"
 	if graphRun.Spec.ResiliencyScoreEnabled {
 		var sentinelScores []krknv1alpha1.GraphClusterScore
-		for _, clusters := range graphRun.Spec.TargetClusters {
+		for providerName, clusters := range graphRun.Spec.TargetClusters {
 			for _, clusterName := range clusters {
 				sentinelScores = append(sentinelScores, krknv1alpha1.GraphClusterScore{
-					ClusterName: clusterName,
-					Calculated:  -1,
-					Baseline:    graphRun.Spec.ResiliencyScoreBaseline,
-					Status:      "calculating",
-					Message:     "Score calculation in progress",
+					ProviderName: providerName,
+					ClusterName:  clusterName,
+					Calculated:   -1,
+					Baseline:     graphRun.Spec.ResiliencyScoreBaseline,
+					Status:       "calculating",
+					Message:      "Score calculation in progress",
 				})
 			}
 		}

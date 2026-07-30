@@ -19,7 +19,6 @@ Assisted-by: Claude Sonnet 4.5 (claude-sonnet-4-5@20250929)
 package api
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -210,7 +209,7 @@ func (h *Handler) GetGraphRun(w http.ResponseWriter, r *http.Request) {
 				FailedNodes:    graphRun.Status.Summary.FailedNodes,
 				PendingNodes:   graphRun.Status.Summary.PendingNodes,
 			},
-			NodeStatuses:     h.convertNodeStatusesWithScores(ctx, graphRun.Status.NodeStatuses),
+			NodeStatuses:     convertNodeStatusesWithScores(graphRun.Status.NodeStatuses, graphRun.Status.ResiliencyScores),
 			ResolvedLevels:   graphRun.Status.ResolvedLevels,
 			StartTime:        graphRun.Status.StartTime,
 			CompletionTime:   graphRun.Status.CompletionTime,
@@ -626,6 +625,7 @@ func convertGraphClusterScores(scores []krknv1alpha1.GraphClusterScore) []GraphC
 	result := make([]GraphClusterScoreResponse, len(scores))
 	for i, score := range scores {
 		result[i] = GraphClusterScoreResponse{
+			ProviderName:      score.ProviderName,
 			ClusterName:       score.ClusterName,
 			Calculated:        score.Calculated,
 			Baseline:          score.Baseline,
@@ -637,17 +637,25 @@ func convertGraphClusterScores(scores []krknv1alpha1.GraphClusterScore) []GraphC
 	return result
 }
 
-// convertNodeStatuses converts Kubernetes NodeStatus to API response format
 // convertNodeStatusesWithScores converts Kubernetes NodeStatus to API response format
-// and enriches each node with its individual resiliency score from the associated KrknScenarioRun
-func (h *Handler) convertNodeStatusesWithScores(ctx context.Context, nodeStatuses []krknv1alpha1.NodeStatus) []NodeStatusResponse {
+// and enriches each node with its resiliency scores derived from GraphClusterScore.NodeContributions
+func convertNodeStatusesWithScores(nodeStatuses []krknv1alpha1.NodeStatus, graphScores []krknv1alpha1.GraphClusterScore) []NodeStatusResponse {
 	if nodeStatuses == nil {
 		return []NodeStatusResponse{}
 	}
 
-	logger := log.FromContext(ctx)
-	result := make([]NodeStatusResponse, 0, len(nodeStatuses))
+	// Precompute nodeID → per-cluster scores from GraphClusterScore.NodeContributions
+	nodeScoreMap := make(map[string][]ClusterResiliencyScoreResponse)
+	for _, gs := range graphScores {
+		for nodeID, score := range gs.NodeContributions {
+			nodeScoreMap[nodeID] = append(nodeScoreMap[nodeID], ClusterResiliencyScoreResponse{
+				ClusterName: gs.ClusterName,
+				Score:       score,
+			})
+		}
+	}
 
+	result := make([]NodeStatusResponse, 0, len(nodeStatuses))
 	for _, ns := range nodeStatuses {
 		response := NodeStatusResponse{
 			NodeID:         ns.NodeID,
@@ -660,62 +668,17 @@ func (h *Handler) convertNodeStatusesWithScores(ctx context.Context, nodeStatuse
 			Message:        ns.Message,
 		}
 
-		// Fetch resiliency score from the associated KrknScenarioRun if available
-		if ns.ScenarioRunRef != "" {
-			var scenarioRun krknv1alpha1.KrknScenarioRun
-			if err := h.client.Get(ctx, types.NamespacedName{
-				Name:      ns.ScenarioRunRef,
-				Namespace: h.namespace,
-			}, &scenarioRun); err != nil {
-				// Log error but don't fail - the node status is still valid without the score
-				logger.V(1).Info("Failed to fetch scenario run for resiliency score",
-					"scenarioRunRef", ns.ScenarioRunRef,
-					"nodeID", ns.NodeID,
-					"error", err.Error())
-			} else {
-				// Add per-cluster resiliency scores if they exist
-				if len(scenarioRun.Status.ResiliencyScores) > 0 {
-					scores := make([]ClusterResiliencyScoreResponse, len(scenarioRun.Status.ResiliencyScores))
-					var sum float64
-					for i, cs := range scenarioRun.Status.ResiliencyScores {
-						scores[i] = ClusterResiliencyScoreResponse{
-							ClusterName: cs.ClusterName,
-							Score:       cs.Score,
-						}
-						sum += cs.Score
-					}
-					response.ResiliencyScores = scores
-					avg := sum / float64(len(scenarioRun.Status.ResiliencyScores))
-					response.ResiliencyScoreAvg = &avg
-				}
+		if scores, ok := nodeScoreMap[ns.NodeID]; ok {
+			response.ResiliencyScores = scores
+			var sum float64
+			for _, s := range scores {
+				sum += s.Score
 			}
+			avg := sum / float64(len(scores))
+			response.ResiliencyScoreAvg = &avg
 		}
 
 		result = append(result, response)
-	}
-
-	return result
-}
-
-// convertNodeStatuses converts Kubernetes NodeStatus to API response format
-// Deprecated: Use convertNodeStatusesWithScores for enriched responses with resiliency scores
-func convertNodeStatuses(nodeStatuses []krknv1alpha1.NodeStatus) []NodeStatusResponse {
-	if nodeStatuses == nil {
-		return []NodeStatusResponse{}
-	}
-
-	result := make([]NodeStatusResponse, 0, len(nodeStatuses))
-	for _, ns := range nodeStatuses {
-		result = append(result, NodeStatusResponse{
-			NodeID:         ns.NodeID,
-			NodeName:       ns.NodeName,
-			Phase:          ns.Phase,
-			ScenarioRunRef: ns.ScenarioRunRef,
-			StartTime:      ns.StartTime,
-			CompletionTime: ns.CompletionTime,
-			DependsOn:      ns.DependsOn,
-			Message:        ns.Message,
-		})
 	}
 
 	return result

@@ -129,6 +129,10 @@ type GraphRunSummary struct {
 // When a graph run executes on multiple clusters, this structure tracks the score contribution
 // from each cluster, along with per-node breakdown.
 type GraphClusterScore struct {
+	// ProviderName is the provider that owns this cluster (e.g., "krkn-operator-acm")
+	// +optional
+	ProviderName string `json:"providerName,omitempty"`
+
 	// ClusterName is the name of the cluster this score applies to
 	ClusterName string `json:"clusterName"`
 

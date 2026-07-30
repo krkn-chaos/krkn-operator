@@ -809,6 +809,7 @@ type ClusterResiliencyScoreResponse struct {
 
 // GraphClusterScoreResponse represents the aggregated resiliency score for a cluster in a graph run
 type GraphClusterScoreResponse struct {
+	ProviderName      string             `json:"providerName,omitempty"`
 	ClusterName       string             `json:"clusterName"`
 	Calculated        float64            `json:"calculated"`
 	Baseline          *float64           `json:"baseline,omitempty"`

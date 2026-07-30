@@ -60,5 +60,25 @@ func buildGraphRunResponse(run *krknv1alpha1.KrknGraphRun) GraphRunResponse {
 		CompletionTime:    run.Status.CompletionTime,
 		OwnerUserID:       run.Spec.OwnerUserID,
 		CreationTimestamp:  run.CreationTimestamp.Format(time.RFC3339),
+		ResiliencyScores:  convertGraphClusterScoresForSnapshot(run.Status.ResiliencyScores),
 	}
+}
+
+func convertGraphClusterScoresForSnapshot(scores []krknv1alpha1.GraphClusterScore) []GraphClusterScoreResponse {
+	if scores == nil {
+		return nil
+	}
+	result := make([]GraphClusterScoreResponse, len(scores))
+	for i, score := range scores {
+		result[i] = GraphClusterScoreResponse{
+			ProviderName:      score.ProviderName,
+			ClusterName:       score.ClusterName,
+			Calculated:        score.Calculated,
+			Baseline:          score.Baseline,
+			Status:            score.Status,
+			Message:           score.Message,
+			NodeContributions: score.NodeContributions,
+		}
+	}
+	return result
 }

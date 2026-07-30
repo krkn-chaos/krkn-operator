@@ -345,6 +345,10 @@ spec:
                         This allows the frontend to show which nodes contributed what score
                         Example: {"node-1": 85.5, "node-2": 92.3}
                       type: object
+                    providerName:
+                      description: ProviderName is the provider that owns this cluster
+                        (e.g., "krkn-operator-acm")
+                      type: string
                     status:
                       description: |-
                         Status indicates the current state of this cluster's score.
