@@ -1935,6 +1935,17 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_api.ClusterResiliencyScoreResponse": {
+            "type": "object",
+            "properties": {
+                "clusterName": {
+                    "type": "string"
+                },
+                "score": {
+                    "type": "number"
+                }
+            }
+        },
         "internal_api.ClustersResponse": {
             "type": "object",
             "properties": {
@@ -2192,6 +2203,15 @@ const docTemplate = `{
                 },
                 "phase": {
                     "type": "string"
+                },
+                "resiliencyScoreAvg": {
+                    "type": "number"
+                },
+                "resiliencyScores": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_api.ClusterResiliencyScoreResponse"
+                    }
                 },
                 "scenarioRunRef": {
                     "type": "string"

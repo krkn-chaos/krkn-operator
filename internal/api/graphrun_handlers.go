@@ -103,7 +103,7 @@ func (h *Handler) ListGraphRuns(w http.ResponseWriter, r *http.Request) {
 			CompletionTime:          run.Status.CompletionTime,
 			ResiliencyScoreEnabled:  run.Spec.ResiliencyScoreEnabled,
 			ResiliencyScoreBaseline: run.Spec.ResiliencyScoreBaseline,
-			ResiliencyScore:         convertResiliencyScore(run.Status.ResiliencyScore),
+			ResiliencyScores:        convertGraphClusterScores(run.Status.ResiliencyScores),
 		})
 	}
 
@@ -209,11 +209,11 @@ func (h *Handler) GetGraphRun(w http.ResponseWriter, r *http.Request) {
 				FailedNodes:    graphRun.Status.Summary.FailedNodes,
 				PendingNodes:   graphRun.Status.Summary.PendingNodes,
 			},
-			NodeStatuses:    convertNodeStatuses(graphRun.Status.NodeStatuses),
-			ResolvedLevels:  graphRun.Status.ResolvedLevels,
-			StartTime:       graphRun.Status.StartTime,
-			CompletionTime:  graphRun.Status.CompletionTime,
-			ResiliencyScore: convertResiliencyScore(graphRun.Status.ResiliencyScore),
+			NodeStatuses:     convertNodeStatusesWithScores(graphRun.Status.NodeStatuses, graphRun.Status.ResiliencyScores),
+			ResolvedLevels:   graphRun.Status.ResolvedLevels,
+			StartTime:        graphRun.Status.StartTime,
+			CompletionTime:   graphRun.Status.CompletionTime,
+			ResiliencyScores: convertGraphClusterScores(graphRun.Status.ResiliencyScores),
 		},
 	}
 
@@ -600,29 +600,64 @@ func (h *Handler) DeleteGraphRun(w http.ResponseWriter, r *http.Request) {
 
 // Helper functions
 
-// convertResiliencyScore converts ResiliencyScoreResult to API response format
-func convertResiliencyScore(score *krknv1alpha1.ResiliencyScoreResult) *ResiliencyScoreResponse {
-	if score == nil {
+// convertClusterResiliencyScores converts ClusterResiliencyScore array to API response format
+func convertClusterResiliencyScores(scores []krknv1alpha1.ClusterResiliencyScore) []ClusterResiliencyScoreResponse {
+	if scores == nil {
 		return nil
 	}
 
-	return &ResiliencyScoreResponse{
-		Calculated: score.Calculated,
-		Baseline:   score.Baseline,
-		Status:     score.Status,
-		Message:    score.Message,
+	result := make([]ClusterResiliencyScoreResponse, len(scores))
+	for i, score := range scores {
+		result[i] = ClusterResiliencyScoreResponse{
+			ClusterName: score.ClusterName,
+			Score:       score.Score,
+		}
 	}
+	return result
 }
 
-// convertNodeStatuses converts Kubernetes NodeStatus to API response format
-func convertNodeStatuses(nodeStatuses []krknv1alpha1.NodeStatus) []NodeStatusResponse {
+// convertGraphClusterScores converts GraphClusterScore array to API response format
+func convertGraphClusterScores(scores []krknv1alpha1.GraphClusterScore) []GraphClusterScoreResponse {
+	if scores == nil {
+		return nil
+	}
+
+	result := make([]GraphClusterScoreResponse, len(scores))
+	for i, score := range scores {
+		result[i] = GraphClusterScoreResponse{
+			ProviderName:      score.ProviderName,
+			ClusterName:       score.ClusterName,
+			Calculated:        score.Calculated,
+			Baseline:          score.Baseline,
+			Status:            score.Status,
+			Message:           score.Message,
+			NodeContributions: score.NodeContributions,
+		}
+	}
+	return result
+}
+
+// convertNodeStatusesWithScores converts Kubernetes NodeStatus to API response format
+// and enriches each node with its resiliency scores derived from GraphClusterScore.NodeContributions
+func convertNodeStatusesWithScores(nodeStatuses []krknv1alpha1.NodeStatus, graphScores []krknv1alpha1.GraphClusterScore) []NodeStatusResponse {
 	if nodeStatuses == nil {
 		return []NodeStatusResponse{}
 	}
 
+	// Precompute nodeID → per-cluster scores from GraphClusterScore.NodeContributions
+	nodeScoreMap := make(map[string][]ClusterResiliencyScoreResponse)
+	for _, gs := range graphScores {
+		for nodeID, score := range gs.NodeContributions {
+			nodeScoreMap[nodeID] = append(nodeScoreMap[nodeID], ClusterResiliencyScoreResponse{
+				ClusterName: gs.ClusterName,
+				Score:       score,
+			})
+		}
+	}
+
 	result := make([]NodeStatusResponse, 0, len(nodeStatuses))
 	for _, ns := range nodeStatuses {
-		result = append(result, NodeStatusResponse{
+		response := NodeStatusResponse{
 			NodeID:         ns.NodeID,
 			NodeName:       ns.NodeName,
 			Phase:          ns.Phase,
@@ -631,7 +666,19 @@ func convertNodeStatuses(nodeStatuses []krknv1alpha1.NodeStatus) []NodeStatusRes
 			CompletionTime: ns.CompletionTime,
 			DependsOn:      ns.DependsOn,
 			Message:        ns.Message,
-		})
+		}
+
+		if scores, ok := nodeScoreMap[ns.NodeID]; ok {
+			response.ResiliencyScores = scores
+			var sum float64
+			for _, s := range scores {
+				sum += s.Score
+			}
+			avg := sum / float64(len(scores))
+			response.ResiliencyScoreAvg = &avg
+		}
+
+		result = append(result, response)
 	}
 
 	return result

@@ -315,6 +315,10 @@ type ScenarioRunStatusResponse struct {
 	GraphNodeID string `json:"graphNodeId,omitempty"`
 	// CustomRunName is the user-provided label for this run
 	CustomRunName string `json:"customRunName,omitempty"`
+	// ResiliencyScore is the individual resiliency score for this scenario run node
+	ResiliencyScore *float64 `json:"resiliencyScore,omitempty"`
+	// ResiliencyScores contains per-cluster resiliency scores
+	ResiliencyScores []ClusterResiliencyScoreResponse `json:"resiliencyScores,omitempty"`
 }
 
 // ClusterJobStatusResponse represents the status of a job for a specific cluster
@@ -373,6 +377,10 @@ type ScenarioRunListItem struct {
 	GraphNodeID string `json:"graphNodeId,omitempty"`
 	// CustomRunName is the user-provided label for this run
 	CustomRunName string `json:"customRunName,omitempty"`
+	// ResiliencyScore is the individual resiliency score for this scenario run node
+	ResiliencyScore *float64 `json:"resiliencyScore,omitempty"`
+	// ResiliencyScores contains per-cluster resiliency scores
+	ResiliencyScores []ClusterResiliencyScoreResponse `json:"resiliencyScores,omitempty"`
 }
 
 // ScenarioRunListResponse represents the response for GET /scenarios/run
@@ -720,18 +728,18 @@ type GraphRunCreateRequest struct {
 
 // GraphRunListItem represents a single item in the graph runs list
 type GraphRunListItem struct {
-	Name                    string                   `json:"name"`
-	Namespace               string                   `json:"namespace"`
-	CreationTimestamp       time.Time                `json:"creationTimestamp"`
-	Phase                   string                   `json:"phase"`
-	OwnerUserID             string                   `json:"ownerUserId"`
-	TargetRequestID         string                   `json:"targetRequestId"`
-	Summary                 GraphRunSummaryResponse  `json:"summary"`
-	StartTime               *metav1.Time             `json:"startTime,omitempty"`
-	CompletionTime          *metav1.Time             `json:"completionTime,omitempty"`
-	ResiliencyScoreEnabled  bool                     `json:"resiliencyScoreEnabled,omitempty"`
-	ResiliencyScoreBaseline *float64                 `json:"resiliencyScoreBaseline,omitempty"`
-	ResiliencyScore         *ResiliencyScoreResponse `json:"resiliencyScore,omitempty"`
+	Name                    string                      `json:"name"`
+	Namespace               string                      `json:"namespace"`
+	CreationTimestamp       time.Time                   `json:"creationTimestamp"`
+	Phase                   string                      `json:"phase"`
+	OwnerUserID             string                      `json:"ownerUserId"`
+	TargetRequestID         string                      `json:"targetRequestId"`
+	Summary                 GraphRunSummaryResponse     `json:"summary"`
+	StartTime               *metav1.Time                `json:"startTime,omitempty"`
+	CompletionTime          *metav1.Time                `json:"completionTime,omitempty"`
+	ResiliencyScoreEnabled  bool                        `json:"resiliencyScoreEnabled,omitempty"`
+	ResiliencyScoreBaseline *float64                    `json:"resiliencyScoreBaseline,omitempty"`
+	ResiliencyScores        []GraphClusterScoreResponse `json:"resiliencyScores,omitempty"`
 }
 
 // GraphRunListResponse represents the response for GET /api/v1/graphruns
@@ -761,13 +769,13 @@ type GraphRunSpecResponse struct {
 
 // GraphRunStatusResponse represents the status section of a graph run
 type GraphRunStatusResponse struct {
-	Phase           string                   `json:"phase"`
-	Summary         GraphRunSummaryResponse  `json:"summary"`
-	NodeStatuses    []NodeStatusResponse     `json:"nodeStatuses"`
-	ResolvedLevels  [][]string               `json:"resolvedLevels"`
-	StartTime       *metav1.Time             `json:"startTime,omitempty"`
-	CompletionTime  *metav1.Time             `json:"completionTime,omitempty"`
-	ResiliencyScore *ResiliencyScoreResponse `json:"resiliencyScore,omitempty"`
+	Phase            string                      `json:"phase"`
+	Summary          GraphRunSummaryResponse     `json:"summary"`
+	NodeStatuses     []NodeStatusResponse        `json:"nodeStatuses"`
+	ResolvedLevels   [][]string                  `json:"resolvedLevels"`
+	StartTime        *metav1.Time                `json:"startTime,omitempty"`
+	CompletionTime   *metav1.Time                `json:"completionTime,omitempty"`
+	ResiliencyScores []GraphClusterScoreResponse `json:"resiliencyScores,omitempty"`
 }
 
 // GraphRunSummaryResponse represents aggregate statistics
@@ -781,20 +789,31 @@ type GraphRunSummaryResponse struct {
 
 // NodeStatusResponse represents the status of a single node in the graph
 type NodeStatusResponse struct {
-	NodeID         string       `json:"nodeId"`
-	NodeName       string       `json:"nodeName"`
-	Phase          string       `json:"phase"`
-	ScenarioRunRef string       `json:"scenarioRunRef,omitempty"`
-	StartTime      *metav1.Time `json:"startTime,omitempty"`
-	CompletionTime *metav1.Time `json:"completionTime,omitempty"`
-	DependsOn      []string     `json:"dependsOn,omitempty"`
-	Message        string       `json:"message,omitempty"`
+	NodeID             string                           `json:"nodeId"`
+	NodeName           string                           `json:"nodeName"`
+	Phase              string                           `json:"phase"`
+	ScenarioRunRef     string                           `json:"scenarioRunRef,omitempty"`
+	StartTime          *metav1.Time                     `json:"startTime,omitempty"`
+	CompletionTime     *metav1.Time                     `json:"completionTime,omitempty"`
+	DependsOn          []string                         `json:"dependsOn,omitempty"`
+	Message            string                           `json:"message,omitempty"`
+	ResiliencyScores   []ClusterResiliencyScoreResponse `json:"resiliencyScores,omitempty"`
+	ResiliencyScoreAvg *float64                         `json:"resiliencyScoreAvg,omitempty"`
 }
 
-// ResiliencyScoreResponse represents the calculated resiliency score
-type ResiliencyScoreResponse struct {
-	Calculated float64  `json:"calculated"`
-	Baseline   *float64 `json:"baseline,omitempty"`
-	Status     string   `json:"status"`
-	Message    string   `json:"message,omitempty"`
+// ClusterResiliencyScoreResponse represents the resiliency score for a specific cluster
+type ClusterResiliencyScoreResponse struct {
+	ClusterName string  `json:"clusterName"`
+	Score       float64 `json:"score"`
+}
+
+// GraphClusterScoreResponse represents the aggregated resiliency score for a cluster in a graph run
+type GraphClusterScoreResponse struct {
+	ProviderName      string             `json:"providerName,omitempty"`
+	ClusterName       string             `json:"clusterName"`
+	Calculated        float64            `json:"calculated"`
+	Baseline          *float64           `json:"baseline,omitempty"`
+	Status            string             `json:"status"`
+	Message           string             `json:"message,omitempty"`
+	NodeContributions map[string]float64 `json:"nodeContributions,omitempty"`
 }

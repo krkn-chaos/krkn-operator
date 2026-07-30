@@ -99,7 +99,7 @@ func (b *Broadcaster) BroadcastScenarioRunUpdate(scenarioRun *krknv1alpha1.KrknS
 		RegistryName:    scenarioRun.Spec.RegistryName,
 		GraphRunName:    scenarioRun.Labels["krkn.dev/graph-run"],
 		GraphNodeID:     scenarioRun.Labels["krkn.dev/graph-node"],
-		CreatedAt:       scenarioRun.CreationTimestamp.Format(time.RFC3339),
+		CreationTimestamp: scenarioRun.CreationTimestamp.Format(time.RFC3339),
 	}
 
 	msg := ServerMessage{
@@ -185,7 +185,8 @@ func (b *Broadcaster) BroadcastScenarioRunDetailUpdate(scenarioRun *krknv1alpha1
 }
 
 // BroadcastGraphRunUpdate broadcasts a graph run update to subscribed clients
-func (b *Broadcaster) BroadcastGraphRunUpdate(graphRun *krknv1alpha1.KrknGraphRun) {
+// event should be "created" for OnAdd or "updated" for OnUpdate
+func (b *Broadcaster) BroadcastGraphRunUpdate(graphRun *krknv1alpha1.KrknGraphRun, event string) {
 	logger := log.Log.WithName("websocket-broadcast")
 
 	// Calculate fingerprint of current status
@@ -221,18 +222,19 @@ func (b *Broadcaster) BroadcastGraphRunUpdate(graphRun *krknv1alpha1.KrknGraphRu
 			FailedNodes:    graphRun.Status.Summary.FailedNodes,
 			PendingNodes:   graphRun.Status.Summary.PendingNodes,
 		},
-		NodeStatuses:   nil, // WebSocket doesn't send full node details
-		ResolvedLevels: graphRun.Status.ResolvedLevels,
-		StartTime:      graphRun.Status.StartTime,
-		CompletionTime: graphRun.Status.CompletionTime,
-		OwnerUserID:    graphRun.Spec.OwnerUserID,
-		CreatedAt:      graphRun.CreationTimestamp.Format(time.RFC3339),
+		NodeStatuses:     convertNodeStatusesWithScores(graphRun.Status.NodeStatuses, graphRun.Status.ResiliencyScores),
+		ResolvedLevels:   graphRun.Status.ResolvedLevels,
+		StartTime:        graphRun.Status.StartTime,
+		CompletionTime:   graphRun.Status.CompletionTime,
+		OwnerUserID:      graphRun.Spec.OwnerUserID,
+		CreationTimestamp: graphRun.CreationTimestamp.Format(time.RFC3339),
+		ResiliencyScores: b.convertGraphClusterScores(graphRun.Status.ResiliencyScores),
 	}
 
 	msg := ServerMessage{
 		Resource: "graphrun",
 		ID:       graphRun.Name,
-		Event:    "updated",
+		Event:    event, // Passed as parameter from watcher
 		Data:     response,
 	}
 
@@ -393,4 +395,71 @@ func (b *Broadcaster) makeGraphRunAuthzCheck(graphRun *krknv1alpha1.KrknGraphRun
 		// If the run was filtered out, user doesn't have permission
 		return len(filtered) > 0
 	}
+}
+
+// convertNodeStatusesWithScores converts Kubernetes NodeStatus to WebSocket response format
+// and enriches each node with its resiliency scores derived from GraphClusterScore.NodeContributions
+func convertNodeStatusesWithScores(nodeStatuses []krknv1alpha1.NodeStatus, graphScores []krknv1alpha1.GraphClusterScore) []NodeStatusResponse {
+	if nodeStatuses == nil {
+		return []NodeStatusResponse{}
+	}
+
+	// Precompute nodeID → per-cluster scores from GraphClusterScore.NodeContributions
+	nodeScoreMap := make(map[string][]ClusterResiliencyScoreResponse)
+	for _, gs := range graphScores {
+		for nodeID, score := range gs.NodeContributions {
+			nodeScoreMap[nodeID] = append(nodeScoreMap[nodeID], ClusterResiliencyScoreResponse{
+				ClusterName: gs.ClusterName,
+				Score:       score,
+			})
+		}
+	}
+
+	result := make([]NodeStatusResponse, 0, len(nodeStatuses))
+	for _, ns := range nodeStatuses {
+		response := NodeStatusResponse{
+			NodeID:         ns.NodeID,
+			NodeName:       ns.NodeName,
+			Phase:          ns.Phase,
+			ScenarioRunRef: ns.ScenarioRunRef,
+			StartTime:      ns.StartTime,
+			CompletionTime: ns.CompletionTime,
+			DependsOn:      ns.DependsOn,
+			Message:        ns.Message,
+		}
+
+		if scores, ok := nodeScoreMap[ns.NodeID]; ok {
+			response.ResiliencyScores = scores
+			var sum float64
+			for _, s := range scores {
+				sum += s.Score
+			}
+			avg := sum / float64(len(scores))
+			response.ResiliencyScoreAvg = &avg
+		}
+
+		result = append(result, response)
+	}
+
+	return result
+}
+
+// convertGraphClusterScores converts GraphClusterScore array to WebSocket response format
+func (b *Broadcaster) convertGraphClusterScores(scores []krknv1alpha1.GraphClusterScore) []GraphClusterScoreResponse {
+	if scores == nil {
+		return nil
+	}
+	result := make([]GraphClusterScoreResponse, len(scores))
+	for i, score := range scores {
+		result[i] = GraphClusterScoreResponse{
+			ProviderName:      score.ProviderName,
+			ClusterName:       score.ClusterName,
+			Calculated:        score.Calculated,
+			Baseline:          score.Baseline,
+			Status:            score.Status,
+			Message:           score.Message,
+			NodeContributions: score.NodeContributions,
+		}
+	}
+	return result
 }

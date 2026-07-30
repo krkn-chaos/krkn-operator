@@ -125,12 +125,25 @@ type GraphRunSummary struct {
 	PendingNodes int `json:"pendingNodes"`
 }
 
-// ResiliencyScoreResult contains the calculated resiliency score and comparison with baseline.
-// This is IMMUTABLE - calculated once when the GraphRun completes and never recalculated.
-// Each run represents an invariant result over time for historical comparison and trend analysis.
-type ResiliencyScoreResult struct {
-	// Calculated is the final computed resiliency score
-	// This value is calculated by aggregating metrics from all nodes in the graph run
+// GraphClusterScore represents the resiliency score for a specific cluster in a graph run.
+// When a graph run executes on multiple clusters, this structure tracks the score contribution
+// from each cluster, along with per-node breakdown.
+type GraphClusterScore struct {
+	// ProviderName is the provider that owns this cluster (e.g., "krkn-operator-acm")
+	// +optional
+	ProviderName string `json:"providerName,omitempty"`
+
+	// ClusterName is the name of the cluster this score applies to
+	ClusterName string `json:"clusterName"`
+
+	// Calculated is the aggregated resiliency score for this cluster (0-100).
+	// This is calculated by averaging the scores from all nodes that ran on this cluster.
+	//
+	// Sentinel convention:
+	//   -1 means score calculation is in progress (Status will be "calculating").
+	//   The controller sets this on GraphRun creation when ResiliencyScoreEnabled is true,
+	//   then replaces it with the real score (>= 0) once the run reaches a terminal phase.
+	//   Frontend interpretation: -1 → "Calculating...", >= 0 → display value, absent → N/A.
 	Calculated float64 `json:"calculated"`
 
 	// Baseline is the user-defined minimum acceptable score (from Spec.ResiliencyScoreBaseline)
@@ -138,18 +151,29 @@ type ResiliencyScoreResult struct {
 	// +optional
 	Baseline *float64 `json:"baseline,omitempty"`
 
-	// Status indicates whether the run met the baseline requirements
-	// Possible values:
-	// - "pass": calculated score >= baseline
-	// - "fail": calculated score < baseline
-	// - "no-baseline": no baseline was specified, score calculated but not compared
-	// - "error": score calculation failed (e.g., pod logs unavailable, no reports found)
+	// Status indicates the current state of this cluster's score.
+	//
+	// Lifecycle: calculating → pass/fail/no-baseline (or error on failure).
+	//
+	// Values:
+	//   - "calculating": score computation in progress (Calculated == -1, set at GraphRun init)
+	//   - "pass":        calculated score >= baseline
+	//   - "fail":        calculated score < baseline
+	//   - "no-baseline": score calculated but no baseline was specified for comparison
+	//   - "error":       score calculation failed (see Message for details)
+	//
+	// +kubebuilder:validation:Enum=pass;fail;no-baseline;calculating;error
 	Status string `json:"status"`
 
-	// Message provides a human-readable description of the result
-	// Example: "Score 8.5 is below baseline 9.0"
+	// Message provides human-readable context about the score (e.g., "Score 85.0 meets baseline 80.0")
 	// +optional
 	Message string `json:"message,omitempty"`
+
+	// NodeContributions maps each node ID to its individual resiliency score on this cluster
+	// This allows the frontend to show which nodes contributed what score
+	// Example: {"node-1": 85.5, "node-2": 92.3}
+	// +optional
+	NodeContributions map[string]float64 `json:"nodeContributions,omitempty"`
 }
 
 // KrknGraphRunSpec defines the desired state of KrknGraphRun
@@ -178,7 +202,7 @@ type KrknGraphRunSpec struct {
 	// 1. RESILIENCY_SCORE=true environment variable is set in all scenario pods
 	// 2. If ResiliencyMountPath is specified, the controller identifies the resiliency metrics file
 	//    by matching the mount path in node.Volumes and sets RESILIENCY_FILE=<path> env var
-	// 3. Upon completion, the controller calculates the final score and stores it in Status.ResiliencyScore
+	// 3. Upon completion, the controller calculates the final score and stores it in Status.ResiliencyScores
 	//
 	// Populated from HTTP header: X-Resiliency-Score
 	// When enabled, X-Resiliency-Baseline header is REQUIRED
@@ -251,15 +275,25 @@ type KrknGraphRunStatus struct {
 	// +optional
 	ResolvedLevels [][]string `json:"resolvedLevels,omitempty"`
 
-	// ResiliencyScore contains the calculated resiliency score and baseline comparison.
-	// This field is populated by the controller when:
-	// 1. Spec.ResiliencyScoreEnabled is true
-	// 2. The GraphRun has reached a terminal phase (Completed, Failed, or PartiallyFailed)
+	// ResiliencyScores tracks per-cluster resiliency scores throughout the GraphRun lifecycle.
+	// One entry per target cluster. The array goes through two phases:
 	//
-	// The score is calculated ONCE and is IMMUTABLE to preserve historical accuracy.
-	// Each run represents an invariant result that can be compared over time.
+	// 1. Sentinel phase (on creation, when Spec.ResiliencyScoreEnabled is true):
+	//    Each entry has Calculated == -1 and Status == "calculating".
+	//    This lets the frontend show "Calculating..." immediately.
+	//
+	// 2. Final phase (on terminal state: Completed, Failed, or PartiallyFailed):
+	//    The controller replaces sentinel entries with real scores (Calculated >= 0).
+	//    Status becomes "pass", "fail", "no-baseline", or "error".
+	//    Once set to real values, scores are IMMUTABLE to preserve historical accuracy.
+	//
+	// Frontend interpretation:
+	//   - absent/empty → resiliency scoring not enabled (show N/A)
+	//   - Calculated == -1 → score calculation in progress (show "Calculating...")
+	//   - Calculated >= 0 → real score (display value)
+	//
 	// +optional
-	ResiliencyScore *ResiliencyScoreResult `json:"resiliencyScore,omitempty"`
+	ResiliencyScores []GraphClusterScore `json:"resiliencyScores,omitempty"`
 
 	// Conditions represent the latest available observations of the graph run's state
 	// +optional

@@ -22,6 +22,14 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+// ClusterResiliencyScore represents the resiliency score for a specific cluster
+type ClusterResiliencyScore struct {
+	// ClusterName is the name of the cluster this score applies to
+	ClusterName string `json:"clusterName"`
+	// Score is the calculated resiliency score for this cluster (0-100)
+	Score float64 `json:"score"`
+}
+
 // FileMount represents a file to be mounted in the scenario pod
 type FileMount struct {
 	// Name is the name of the file
@@ -177,6 +185,13 @@ type KrknScenarioRunStatus struct {
 	// ClusterJobs contains the status of each cluster job
 	// +optional
 	ClusterJobs []ClusterJobStatus `json:"clusterJobs,omitempty"`
+
+	// ResiliencyScores contains per-cluster resiliency scores for this scenario run.
+	// Each entry represents the score calculated from the pod logs of a specific cluster.
+	// When a scenario runs on multiple clusters, this array will contain one entry per cluster.
+	// Populated only when the parent KrknGraphRun has Spec.ResiliencyScoreEnabled set to true.
+	// +optional
+	ResiliencyScores []ClusterResiliencyScore `json:"resiliencyScores,omitempty"`
 
 	// Conditions represent the latest available observations of the scenario run's state
 	// +optional
