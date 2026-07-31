@@ -614,6 +614,7 @@ func convertInputFields(fields []typing.InputField) []InputFieldResponse {
 			Requires:          field.Requires,
 			MutuallyExcludes:  field.MutuallyExcludes,
 			Secret:            field.Secret,
+			Group:             field.Group,
 		})
 	}
 	return result
@@ -973,10 +974,17 @@ func (h *Handler) PostScenarioGlobals(w http.ResponseWriter, r *http.Request) {
 	// Get global environment
 	globalDetail, err := scenarioProvider.GetGlobalEnvironment(apiRegistry, scenarioName)
 	if err != nil {
+		if strings.Contains(err.Error(), "LABEL not found") {
+			writeJSONError(w, http.StatusNotFound, ErrorResponse{
+				Error:   "not_found",
+				Message: "Global environment for scenario '" + scenarioName + "' not found",
+			})
+			return
+		}
 		log.FromContext(ctx).Error(err, "Failed to get global environment", "registry", registry, "scenarioName", scenarioName)
 		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
 			Error:   "internal_error",
-			Message: "Failed to get global environment",
+			Message: "Failed to get global environment: " + err.Error(),
 		})
 		return
 	}

@@ -32,6 +32,7 @@ type InputField struct {
 	Requires          *string `json:"requires,omitempty"`
 	MutuallyExcludes  *string `json:"mutually_excludes,omitempty"`
 	Secret            bool    `json:"secret,omitempty"`
+	Group             *string `json:"group,omitempty"`
 }
 
 type alias InputField
@@ -82,8 +83,14 @@ func (f *InputField) UnmarshalJSON(data []byte) error {
 
 	// variable must be always present since represents
 	// the envvar to be exported in the scenario_orchestrator
+	// Group fields are container types with no value of their own, so variable falls back to name.
 	if fieldProperty, ok := temp["variable"]; ok {
 		f.Variable = &fieldProperty
+	} else if f.Type == Group {
+		// Use name as the group identifier so the frontend lookup (groupMembers.get(field.variable)) still works
+		if nameField, ok := temp["name"]; ok {
+			f.Variable = &nameField
+		}
 	} else {
 		return errors.New("`variable` key not found")
 	}
@@ -112,6 +119,10 @@ func (f *InputField) UnmarshalJSON(data []byte) error {
 		f.Secret = secret
 	} else {
 		f.Secret = false
+	}
+
+	if fieldProperty, ok := temp["group"]; ok {
+		f.Group = &fieldProperty
 	}
 
 	return nil
@@ -233,6 +244,8 @@ func (f *InputField) Validate(value *string) (*string, error) {
 			} else {
 				return nil, errors.New("file `" + *selectedValue + "` is not a file or is not accessible")
 			}
+		case Group:
+			// Group is a container type with no value of its own
 		default:
 			return nil, errors.New("impossible to validate object")
 		}
