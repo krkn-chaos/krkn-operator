@@ -31,6 +31,7 @@ import (
 	"github.com/krkn-chaos/krkn-operator/pkg/files"
 	"github.com/krkn-chaos/krkn-operator/pkg/workflows"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -590,18 +591,17 @@ func (h *Handler) createFileInternal(ctx context.Context, req files.CreateFileRe
 		return nil, err
 	}
 
-	// Check for duplicate logical name (global uniqueness)
-	logicalName := deriveLogicalName(req.FileName, req.WorkflowName)
-	existingID, err := h.checkDuplicateLogicalName(ctx, logicalName, "")
-	if err != nil {
-		return nil, fmt.Errorf("failed to check for duplicate file name: %w", err)
-	}
-	if existingID != "" {
-		return nil, &DuplicateFileError{Name: logicalName, ExistingID: existingID}
-	}
-
 	// Generate unique file ID (UUID)
 	fileID := uuid.New().String()
+
+	// Atomically reserve the logical name (prevents concurrent duplicates)
+	logicalName := deriveLogicalName(req.FileName, req.WorkflowName)
+	if err := h.reserveLogicalName(ctx, logicalName, fileID); err != nil {
+		if apierrors.IsAlreadyExists(err) {
+			return nil, &DuplicateFileError{Name: logicalName}
+		}
+		return nil, fmt.Errorf("failed to reserve logical name: %w", err)
+	}
 	configMapName := fmt.Sprintf("file-%s", fileID)
 	createdBy := claims.UserID
 
@@ -638,6 +638,9 @@ func (h *Handler) createFileInternal(ctx context.Context, req files.CreateFileRe
 	}
 
 	if err := h.client.Create(ctx, configMap); err != nil {
+		if releaseErr := h.releaseLogicalName(ctx, logicalName); releaseErr != nil {
+			logger.Error(releaseErr, "Failed to release reservation after file creation failure", "logicalName", logicalName)
+		}
 		return nil, fmt.Errorf("failed to create file ConfigMap: %w", err)
 	}
 
@@ -813,18 +816,23 @@ func (h *Handler) updateFileInternal(ctx context.Context, fileID string, req fil
 		return fmt.Errorf("only the workflow owner or an admin can update this workflow")
 	}
 
-	// Check for duplicate logical name on rename (exclude current file)
+	// Derive logical names for rename detection
 	workflowName := ""
 	if req.WorkflowName != nil {
 		workflowName = *req.WorkflowName
 	}
-	logicalName := deriveLogicalName(req.FileName, workflowName)
-	existingID, err := h.checkDuplicateLogicalName(ctx, logicalName, fileID)
-	if err != nil {
-		return fmt.Errorf("failed to check for duplicate file name: %w", err)
-	}
-	if existingID != "" {
-		return &DuplicateFileError{Name: logicalName, ExistingID: existingID}
+	newLogicalName := deriveLogicalName(req.FileName, workflowName)
+	oldLogicalName := extractLogicalName(configMap)
+	renamed := newLogicalName != oldLogicalName
+
+	// On rename, atomically reserve the new name
+	if renamed {
+		if err := h.reserveLogicalName(ctx, newLogicalName, fileID); err != nil {
+			if apierrors.IsAlreadyExists(err) {
+				return &DuplicateFileError{Name: newLogicalName}
+			}
+			return fmt.Errorf("failed to reserve logical name: %w", err)
+		}
 	}
 
 	// Get current user for audit trail
@@ -839,7 +847,7 @@ func (h *Handler) updateFileInternal(ctx context.Context, fileID string, req fil
 	}
 
 	// Update labels and annotations (preserve existing file ID)
-	configMap.Labels = files.BuildFileLabels(fileID, req.FileType, req.Groups, req.AvailableToAll, req.FilePurpose, logicalName)
+	configMap.Labels = files.BuildFileLabels(fileID, req.FileType, req.Groups, req.AvailableToAll, req.FilePurpose, newLogicalName)
 	configMap.Annotations = files.UpdateFileAnnotations(
 		configMap.Annotations,
 		req.Description,
@@ -858,7 +866,20 @@ func (h *Handler) updateFileInternal(ctx context.Context, fileID string, req fil
 	configMap.Data = data
 
 	if err := h.client.Update(ctx, configMap); err != nil {
+		// Rollback new reservation on failure
+		if renamed {
+			if releaseErr := h.releaseLogicalName(ctx, newLogicalName); releaseErr != nil {
+				logger.Error(releaseErr, "Failed to release new reservation after update failure", "logicalName", newLogicalName)
+			}
+		}
 		return fmt.Errorf("failed to update file: %w", err)
+	}
+
+	// Release old reservation on successful rename
+	if renamed && oldLogicalName != "" {
+		if err := h.releaseLogicalName(ctx, oldLogicalName); err != nil {
+			logger.Error(err, "Failed to release old name reservation", "logicalName", oldLogicalName)
+		}
 	}
 
 	logger.Info("Updated file", "fileID", fileID, "updatedBy", updatedBy)
@@ -887,6 +908,14 @@ func (h *Handler) deleteFileInternal(ctx context.Context, fileID string) error {
 	// Delete ConfigMap
 	if err := h.client.Delete(ctx, configMap); err != nil {
 		return fmt.Errorf("failed to delete file: %w", err)
+	}
+
+	// Release the logical name reservation
+	logicalName := extractLogicalName(configMap)
+	if logicalName != "" {
+		if err := h.releaseLogicalName(ctx, logicalName); err != nil {
+			logger.Error(err, "Failed to release name reservation", "logicalName", logicalName, "fileID", fileID)
+		}
 	}
 
 	logger.Info("Deleted file", "fileID", fileID)

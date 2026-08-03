@@ -119,31 +119,26 @@ func (h *Handler) CreateFile(w http.ResponseWriter, r *http.Request) {
 		req.WorkflowName = ""
 	}
 
-	// Check for duplicate logical name (global uniqueness)
+	// Generate unique file ID (UUID)
+	fileID := uuid.New().String()
 	logicalName := deriveLogicalName(req.FileName, req.WorkflowName)
-	existingID, err := h.checkDuplicateLogicalName(ctx, logicalName, "")
-	if err != nil {
-		logger.Error(err, "Failed to check for duplicate file name", "logicalName", logicalName)
+
+	// Atomically reserve the logical name (prevents concurrent duplicates)
+	if err := h.reserveLogicalName(ctx, logicalName, fileID); err != nil {
+		if apierrors.IsAlreadyExists(err) {
+			writeJSONError(w, http.StatusConflict, ErrorResponse{
+				Error:   "conflict",
+				Message: fmt.Sprintf("A file with name '%s' already exists", logicalName),
+			})
+			return
+		}
+		logger.Error(err, "Failed to reserve logical name", "logicalName", logicalName)
 		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
 			Error:   "internal_error",
 			Message: "Failed to validate file name uniqueness",
 		})
 		return
 	}
-	if existingID != "" {
-		logger.Info("duplicate file name detected", "logicalName", logicalName, "existingID", existingID)
-		writeJSONError(w, http.StatusConflict, ErrorResponse{
-			Error:   "conflict",
-			Message: fmt.Sprintf("A file with name '%s' already exists", logicalName),
-		})
-		return
-	}
-
-	// Generate unique file ID (UUID)
-	fileID := uuid.New().String()
-
-	// Generate ConfigMap name from file ID
-	configMapName := fmt.Sprintf("file-%s", fileID)
 
 	// Get current user for audit trail
 	createdBy := claims.UserID
@@ -152,7 +147,6 @@ func (h *Handler) CreateFile(w http.ResponseWriter, r *http.Request) {
 	if req.FileType != "" {
 		if err := h.ensureFileTypeExists(ctx, req.FileType, createdBy); err != nil {
 			logger.Error(err, "Failed to ensure file type exists", "fileType", req.FileType)
-			// Continue anyway - file type is optional metadata
 		}
 	}
 
@@ -161,10 +155,10 @@ func (h *Handler) CreateFile(w http.ResponseWriter, r *http.Request) {
 	annotations := files.BuildFileAnnotations(
 		req.Description,
 		createdBy,
-		req.WorkflowName, // Empty for regular files, populated for workflows
+		req.WorkflowName,
 	)
 
-	// Create ConfigMap
+	configMapName := fmt.Sprintf("file-%s", fileID)
 	configMap := &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        configMapName,
@@ -178,7 +172,11 @@ func (h *Handler) CreateFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.client.Create(ctx, configMap); err != nil {
-		logger.Error(err, "Failed to create file ConfigMap", "fileID", fileID, "configMapName", configMapName)
+		logger.Error(err, "Failed to create file ConfigMap", "fileID", fileID)
+		// Rollback reservation
+		if releaseErr := h.releaseLogicalName(ctx, logicalName); releaseErr != nil {
+			logger.Error(releaseErr, "Failed to release reservation after file creation failure", "logicalName", logicalName)
+		}
 		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
 			Error:   "internal_error",
 			Message: "Failed to create file",
@@ -432,24 +430,27 @@ func (h *Handler) UpdateFile(w http.ResponseWriter, r *http.Request) {
 		workflowName = *req.WorkflowName
 	}
 
-	// Check for duplicate logical name on rename (exclude current file)
-	logicalName := deriveLogicalName(req.FileName, workflowName)
-	existingID, err := h.checkDuplicateLogicalName(ctx, logicalName, fileID)
-	if err != nil {
-		logger.Error(err, "Failed to check for duplicate file name", "logicalName", logicalName)
-		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
-			Error:   "internal_error",
-			Message: "Failed to validate file name uniqueness",
-		})
-		return
-	}
-	if existingID != "" {
-		logger.Info("duplicate file name detected on update", "logicalName", logicalName, "existingID", existingID)
-		writeJSONError(w, http.StatusConflict, ErrorResponse{
-			Error:   "conflict",
-			Message: fmt.Sprintf("A file with name '%s' already exists", logicalName),
-		})
-		return
+	newLogicalName := deriveLogicalName(req.FileName, workflowName)
+	oldLogicalName := extractLogicalName(configMap)
+	renamed := newLogicalName != oldLogicalName
+
+	// On rename, atomically reserve the new name
+	if renamed {
+		if err := h.reserveLogicalName(ctx, newLogicalName, fileID); err != nil {
+			if apierrors.IsAlreadyExists(err) {
+				writeJSONError(w, http.StatusConflict, ErrorResponse{
+					Error:   "conflict",
+					Message: fmt.Sprintf("A file with name '%s' already exists", newLogicalName),
+				})
+				return
+			}
+			logger.Error(err, "Failed to reserve new logical name", "logicalName", newLogicalName)
+			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+				Error:   "internal_error",
+				Message: "Failed to validate file name uniqueness",
+			})
+			return
+		}
 	}
 
 	// Get current user for audit trail
@@ -459,17 +460,16 @@ func (h *Handler) UpdateFile(w http.ResponseWriter, r *http.Request) {
 	if req.FileType != "" {
 		if err := h.ensureFileTypeExists(ctx, req.FileType, updatedBy); err != nil {
 			logger.Error(err, "Failed to ensure file type exists", "fileType", req.FileType)
-			// Continue anyway - file type is optional metadata
 		}
 	}
 
 	// Update labels and annotations (preserve existing file ID)
-	configMap.Labels = files.BuildFileLabels(fileID, req.FileType, req.Groups, req.AvailableToAll, req.FilePurpose, logicalName)
+	configMap.Labels = files.BuildFileLabels(fileID, req.FileType, req.Groups, req.AvailableToAll, req.FilePurpose, newLogicalName)
 	configMap.Annotations = files.UpdateFileAnnotations(
 		configMap.Annotations,
 		req.Description,
 		updatedBy,
-		req.WorkflowName, // Pointer: nil preserves existing, non-nil updates/deletes
+		req.WorkflowName,
 	)
 
 	// Update data
@@ -479,11 +479,24 @@ func (h *Handler) UpdateFile(w http.ResponseWriter, r *http.Request) {
 
 	if err := h.client.Update(ctx, configMap); err != nil {
 		logger.Error(err, "Failed to update file", "fileID", fileID)
+		// Rollback new reservation on failure
+		if renamed {
+			if releaseErr := h.releaseLogicalName(ctx, newLogicalName); releaseErr != nil {
+				logger.Error(releaseErr, "Failed to release new reservation after update failure", "logicalName", newLogicalName)
+			}
+		}
 		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
 			Error:   "internal_error",
 			Message: "Failed to update file",
 		})
 		return
+	}
+
+	// Release old reservation on successful rename
+	if renamed && oldLogicalName != "" {
+		if err := h.releaseLogicalName(ctx, oldLogicalName); err != nil {
+			logger.Error(err, "Failed to release old name reservation", "logicalName", oldLogicalName)
+		}
 	}
 
 	logger.Info("Updated file", "fileID", fileID, "updatedBy", updatedBy)
@@ -556,6 +569,14 @@ func (h *Handler) DeleteFile(w http.ResponseWriter, r *http.Request) {
 			Message: "Failed to delete file",
 		})
 		return
+	}
+
+	// Release the logical name reservation
+	logicalName := extractLogicalName(configMap)
+	if logicalName != "" {
+		if err := h.releaseLogicalName(ctx, logicalName); err != nil {
+			logger.Error(err, "Failed to release name reservation", "logicalName", logicalName, "fileID", fileID)
+		}
 	}
 
 	logger.Info("Deleted file", "fileID", fileID)
@@ -927,36 +948,41 @@ func deriveLogicalName(fileName, workflowName string) string {
 	return fileName
 }
 
-// checkDuplicateLogicalName checks if a file with the same logical name already exists.
-// Uses a label selector on the logical-name hash for efficient server-side filtering.
-// excludeFileID can be set to skip a specific file (for update operations).
-// Returns the existing file's ID if a duplicate is found, or empty string if no conflict.
-func (h *Handler) checkDuplicateLogicalName(ctx context.Context, logicalName, excludeFileID string) (string, error) {
-	var configMapList corev1.ConfigMapList
-	err := h.client.List(ctx, &configMapList,
-		client.InNamespace(h.namespace),
-		client.MatchingLabels{
-			files.AppNameLabel:        files.AppName,
-			files.AppComponentLabel:   files.ComponentFile,
-			files.LogicalNameHashLabel: files.HashLogicalName(logicalName),
+// reserveLogicalName atomically reserves a logical name by creating a deterministic
+// ConfigMap. Kubernetes rejects the Create with AlreadyExists if the name is taken,
+// preventing concurrent requests from creating duplicates.
+func (h *Handler) reserveLogicalName(ctx context.Context, logicalName, fileID string) error {
+	reservation := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      files.ReservationName(logicalName),
+			Namespace: h.namespace,
+			Labels: map[string]string{
+				files.AppNameLabel:      files.AppName,
+				files.AppComponentLabel: files.ComponentFileReservation,
+			},
 		},
-	)
-	if err != nil {
-		return "", fmt.Errorf("failed to list file ConfigMaps for duplicate check: %w", err)
+		Data: map[string]string{
+			"logicalName": logicalName,
+			"fileID":      fileID,
+		},
 	}
+	return h.client.Create(ctx, reservation)
+}
 
-	// Verify exact match (hash collisions are theoretically possible)
-	for i := range configMapList.Items {
-		cm := &configMapList.Items[i]
-		existingID := files.ExtractFileIDFromLabels(cm.Labels)
-		if excludeFileID != "" && existingID == excludeFileID {
-			continue
-		}
-		if extractLogicalName(cm) == logicalName {
-			return existingID, nil
-		}
+// releaseLogicalName deletes the reservation ConfigMap for a logical name.
+// Ignores NotFound errors (idempotent).
+func (h *Handler) releaseLogicalName(ctx context.Context, logicalName string) error {
+	reservation := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      files.ReservationName(logicalName),
+			Namespace: h.namespace,
+		},
 	}
-	return "", nil
+	err := h.client.Delete(ctx, reservation)
+	if apierrors.IsNotFound(err) {
+		return nil
+	}
+	return err
 }
 
 // validateCreateFileRequest validates a CreateFileRequest

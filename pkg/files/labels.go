@@ -59,6 +59,8 @@ const (
 	AppName = "krkn-operator"
 	// ComponentFile is the value for AppComponentLabel
 	ComponentFile = "file"
+	// ComponentFileReservation is the component label for name reservation ConfigMaps
+	ComponentFileReservation = "file-reservation"
 
 	// FilePurposeFile is the filePurpose value for generic user files
 	FilePurposeFile = "file"
@@ -73,6 +75,11 @@ const (
 func HashLogicalName(name string) string {
 	h := sha256.Sum256([]byte(name))
 	return hex.EncodeToString(h[:16])
+}
+
+// ReservationName returns the deterministic ConfigMap name for a logical name reservation.
+func ReservationName(logicalName string) string {
+	return "file-reservation-" + HashLogicalName(logicalName)
 }
 
 // BuildFileLabels creates the labels map for a file ConfigMap
