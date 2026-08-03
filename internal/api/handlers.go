@@ -788,6 +788,9 @@ func (h *Handler) PostScenarios(w http.ResponseWriter, r *http.Request) {
 	scenarios := make([]ScenarioTag, 0)
 	if scenarioTags != nil {
 		for _, tag := range *scenarioTags {
+			if isScenarioBlocked(tag.Name) {
+				continue
+			}
 			scenarios = append(scenarios, ScenarioTag{
 				Name:         tag.Name,
 				Digest:       tag.Digest,
@@ -1061,6 +1064,14 @@ func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
 			Error:   "bad_request",
 			Message: "scenarioName is required",
+		})
+		return
+	}
+
+	if isScenarioBlocked(req.ScenarioName) {
+		writeJSONError(w, http.StatusForbidden, ErrorResponse{
+			Error:   "forbidden",
+			Message: "This scenario type is not permitted",
 		})
 		return
 	}
