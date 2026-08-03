@@ -48,6 +48,7 @@ import (
 // @Success 201 {object} files.CreateFileResponse "File created"
 // @Failure 400 {object} ErrorResponse "Invalid request or validation error"
 // @Failure 401 {object} ErrorResponse "Unauthorized"
+// @Failure 409 {object} ErrorResponse "File name already exists"
 // @Failure 500 {object} ErrorResponse "Internal server error"
 // @Router /files [post]
 func (h *Handler) CreateFile(w http.ResponseWriter, r *http.Request) {
@@ -90,8 +91,13 @@ func (h *Handler) CreateFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Default filePurpose to "file" if not specified
+	if req.FilePurpose == "" {
+		req.FilePurpose = files.FilePurposeFile
+	}
+
 	// Validate filePurpose - only workflow API can create workflow-template files
-	if req.FilePurpose == "workflow-template" {
+	if req.FilePurpose == files.FilePurposeWorkflow {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
 			Error:   "bad_request",
 			Message: "Use POST /api/v1/workflows to create workflow templates",
@@ -99,11 +105,40 @@ func (h *Handler) CreateFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Validate filePurpose is a known value
+	if !files.IsValidFilePurpose(req.FilePurpose) {
+		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+			Error:   "bad_request",
+			Message: fmt.Sprintf("Invalid filePurpose '%s'. Valid values: %s", req.FilePurpose, strings.Join(files.ValidFilePurposes(), ", ")),
+		})
+		return
+	}
+
+	// For non-workflow files, store fileName as the logical name in the same annotation
+	if req.FilePurpose != files.FilePurposeWorkflow {
+		req.WorkflowName = req.FileName
+	}
+
 	// Generate unique file ID (UUID)
 	fileID := uuid.New().String()
+	logicalName := deriveLogicalName(req.FileName, req.WorkflowName)
 
-	// Generate ConfigMap name from file ID
-	configMapName := fmt.Sprintf("file-%s", fileID)
+	// Atomically reserve the logical name (prevents concurrent duplicates)
+	if err := h.reserveLogicalName(ctx, logicalName, fileID); err != nil {
+		if apierrors.IsAlreadyExists(err) {
+			writeJSONError(w, http.StatusConflict, ErrorResponse{
+				Error:   "conflict",
+				Message: fmt.Sprintf("A file with name '%s' already exists", logicalName),
+			})
+			return
+		}
+		logger.Error(err, "Failed to reserve logical name", "logicalName", logicalName)
+		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+			Error:   "internal_error",
+			Message: "Failed to validate file name uniqueness",
+		})
+		return
+	}
 
 	// Get current user for audit trail
 	createdBy := claims.UserID
@@ -112,19 +147,18 @@ func (h *Handler) CreateFile(w http.ResponseWriter, r *http.Request) {
 	if req.FileType != "" {
 		if err := h.ensureFileTypeExists(ctx, req.FileType, createdBy); err != nil {
 			logger.Error(err, "Failed to ensure file type exists", "fileType", req.FileType)
-			// Continue anyway - file type is optional metadata
 		}
 	}
 
 	// Build labels and annotations
-	labels := files.BuildFileLabels(fileID, req.FileType, req.Groups, req.AvailableToAll, req.FilePurpose)
+	labels := files.BuildFileLabels(fileID, req.FileType, req.Groups, req.AvailableToAll, req.FilePurpose, logicalName)
 	annotations := files.BuildFileAnnotations(
 		req.Description,
 		createdBy,
-		req.WorkflowName, // Empty for regular files, populated for workflows
+		req.WorkflowName,
 	)
 
-	// Create ConfigMap
+	configMapName := fmt.Sprintf("file-%s", fileID)
 	configMap := &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        configMapName,
@@ -138,7 +172,11 @@ func (h *Handler) CreateFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.client.Create(ctx, configMap); err != nil {
-		logger.Error(err, "Failed to create file ConfigMap", "fileID", fileID, "configMapName", configMapName)
+		logger.Error(err, "Failed to create file ConfigMap", "fileID", fileID)
+		// Rollback reservation
+		if releaseErr := h.releaseLogicalName(ctx, logicalName); releaseErr != nil {
+			logger.Error(releaseErr, "Failed to release reservation after file creation failure", "logicalName", logicalName)
+		}
 		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
 			Error:   "internal_error",
 			Message: "Failed to create file",
@@ -161,7 +199,7 @@ func (h *Handler) CreateFile(w http.ResponseWriter, r *http.Request) {
 // @Tags files
 // @Produce json
 // @Security BearerAuth
-// @Param filePurpose query string false "Filter by file purpose (e.g., workflow-template)"
+// @Param filePurpose query string false "Filter by file purpose (file, workflow-template, resiliency-score)"
 // @Success 200 {object} files.ListFilesResponse "List of files"
 // @Failure 401 {object} ErrorResponse "Unauthorized"
 // @Failure 403 {object} ErrorResponse "Forbidden (admin only)"
@@ -335,6 +373,15 @@ func (h *Handler) UpdateFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Block workflow-template reclassification via /files
+	if req.FilePurpose == files.FilePurposeWorkflow {
+		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+			Error:   "bad_request",
+			Message: "Use POST /api/v1/workflows to manage workflow templates",
+		})
+		return
+	}
+
 	// Load existing ConfigMap by file ID
 	configMap, err := h.loadFileConfigMapByID(ctx, fileID)
 	if err != nil {
@@ -351,6 +398,12 @@ func (h *Handler) UpdateFile(w http.ResponseWriter, r *http.Request) {
 			})
 		}
 		return
+	}
+
+	// Preserve existing filePurpose — /files cannot reclassify resources
+	existingPurpose := files.ExtractFilePurposeFromLabels(configMap.Labels)
+	if existingPurpose != "" {
+		req.FilePurpose = existingPurpose
 	}
 
 	// Check ownership - only owner or admin can update files
@@ -371,6 +424,45 @@ func (h *Handler) UpdateFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Derive the logical name and annotation pointer.
+	// For workflows: nil req.WorkflowName means preserve existing (pointer semantics).
+	// For regular files: always sync annotation to fileName.
+	var workflowNamePtr *string
+	var newLogicalName string
+	if req.FilePurpose == files.FilePurposeWorkflow {
+		if req.WorkflowName != nil {
+			newLogicalName = deriveLogicalName(req.FileName, *req.WorkflowName)
+			workflowNamePtr = req.WorkflowName
+		} else {
+			newLogicalName = extractLogicalName(configMap)
+			workflowNamePtr = nil
+		}
+	} else {
+		newLogicalName = req.FileName
+		workflowNamePtr = &req.FileName
+	}
+	oldLogicalName := extractLogicalName(configMap)
+	renamed := newLogicalName != oldLogicalName
+
+	// On rename, atomically reserve the new name
+	if renamed {
+		if err := h.reserveLogicalName(ctx, newLogicalName, fileID); err != nil {
+			if apierrors.IsAlreadyExists(err) {
+				writeJSONError(w, http.StatusConflict, ErrorResponse{
+					Error:   "conflict",
+					Message: fmt.Sprintf("A file with name '%s' already exists", newLogicalName),
+				})
+				return
+			}
+			logger.Error(err, "Failed to reserve new logical name", "logicalName", newLogicalName)
+			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+				Error:   "internal_error",
+				Message: "Failed to validate file name uniqueness",
+			})
+			return
+		}
+	}
+
 	// Get current user for audit trail
 	updatedBy := claims.UserID
 
@@ -378,17 +470,16 @@ func (h *Handler) UpdateFile(w http.ResponseWriter, r *http.Request) {
 	if req.FileType != "" {
 		if err := h.ensureFileTypeExists(ctx, req.FileType, updatedBy); err != nil {
 			logger.Error(err, "Failed to ensure file type exists", "fileType", req.FileType)
-			// Continue anyway - file type is optional metadata
 		}
 	}
 
 	// Update labels and annotations (preserve existing file ID)
-	configMap.Labels = files.BuildFileLabels(fileID, req.FileType, req.Groups, req.AvailableToAll, req.FilePurpose)
+	configMap.Labels = files.BuildFileLabels(fileID, req.FileType, req.Groups, req.AvailableToAll, req.FilePurpose, newLogicalName)
 	configMap.Annotations = files.UpdateFileAnnotations(
 		configMap.Annotations,
 		req.Description,
 		updatedBy,
-		req.WorkflowName, // Pointer: nil preserves existing, non-nil updates/deletes
+		workflowNamePtr,
 	)
 
 	// Update data
@@ -398,11 +489,24 @@ func (h *Handler) UpdateFile(w http.ResponseWriter, r *http.Request) {
 
 	if err := h.client.Update(ctx, configMap); err != nil {
 		logger.Error(err, "Failed to update file", "fileID", fileID)
+		// Rollback new reservation on failure
+		if renamed {
+			if releaseErr := h.releaseLogicalName(ctx, newLogicalName); releaseErr != nil {
+				logger.Error(releaseErr, "Failed to release new reservation after update failure", "logicalName", newLogicalName)
+			}
+		}
 		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
 			Error:   "internal_error",
 			Message: "Failed to update file",
 		})
 		return
+	}
+
+	// Release old reservation on successful rename
+	if renamed && oldLogicalName != "" {
+		if err := h.releaseLogicalName(ctx, oldLogicalName); err != nil {
+			logger.Error(err, "Failed to release old name reservation", "logicalName", oldLogicalName)
+		}
 	}
 
 	logger.Info("Updated file", "fileID", fileID, "updatedBy", updatedBy)
@@ -477,6 +581,14 @@ func (h *Handler) DeleteFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Release the logical name reservation
+	logicalName := extractLogicalName(configMap)
+	if logicalName != "" {
+		if err := h.releaseLogicalName(ctx, logicalName); err != nil {
+			logger.Error(err, "Failed to release name reservation", "logicalName", logicalName, "fileID", fileID)
+		}
+	}
+
 	logger.Info("Deleted file", "fileID", fileID)
 
 	writeJSON(w, http.StatusOK, files.DeleteFileResponse{
@@ -491,7 +603,7 @@ func (h *Handler) DeleteFile(w http.ResponseWriter, r *http.Request) {
 // @Tags files
 // @Produce json
 // @Security BearerAuth
-// @Param filePurpose query string false "Filter by file purpose (e.g., workflow-template)"
+// @Param filePurpose query string false "Filter by file purpose (file, workflow-template, resiliency-score)"
 // @Success 200 {object} files.AvailableFilesResponse "List of accessible files"
 // @Failure 401 {object} ErrorResponse "Unauthorized"
 // @Failure 500 {object} ErrorResponse "Internal server error"
@@ -758,33 +870,26 @@ func (h *Handler) isFileOwnerOrAdmin(ctx context.Context, configMap *corev1.Conf
 
 // buildFileResponse builds a FileResponse from a ConfigMap
 func buildFileResponse(configMap *corev1.ConfigMap) files.FileResponse {
-	// Extract file name, content, and studioLayout from data
-	// studioLayout.json is separate from the main file content
-	fileName := ""
+	// Extract content and studioLayout from data
 	content := ""
 	studioLayout := ""
 	for k, v := range configMap.Data {
-		if k == "studioLayout.json" {
+		switch k {
+		case "studioLayout.json":
 			studioLayout = v
-		} else {
-			fileName = k
+		default:
 			content = v
 		}
 	}
 
-	// Get workflow name with backwards-compatible fallback
-	workflowName := configMap.Annotations[files.WorkflowNameAnnotation]
-	if workflowName == "" && files.ExtractFilePurposeFromLabels(configMap.Labels) == "workflow-template" {
-		// Fallback for workflows created before workflowName annotation was added
-		workflowName = fileName
-	}
+	logicalName := configMap.Annotations[files.WorkflowNameAnnotation]
 
 	return files.FileResponse{
 		FileID:         files.ExtractFileIDFromLabels(configMap.Labels),
-		FileName:       fileName,
+		FileName:       logicalName,
 		Content:        content,
 		StudioLayout:   studioLayout,
-		WorkflowName:   workflowName,
+		WorkflowName:   logicalName,
 		Description:    configMap.Annotations[files.DescriptionAnnotation],
 		FileType:       files.ExtractFileTypeFromLabels(configMap.Labels),
 		FilePurpose:    files.ExtractFilePurposeFromLabels(configMap.Labels),
@@ -799,24 +904,69 @@ func buildFileResponse(configMap *corev1.ConfigMap) files.FileResponse {
 
 // buildFileInfo builds a FileInfo from a ConfigMap (minimal user-facing info)
 func buildFileInfo(configMap *corev1.ConfigMap) files.FileInfo {
-	// Extract primary file name from data (exclude studioLayout.json)
-	fileName := ""
-	for k := range configMap.Data {
-		if k != "studioLayout.json" {
-			fileName = k
-			break
-		}
-	}
-
 	return files.FileInfo{
 		FileID:      files.ExtractFileIDFromLabels(configMap.Labels),
-		FileName:    fileName,
+		FileName:    configMap.Annotations[files.WorkflowNameAnnotation],
 		Description: configMap.Annotations[files.DescriptionAnnotation],
 		FileType:    files.ExtractFileTypeFromLabels(configMap.Labels),
 		FilePurpose: files.ExtractFilePurposeFromLabels(configMap.Labels),
 		CreatedAt:   configMap.Annotations[files.CreatedAtAnnotation],
 		UpdatedAt:   configMap.Annotations[files.UpdatedAtAnnotation],
 	}
+}
+
+// extractLogicalName derives the logical name from an existing file ConfigMap.
+// For workflows, the logical name is the workflowName annotation.
+// For regular files, it is the primary Data key (excluding studioLayout.json).
+func extractLogicalName(cm *corev1.ConfigMap) string {
+	return cm.Annotations[files.WorkflowNameAnnotation]
+}
+
+// deriveLogicalName derives the logical name from request fields.
+// If workflowName is set, it takes precedence (workflow identity).
+// Otherwise, fileName is used (regular file identity).
+func deriveLogicalName(fileName, workflowName string) string {
+	if workflowName != "" {
+		return workflowName
+	}
+	return fileName
+}
+
+// reserveLogicalName atomically reserves a logical name by creating a deterministic
+// ConfigMap. Kubernetes rejects the Create with AlreadyExists if the name is taken,
+// preventing concurrent requests from creating duplicates.
+func (h *Handler) reserveLogicalName(ctx context.Context, logicalName, fileID string) error {
+	reservation := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      files.ReservationName(logicalName),
+			Namespace: h.namespace,
+			Labels: map[string]string{
+				files.AppNameLabel:      files.AppName,
+				files.AppComponentLabel: files.ComponentFileReservation,
+			},
+		},
+		Data: map[string]string{
+			"logicalName": logicalName,
+			"fileID":      fileID,
+		},
+	}
+	return h.client.Create(ctx, reservation)
+}
+
+// releaseLogicalName deletes the reservation ConfigMap for a logical name.
+// Ignores NotFound errors (idempotent).
+func (h *Handler) releaseLogicalName(ctx context.Context, logicalName string) error {
+	reservation := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      files.ReservationName(logicalName),
+			Namespace: h.namespace,
+		},
+	}
+	err := h.client.Delete(ctx, reservation)
+	if apierrors.IsNotFound(err) {
+		return nil
+	}
+	return err
 }
 
 // validateCreateFileRequest validates a CreateFileRequest

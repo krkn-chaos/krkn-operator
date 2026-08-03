@@ -822,3 +822,116 @@ func TestWorkflowStudioLayout(t *testing.T) {
 		t.Errorf("Expected nextNodeNumber=4 after update, got %v", getResp2.StudioLayout["nextNodeNumber"])
 	}
 }
+
+func TestCreateWorkflow_DuplicateName(t *testing.T) {
+	handler := setupWorkflowTestHandler()
+
+	// Create user
+	user := &krknv1alpha1.KrknUser{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "krknuser-" + sanitizeUserID("admin@test.example"),
+			Namespace: handler.namespace,
+		},
+		Spec: krknv1alpha1.KrknUserSpec{
+			UserID: "admin@test.example",
+		},
+	}
+	_ = handler.client.Create(context.Background(), user)
+
+	req1 := workflows.CreateWorkflowRequest{
+		WorkflowName:   "My Workflow",
+		Description:    "first",
+		Graph:          validWorkflowGraph(),
+		AvailableToAll: true,
+	}
+	body, _ := json.Marshal(req1)
+	httpReq := httptest.NewRequest(http.MethodPost, WorkflowsPath, bytes.NewReader(body))
+	httpReq = addAdminContext(httpReq)
+	w := httptest.NewRecorder()
+	handler.CreateWorkflow(w, httpReq)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("Setup: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Second workflow with same name should return 409
+	req2 := workflows.CreateWorkflowRequest{
+		WorkflowName:   "My Workflow",
+		Description:    "duplicate",
+		Graph:          validWorkflowGraph(),
+		AvailableToAll: true,
+	}
+	body, _ = json.Marshal(req2)
+	httpReq = httptest.NewRequest(http.MethodPost, WorkflowsPath, bytes.NewReader(body))
+	httpReq = addAdminContext(httpReq)
+	w = httptest.NewRecorder()
+	handler.CreateWorkflow(w, httpReq)
+
+	if w.Code != http.StatusConflict {
+		t.Errorf("Expected 409 Conflict for duplicate workflow name, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestUpdateWorkflow_RenameConflict(t *testing.T) {
+	handler := setupWorkflowTestHandler()
+
+	// Create user
+	user := &krknv1alpha1.KrknUser{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "krknuser-" + sanitizeUserID("admin@test.example"),
+			Namespace: handler.namespace,
+		},
+		Spec: krknv1alpha1.KrknUserSpec{
+			UserID: "admin@test.example",
+		},
+	}
+	_ = handler.client.Create(context.Background(), user)
+
+	// Create workflow A
+	reqA := workflows.CreateWorkflowRequest{
+		WorkflowName:   "Workflow Alpha",
+		Graph:          validWorkflowGraph(),
+		AvailableToAll: true,
+	}
+	body, _ := json.Marshal(reqA)
+	httpReq := httptest.NewRequest(http.MethodPost, WorkflowsPath, bytes.NewReader(body))
+	httpReq = addAdminContext(httpReq)
+	w := httptest.NewRecorder()
+	handler.CreateWorkflow(w, httpReq)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("Setup workflow A: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Create workflow B
+	reqB := workflows.CreateWorkflowRequest{
+		WorkflowName:   "Workflow Beta",
+		Graph:          validWorkflowGraph(),
+		AvailableToAll: true,
+	}
+	body, _ = json.Marshal(reqB)
+	httpReq = httptest.NewRequest(http.MethodPost, WorkflowsPath, bytes.NewReader(body))
+	httpReq = addAdminContext(httpReq)
+	w = httptest.NewRecorder()
+	handler.CreateWorkflow(w, httpReq)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("Setup workflow B: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var respB workflows.CreateWorkflowResponse
+	_ = json.Unmarshal(w.Body.Bytes(), &respB)
+
+	// Rename workflow B to "Workflow Alpha" — should conflict
+	updateReq := workflows.UpdateWorkflowRequest{
+		WorkflowName:   "Workflow Alpha",
+		Graph:          validWorkflowGraph(),
+		AvailableToAll: true,
+	}
+	body, _ = json.Marshal(updateReq)
+	httpReq = httptest.NewRequest(http.MethodPut, WorkflowsPath+"/"+respB.WorkflowID, bytes.NewReader(body))
+	httpReq = addAdminContext(httpReq)
+	w = httptest.NewRecorder()
+	handler.UpdateWorkflow(w, httpReq)
+
+	if w.Code != http.StatusConflict {
+		t.Errorf("Expected 409 Conflict on rename to existing workflow name, got %d: %s", w.Code, w.Body.String())
+	}
+}

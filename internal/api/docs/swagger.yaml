@@ -784,7 +784,7 @@ paths:
       description: Get list of all file ConfigMaps (admin only). Supports filtering
         by filePurpose query parameter.
       parameters:
-      - description: Filter by file purpose (e.g., workflow-template)
+      - description: Filter by file purpose (file, workflow-template, resiliency-score)
         in: query
         name: filePurpose
         type: string
@@ -840,6 +840,10 @@ paths:
           description: Unauthorized
           schema:
             $ref: '#/definitions/internal_api.ErrorResponse'
+        "409":
+          description: File name already exists
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
         "500":
           description: Internal server error
           schema:
@@ -854,7 +858,7 @@ paths:
       description: Get files accessible to current user (own files, group files, public
         files). Supports filtering by filePurpose query parameter.
       parameters:
-      - description: Filter by file purpose (e.g., workflow-template)
+      - description: Filter by file purpose (file, workflow-template, resiliency-score)
         in: query
         name: filePurpose
         type: string
@@ -1682,6 +1686,10 @@ paths:
             $ref: '#/definitions/internal_api.ErrorResponse'
         "401":
           description: Unauthorized
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "409":
+          description: Workflow name already exists
           schema:
             $ref: '#/definitions/internal_api.ErrorResponse'
         "500":

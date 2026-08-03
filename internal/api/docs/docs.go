@@ -230,7 +230,7 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "Filter by file purpose (e.g., workflow-template)",
+                        "description": "Filter by file purpose (file, workflow-template, resiliency-score)",
                         "name": "filePurpose",
                         "in": "query"
                     }
@@ -309,6 +309,12 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     },
+                    "409": {
+                        "description": "File name already exists",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
                     "500": {
                         "description": "Internal server error",
                         "schema": {
@@ -336,7 +342,7 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "Filter by file purpose (e.g., workflow-template)",
+                        "description": "Filter by file purpose (file, workflow-template, resiliency-score)",
                         "name": "filePurpose",
                         "in": "query"
                     }
@@ -1469,6 +1475,12 @@ const docTemplate = `{
                     },
                     "401": {
                         "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Workflow name already exists",
                         "schema": {
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }

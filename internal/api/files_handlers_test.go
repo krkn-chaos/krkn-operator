@@ -1237,3 +1237,302 @@ func TestCanAccessFile(t *testing.T) {
 		})
 	}
 }
+
+// createTestAdminUser creates an admin KrknUser in the fake client for validation
+func createTestAdminUser(handler *Handler) {
+	user := &krknv1alpha1.KrknUser{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "krknuser-" + sanitizeUserID("admin@test.example"),
+			Namespace: handler.namespace,
+		},
+		Spec: krknv1alpha1.KrknUserSpec{
+			UserID: "admin@test.example",
+			Role:   "admin",
+		},
+	}
+	_ = handler.client.Create(context.Background(), user)
+}
+
+func TestCreateFile_DuplicateName(t *testing.T) {
+	handler := setupFilesTestHandler()
+	createTestAdminUser(handler)
+
+	createReq := files.CreateFileRequest{
+		FileName:       "unique-config.yaml",
+		Content:        "key: value",
+		AvailableToAll: true,
+	}
+	body, _ := json.Marshal(createReq)
+	req := httptest.NewRequest(http.MethodPost, FilesPath, bytes.NewReader(body))
+	req = addAdminContext(req)
+	w := httptest.NewRecorder()
+	handler.CreateFile(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("Setup: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Second create with the same fileName should return 409
+	body, _ = json.Marshal(createReq)
+	req = httptest.NewRequest(http.MethodPost, FilesPath, bytes.NewReader(body))
+	req = addAdminContext(req)
+	w = httptest.NewRecorder()
+	handler.CreateFile(w, req)
+
+	if w.Code != http.StatusConflict {
+		t.Errorf("Expected 409 Conflict for duplicate name, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestCreateFile_DuplicateName_CrossPurpose(t *testing.T) {
+	handler := setupFilesTestHandler()
+	createTestAdminUser(handler)
+
+	// Create a generic file
+	createReq := files.CreateFileRequest{
+		FileName:       "cross-purpose.yaml",
+		Content:        "data: value",
+		FilePurpose:    files.FilePurposeFile,
+		AvailableToAll: true,
+	}
+	body, _ := json.Marshal(createReq)
+	req := httptest.NewRequest(http.MethodPost, FilesPath, bytes.NewReader(body))
+	req = addAdminContext(req)
+	w := httptest.NewRecorder()
+	handler.CreateFile(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("Setup: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Create a resiliency file with same fileName — should still conflict (global uniqueness)
+	createReq2 := files.CreateFileRequest{
+		FileName:       "cross-purpose.yaml",
+		Content:        "metrics: true",
+		FilePurpose:    files.FilePurposeResiliency,
+		AvailableToAll: true,
+	}
+	body, _ = json.Marshal(createReq2)
+	req = httptest.NewRequest(http.MethodPost, FilesPath, bytes.NewReader(body))
+	req = addAdminContext(req)
+	w = httptest.NewRecorder()
+	handler.CreateFile(w, req)
+
+	if w.Code != http.StatusConflict {
+		t.Errorf("Expected 409 Conflict across filePurpose, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestUpdateFile_RenameConflict(t *testing.T) {
+	handler := setupFilesTestHandler()
+	createTestAdminUser(handler)
+
+	// Create file A
+	reqA := files.CreateFileRequest{
+		FileName:       "file-a.yaml",
+		Content:        "key: a",
+		AvailableToAll: true,
+	}
+	body, _ := json.Marshal(reqA)
+	req := httptest.NewRequest(http.MethodPost, FilesPath, bytes.NewReader(body))
+	req = addAdminContext(req)
+	w := httptest.NewRecorder()
+	handler.CreateFile(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("Setup file A: expected 201, got %d", w.Code)
+	}
+
+	// Create file B
+	reqB := files.CreateFileRequest{
+		FileName:       "file-b.yaml",
+		Content:        "key: b",
+		AvailableToAll: true,
+	}
+	body, _ = json.Marshal(reqB)
+	req = httptest.NewRequest(http.MethodPost, FilesPath, bytes.NewReader(body))
+	req = addAdminContext(req)
+	w = httptest.NewRecorder()
+	handler.CreateFile(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("Setup file B: expected 201, got %d", w.Code)
+	}
+	var respB files.CreateFileResponse
+	_ = json.Unmarshal(w.Body.Bytes(), &respB)
+
+	// Rename file B to file-a.yaml — should conflict
+	updateReq := files.UpdateFileRequest{
+		FileName:       "file-a.yaml",
+		Content:        "key: b-updated",
+		AvailableToAll: true,
+	}
+	body, _ = json.Marshal(updateReq)
+	req = httptest.NewRequest(http.MethodPut, FilesPath+"/"+respB.FileID, bytes.NewReader(body))
+	req = addAdminContext(req)
+	w = httptest.NewRecorder()
+	handler.UpdateFile(w, req)
+
+	if w.Code != http.StatusConflict {
+		t.Errorf("Expected 409 Conflict on rename to existing name, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestUpdateFile_SameName(t *testing.T) {
+	handler := setupFilesTestHandler()
+	createTestAdminUser(handler)
+
+	// Create file
+	createReq := files.CreateFileRequest{
+		FileName:       "keep-name.yaml",
+		Content:        "key: original",
+		AvailableToAll: true,
+	}
+	body, _ := json.Marshal(createReq)
+	req := httptest.NewRequest(http.MethodPost, FilesPath, bytes.NewReader(body))
+	req = addAdminContext(req)
+	w := httptest.NewRecorder()
+	handler.CreateFile(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("Setup: expected 201, got %d", w.Code)
+	}
+	var resp files.CreateFileResponse
+	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+
+	// Update content but keep same fileName — should succeed
+	updateReq := files.UpdateFileRequest{
+		FileName:       "keep-name.yaml",
+		Content:        "key: updated",
+		AvailableToAll: true,
+	}
+	body, _ = json.Marshal(updateReq)
+	req = httptest.NewRequest(http.MethodPut, FilesPath+"/"+resp.FileID, bytes.NewReader(body))
+	req = addAdminContext(req)
+	w = httptest.NewRecorder()
+	handler.UpdateFile(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("Expected 200 OK when keeping same name, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestCreateFile_DefaultFilePurpose(t *testing.T) {
+	handler := setupFilesTestHandler()
+	createTestAdminUser(handler)
+
+	createReq := files.CreateFileRequest{
+		FileName:       "no-purpose.yaml",
+		Content:        "data: value",
+		AvailableToAll: true,
+	}
+	body, _ := json.Marshal(createReq)
+	req := httptest.NewRequest(http.MethodPost, FilesPath, bytes.NewReader(body))
+	req = addAdminContext(req)
+	w := httptest.NewRecorder()
+	handler.CreateFile(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("Expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp files.CreateFileResponse
+	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+
+	// Verify the ConfigMap has filePurpose label set to "file"
+	var cm corev1.ConfigMap
+	err := handler.client.Get(context.Background(), client.ObjectKey{
+		Name:      "file-" + resp.FileID,
+		Namespace: handler.namespace,
+	}, &cm)
+	if err != nil {
+		t.Fatalf("Failed to get ConfigMap: %v", err)
+	}
+
+	if cm.Labels[files.FilePurposeLabel] != files.FilePurposeFile {
+		t.Errorf("Expected filePurpose label '%s', got '%s'", files.FilePurposeFile, cm.Labels[files.FilePurposeLabel])
+	}
+}
+
+func TestCreateFile_ResiliencyPurpose(t *testing.T) {
+	handler := setupFilesTestHandler()
+	createTestAdminUser(handler)
+
+	createReq := files.CreateFileRequest{
+		FileName:       "resiliency-metrics.yaml",
+		Content:        "metrics: true",
+		FilePurpose:    files.FilePurposeResiliency,
+		AvailableToAll: true,
+	}
+	body, _ := json.Marshal(createReq)
+	req := httptest.NewRequest(http.MethodPost, FilesPath, bytes.NewReader(body))
+	req = addAdminContext(req)
+	w := httptest.NewRecorder()
+	handler.CreateFile(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("Expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp files.CreateFileResponse
+	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+
+	// Verify the ConfigMap has filePurpose label set to "resiliency-score"
+	var cm corev1.ConfigMap
+	err := handler.client.Get(context.Background(), client.ObjectKey{
+		Name:      "file-" + resp.FileID,
+		Namespace: handler.namespace,
+	}, &cm)
+	if err != nil {
+		t.Fatalf("Failed to get ConfigMap: %v", err)
+	}
+
+	if cm.Labels[files.FilePurposeLabel] != files.FilePurposeResiliency {
+		t.Errorf("Expected filePurpose label '%s', got '%s'", files.FilePurposeResiliency, cm.Labels[files.FilePurposeLabel])
+	}
+}
+
+func TestCreateFile_InvalidFilePurpose(t *testing.T) {
+	handler := setupFilesTestHandler()
+	createTestAdminUser(handler)
+
+	createReq := files.CreateFileRequest{
+		FileName:       "invalid-purpose.yaml",
+		Content:        "key: value",
+		FilePurpose:    "unknown-purpose",
+		AvailableToAll: true,
+	}
+	body, _ := json.Marshal(createReq)
+	req := httptest.NewRequest(http.MethodPost, FilesPath, bytes.NewReader(body))
+	req = addAdminContext(req)
+	w := httptest.NewRecorder()
+	handler.CreateFile(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("Expected 400 for invalid filePurpose, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "Invalid filePurpose") {
+		t.Errorf("Expected error about invalid filePurpose, got: %s", w.Body.String())
+	}
+}
+
+func TestCreateFile_WorkflowPurposeBlocked(t *testing.T) {
+	handler := setupFilesTestHandler()
+	createTestAdminUser(handler)
+
+	createReq := files.CreateFileRequest{
+		FileName:       "sneaky-workflow.json",
+		Content:        `{"nodes": []}`,
+		FilePurpose:    files.FilePurposeWorkflow,
+		AvailableToAll: true,
+	}
+	body, _ := json.Marshal(createReq)
+	req := httptest.NewRequest(http.MethodPost, FilesPath, bytes.NewReader(body))
+	req = addAdminContext(req)
+	w := httptest.NewRecorder()
+	handler.CreateFile(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("Expected 400 for workflow-template via files API, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "POST /api/v1/workflows") {
+		t.Errorf("Expected error about using workflows API, got: %s", w.Body.String())
+	}
+}

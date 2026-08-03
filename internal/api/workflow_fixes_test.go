@@ -34,12 +34,15 @@ func TestBuildFileInfo_ExcludesStudioLayout(t *testing.T) {
 		wantFileName string
 	}{
 		{
-			name: "workflow with studioLayout - should return workflow.json",
+			name: "workflow with studioLayout - should return logical name from annotation",
 			configMap: &corev1.ConfigMap{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "test-workflow",
 					Labels: map[string]string{
 						files.FileIDLabel: "test-123",
+					},
+					Annotations: map[string]string{
+						files.WorkflowNameAnnotation: "My Workflow",
 					},
 				},
 				Data: map[string]string{
@@ -47,15 +50,18 @@ func TestBuildFileInfo_ExcludesStudioLayout(t *testing.T) {
 					"studioLayout.json": `{"positions": {}}`,
 				},
 			},
-			wantFileName: "workflow.json",
+			wantFileName: "My Workflow",
 		},
 		{
-			name: "file without studioLayout - should return filename",
+			name: "file without studioLayout - should return logical name from annotation",
 			configMap: &corev1.ConfigMap{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "test-file",
 					Labels: map[string]string{
 						files.FileIDLabel: "test-456",
+					},
+					Annotations: map[string]string{
+						files.WorkflowNameAnnotation: "config.yaml",
 					},
 				},
 				Data: map[string]string{
@@ -65,7 +71,7 @@ func TestBuildFileInfo_ExcludesStudioLayout(t *testing.T) {
 			wantFileName: "config.yaml",
 		},
 		{
-			name: "only studioLayout - should return empty",
+			name: "no annotation - should return empty",
 			configMap: &corev1.ConfigMap{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "test-broken",
@@ -91,7 +97,7 @@ func TestBuildFileInfo_ExcludesStudioLayout(t *testing.T) {
 	}
 }
 
-// Test for Bug Fix #2: WorkflowName fallback for backwards compatibility
+// Test for Bug Fix #2: WorkflowName/FileName read from annotation for all files
 func TestBuildFileResponse_WorkflowNameFallback(t *testing.T) {
 	tests := []struct {
 		name             string
@@ -99,7 +105,7 @@ func TestBuildFileResponse_WorkflowNameFallback(t *testing.T) {
 		wantWorkflowName string
 	}{
 		{
-			name: "workflow with annotation - use annotation",
+			name: "workflow with annotation",
 			configMap: &corev1.ConfigMap{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "test-workflow",
@@ -118,37 +124,22 @@ func TestBuildFileResponse_WorkflowNameFallback(t *testing.T) {
 			wantWorkflowName: "My Custom Workflow",
 		},
 		{
-			name: "workflow without annotation - fallback to fileName",
-			configMap: &corev1.ConfigMap{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "test-workflow-old",
-					Labels: map[string]string{
-						files.FileIDLabel:      "test-456",
-						files.FilePurposeLabel: "workflow-template",
-					},
-					Annotations: map[string]string{},
-				},
-				Data: map[string]string{
-					"workflow.json": `{"node1": {}}`,
-				},
-			},
-			wantWorkflowName: "workflow.json",
-		},
-		{
-			name: "regular file without annotation - no fallback",
+			name: "regular file with annotation",
 			configMap: &corev1.ConfigMap{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "test-file",
 					Labels: map[string]string{
 						files.FileIDLabel: "test-789",
 					},
-					Annotations: map[string]string{},
+					Annotations: map[string]string{
+						files.WorkflowNameAnnotation: "config.yaml",
+					},
 				},
 				Data: map[string]string{
 					"config.yaml": `key: value`,
 				},
 			},
-			wantWorkflowName: "",
+			wantWorkflowName: "config.yaml",
 		},
 	}
 

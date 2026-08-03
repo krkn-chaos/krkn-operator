@@ -21,6 +21,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -30,6 +31,7 @@ import (
 	"github.com/krkn-chaos/krkn-operator/pkg/files"
 	"github.com/krkn-chaos/krkn-operator/pkg/workflows"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -46,6 +48,7 @@ import (
 // @Success 201 {object} workflows.CreateWorkflowResponse "Workflow created"
 // @Failure 400 {object} ErrorResponse "Invalid request or graph validation error"
 // @Failure 401 {object} ErrorResponse "Unauthorized"
+// @Failure 409 {object} ErrorResponse "Workflow name already exists"
 // @Failure 500 {object} ErrorResponse "Internal server error"
 // @Router /workflows [post]
 func (h *Handler) CreateWorkflow(w http.ResponseWriter, r *http.Request) {
@@ -122,17 +125,24 @@ func (h *Handler) CreateWorkflow(w http.ResponseWriter, r *http.Request) {
 		StudioLayout:   studioLayoutJSON, // Studio visual layout (optional)
 		WorkflowName:   req.WorkflowName, // User-defined workflow name
 		Description:    req.Description,
-		FileType:       req.FileType,        // User categorization (optional)
-		Groups:         req.Groups,          // RBAC groups
-		AvailableToAll: req.AvailableToAll,  // Public flag
-		FilePurpose:    "workflow-template", // System marker
+		FileType:       req.FileType,              // User categorization (optional)
+		Groups:         req.Groups,                // RBAC groups
+		AvailableToAll: req.AvailableToAll,        // Public flag
+		FilePurpose:    files.FilePurposeWorkflow, // System marker
 	}
 
 	// Call existing CreateFile handler logic
 	fileResp, err := h.createFileInternal(ctx, fileReq)
 	if err != nil {
+		var dupErr *DuplicateFileError
+		if errors.As(err, &dupErr) {
+			writeJSONError(w, http.StatusConflict, ErrorResponse{
+				Error:   "conflict",
+				Message: dupErr.Error(),
+			})
+			return
+		}
 		// Distinguish validation errors (4xx) from internal errors (5xx)
-		// Only known validation errors should return 400
 		statusCode := http.StatusInternalServerError
 		errorCode := "internal_error"
 		if strings.Contains(err.Error(), "you can only assign files to your own group") {
@@ -212,7 +222,7 @@ func (h *Handler) ListWorkflows(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Call file list with filePurpose filter
-	fileList, err := h.listFilesInternal(ctx, "workflow-template")
+	fileList, err := h.listFilesInternal(ctx, files.FilePurposeWorkflow)
 	if err != nil {
 		logger.Error(err, "Failed to list workflow files")
 		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
@@ -265,7 +275,7 @@ func (h *Handler) ListAvailableWorkflows(w http.ResponseWriter, r *http.Request)
 	}
 
 	// Call file list with filePurpose filter (returns ConfigMaps)
-	configMaps, err := h.listAvailableFilesInternal(ctx, "workflow-template")
+	configMaps, err := h.listAvailableFilesInternal(ctx, files.FilePurposeWorkflow)
 	if err != nil {
 		logger.Error(err, "Failed to list available workflow files")
 		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
@@ -315,7 +325,7 @@ func (h *Handler) GetWorkflow(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Verify it's a workflow file
-	if fileResp.FilePurpose != "workflow-template" {
+	if fileResp.FilePurpose != files.FilePurposeWorkflow {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
 			Error:   "bad_request",
 			Message: "File is not a workflow template",
@@ -418,11 +428,19 @@ func (h *Handler) UpdateWorkflow(w http.ResponseWriter, r *http.Request) {
 		FileType:       req.FileType,
 		Groups:         req.Groups,
 		AvailableToAll: req.AvailableToAll,
-		FilePurpose:    "workflow-template",
+		FilePurpose:    files.FilePurposeWorkflow,
 	}
 
 	err = h.updateFileInternal(ctx, workflowID, fileReq)
 	if err != nil {
+		var dupErr *DuplicateFileError
+		if errors.As(err, &dupErr) {
+			writeJSONError(w, http.StatusConflict, ErrorResponse{
+				Error:   "conflict",
+				Message: dupErr.Error(),
+			})
+			return
+		}
 		logger.Error(err, "Failed to update workflow", "workflowID", workflowID)
 		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
 			Error:   "internal_error",
@@ -466,7 +484,7 @@ func (h *Handler) DeleteWorkflow(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Check file purpose
-	if files.ExtractFilePurposeFromLabels(configMap.Labels) != "workflow-template" {
+	if files.ExtractFilePurposeFromLabels(configMap.Labels) != files.FilePurposeWorkflow {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
 			Error:   "bad_request",
 			Message: "File is not a workflow template",
@@ -575,6 +593,15 @@ func (h *Handler) createFileInternal(ctx context.Context, req files.CreateFileRe
 
 	// Generate unique file ID (UUID)
 	fileID := uuid.New().String()
+
+	// Atomically reserve the logical name (prevents concurrent duplicates)
+	logicalName := deriveLogicalName(req.FileName, req.WorkflowName)
+	if err := h.reserveLogicalName(ctx, logicalName, fileID); err != nil {
+		if apierrors.IsAlreadyExists(err) {
+			return nil, &DuplicateFileError{Name: logicalName}
+		}
+		return nil, fmt.Errorf("failed to reserve logical name: %w", err)
+	}
 	configMapName := fmt.Sprintf("file-%s", fileID)
 	createdBy := claims.UserID
 
@@ -587,7 +614,7 @@ func (h *Handler) createFileInternal(ctx context.Context, req files.CreateFileRe
 	}
 
 	// Build labels and annotations
-	labels := files.BuildFileLabels(fileID, req.FileType, req.Groups, req.AvailableToAll, req.FilePurpose)
+	labels := files.BuildFileLabels(fileID, req.FileType, req.Groups, req.AvailableToAll, req.FilePurpose, logicalName)
 	annotations := files.BuildFileAnnotations(req.Description, createdBy, req.WorkflowName)
 
 	// Build ConfigMap data
@@ -611,6 +638,9 @@ func (h *Handler) createFileInternal(ctx context.Context, req files.CreateFileRe
 	}
 
 	if err := h.client.Create(ctx, configMap); err != nil {
+		if releaseErr := h.releaseLogicalName(ctx, logicalName); releaseErr != nil {
+			logger.Error(releaseErr, "Failed to release reservation after file creation failure", "logicalName", logicalName)
+		}
 		return nil, fmt.Errorf("failed to create file ConfigMap: %w", err)
 	}
 
@@ -770,9 +800,9 @@ func (h *Handler) updateFileInternal(ctx context.Context, fileID string, req fil
 
 	// Verify file purpose matches expected type (only for workflow operations)
 	// This prevents workflow endpoints from mutating non-workflow files
-	if req.FilePurpose == "workflow-template" {
+	if req.FilePurpose == files.FilePurposeWorkflow {
 		existingPurpose := files.ExtractFilePurposeFromLabels(configMap.Labels)
-		if existingPurpose != "workflow-template" {
+		if existingPurpose != files.FilePurposeWorkflow {
 			return fmt.Errorf("cannot update non-workflow file via workflow API")
 		}
 	}
@@ -784,6 +814,25 @@ func (h *Handler) updateFileInternal(ctx context.Context, fileID string, req fil
 	}
 	if !isOwner {
 		return fmt.Errorf("only the workflow owner or an admin can update this workflow")
+	}
+
+	// Derive logical names for rename detection
+	workflowName := ""
+	if req.WorkflowName != nil {
+		workflowName = *req.WorkflowName
+	}
+	newLogicalName := deriveLogicalName(req.FileName, workflowName)
+	oldLogicalName := extractLogicalName(configMap)
+	renamed := newLogicalName != oldLogicalName
+
+	// On rename, atomically reserve the new name
+	if renamed {
+		if err := h.reserveLogicalName(ctx, newLogicalName, fileID); err != nil {
+			if apierrors.IsAlreadyExists(err) {
+				return &DuplicateFileError{Name: newLogicalName}
+			}
+			return fmt.Errorf("failed to reserve logical name: %w", err)
+		}
 	}
 
 	// Get current user for audit trail
@@ -798,7 +847,7 @@ func (h *Handler) updateFileInternal(ctx context.Context, fileID string, req fil
 	}
 
 	// Update labels and annotations (preserve existing file ID)
-	configMap.Labels = files.BuildFileLabels(fileID, req.FileType, req.Groups, req.AvailableToAll, req.FilePurpose)
+	configMap.Labels = files.BuildFileLabels(fileID, req.FileType, req.Groups, req.AvailableToAll, req.FilePurpose, newLogicalName)
 	configMap.Annotations = files.UpdateFileAnnotations(
 		configMap.Annotations,
 		req.Description,
@@ -817,7 +866,20 @@ func (h *Handler) updateFileInternal(ctx context.Context, fileID string, req fil
 	configMap.Data = data
 
 	if err := h.client.Update(ctx, configMap); err != nil {
+		// Rollback new reservation on failure
+		if renamed {
+			if releaseErr := h.releaseLogicalName(ctx, newLogicalName); releaseErr != nil {
+				logger.Error(releaseErr, "Failed to release new reservation after update failure", "logicalName", newLogicalName)
+			}
+		}
 		return fmt.Errorf("failed to update file: %w", err)
+	}
+
+	// Release old reservation on successful rename
+	if renamed && oldLogicalName != "" {
+		if err := h.releaseLogicalName(ctx, oldLogicalName); err != nil {
+			logger.Error(err, "Failed to release old name reservation", "logicalName", oldLogicalName)
+		}
 	}
 
 	logger.Info("Updated file", "fileID", fileID, "updatedBy", updatedBy)
@@ -846,6 +908,14 @@ func (h *Handler) deleteFileInternal(ctx context.Context, fileID string) error {
 	// Delete ConfigMap
 	if err := h.client.Delete(ctx, configMap); err != nil {
 		return fmt.Errorf("failed to delete file: %w", err)
+	}
+
+	// Release the logical name reservation
+	logicalName := extractLogicalName(configMap)
+	if logicalName != "" {
+		if err := h.releaseLogicalName(ctx, logicalName); err != nil {
+			logger.Error(err, "Failed to release name reservation", "logicalName", logicalName, "fileID", fileID)
+		}
 	}
 
 	logger.Info("Deleted file", "fileID", fileID)

@@ -17,6 +17,8 @@ limitations under the License.
 package files
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"strings"
 	"time"
 
@@ -37,6 +39,8 @@ const (
 	FileIDLabel = "files.krkn.krkn-chaos.dev/file-id"
 	// FilePurposeLabel identifies the purpose/type of file (e.g., "workflow-template")
 	FilePurposeLabel = "files.krkn.krkn-chaos.dev/file-purpose"
+	// LogicalNameHashLabel stores a SHA256 prefix of the logical name for efficient server-side dedup queries
+	LogicalNameHashLabel = "files.krkn.krkn-chaos.dev/logical-name-hash"
 
 	// DescriptionAnnotation stores the file description
 	DescriptionAnnotation = "files.krkn.krkn-chaos.dev/description"
@@ -55,10 +59,31 @@ const (
 	AppName = "krkn-operator"
 	// ComponentFile is the value for AppComponentLabel
 	ComponentFile = "file"
+	// ComponentFileReservation is the component label for name reservation ConfigMaps
+	ComponentFileReservation = "file-reservation"
+
+	// FilePurposeFile is the filePurpose value for generic user files
+	FilePurposeFile = "file"
+	// FilePurposeWorkflow is the filePurpose value for workflow graph templates
+	FilePurposeWorkflow = "workflow-template"
+	// FilePurposeResiliency is the filePurpose value for resiliency scoring metric definitions
+	FilePurposeResiliency = "resiliency-score"
 )
 
+// HashLogicalName returns a truncated SHA256 hex digest of the logical name,
+// safe for use as a Kubernetes label value (max 63 chars, RFC 1123).
+func HashLogicalName(name string) string {
+	h := sha256.Sum256([]byte(name))
+	return hex.EncodeToString(h[:16])
+}
+
+// ReservationName returns the deterministic ConfigMap name for a logical name reservation.
+func ReservationName(logicalName string) string {
+	return "file-reservation-" + HashLogicalName(logicalName)
+}
+
 // BuildFileLabels creates the labels map for a file ConfigMap
-func BuildFileLabels(fileID, fileType string, groups []string, availableToAll bool, filePurpose string) map[string]string {
+func BuildFileLabels(fileID, fileType string, groups []string, availableToAll bool, filePurpose, logicalName string) map[string]string {
 	labels := map[string]string{
 		AppNameLabel:      AppName,
 		AppComponentLabel: ComponentFile,
@@ -85,6 +110,11 @@ func BuildFileLabels(fileID, fileType string, groups []string, availableToAll bo
 	// Add file purpose label if specified
 	if filePurpose != "" {
 		labels[FilePurposeLabel] = filePurpose
+	}
+
+	// Add logical name hash for efficient server-side dedup queries
+	if logicalName != "" {
+		labels[LogicalNameHashLabel] = HashLogicalName(logicalName)
 	}
 
 	return labels
@@ -209,4 +239,19 @@ func ExtractFileTypeFromLabels(labels map[string]string) string {
 // Returns empty string if no file purpose label is found
 func ExtractFilePurposeFromLabels(labels map[string]string) string {
 	return labels[FilePurposeLabel]
+}
+
+// ValidFilePurposes returns all valid filePurpose values
+func ValidFilePurposes() []string {
+	return []string{FilePurposeFile, FilePurposeWorkflow, FilePurposeResiliency}
+}
+
+// IsValidFilePurpose checks if a filePurpose value is valid
+func IsValidFilePurpose(purpose string) bool {
+	for _, valid := range ValidFilePurposes() {
+		if purpose == valid {
+			return true
+		}
+	}
+	return false
 }
