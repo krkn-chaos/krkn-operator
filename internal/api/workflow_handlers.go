@@ -614,7 +614,7 @@ func (h *Handler) createFileInternal(ctx context.Context, req files.CreateFileRe
 	}
 
 	// Build labels and annotations
-	labels := files.BuildFileLabels(fileID, req.FileType, req.Groups, req.AvailableToAll, req.FilePurpose)
+	labels := files.BuildFileLabels(fileID, req.FileType, req.Groups, req.AvailableToAll, req.FilePurpose, logicalName)
 	annotations := files.BuildFileAnnotations(req.Description, createdBy, req.WorkflowName)
 
 	// Build ConfigMap data
@@ -839,7 +839,7 @@ func (h *Handler) updateFileInternal(ctx context.Context, fileID string, req fil
 	}
 
 	// Update labels and annotations (preserve existing file ID)
-	configMap.Labels = files.BuildFileLabels(fileID, req.FileType, req.Groups, req.AvailableToAll, req.FilePurpose)
+	configMap.Labels = files.BuildFileLabels(fileID, req.FileType, req.Groups, req.AvailableToAll, req.FilePurpose, logicalName)
 	configMap.Annotations = files.UpdateFileAnnotations(
 		configMap.Annotations,
 		req.Description,

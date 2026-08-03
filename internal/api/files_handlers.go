@@ -114,6 +114,11 @@ func (h *Handler) CreateFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Only workflow-template files can set workflowName
+	if req.FilePurpose != files.FilePurposeWorkflow {
+		req.WorkflowName = ""
+	}
+
 	// Check for duplicate logical name (global uniqueness)
 	logicalName := deriveLogicalName(req.FileName, req.WorkflowName)
 	existingID, err := h.checkDuplicateLogicalName(ctx, logicalName, "")
@@ -126,9 +131,10 @@ func (h *Handler) CreateFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if existingID != "" {
+		logger.Info("duplicate file name detected", "logicalName", logicalName, "existingID", existingID)
 		writeJSONError(w, http.StatusConflict, ErrorResponse{
 			Error:   "conflict",
-			Message: fmt.Sprintf("A file with name '%s' already exists (ID: %s)", logicalName, existingID),
+			Message: fmt.Sprintf("A file with name '%s' already exists", logicalName),
 		})
 		return
 	}
@@ -151,7 +157,7 @@ func (h *Handler) CreateFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Build labels and annotations
-	labels := files.BuildFileLabels(fileID, req.FileType, req.Groups, req.AvailableToAll, req.FilePurpose)
+	labels := files.BuildFileLabels(fileID, req.FileType, req.Groups, req.AvailableToAll, req.FilePurpose, logicalName)
 	annotations := files.BuildFileAnnotations(
 		req.Description,
 		createdBy,
@@ -369,6 +375,15 @@ func (h *Handler) UpdateFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Block workflow-template reclassification via /files
+	if req.FilePurpose == files.FilePurposeWorkflow {
+		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+			Error:   "bad_request",
+			Message: "Use POST /api/v1/workflows to manage workflow templates",
+		})
+		return
+	}
+
 	// Load existing ConfigMap by file ID
 	configMap, err := h.loadFileConfigMapByID(ctx, fileID)
 	if err != nil {
@@ -385,6 +400,12 @@ func (h *Handler) UpdateFile(w http.ResponseWriter, r *http.Request) {
 			})
 		}
 		return
+	}
+
+	// Preserve existing filePurpose — /files cannot reclassify resources
+	existingPurpose := files.ExtractFilePurposeFromLabels(configMap.Labels)
+	if existingPurpose != "" {
+		req.FilePurpose = existingPurpose
 	}
 
 	// Check ownership - only owner or admin can update files
@@ -405,11 +426,13 @@ func (h *Handler) UpdateFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check for duplicate logical name on rename (exclude current file)
+	// Only workflow-template files can set workflowName
 	workflowName := ""
-	if req.WorkflowName != nil {
+	if req.FilePurpose == files.FilePurposeWorkflow && req.WorkflowName != nil {
 		workflowName = *req.WorkflowName
 	}
+
+	// Check for duplicate logical name on rename (exclude current file)
 	logicalName := deriveLogicalName(req.FileName, workflowName)
 	existingID, err := h.checkDuplicateLogicalName(ctx, logicalName, fileID)
 	if err != nil {
@@ -421,9 +444,10 @@ func (h *Handler) UpdateFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if existingID != "" {
+		logger.Info("duplicate file name detected on update", "logicalName", logicalName, "existingID", existingID)
 		writeJSONError(w, http.StatusConflict, ErrorResponse{
 			Error:   "conflict",
-			Message: fmt.Sprintf("A file with name '%s' already exists (ID: %s)", logicalName, existingID),
+			Message: fmt.Sprintf("A file with name '%s' already exists", logicalName),
 		})
 		return
 	}
@@ -440,7 +464,7 @@ func (h *Handler) UpdateFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Update labels and annotations (preserve existing file ID)
-	configMap.Labels = files.BuildFileLabels(fileID, req.FileType, req.Groups, req.AvailableToAll, req.FilePurpose)
+	configMap.Labels = files.BuildFileLabels(fileID, req.FileType, req.Groups, req.AvailableToAll, req.FilePurpose, logicalName)
 	configMap.Annotations = files.UpdateFileAnnotations(
 		configMap.Annotations,
 		req.Description,
@@ -880,8 +904,10 @@ func buildFileInfo(configMap *corev1.ConfigMap) files.FileInfo {
 // For workflows, the logical name is the workflowName annotation.
 // For regular files, it is the primary Data key (excluding studioLayout.json).
 func extractLogicalName(cm *corev1.ConfigMap) string {
-	if wn := cm.Annotations[files.WorkflowNameAnnotation]; wn != "" {
-		return wn
+	if files.ExtractFilePurposeFromLabels(cm.Labels) == files.FilePurposeWorkflow {
+		if wn := cm.Annotations[files.WorkflowNameAnnotation]; wn != "" {
+			return wn
+		}
 	}
 	for k := range cm.Data {
 		if k != "studioLayout.json" {
@@ -902,7 +928,7 @@ func deriveLogicalName(fileName, workflowName string) string {
 }
 
 // checkDuplicateLogicalName checks if a file with the same logical name already exists.
-// The check is global across all filePurpose values.
+// Uses a label selector on the logical-name hash for efficient server-side filtering.
 // excludeFileID can be set to skip a specific file (for update operations).
 // Returns the existing file's ID if a duplicate is found, or empty string if no conflict.
 func (h *Handler) checkDuplicateLogicalName(ctx context.Context, logicalName, excludeFileID string) (string, error) {
@@ -910,14 +936,16 @@ func (h *Handler) checkDuplicateLogicalName(ctx context.Context, logicalName, ex
 	err := h.client.List(ctx, &configMapList,
 		client.InNamespace(h.namespace),
 		client.MatchingLabels{
-			files.AppNameLabel:      files.AppName,
-			files.AppComponentLabel: files.ComponentFile,
+			files.AppNameLabel:        files.AppName,
+			files.AppComponentLabel:   files.ComponentFile,
+			files.LogicalNameHashLabel: files.HashLogicalName(logicalName),
 		},
 	)
 	if err != nil {
 		return "", fmt.Errorf("failed to list file ConfigMaps for duplicate check: %w", err)
 	}
 
+	// Verify exact match (hash collisions are theoretically possible)
 	for i := range configMapList.Items {
 		cm := &configMapList.Items[i]
 		existingID := files.ExtractFileIDFromLabels(cm.Labels)

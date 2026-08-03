@@ -1491,10 +1491,11 @@ func TestCreateFile_ResiliencyPurpose(t *testing.T) {
 
 func TestCreateFile_InvalidFilePurpose(t *testing.T) {
 	handler := setupFilesTestHandler()
+	createTestAdminUser(handler)
 
 	createReq := files.CreateFileRequest{
 		FileName:       "invalid-purpose.yaml",
-		Content:        "data",
+		Content:        "key: value",
 		FilePurpose:    "unknown-purpose",
 		AvailableToAll: true,
 	}
@@ -1507,10 +1508,14 @@ func TestCreateFile_InvalidFilePurpose(t *testing.T) {
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("Expected 400 for invalid filePurpose, got %d: %s", w.Code, w.Body.String())
 	}
+	if !strings.Contains(w.Body.String(), "Invalid filePurpose") {
+		t.Errorf("Expected error about invalid filePurpose, got: %s", w.Body.String())
+	}
 }
 
 func TestCreateFile_WorkflowPurposeBlocked(t *testing.T) {
 	handler := setupFilesTestHandler()
+	createTestAdminUser(handler)
 
 	createReq := files.CreateFileRequest{
 		FileName:       "sneaky-workflow.json",
@@ -1526,5 +1531,8 @@ func TestCreateFile_WorkflowPurposeBlocked(t *testing.T) {
 
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("Expected 400 for workflow-template via files API, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "POST /api/v1/workflows") {
+		t.Errorf("Expected error about using workflows API, got: %s", w.Body.String())
 	}
 }

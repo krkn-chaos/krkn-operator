@@ -53,7 +53,7 @@ type DuplicateFileError struct {
 }
 
 func (e *DuplicateFileError) Error() string {
-	return fmt.Sprintf("a file with name '%s' already exists (ID: %s)", e.Name, e.ExistingID)
+	return fmt.Sprintf("a file with name '%s' already exists", e.Name)
 }
 
 // ScenariosRequest represents the optional request body for POST /scenarios

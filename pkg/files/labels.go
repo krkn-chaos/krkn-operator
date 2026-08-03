@@ -17,6 +17,8 @@ limitations under the License.
 package files
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"strings"
 	"time"
 
@@ -37,6 +39,8 @@ const (
 	FileIDLabel = "files.krkn.krkn-chaos.dev/file-id"
 	// FilePurposeLabel identifies the purpose/type of file (e.g., "workflow-template")
 	FilePurposeLabel = "files.krkn.krkn-chaos.dev/file-purpose"
+	// LogicalNameHashLabel stores a SHA256 prefix of the logical name for efficient server-side dedup queries
+	LogicalNameHashLabel = "files.krkn.krkn-chaos.dev/logical-name-hash"
 
 	// DescriptionAnnotation stores the file description
 	DescriptionAnnotation = "files.krkn.krkn-chaos.dev/description"
@@ -64,8 +68,15 @@ const (
 	FilePurposeResiliency = "resiliency-score"
 )
 
+// HashLogicalName returns a truncated SHA256 hex digest of the logical name,
+// safe for use as a Kubernetes label value (max 63 chars, RFC 1123).
+func HashLogicalName(name string) string {
+	h := sha256.Sum256([]byte(name))
+	return hex.EncodeToString(h[:16])
+}
+
 // BuildFileLabels creates the labels map for a file ConfigMap
-func BuildFileLabels(fileID, fileType string, groups []string, availableToAll bool, filePurpose string) map[string]string {
+func BuildFileLabels(fileID, fileType string, groups []string, availableToAll bool, filePurpose, logicalName string) map[string]string {
 	labels := map[string]string{
 		AppNameLabel:      AppName,
 		AppComponentLabel: ComponentFile,
@@ -92,6 +103,11 @@ func BuildFileLabels(fileID, fileType string, groups []string, availableToAll bo
 	// Add file purpose label if specified
 	if filePurpose != "" {
 		labels[FilePurposeLabel] = filePurpose
+	}
+
+	// Add logical name hash for efficient server-side dedup queries
+	if logicalName != "" {
+		labels[LogicalNameHashLabel] = HashLogicalName(logicalName)
 	}
 
 	return labels
