@@ -114,9 +114,9 @@ func (h *Handler) CreateFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Only workflow-template files can set workflowName
+	// For non-workflow files, store fileName as the logical name in the same annotation
 	if req.FilePurpose != files.FilePurposeWorkflow {
-		req.WorkflowName = ""
+		req.WorkflowName = req.FileName
 	}
 
 	// Generate unique file ID (UUID)
@@ -424,8 +424,8 @@ func (h *Handler) UpdateFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Only workflow-template files can set workflowName
-	workflowName := ""
+	// Derive the logical name: workflowName for workflows, fileName for regular files
+	workflowName := req.FileName
 	if req.FilePurpose == files.FilePurposeWorkflow && req.WorkflowName != nil {
 		workflowName = *req.WorkflowName
 	}
@@ -469,7 +469,7 @@ func (h *Handler) UpdateFile(w http.ResponseWriter, r *http.Request) {
 		configMap.Annotations,
 		req.Description,
 		updatedBy,
-		req.WorkflowName,
+		&workflowName,
 	)
 
 	// Update data
@@ -860,33 +860,26 @@ func (h *Handler) isFileOwnerOrAdmin(ctx context.Context, configMap *corev1.Conf
 
 // buildFileResponse builds a FileResponse from a ConfigMap
 func buildFileResponse(configMap *corev1.ConfigMap) files.FileResponse {
-	// Extract file name, content, and studioLayout from data
-	// studioLayout.json is separate from the main file content
-	fileName := ""
+	// Extract content and studioLayout from data
 	content := ""
 	studioLayout := ""
 	for k, v := range configMap.Data {
-		if k == "studioLayout.json" {
+		switch k {
+		case "studioLayout.json":
 			studioLayout = v
-		} else {
-			fileName = k
+		default:
 			content = v
 		}
 	}
 
-	// Get workflow name with backwards-compatible fallback
-	workflowName := configMap.Annotations[files.WorkflowNameAnnotation]
-	if workflowName == "" && files.ExtractFilePurposeFromLabels(configMap.Labels) == files.FilePurposeWorkflow {
-		// Fallback for workflows created before workflowName annotation was added
-		workflowName = fileName
-	}
+	logicalName := configMap.Annotations[files.WorkflowNameAnnotation]
 
 	return files.FileResponse{
 		FileID:         files.ExtractFileIDFromLabels(configMap.Labels),
-		FileName:       fileName,
+		FileName:       logicalName,
 		Content:        content,
 		StudioLayout:   studioLayout,
-		WorkflowName:   workflowName,
+		WorkflowName:   logicalName,
 		Description:    configMap.Annotations[files.DescriptionAnnotation],
 		FileType:       files.ExtractFileTypeFromLabels(configMap.Labels),
 		FilePurpose:    files.ExtractFilePurposeFromLabels(configMap.Labels),
@@ -901,18 +894,9 @@ func buildFileResponse(configMap *corev1.ConfigMap) files.FileResponse {
 
 // buildFileInfo builds a FileInfo from a ConfigMap (minimal user-facing info)
 func buildFileInfo(configMap *corev1.ConfigMap) files.FileInfo {
-	// Extract primary file name from data (exclude studioLayout.json)
-	fileName := ""
-	for k := range configMap.Data {
-		if k != "studioLayout.json" {
-			fileName = k
-			break
-		}
-	}
-
 	return files.FileInfo{
 		FileID:      files.ExtractFileIDFromLabels(configMap.Labels),
-		FileName:    fileName,
+		FileName:    configMap.Annotations[files.WorkflowNameAnnotation],
 		Description: configMap.Annotations[files.DescriptionAnnotation],
 		FileType:    files.ExtractFileTypeFromLabels(configMap.Labels),
 		FilePurpose: files.ExtractFilePurposeFromLabels(configMap.Labels),
@@ -925,17 +909,7 @@ func buildFileInfo(configMap *corev1.ConfigMap) files.FileInfo {
 // For workflows, the logical name is the workflowName annotation.
 // For regular files, it is the primary Data key (excluding studioLayout.json).
 func extractLogicalName(cm *corev1.ConfigMap) string {
-	if files.ExtractFilePurposeFromLabels(cm.Labels) == files.FilePurposeWorkflow {
-		if wn := cm.Annotations[files.WorkflowNameAnnotation]; wn != "" {
-			return wn
-		}
-	}
-	for k := range cm.Data {
-		if k != "studioLayout.json" {
-			return k
-		}
-	}
-	return ""
+	return cm.Annotations[files.WorkflowNameAnnotation]
 }
 
 // deriveLogicalName derives the logical name from request fields.
