@@ -52,6 +52,7 @@ type DuplicateFileError struct {
 	ExistingID string
 }
 
+// Error implements the error interface for DuplicateFileError.
 func (e *DuplicateFileError) Error() string {
 	return fmt.Sprintf("a file with name '%s' already exists", e.Name)
 }

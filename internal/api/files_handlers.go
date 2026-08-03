@@ -424,13 +424,23 @@ func (h *Handler) UpdateFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Derive the logical name: workflowName for workflows, fileName for regular files
-	workflowName := req.FileName
-	if req.FilePurpose == files.FilePurposeWorkflow && req.WorkflowName != nil {
-		workflowName = *req.WorkflowName
+	// Derive the logical name and annotation pointer.
+	// For workflows: nil req.WorkflowName means preserve existing (pointer semantics).
+	// For regular files: always sync annotation to fileName.
+	var workflowNamePtr *string
+	var newLogicalName string
+	if req.FilePurpose == files.FilePurposeWorkflow {
+		if req.WorkflowName != nil {
+			newLogicalName = deriveLogicalName(req.FileName, *req.WorkflowName)
+			workflowNamePtr = req.WorkflowName
+		} else {
+			newLogicalName = extractLogicalName(configMap)
+			workflowNamePtr = nil
+		}
+	} else {
+		newLogicalName = req.FileName
+		workflowNamePtr = &req.FileName
 	}
-
-	newLogicalName := deriveLogicalName(req.FileName, workflowName)
 	oldLogicalName := extractLogicalName(configMap)
 	renamed := newLogicalName != oldLogicalName
 
@@ -469,7 +479,7 @@ func (h *Handler) UpdateFile(w http.ResponseWriter, r *http.Request) {
 		configMap.Annotations,
 		req.Description,
 		updatedBy,
-		&workflowName,
+		workflowNamePtr,
 	)
 
 	// Update data
