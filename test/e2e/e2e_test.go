@@ -79,6 +79,12 @@ var _ = Describe("Manager", Ordered, func() {
 			"-p", `[{"op": "replace", "path": "/spec/template/spec/containers/0/imagePullPolicy", "value": "IfNotPresent"},{"op": "replace", "path": "/spec/template/spec/containers/1/imagePullPolicy", "value": "IfNotPresent"}]`)
 		_, err = utils.Run(cmd)
 		Expect(err).NotTo(HaveOccurred(), "Failed to patch imagePullPolicy")
+
+		By("waiting for rollout to complete after imagePullPolicy patch")
+		cmd = exec.Command("kubectl", "rollout", "status", "deployment/krkn-operator-controller-manager",
+			"-n", namespace, "--timeout=120s")
+		_, err = utils.Run(cmd)
+		Expect(err).NotTo(HaveOccurred(), "Rollout did not complete after imagePullPolicy patch")
 	})
 
 	// After all tests have been executed, clean up by undeploying the controller, uninstalling CRDs,
