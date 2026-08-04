@@ -21,6 +21,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"path/filepath"
@@ -974,9 +975,7 @@ func (h *Handler) PostScenarioGlobals(w http.ResponseWriter, r *http.Request) {
 	// Get global environment
 	globalDetail, err := scenarioProvider.GetGlobalEnvironment(apiRegistry, scenarioName)
 	if err != nil {
-		// krknctl providers return errors containing "LABEL not found" when a
-		// required container label is missing — this maps to a 404 for the client.
-		if strings.Contains(err.Error(), "LABEL not found") {
+		if errors.Is(err, provider.ErrLabelNotFound) {
 			writeJSONError(w, http.StatusNotFound, ErrorResponse{
 				Error:   "not_found",
 				Message: "Global environment for scenario '" + scenarioName + "' not found",
@@ -1203,6 +1202,7 @@ func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
 				Error:   "internal_error",
 				Message: "Failed to validate file access permissions",
 			})
+
 			return
 		}
 		if !hasAccess {
