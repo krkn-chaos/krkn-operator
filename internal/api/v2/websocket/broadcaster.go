@@ -88,17 +88,17 @@ func (b *Broadcaster) BroadcastScenarioRunUpdate(scenarioRun *krknv1alpha1.KrknS
 	// Status changed - broadcast and update cache
 	// Build the SAME response as REST API
 	response := ScenarioRunStatusResponse{
-		ScenarioRunName: scenarioRun.Name,
-		Phase:           scenarioRun.Status.Phase,
-		TotalTargets:    scenarioRun.Status.TotalTargets,
-		SuccessfulJobs:  scenarioRun.Status.SuccessfulJobs,
-		FailedJobs:      scenarioRun.Status.FailedJobs,
-		RunningJobs:     scenarioRun.Status.RunningJobs,
-		ClusterJobs:     nil, // WebSocket doesn't send cluster jobs details
-		OwnerUserID:     scenarioRun.Spec.OwnerUserID,
-		RegistryName:    scenarioRun.Spec.RegistryName,
-		GraphRunName:    scenarioRun.Labels["krkn.dev/graph-run"],
-		GraphNodeID:     scenarioRun.Labels["krkn.dev/graph-node"],
+		ScenarioRunName:   scenarioRun.Name,
+		Phase:             scenarioRun.Status.Phase,
+		TotalTargets:      scenarioRun.Status.TotalTargets,
+		SuccessfulJobs:    scenarioRun.Status.SuccessfulJobs,
+		FailedJobs:        scenarioRun.Status.FailedJobs,
+		RunningJobs:       scenarioRun.Status.RunningJobs,
+		ClusterJobs:       nil, // WebSocket doesn't send cluster jobs details
+		OwnerUserID:       scenarioRun.Spec.OwnerUserID,
+		RegistryName:      scenarioRun.Spec.RegistryName,
+		GraphRunName:      scenarioRun.Labels["krkn.dev/graph-run"],
+		GraphNodeID:       scenarioRun.Labels["krkn.dev/graph-node"],
 		CreationTimestamp: scenarioRun.CreationTimestamp.Format(time.RFC3339),
 	}
 
@@ -222,13 +222,13 @@ func (b *Broadcaster) BroadcastGraphRunUpdate(graphRun *krknv1alpha1.KrknGraphRu
 			FailedNodes:    graphRun.Status.Summary.FailedNodes,
 			PendingNodes:   graphRun.Status.Summary.PendingNodes,
 		},
-		NodeStatuses:     convertNodeStatusesWithScores(graphRun.Status.NodeStatuses, graphRun.Status.ResiliencyScores),
-		ResolvedLevels:   graphRun.Status.ResolvedLevels,
-		StartTime:        graphRun.Status.StartTime,
-		CompletionTime:   graphRun.Status.CompletionTime,
-		OwnerUserID:      graphRun.Spec.OwnerUserID,
+		NodeStatuses:      convertNodeStatusesWithScores(graphRun.Status.NodeStatuses, graphRun.Status.ResiliencyScores),
+		ResolvedLevels:    graphRun.Status.ResolvedLevels,
+		StartTime:         graphRun.Status.StartTime,
+		CompletionTime:    graphRun.Status.CompletionTime,
+		OwnerUserID:       graphRun.Spec.OwnerUserID,
 		CreationTimestamp: graphRun.CreationTimestamp.Format(time.RFC3339),
-		ResiliencyScores: b.convertGraphClusterScores(graphRun.Status.ResiliencyScores),
+		ResiliencyScores:  b.convertGraphClusterScores(graphRun.Status.ResiliencyScores),
 	}
 
 	msg := ServerMessage{

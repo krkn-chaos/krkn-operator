@@ -100,6 +100,7 @@ type InputFieldResponse struct {
 	Requires          *string `json:"requires,omitempty"`
 	MutuallyExcludes  *string `json:"mutually_excludes,omitempty"`
 	Secret            bool    `json:"secret,omitempty"`
+	Group             *string `json:"group,omitempty"`
 }
 
 // ScenarioDetailResponse represents the response for POST /scenarios/detail/{scenario_name}

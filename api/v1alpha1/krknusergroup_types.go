@@ -20,6 +20,7 @@ package v1alpha1
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 )
 
 // ClusterPermissionSet defines the actions allowed on a cluster.
@@ -81,5 +82,8 @@ type KrknUserGroupList struct {
 }
 
 func init() {
-	SchemeBuilder.Register(&KrknUserGroup{}, &KrknUserGroupList{})
+	SchemeBuilder.Register(func(s *runtime.Scheme) error {
+		s.AddKnownTypes(GroupVersion, &KrknUserGroup{}, &KrknUserGroupList{})
+		return nil
+	})
 }

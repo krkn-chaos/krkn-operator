@@ -24,6 +24,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/krkn-chaos/krknctl/pkg/typing"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -1416,5 +1417,174 @@ func TestGetScenarioRunStatus_IncludesCustomRunName(t *testing.T) {
 
 	if response.ScenarioRunName != "pod-delete-abc123" {
 		t.Errorf("Expected ScenarioRunName='pod-delete-abc123', got '%s'", response.ScenarioRunName)
+	}
+}
+
+func TestConvertInputFields(t *testing.T) {
+	strPtr := func(s string) *string { return &s }
+
+	tests := []struct {
+		name     string
+		input    []typing.InputField
+		expected []InputFieldResponse
+	}{
+		{
+			name:     "empty fields",
+			input:    []typing.InputField{},
+			expected: []InputFieldResponse{},
+		},
+		{
+			name: "field with group",
+			input: []typing.InputField{
+				{
+					Name:     strPtr("timeout"),
+					Variable: strPtr("TIMEOUT"),
+					Type:     typing.String,
+					Required: true,
+					Group:    strPtr("advanced"),
+				},
+			},
+			expected: []InputFieldResponse{
+				{
+					Name:     strPtr("timeout"),
+					Variable: strPtr("TIMEOUT"),
+					Type:     "string",
+					Required: true,
+					Group:    strPtr("advanced"),
+				},
+			},
+		},
+		{
+			name: "field without group",
+			input: []typing.InputField{
+				{
+					Name:     strPtr("duration"),
+					Variable: strPtr("DURATION"),
+					Type:     typing.Number,
+				},
+			},
+			expected: []InputFieldResponse{
+				{
+					Name:     strPtr("duration"),
+					Variable: strPtr("DURATION"),
+					Type:     "number",
+					Group:    nil,
+				},
+			},
+		},
+		{
+			name: "group type field",
+			input: []typing.InputField{
+				{
+					Name:     strPtr("network-settings"),
+					Variable: strPtr("network-settings"),
+					Type:     typing.Group,
+				},
+			},
+			expected: []InputFieldResponse{
+				{
+					Name:     strPtr("network-settings"),
+					Variable: strPtr("network-settings"),
+					Type:     "group",
+				},
+			},
+		},
+		{
+			name: "multiple fields with mixed groups",
+			input: []typing.InputField{
+				{
+					Name:     strPtr("param1"),
+					Variable: strPtr("PARAM1"),
+					Type:     typing.String,
+					Group:    strPtr("basic"),
+				},
+				{
+					Name:     strPtr("param2"),
+					Variable: strPtr("PARAM2"),
+					Type:     typing.Boolean,
+					Group:    strPtr("advanced"),
+					Default:  strPtr("true"),
+					Secret:   true,
+				},
+				{
+					Name:     strPtr("param3"),
+					Variable: strPtr("PARAM3"),
+					Type:     typing.Enum,
+				},
+			},
+			expected: []InputFieldResponse{
+				{
+					Name:     strPtr("param1"),
+					Variable: strPtr("PARAM1"),
+					Type:     "string",
+					Group:    strPtr("basic"),
+				},
+				{
+					Name:     strPtr("param2"),
+					Variable: strPtr("PARAM2"),
+					Type:     "boolean",
+					Group:    strPtr("advanced"),
+					Default:  strPtr("true"),
+					Secret:   true,
+				},
+				{
+					Name:     strPtr("param3"),
+					Variable: strPtr("PARAM3"),
+					Type:     "enum",
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := convertInputFields(tt.input)
+
+			if len(result) != len(tt.expected) {
+				t.Fatalf("expected %d fields, got %d", len(tt.expected), len(result))
+			}
+
+			for i, got := range result {
+				exp := tt.expected[i]
+
+				if got.Type != exp.Type {
+					t.Errorf("field[%d] Type: expected %q, got %q", i, exp.Type, got.Type)
+				}
+				if (got.Group == nil) != (exp.Group == nil) {
+					t.Errorf("field[%d] Group: expected nil=%v, got nil=%v", i, exp.Group == nil, got.Group == nil)
+				} else if got.Group != nil && *got.Group != *exp.Group {
+					t.Errorf("field[%d] Group: expected %q, got %q", i, *exp.Group, *got.Group)
+				}
+				if (got.Name == nil) != (exp.Name == nil) {
+					t.Errorf("field[%d] Name: expected nil=%v, got nil=%v", i, exp.Name == nil, got.Name == nil)
+				} else if got.Name != nil && *got.Name != *exp.Name {
+					t.Errorf("field[%d] Name: expected %q, got %q", i, *exp.Name, *got.Name)
+				}
+				if got.Required != exp.Required {
+					t.Errorf("field[%d] Required: expected %v, got %v", i, exp.Required, got.Required)
+				}
+				if got.Secret != exp.Secret {
+					t.Errorf("field[%d] Secret: expected %v, got %v", i, exp.Secret, got.Secret)
+				}
+
+				jsonBytes, err := json.Marshal(got)
+				if err != nil {
+					t.Fatalf("field[%d] failed to marshal to JSON: %v", i, err)
+				}
+				var jsonMap map[string]interface{}
+				if err := json.Unmarshal(jsonBytes, &jsonMap); err != nil {
+					t.Fatalf("field[%d] failed to unmarshal JSON: %v", i, err)
+				}
+				if exp.Group != nil {
+					if jsonMap["group"] != *exp.Group {
+						t.Errorf("field[%d] JSON group: expected %q, got %v", i, *exp.Group, jsonMap["group"])
+					}
+				} else {
+					if _, exists := jsonMap["group"]; exists {
+						t.Errorf("field[%d] JSON group: expected absent for nil Group, but found %v", i, jsonMap["group"])
+					}
+				}
+			}
+		})
 	}
 }

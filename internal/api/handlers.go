@@ -21,6 +21,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"path/filepath"
@@ -614,6 +615,7 @@ func convertInputFields(fields []typing.InputField) []InputFieldResponse {
 			Requires:          field.Requires,
 			MutuallyExcludes:  field.MutuallyExcludes,
 			Secret:            field.Secret,
+			Group:             field.Group,
 		})
 	}
 	return result
@@ -973,6 +975,13 @@ func (h *Handler) PostScenarioGlobals(w http.ResponseWriter, r *http.Request) {
 	// Get global environment
 	globalDetail, err := scenarioProvider.GetGlobalEnvironment(apiRegistry, scenarioName)
 	if err != nil {
+		if errors.Is(err, provider.ErrLabelNotFound) {
+			writeJSONError(w, http.StatusNotFound, ErrorResponse{
+				Error:   "not_found",
+				Message: "Global environment for scenario '" + scenarioName + "' not found",
+			})
+			return
+		}
 		log.FromContext(ctx).Error(err, "Failed to get global environment", "registry", registry, "scenarioName", scenarioName)
 		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
 			Error:   "internal_error",
@@ -1193,6 +1202,7 @@ func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
 				Error:   "internal_error",
 				Message: "Failed to validate file access permissions",
 			})
+
 			return
 		}
 		if !hasAccess {

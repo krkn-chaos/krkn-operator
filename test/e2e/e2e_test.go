@@ -79,6 +79,12 @@ var _ = Describe("Manager", Ordered, func() {
 			"-p", `[{"op": "replace", "path": "/spec/template/spec/containers/0/imagePullPolicy", "value": "IfNotPresent"},{"op": "replace", "path": "/spec/template/spec/containers/1/imagePullPolicy", "value": "IfNotPresent"}]`)
 		_, err = utils.Run(cmd)
 		Expect(err).NotTo(HaveOccurred(), "Failed to patch imagePullPolicy")
+
+		By("waiting for rollout to complete after imagePullPolicy patch")
+		cmd = exec.Command("kubectl", "rollout", "status", "deployment/krkn-operator-controller-manager",
+			"-n", namespace, "--timeout=120s")
+		_, err = utils.Run(cmd)
+		Expect(err).NotTo(HaveOccurred(), "Rollout did not complete after imagePullPolicy patch")
 	})
 
 	// After all tests have been executed, clean up by undeploying the controller, uninstalling CRDs,
@@ -107,16 +113,38 @@ var _ = Describe("Manager", Ordered, func() {
 		specReport := CurrentSpecReport()
 		if specReport.Failed() {
 			By("Fetching controller manager pod logs")
-			cmd := exec.Command("kubectl", "logs", controllerPodName, "-n", namespace)
-			controllerLogs, err := utils.Run(cmd)
-			if err == nil {
-				_, _ = fmt.Fprintf(GinkgoWriter, "Controller logs:\n %s", controllerLogs)
+			if controllerPodName != "" {
+				cmd := exec.Command("kubectl", "logs", controllerPodName, "-c", "manager", "-n", namespace, "--previous")
+				controllerLogs, err := utils.Run(cmd)
+				if err == nil {
+					_, _ = fmt.Fprintf(GinkgoWriter, "Controller logs (previous):\n %s", controllerLogs)
+				}
+				cmd = exec.Command("kubectl", "logs", controllerPodName, "-c", "manager", "-n", namespace)
+				controllerLogs, err = utils.Run(cmd)
+				if err == nil {
+					_, _ = fmt.Fprintf(GinkgoWriter, "Controller logs (current):\n %s", controllerLogs)
+				} else {
+					_, _ = fmt.Fprintf(GinkgoWriter, "Failed to get Controller logs: %s", err)
+				}
 			} else {
-				_, _ = fmt.Fprintf(GinkgoWriter, "Failed to get Controller logs: %s", err)
+				cmd := exec.Command("kubectl", "logs", "-l", "control-plane=controller-manager",
+					"-c", "manager", "--all-containers=false", "--prefix", "--previous", "-n", namespace)
+				controllerLogs, err := utils.Run(cmd)
+				if err == nil {
+					_, _ = fmt.Fprintf(GinkgoWriter, "Controller logs (all pods, previous):\n %s", controllerLogs)
+				}
+				cmd = exec.Command("kubectl", "logs", "-l", "control-plane=controller-manager",
+					"-c", "manager", "--all-containers=false", "--prefix", "-n", namespace)
+				controllerLogs, err = utils.Run(cmd)
+				if err == nil {
+					_, _ = fmt.Fprintf(GinkgoWriter, "Controller logs (all pods):\n %s", controllerLogs)
+				} else {
+					_, _ = fmt.Fprintf(GinkgoWriter, "Failed to get Controller logs: %s", err)
+				}
 			}
 
 			By("Fetching Kubernetes events")
-			cmd = exec.Command("kubectl", "get", "events", "-n", namespace, "--sort-by=.lastTimestamp")
+			cmd := exec.Command("kubectl", "get", "events", "-n", namespace, "--sort-by=.lastTimestamp")
 			eventsOutput, err := utils.Run(cmd)
 			if err == nil {
 				_, _ = fmt.Fprintf(GinkgoWriter, "Kubernetes events:\n%s", eventsOutput)
@@ -134,7 +162,11 @@ var _ = Describe("Manager", Ordered, func() {
 			}
 
 			By("Fetching controller manager pod description")
-			cmd = exec.Command("kubectl", "describe", "pod", controllerPodName, "-n", namespace)
+			if controllerPodName != "" {
+				cmd = exec.Command("kubectl", "describe", "pod", controllerPodName, "-n", namespace)
+			} else {
+				cmd = exec.Command("kubectl", "describe", "pods", "-l", "control-plane=controller-manager", "-n", namespace)
+			}
 			podDescription, err := utils.Run(cmd)
 			if err == nil {
 				fmt.Println("Pod description:\n", podDescription)
