@@ -20,6 +20,7 @@ package v1alpha1
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 )
 
 // GraphScenario represents a chaos scenario in the dependency graph
@@ -328,5 +329,8 @@ type KrknGraphRunList struct {
 }
 
 func init() {
-	SchemeBuilder.Register(&KrknGraphRun{}, &KrknGraphRunList{})
+	SchemeBuilder.Register(func(s *runtime.Scheme) error {
+		s.AddKnownTypes(GroupVersion, &KrknGraphRun{}, &KrknGraphRunList{})
+		return nil
+	})
 }

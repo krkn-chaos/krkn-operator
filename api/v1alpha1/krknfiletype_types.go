@@ -20,6 +20,7 @@ package v1alpha1
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 )
 
 // KrknFileTypeSpec defines the desired state of KrknFileType.
@@ -74,5 +75,8 @@ type KrknFileTypeList struct {
 }
 
 func init() {
-	SchemeBuilder.Register(&KrknFileType{}, &KrknFileTypeList{})
+	SchemeBuilder.Register(func(s *runtime.Scheme) error {
+		s.AddKnownTypes(GroupVersion, &KrknFileType{}, &KrknFileTypeList{})
+		return nil
+	})
 }

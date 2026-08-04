@@ -20,6 +20,7 @@ package v1alpha1
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 )
 
 // ProviderConfigData contains configuration information from a provider
@@ -86,5 +87,8 @@ type KrknOperatorTargetProviderConfigList struct {
 }
 
 func init() {
-	SchemeBuilder.Register(&KrknOperatorTargetProviderConfig{}, &KrknOperatorTargetProviderConfigList{})
+	SchemeBuilder.Register(func(s *runtime.Scheme) error {
+		s.AddKnownTypes(GroupVersion, &KrknOperatorTargetProviderConfig{}, &KrknOperatorTargetProviderConfigList{})
+		return nil
+	})
 }

@@ -20,6 +20,7 @@ package v1alpha1
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 )
 
 // ClusterResiliencyScore represents the resiliency score for a specific cluster
@@ -226,5 +227,8 @@ type KrknScenarioRunList struct {
 }
 
 func init() {
-	SchemeBuilder.Register(&KrknScenarioRun{}, &KrknScenarioRunList{})
+	SchemeBuilder.Register(func(s *runtime.Scheme) error {
+		s.AddKnownTypes(GroupVersion, &KrknScenarioRun{}, &KrknScenarioRunList{})
+		return nil
+	})
 }

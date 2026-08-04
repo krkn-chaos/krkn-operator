@@ -20,6 +20,7 @@ package v1alpha1
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 )
 
 // KrknOperatorTargetSpec defines the desired state of KrknOperatorTarget.
@@ -92,5 +93,8 @@ type KrknOperatorTargetList struct {
 }
 
 func init() {
-	SchemeBuilder.Register(&KrknOperatorTarget{}, &KrknOperatorTargetList{})
+	SchemeBuilder.Register(func(s *runtime.Scheme) error {
+		s.AddKnownTypes(GroupVersion, &KrknOperatorTarget{}, &KrknOperatorTargetList{})
+		return nil
+	})
 }
