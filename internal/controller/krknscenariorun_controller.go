@@ -386,8 +386,9 @@ func (r *KrknScenarioRunReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 			"runningJobs", scenarioRun.Status.RunningJobs)
 	}
 
-	// Requeue if run is still active (Running includes pending jobs via calculateOverallStatus)
-	if scenarioRun.Status.Phase == "Running" || scenarioRun.Status.Phase == "Pending" {
+	// Requeue if run is still active. Phase "Running" covers both running and pending
+	// jobs (calculateOverallStatus sets Running when pendingJobs > 0).
+	if scenarioRun.Status.Phase == "Running" {
 		logger.V(1).Info("requeuing because run still active",
 			"scenarioRun", scenarioRun.Name,
 			"phase", scenarioRun.Status.Phase,

@@ -1,6 +1,8 @@
 package websocket
 
 import (
+	"time"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -72,6 +74,24 @@ type GraphRunSummaryResponse struct {
 	RunningNodes   int `json:"runningNodes"`
 	FailedNodes    int `json:"failedNodes"`
 	PendingNodes   int `json:"pendingNodes"`
+}
+
+// ClusterJobResponse is the sanitized WebSocket response for a cluster job.
+// Mirrors internal/api.ClusterJobStatusResponse — omits ClusterAPIURL for security.
+type ClusterJobResponse struct {
+	ProviderName    string     `json:"providerName"`
+	ClusterName     string     `json:"clusterName"`
+	JobID           string     `json:"jobId"`
+	PodName         string     `json:"podName,omitempty"`
+	ContainerImage  string     `json:"containerImage,omitempty"`
+	Phase           string     `json:"phase"`
+	StartTime       *time.Time `json:"startTime,omitempty"`
+	CompletionTime  *time.Time `json:"completionTime,omitempty"`
+	Message         string     `json:"message,omitempty"`
+	RetryCount      int        `json:"retryCount,omitempty"`
+	MaxRetries      int        `json:"maxRetries,omitempty"`
+	CancelRequested bool       `json:"cancelRequested,omitempty"`
+	FailureReason   string     `json:"failureReason,omitempty"`
 }
 
 // ServerMessage is sent from server to client

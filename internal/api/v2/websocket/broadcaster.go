@@ -86,21 +86,7 @@ func (b *Broadcaster) BroadcastScenarioRunUpdate(scenarioRun *krknv1alpha1.KrknS
 	}
 
 	// Status changed - broadcast and update cache
-	// Build the SAME response as REST API
-	response := ScenarioRunStatusResponse{
-		ScenarioRunName:   scenarioRun.Name,
-		Phase:             scenarioRun.Status.Phase,
-		TotalTargets:      scenarioRun.Status.TotalTargets,
-		SuccessfulJobs:    scenarioRun.Status.SuccessfulJobs,
-		FailedJobs:        scenarioRun.Status.FailedJobs,
-		RunningJobs:       scenarioRun.Status.RunningJobs,
-		ClusterJobs:       scenarioRun.Status.ClusterJobs,
-		OwnerUserID:       scenarioRun.Spec.OwnerUserID,
-		RegistryName:      scenarioRun.Spec.RegistryName,
-		GraphRunName:      scenarioRun.Labels["krkn.dev/graph-run"],
-		GraphNodeID:       scenarioRun.Labels["krkn.dev/graph-node"],
-		CreationTimestamp: scenarioRun.CreationTimestamp.Format(time.RFC3339),
-	}
+	response := buildScenarioRunResponse(scenarioRun)
 
 	msg := ServerMessage{
 		Resource: "run",
