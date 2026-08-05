@@ -186,6 +186,7 @@ func (r *KrknScenarioRunReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 			logger.Error(err, "failed to initialize status")
 			return ctrl.Result{}, err
 		}
+		return ctrl.Result{Requeue: true}, nil
 	}
 
 	// Snapshot status BEFORE any job creation so that appended failure entries are
@@ -385,10 +386,12 @@ func (r *KrknScenarioRunReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 			"runningJobs", scenarioRun.Status.RunningJobs)
 	}
 
-	// Requeue if jobs still running
-	if scenarioRun.Status.RunningJobs > 0 {
-		logger.V(1).Info("requeuing because jobs still running",
+	// Requeue if run is still active. Phase "Running" covers both running and pending
+	// jobs (calculateOverallStatus sets Running when pendingJobs > 0).
+	if scenarioRun.Status.Phase == "Running" {
+		logger.V(1).Info("requeuing because run still active",
 			"scenarioRun", scenarioRun.Name,
+			"phase", scenarioRun.Status.Phase,
 			"runningJobs", scenarioRun.Status.RunningJobs)
 		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 	}

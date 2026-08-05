@@ -344,6 +344,96 @@ func TestBroadcastGraphRunDeleted(t *testing.T) {
 	}
 }
 
+func TestBroadcastScenarioRunUpdate_IncludesSanitizedClusterJobs(t *testing.T) {
+	hub := NewHub()
+	go hub.Run()
+	defer close(hub.register)
+
+	broadcaster := NewBroadcaster(hub, &mockAuthzChecker{}, nil, "default")
+
+	client := &Client{
+		userID:  "test-user",
+		isAdmin: false,
+		send:    make(chan []byte, 256),
+		subscriptions: map[string]map[string]bool{
+			"run": {"scenario-run-1": true},
+		},
+	}
+
+	hub.register <- client
+	time.Sleep(10 * time.Millisecond)
+
+	now := metav1.Now()
+	scenarioRun := &krknv1alpha1.KrknScenarioRun{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "scenario-run-1",
+			Namespace: "default",
+		},
+		Status: krknv1alpha1.KrknScenarioRunStatus{
+			Phase:        "Running",
+			TotalTargets: 1,
+			RunningJobs:  1,
+			ClusterJobs: []krknv1alpha1.ClusterJobStatus{
+				{
+					ProviderName:   "provider-1",
+					ClusterName:    "cluster-1",
+					ClusterAPIURL:  "https://secret-api.example.com:6443",
+					JobID:          "job-123",
+					PodName:        "scenario-pod-1",
+					ContainerImage: "quay.io/krkn/scenario:latest",
+					Phase:          "Running",
+					StartTime:      &now,
+				},
+			},
+		},
+	}
+
+	broadcaster.BroadcastScenarioRunUpdate(scenarioRun)
+
+	select {
+	case msg := <-client.send:
+		// Verify clusterJobs is included
+		var raw map[string]json.RawMessage
+		if err := json.Unmarshal(msg, &raw); err != nil {
+			t.Fatalf("Failed to unmarshal: %v", err)
+		}
+
+		var data map[string]json.RawMessage
+		if err := json.Unmarshal(raw["data"], &data); err != nil {
+			t.Fatalf("Failed to unmarshal data: %v", err)
+		}
+
+		if _, ok := data["clusterJobs"]; !ok {
+			t.Fatal("Expected clusterJobs to be present in broadcast")
+		}
+
+		var jobs []map[string]interface{}
+		if err := json.Unmarshal(data["clusterJobs"], &jobs); err != nil {
+			t.Fatalf("Failed to unmarshal clusterJobs: %v", err)
+		}
+
+		if len(jobs) != 1 {
+			t.Fatalf("Expected 1 job, got %d", len(jobs))
+		}
+
+		job := jobs[0]
+		if job["phase"] != "Running" {
+			t.Errorf("Expected phase 'Running', got '%v'", job["phase"])
+		}
+		if job["jobId"] != "job-123" {
+			t.Errorf("Expected jobId 'job-123', got '%v'", job["jobId"])
+		}
+
+		// ClusterAPIURL must NOT be present (security)
+		if _, ok := job["clusterApiUrl"]; ok {
+			t.Error("ClusterAPIURL must NOT be included in WebSocket broadcast (security)")
+		}
+
+	case <-time.After(100 * time.Millisecond):
+		t.Error("Timeout waiting for broadcast message")
+	}
+}
+
 func TestBroadcastOnlyToSubscribedClients(t *testing.T) {
 	hub := NewHub()
 	go hub.Run()
