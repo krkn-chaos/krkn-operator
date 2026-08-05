@@ -85,8 +85,12 @@ run_operator() {
     print_info "Press Ctrl+C to stop the operator"
     echo ""
 
-    # Run the operator with custom flags and export KRKN_NAMESPACE
+    # Run the operator with custom flags and export namespaces.
+    # POD_NAMESPACE must match KRKN_NAMESPACE so the cache and all components
+    # watch the same namespace. Without this the operator falls back to the
+    # hardcoded "krkn-operator-system" while KRKN_NAMESPACE may differ.
     export KRKN_NAMESPACE
+    export POD_NAMESPACE="${KRKN_NAMESPACE}"
     ./bin/manager \
         --api-port="$API_PORT" \
         --metrics-bind-address="$METRICS_ADDR" \

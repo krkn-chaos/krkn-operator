@@ -211,6 +211,9 @@ func NewServer(port int, client client.Client, clientset kubernetes.Interface, n
 
 	// Swagger UI - public endpoint for API documentation
 	mux.Handle("/api/swagger/", httpSwagger.WrapHandler)
+	// Elasticsearch config endpoints - admin only
+	mux.Handle(ElasticsearchConfigsPath, authMw.RequireAuth(http.HandlerFunc(handler.ElasticsearchConfigsRouter)))
+	mux.Handle(ElasticsearchConfigsPath+"/", authMw.RequireAuth(http.HandlerFunc(handler.ElasticsearchConfigsRouter)))
 
 	// ==================== API v2 Endpoints ====================
 	// v2 REST endpoints reuse v1 handlers (backward compatible)
