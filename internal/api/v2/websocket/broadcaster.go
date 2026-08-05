@@ -94,7 +94,7 @@ func (b *Broadcaster) BroadcastScenarioRunUpdate(scenarioRun *krknv1alpha1.KrknS
 		SuccessfulJobs:    scenarioRun.Status.SuccessfulJobs,
 		FailedJobs:        scenarioRun.Status.FailedJobs,
 		RunningJobs:       scenarioRun.Status.RunningJobs,
-		ClusterJobs:       nil, // WebSocket doesn't send cluster jobs details
+		ClusterJobs:       scenarioRun.Status.ClusterJobs,
 		OwnerUserID:       scenarioRun.Spec.OwnerUserID,
 		RegistryName:      scenarioRun.Spec.RegistryName,
 		GraphRunName:      scenarioRun.Labels["krkn.dev/graph-run"],
