@@ -25,6 +25,13 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
+// PaginationClientState tracks per-client pagination state for a resource type.
+type PaginationClientState struct {
+	Page     int
+	Limit    int
+	LastHash uint64 // fingerprint of last sent page content
+}
+
 // Client represents a connected WebSocket client
 type Client struct {
 	// WebSocket connection
@@ -42,6 +49,9 @@ type Client struct {
 	// Subscriptions: map[resourceType]map[resourceID]bool
 	// Example: subscriptions["run"]["run-abc123"] = true
 	subscriptions map[string]map[string]bool
+
+	// Pagination state per resource type (e.g., "jobs" → page/limit)
+	paginationState map[string]*PaginationClientState
 
 	// Mutex for subscription updates
 	mu sync.RWMutex
@@ -196,6 +206,21 @@ func (c *Client) Unsubscribe(resourceType string, resourceIDs []string) {
 
 	for _, id := range resourceIDs {
 		delete(c.subscriptions[resourceType], id)
+	}
+}
+
+// ForEachSubscriber calls fn for each client subscribed to the given resource type.
+// The caller must not call Hub methods inside fn to avoid deadlock.
+func (h *Hub) ForEachSubscriber(resourceType string, fn func(*Client)) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	for client := range h.clients {
+		client.mu.RLock()
+		_, subscribed := client.subscriptions[resourceType]
+		client.mu.RUnlock()
+		if subscribed {
+			fn(client)
+		}
 	}
 }
 

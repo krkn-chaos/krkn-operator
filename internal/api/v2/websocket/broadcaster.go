@@ -321,6 +321,88 @@ func (b *Broadcaster) BroadcastGraphRunDeleted(graphRun *krknv1alpha1.KrknGraphR
 	b.cacheMu.Unlock()
 }
 
+// BroadcastJobsPageUpdate recomputes the paginated jobs page for each "jobs" subscriber
+// and sends an updated snapshot if the page content has changed.
+func (b *Broadcaster) BroadcastJobsPageUpdate() {
+	logger := log.Log.WithName("websocket-broadcast-jobs")
+
+	// List all ScenarioRuns
+	var scenarioRuns krknv1alpha1.KrknScenarioRunList
+	if err := b.k8sClient.List(context.Background(), &scenarioRuns, k8sclient.InNamespace(b.namespace)); err != nil {
+		logger.Error(err, "Failed to list scenario runs for jobs page update")
+		return
+	}
+
+	// List all GraphRuns
+	var graphRuns krknv1alpha1.KrknGraphRunList
+	if err := b.k8sClient.List(context.Background(), &graphRuns, k8sclient.InNamespace(b.namespace)); err != nil {
+		logger.Error(err, "Failed to list graph runs for jobs page update")
+		return
+	}
+
+	b.hub.ForEachSubscriber("jobs", func(client *Client) {
+		// Create auth context for this client
+		claims := &auth.Claims{
+			UserID: client.userID,
+			Role:   roleFromAdmin(client.isAdmin),
+		}
+		ctx := context.WithValue(context.Background(), auth.UserClaimsKey, claims)
+
+		// Apply per-user authorization filters
+		filteredScenarioRuns := b.authz.FilterScenarioRunsByGroupPermission(scenarioRuns.Items, ctx)
+		filteredGraphRuns := b.authz.FilterGraphRunsByGroupPermission(graphRuns.Items, ctx)
+
+		// Build unified sorted list
+		allJobs := buildUnifiedJobList(filteredScenarioRuns, filteredGraphRuns)
+
+		// Get this client's pagination state
+		client.mu.RLock()
+		ps := client.paginationState["jobs"]
+		client.mu.RUnlock()
+
+		if ps == nil {
+			return
+		}
+
+		// Paginate
+		pageItems, meta := paginateJobItems(allJobs, ps.Page, ps.Limit)
+
+		snapshot := WSUnifiedJobsSnapshot{Jobs: pageItems}
+		msg := ServerMessage{
+			Resource:   "jobs",
+			Event:      "snapshot",
+			Data:       snapshot,
+			Pagination: &meta,
+		}
+
+		data, err := json.Marshal(msg)
+		if err != nil {
+			logger.Error(err, "Failed to marshal jobs page update", "userId", client.userID)
+			return
+		}
+
+		// Check fingerprint — skip if page content unchanged
+		fp := hashBytes(data)
+		client.mu.Lock()
+		if ps.LastHash == fp {
+			client.mu.Unlock()
+			return
+		}
+		ps.LastHash = fp
+		client.mu.Unlock()
+
+		select {
+		case client.send <- data:
+			logger.V(1).Info("Sent jobs page update",
+				"userId", client.userID,
+				"page", meta.Page,
+				"total", meta.Total)
+		default:
+			logger.Error(nil, "Client buffer full, dropping jobs page update", "userId", client.userID)
+		}
+	})
+}
+
 // hashBytes computes a fast hash of a byte slice for deduplication
 func hashBytes(data []byte) uint64 {
 	h := fnv.New64a()

@@ -22,6 +22,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -29,6 +30,7 @@ import (
 	"github.com/gorilla/websocket"
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
 	"github.com/krkn-chaos/krkn-operator/pkg/auth"
+	kvstore "github.com/krkn-chaos/krkn-operator/pkg/configstore"
 	k8sclient "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
@@ -193,11 +195,12 @@ func (h *Handler) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 	// Create client and register with hub
 	client := &Client{
-		conn:          conn,
-		userID:        claims.UserID,
-		isAdmin:       claims.Role == "admin",
-		send:          make(chan []byte, 256),
-		subscriptions: make(map[string]map[string]bool),
+		conn:            conn,
+		userID:          claims.UserID,
+		isAdmin:         claims.Role == "admin",
+		send:            make(chan []byte, 256),
+		subscriptions:   make(map[string]map[string]bool),
+		paginationState: make(map[string]*PaginationClientState),
 	}
 
 	h.hub.register <- client
@@ -300,14 +303,33 @@ func (h *Handler) handleClientMessage(client *Client, msg *ClientMessage) {
 			"run-detail": true, // Full ScenarioRun with clusterJobs
 			"graphrun":   true,
 			"dashboard":  true,
+			"jobs":       true, // Unified paginated view
 		}
 		if !validResources[msg.Resource] {
-			h.sendError(client, "invalid_resource", "Invalid resource type. Valid: run, run-detail, graphrun, dashboard")
+			h.sendError(client, "invalid_resource", "Invalid resource type. Valid: run, run-detail, graphrun, dashboard, jobs")
 			return
 		}
 
 		// Subscribe client
 		client.Subscribe(msg.Resource, msg.IDs)
+
+		// Store pagination state for "jobs" subscriptions
+		if msg.Resource == "jobs" {
+			page := 1
+			limit := h.getDefaultPageSize()
+			if msg.Page != nil && *msg.Page > 0 {
+				page = *msg.Page
+			}
+			if msg.Limit != nil && *msg.Limit > 0 {
+				limit = *msg.Limit
+			}
+			client.mu.Lock()
+			client.paginationState["jobs"] = &PaginationClientState{
+				Page:  page,
+				Limit: limit,
+			}
+			client.mu.Unlock()
+		}
 
 		logger.Info("Client subscribed",
 			"userId", client.userID,
@@ -362,6 +384,16 @@ func roleFromAdmin(isAdmin bool) string {
 	return string(auth.RoleUser)
 }
 
+// getDefaultPageSize reads the default page size from configstore.
+func (h *Handler) getDefaultPageSize() int {
+	if val, ok := kvstore.Get().GetValue("jobs.defaultPageSize"); ok {
+		if n, err := strconv.Atoi(val); err == nil && n > 0 {
+			return n
+		}
+	}
+	return 20
+}
+
 // sendInitialSnapshot sends the current state of resources to a newly subscribed client
 func (h *Handler) sendInitialSnapshot(client *Client, resourceType string, resourceIDs []string) {
 	// Skip snapshot if k8sClient is not available (e.g., in tests)
@@ -386,6 +418,8 @@ func (h *Handler) sendInitialSnapshot(client *Client, resourceType string, resou
 		h.sendScenarioRunDetailSnapshot(ctx, client, resourceIDs, logger)
 	case "graphrun":
 		h.sendGraphRunsSnapshot(ctx, client, resourceIDs, logger)
+	case "jobs":
+		h.sendJobsSnapshot(ctx, client, logger)
 	case "dashboard":
 		// Dashboard is a global subscription - no snapshot needed as it will be broadcasted
 		logger.V(1).Info("Dashboard subscription - no initial snapshot needed")
@@ -570,5 +604,73 @@ func (h *Handler) sendGraphRunsSnapshot(ctx context.Context, client *Client, res
 		default:
 			logger.Error(nil, "Client buffer full, dropping snapshot", "runName", run.Name)
 		}
+	}
+}
+
+// sendJobsSnapshot sends a paginated unified jobs snapshot to the client.
+func (h *Handler) sendJobsSnapshot(ctx context.Context, client *Client, logger logr.Logger) {
+	// List ScenarioRuns
+	var scenarioRuns krknv1alpha1.KrknScenarioRunList
+	if err := h.k8sClient.List(ctx, &scenarioRuns, k8sclient.InNamespace(h.namespace)); err != nil {
+		logger.Error(err, "Failed to list scenario runs for jobs snapshot")
+		return
+	}
+
+	// List GraphRuns
+	var graphRuns krknv1alpha1.KrknGraphRunList
+	if err := h.k8sClient.List(ctx, &graphRuns, k8sclient.InNamespace(h.namespace)); err != nil {
+		logger.Error(err, "Failed to list graph runs for jobs snapshot")
+		return
+	}
+
+	// Apply authorization filters
+	filteredScenarioRuns := h.authz.FilterScenarioRunsByGroupPermission(scenarioRuns.Items, ctx)
+	filteredGraphRuns := h.authz.FilterGraphRunsByGroupPermission(graphRuns.Items, ctx)
+
+	// Build unified sorted list
+	allJobs := buildUnifiedJobList(filteredScenarioRuns, filteredGraphRuns)
+
+	// Get pagination state
+	client.mu.RLock()
+	ps := client.paginationState["jobs"]
+	client.mu.RUnlock()
+
+	page := 1
+	limit := h.getDefaultPageSize()
+	if ps != nil {
+		page = ps.Page
+		limit = ps.Limit
+	}
+
+	// Paginate
+	pageItems, meta := paginateJobItems(allJobs, page, limit)
+
+	snapshot := WSUnifiedJobsSnapshot{Jobs: pageItems}
+	msg := ServerMessage{
+		Resource:   "jobs",
+		Event:      "snapshot",
+		Data:       snapshot,
+		Pagination: &meta,
+	}
+
+	data, err := json.Marshal(msg)
+	if err != nil {
+		logger.Error(err, "Failed to marshal jobs snapshot")
+		return
+	}
+
+	// Update fingerprint
+	fp := hashBytes(data)
+	client.mu.Lock()
+	if client.paginationState["jobs"] != nil {
+		client.paginationState["jobs"].LastHash = fp
+	}
+	client.mu.Unlock()
+
+	select {
+	case client.send <- data:
+		logger.Info("Sent jobs snapshot", "page", meta.Page, "limit", meta.Limit, "total", meta.Total, "items", len(pageItems))
+	default:
+		logger.Error(nil, "Client buffer full, dropping jobs snapshot")
 	}
 }

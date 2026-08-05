@@ -112,9 +112,10 @@ func TestConfigStoreInitializer_Start_ConfigMapNotFound(t *testing.T) {
 		t.Errorf("Expected no error when ConfigMap not found, got %v", err)
 	}
 
-	// kvstore should be empty
-	if len(store.Snapshot()) > 0 {
-		t.Errorf("Expected empty kvstore, got %d keys", len(store.Snapshot()))
+	// kvstore should only contain pagination defaults
+	snapshot = store.Snapshot()
+	if val, ok := snapshot["jobs.defaultPageSize"]; !ok || val != "20" {
+		t.Errorf("Expected jobs.defaultPageSize=20, got %v", snapshot)
 	}
 }
 

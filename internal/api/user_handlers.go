@@ -113,44 +113,6 @@ func filterUsers(users []krknv1alpha1.KrknUser, role, activeParam, search string
 	return filtered
 }
 
-// paginateUsers paginates a list of users
-func paginateUsers(users []krknv1alpha1.KrknUser, page, limit int) ([]krknv1alpha1.KrknUser, int) {
-	total := len(users)
-
-	// Calculate offset
-	offset := (page - 1) * limit
-	if offset >= total {
-		return []krknv1alpha1.KrknUser{}, total
-	}
-
-	// Calculate end index
-	end := offset + limit
-	if end > total {
-		end = total
-	}
-
-	return users[offset:end], total
-}
-
-// parsePaginationParams parses page and limit query parameters
-func parsePaginationParams(r *http.Request) (int, int) {
-	page := 1
-	limit := 50
-
-	if pageStr := r.URL.Query().Get("page"); pageStr != "" {
-		if p, err := strconv.Atoi(pageStr); err == nil && p > 0 {
-			page = p
-		}
-	}
-
-	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
-		if l, err := strconv.Atoi(limitStr); err == nil && l > 0 && l <= 100 {
-			limit = l
-		}
-	}
-
-	return page, limit
-}
 
 // sanitizeUsername converts an email to a valid Kubernetes resource name of the
 // form "krknuser-<sanitized>".
@@ -205,9 +167,15 @@ func (h *Handler) ListUsers(w http.ResponseWriter, r *http.Request) {
 	// Filter users
 	filtered := filterUsers(users.Items, role, activeParam, search)
 
-	// Paginate
-	page, limit := parsePaginationParams(r)
-	paginated, total := paginateUsers(filtered, page, limit)
+	// Paginate (users always paginate with default limit=50)
+	page, limit := ParsePaginationParams(r, 50)
+	if page == 0 {
+		page = 1
+	}
+	if limit == 0 {
+		limit = 50
+	}
+	paginated, meta := PaginateSlice(filtered, page, limit)
 
 	// Convert to response format
 	userResponses := make([]UserResponse, len(paginated))
@@ -215,13 +183,13 @@ func (h *Handler) ListUsers(w http.ResponseWriter, r *http.Request) {
 		userResponses[i] = buildUserResponse(&user)
 	}
 
-	logger.Info("Listed users", "total", total, "page", page, "limit", limit)
+	logger.Info("Listed users", "total", meta.Total, "page", meta.Page, "limit", meta.Limit)
 
 	writeJSON(w, http.StatusOK, ListUsersResponse{
 		Users: userResponses,
-		Total: total,
-		Page:  page,
-		Limit: limit,
+		Total: meta.Total,
+		Page:  meta.Page,
+		Limit: meta.Limit,
 	})
 }
 

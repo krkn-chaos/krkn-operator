@@ -37,6 +37,9 @@ const (
 	// Graph Run endpoints (same as v1)
 	GraphRunsPath = APIBasePath + "/graphruns"
 
+	// Jobs endpoint (unified paginated view of ScenarioRuns + GraphRuns)
+	JobsPath = APIBasePath + "/jobs"
+
 	// Dashboard endpoints (same as v1)
 	DashboardPath           = APIBasePath + "/dashboard"
 	DashboardActiveRunsPath = DashboardPath + "/active-runs"
