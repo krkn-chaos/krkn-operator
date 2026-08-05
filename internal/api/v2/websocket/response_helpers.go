@@ -1,11 +1,92 @@
 package websocket
 
 import (
+	"math"
+	"sort"
 	"time"
 
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
+
+// WSUnifiedJobItem represents a single item in the unified jobs list for WebSocket responses.
+type WSUnifiedJobItem struct {
+	Type      string      `json:"type"`      // "scenarioRun" or "graphRun"
+	Name      string      `json:"name"`
+	CreatedAt string      `json:"createdAt"` // RFC3339 timestamp
+	Data      interface{} `json:"data"`      // ScenarioRunStatusResponse or GraphRunResponse
+}
+
+// WSUnifiedJobsSnapshot represents the paginated jobs snapshot sent to WebSocket clients.
+type WSUnifiedJobsSnapshot struct {
+	Jobs []WSUnifiedJobItem `json:"jobs"`
+}
+
+// buildUnifiedJobList merges standalone ScenarioRuns and GraphRuns into a unified sorted list.
+func buildUnifiedJobList(scenarioRuns []krknv1alpha1.KrknScenarioRun, graphRuns []krknv1alpha1.KrknGraphRun) []WSUnifiedJobItem {
+	jobs := make([]WSUnifiedJobItem, 0, len(scenarioRuns)+len(graphRuns))
+
+	for i := range scenarioRuns {
+		sr := &scenarioRuns[i]
+		if sr.Labels["krkn.dev/graph-run"] != "" {
+			continue
+		}
+		jobs = append(jobs, WSUnifiedJobItem{
+			Type:      "scenarioRun",
+			Name:      sr.Name,
+			CreatedAt: sr.CreationTimestamp.Format(time.RFC3339),
+			Data:      buildScenarioRunResponse(sr),
+		})
+	}
+
+	for i := range graphRuns {
+		gr := &graphRuns[i]
+		jobs = append(jobs, WSUnifiedJobItem{
+			Type:      "graphRun",
+			Name:      gr.Name,
+			CreatedAt: gr.CreationTimestamp.Format(time.RFC3339),
+			Data:      buildGraphRunResponse(gr),
+		})
+	}
+
+	sort.Slice(jobs, func(i, j int) bool {
+		return jobs[i].CreatedAt > jobs[j].CreatedAt
+	})
+
+	return jobs
+}
+
+// paginateJobItems returns a page of items and pagination metadata.
+func paginateJobItems(items []WSUnifiedJobItem, page, limit int) ([]WSUnifiedJobItem, WSPaginationMeta) {
+	total := len(items)
+	totalPages := 0
+	if limit > 0 {
+		totalPages = int(math.Ceil(float64(total) / float64(limit)))
+	}
+
+	meta := WSPaginationMeta{
+		Page:       page,
+		Limit:      limit,
+		Total:      total,
+		TotalPages: totalPages,
+	}
+
+	if limit <= 0 || page <= 0 {
+		return items, meta
+	}
+
+	offset := (page - 1) * limit
+	if offset >= total {
+		return []WSUnifiedJobItem{}, meta
+	}
+
+	end := offset + limit
+	if end > total {
+		end = total
+	}
+
+	return items[offset:end], meta
+}
 
 // buildScenarioRunResponse builds the response with sanitized clusterJobs (no ClusterAPIURL).
 // Used for both lightweight "run" broadcasts and "run" snapshots.

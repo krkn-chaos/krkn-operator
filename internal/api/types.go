@@ -406,6 +406,41 @@ type ScenarioRunListResponse struct {
 	ScenarioRuns []ScenarioRunListItem `json:"scenarioRuns"`
 }
 
+// PaginationMeta contains pagination metadata for paginated responses.
+type PaginationMeta struct {
+	// Page is the current page number (1-based), 0 if unpaginated
+	Page int `json:"page"`
+	// Limit is the number of items per page, 0 if unpaginated
+	Limit int `json:"limit"`
+	// Total is the total number of items matching the query
+	Total int `json:"total"`
+	// TotalPages is the total number of pages
+	TotalPages int `json:"totalPages"`
+}
+
+// UnifiedJobItem represents a single item in the unified jobs list.
+// It wraps either a ScenarioRun or a GraphRun with a type discriminator.
+type UnifiedJobItem struct {
+	// Type is the resource type: "scenarioRun" or "graphRun"
+	Type string `json:"type"`
+	// Name is the resource name
+	Name string `json:"name"`
+	// CreatedAt is the creation timestamp (used for sorting)
+	CreatedAt time.Time `json:"createdAt"`
+	// ScenarioRun contains the scenario run data (when Type == "scenarioRun")
+	ScenarioRun *ScenarioRunListItem `json:"scenarioRun,omitempty"`
+	// GraphRun contains the graph run data (when Type == "graphRun")
+	GraphRun *GraphRunListItem `json:"graphRun,omitempty"`
+}
+
+// UnifiedJobsResponse represents the response for GET /api/v2/jobs
+type UnifiedJobsResponse struct {
+	// Jobs is the list of unified job items
+	Jobs []UnifiedJobItem `json:"jobs"`
+	// Pagination contains pagination metadata
+	Pagination PaginationMeta `json:"pagination"`
+}
+
 // ActiveRunsOverviewResponse represents the response for GET /api/v1/dashboard/active-runs
 // It provides an overview of currently running scenario runs
 type ActiveRunsOverviewResponse struct {

@@ -25,6 +25,13 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
+// PaginationClientState tracks per-client pagination state for a resource type.
+type PaginationClientState struct {
+	Page     int
+	Limit    int
+	LastHash uint64 // fingerprint of last sent page content
+}
+
 // Client represents a connected WebSocket client
 type Client struct {
 	// WebSocket connection
@@ -42,6 +49,9 @@ type Client struct {
 	// Subscriptions: map[resourceType]map[resourceID]bool
 	// Example: subscriptions["run"]["run-abc123"] = true
 	subscriptions map[string]map[string]bool
+
+	// Pagination state per resource type (e.g., "jobs" → page/limit)
+	paginationState map[string]*PaginationClientState
 
 	// Mutex for subscription updates
 	mu sync.RWMutex
@@ -185,7 +195,8 @@ func (c *Client) Subscribe(resourceType string, resourceIDs []string) {
 	}
 }
 
-// Unsubscribe removes resource subscriptions for a client
+// Unsubscribe removes resource subscriptions for a client.
+// Cleans up the resource key and pagination state when no subscriptions remain.
 func (c *Client) Unsubscribe(resourceType string, resourceIDs []string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -196,6 +207,33 @@ func (c *Client) Unsubscribe(resourceType string, resourceIDs []string) {
 
 	for _, id := range resourceIDs {
 		delete(c.subscriptions[resourceType], id)
+	}
+
+	if len(c.subscriptions[resourceType]) == 0 {
+		delete(c.subscriptions, resourceType)
+		delete(c.paginationState, resourceType)
+	}
+}
+
+// ForEachSubscriber calls fn for each client subscribed to the given resource type.
+// Snapshots the matching client set under a short lock so fn can do expensive work
+// without blocking hub register/unregister.
+func (h *Hub) ForEachSubscriber(resourceType string, fn func(*Client)) {
+	h.mu.RLock()
+	subscribers := make([]*Client, 0, len(h.clients))
+	for client := range h.clients {
+		client.mu.RLock()
+		subs, ok := client.subscriptions[resourceType]
+		hasActive := ok && len(subs) > 0
+		client.mu.RUnlock()
+		if hasActive {
+			subscribers = append(subscribers, client)
+		}
+	}
+	h.mu.RUnlock()
+
+	for _, client := range subscribers {
+		fn(client)
 	}
 }
 

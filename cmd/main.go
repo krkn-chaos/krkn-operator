@@ -25,6 +25,8 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/go-logr/logr"
+
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
@@ -412,7 +414,8 @@ func (c *ConfigStoreInitializer) Start(ctx context.Context) error {
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			logger.Info("config configmap not found, kvstore will be initialized when ConfigMap is created")
-			// Not an error - ConfigMap might be created later by controllers
+			// Still apply env var overrides and defaults
+			c.applyPaginationDefaults(kvstore.Get(), logger)
 			return nil
 		}
 		logger.Error(err, "failed to get config configmap")
@@ -428,6 +431,9 @@ func (c *ConfigStoreInitializer) Start(ctx context.Context) error {
 		return nil
 	}
 
+	// Apply env var overrides and defaults for pagination
+	c.applyPaginationDefaults(store, logger)
+
 	// Log what was loaded
 	snapshot := store.Snapshot()
 	logger.Info("kvstore initialized from configmap",
@@ -436,6 +442,26 @@ func (c *ConfigStoreInitializer) Start(ctx context.Context) error {
 		"keys", len(snapshot))
 
 	return nil
+}
+
+// applyPaginationDefaults sets pagination configuration with env var override and defaults.
+func (c *ConfigStoreInitializer) applyPaginationDefaults(store *kvstore.Store, logger logr.Logger) {
+	const (
+		key        = "jobs.defaultPageSize"
+		envVar     = "KRKN_JOBS_DEFAULT_PAGE_SIZE"
+		defaultVal = "20"
+	)
+
+	if envVal := os.Getenv(envVar); envVal != "" {
+		store.SetValue(key, envVal)
+		logger.Info("pagination default page size set from env var", "env", envVar, "value", envVal)
+		return
+	}
+
+	if _, exists := store.GetValue(key); !exists {
+		store.SetValue(key, defaultVal)
+		logger.Info("pagination default page size set to default", "value", defaultVal)
+	}
 }
 
 // NeedLeaderElection implements manager.LeaderElectionRunnable
