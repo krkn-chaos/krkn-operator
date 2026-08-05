@@ -235,6 +235,7 @@ func NewServer(port int, client client.Client, clientset kubernetes.Interface, n
 	mux.Handle(v2.GraphRunsPath+"/", authMw.RequireAuth(http.HandlerFunc(handler.GraphRunsRouter)))
 	mux.Handle(v2.DashboardActiveRunsPath, authMw.RequireAuth(http.HandlerFunc(handler.GetActiveRunsOverview)))
 	mux.Handle(v2.JobsPath, authMw.RequireAuth(http.HandlerFunc(handler.ListJobs)))
+	mux.Handle(v2.JobsPath+"/", authMw.RequireAuth(http.HandlerFunc(handler.ListJobs)))
 
 	// v2 WebSocket endpoints (NEW - real-time multiplexed updates)
 	// WebSocket authentication is handled internally via Sec-WebSocket-Protocol header

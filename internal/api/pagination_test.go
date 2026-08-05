@@ -17,159 +17,78 @@ limitations under the License.
 package api
 
 import (
+	"fmt"
 	"net/http/httptest"
 	"testing"
 )
 
-func TestPaginateSlice_FirstPage(t *testing.T) {
-	items := []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
-	result, meta := PaginateSlice(items, 1, 3)
+func TestPaginateSlice(t *testing.T) {
+	tests := []struct {
+		name          string
+		items         []int
+		page          int
+		limit         int
+		wantLen       int
+		wantFirst     int // -1 to skip
+		wantTotal     int
+		wantTotalPgs  int
+	}{
+		{"FirstPage", []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}, 1, 3, 3, 1, 10, 4},
+		{"MiddlePage", []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}, 2, 3, 3, 4, 10, 4},
+		{"LastPage", []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}, 4, 3, 1, 10, 10, 4},
+		{"BeyondTotal", []int{1, 2, 3}, 5, 3, 0, -1, 3, 1},
+		{"Empty", []int{}, 1, 10, 0, -1, 0, 0},
+		{"ZeroLimit", []int{1, 2, 3}, 1, 0, 3, 1, 3, 0},
+		{"ExactFit", []int{1, 2, 3, 4, 5, 6}, 2, 3, 3, 4, 6, 2},
+	}
 
-	if len(result) != 3 {
-		t.Errorf("expected 3 items, got %d", len(result))
-	}
-	if result[0] != 1 || result[1] != 2 || result[2] != 3 {
-		t.Errorf("expected [1,2,3], got %v", result)
-	}
-	if meta.Total != 10 {
-		t.Errorf("expected total 10, got %d", meta.Total)
-	}
-	if meta.TotalPages != 4 {
-		t.Errorf("expected 4 pages, got %d", meta.TotalPages)
-	}
-	if meta.Page != 1 {
-		t.Errorf("expected page 1, got %d", meta.Page)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result, meta := PaginateSlice(tc.items, tc.page, tc.limit)
+			if len(result) != tc.wantLen {
+				t.Errorf("len = %d, want %d", len(result), tc.wantLen)
+			}
+			if tc.wantFirst >= 0 && len(result) > 0 && result[0] != tc.wantFirst {
+				t.Errorf("first = %d, want %d", result[0], tc.wantFirst)
+			}
+			if meta.Total != tc.wantTotal {
+				t.Errorf("total = %d, want %d", meta.Total, tc.wantTotal)
+			}
+			if meta.TotalPages != tc.wantTotalPgs {
+				t.Errorf("totalPages = %d, want %d", meta.TotalPages, tc.wantTotalPgs)
+			}
+		})
 	}
 }
 
-func TestPaginateSlice_MiddlePage(t *testing.T) {
-	items := []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
-	result, meta := PaginateSlice(items, 2, 3)
-
-	if len(result) != 3 {
-		t.Errorf("expected 3 items, got %d", len(result))
+func TestParsePaginationParams(t *testing.T) {
+	tests := []struct {
+		name      string
+		query     string
+		defLimit  int
+		wantPage  int
+		wantLimit int
+	}{
+		{"NoParams", "/api/v2/jobs", 20, 0, 0},
+		{"PageOnly", "/api/v2/jobs?page=3", 20, 3, 20},
+		{"PageAndLimit", "/api/v2/jobs?page=2&limit=50", 20, 2, 50},
+		{"InvalidPage", "/api/v2/jobs?page=abc", 20, 1, 20},
+		{"NegativePage", "/api/v2/jobs?page=-1", 20, 1, 20},
+		{"LimitOnly_ReturnsAll", "/api/v2/jobs?limit=5", 20, 0, 0},
+		{"LimitAboveMax", fmt.Sprintf("/api/v2/jobs?page=1&limit=%d", maxPageSize+100), 20, 1, maxPageSize},
 	}
-	if result[0] != 4 || result[1] != 5 || result[2] != 6 {
-		t.Errorf("expected [4,5,6], got %v", result)
-	}
-	if meta.Total != 10 {
-		t.Errorf("expected total 10, got %d", meta.Total)
-	}
-}
 
-func TestPaginateSlice_LastPage(t *testing.T) {
-	items := []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
-	result, meta := PaginateSlice(items, 4, 3)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest("GET", tc.query, nil)
+			page, limit := ParsePaginationParams(req, tc.defLimit)
 
-	if len(result) != 1 {
-		t.Errorf("expected 1 item on last page, got %d", len(result))
-	}
-	if result[0] != 10 {
-		t.Errorf("expected [10], got %v", result)
-	}
-	if meta.TotalPages != 4 {
-		t.Errorf("expected 4 pages, got %d", meta.TotalPages)
-	}
-}
-
-func TestPaginateSlice_BeyondTotal(t *testing.T) {
-	items := []int{1, 2, 3}
-	result, meta := PaginateSlice(items, 5, 3)
-
-	if len(result) != 0 {
-		t.Errorf("expected empty slice for page beyond total, got %d items", len(result))
-	}
-	if meta.Total != 3 {
-		t.Errorf("expected total 3, got %d", meta.Total)
-	}
-}
-
-func TestPaginateSlice_Empty(t *testing.T) {
-	items := []int{}
-	result, meta := PaginateSlice(items, 1, 10)
-
-	if len(result) != 0 {
-		t.Errorf("expected empty result, got %d items", len(result))
-	}
-	if meta.Total != 0 {
-		t.Errorf("expected total 0, got %d", meta.Total)
-	}
-	if meta.TotalPages != 0 {
-		t.Errorf("expected 0 pages, got %d", meta.TotalPages)
-	}
-}
-
-func TestPaginateSlice_ZeroLimit(t *testing.T) {
-	items := []int{1, 2, 3}
-	result, _ := PaginateSlice(items, 1, 0)
-
-	if len(result) != 3 {
-		t.Errorf("expected all items with zero limit, got %d", len(result))
-	}
-}
-
-func TestPaginateSlice_ExactFit(t *testing.T) {
-	items := []int{1, 2, 3, 4, 5, 6}
-	result, meta := PaginateSlice(items, 2, 3)
-
-	if len(result) != 3 {
-		t.Errorf("expected 3 items, got %d", len(result))
-	}
-	if meta.TotalPages != 2 {
-		t.Errorf("expected 2 pages for exact fit, got %d", meta.TotalPages)
-	}
-}
-
-func TestParsePaginationParams_NoPagination(t *testing.T) {
-	req := httptest.NewRequest("GET", "/api/v2/jobs", nil)
-	page, limit := ParsePaginationParams(req, 20)
-
-	if page != 0 || limit != 0 {
-		t.Errorf("expected (0,0) when no params, got (%d,%d)", page, limit)
-	}
-}
-
-func TestParsePaginationParams_WithPage(t *testing.T) {
-	req := httptest.NewRequest("GET", "/api/v2/jobs?page=3", nil)
-	page, limit := ParsePaginationParams(req, 20)
-
-	if page != 3 {
-		t.Errorf("expected page 3, got %d", page)
-	}
-	if limit != 20 {
-		t.Errorf("expected default limit 20, got %d", limit)
-	}
-}
-
-func TestParsePaginationParams_WithBoth(t *testing.T) {
-	req := httptest.NewRequest("GET", "/api/v2/jobs?page=2&limit=50", nil)
-	page, limit := ParsePaginationParams(req, 20)
-
-	if page != 2 {
-		t.Errorf("expected page 2, got %d", page)
-	}
-	if limit != 50 {
-		t.Errorf("expected limit 50, got %d", limit)
-	}
-}
-
-func TestParsePaginationParams_InvalidPage(t *testing.T) {
-	req := httptest.NewRequest("GET", "/api/v2/jobs?page=abc", nil)
-	page, limit := ParsePaginationParams(req, 20)
-
-	if page != 1 {
-		t.Errorf("expected default page 1 for invalid input, got %d", page)
-	}
-	if limit != 20 {
-		t.Errorf("expected default limit 20, got %d", limit)
-	}
-}
-
-func TestParsePaginationParams_NegativePage(t *testing.T) {
-	req := httptest.NewRequest("GET", "/api/v2/jobs?page=-1", nil)
-	page, _ := ParsePaginationParams(req, 20)
-
-	if page != 1 {
-		t.Errorf("expected default page 1 for negative input, got %d", page)
+			if page != tc.wantPage {
+				t.Errorf("page = %d, want %d", page, tc.wantPage)
+			}
+			if limit != tc.wantLimit {
+				t.Errorf("limit = %d, want %d", limit, tc.wantLimit)
+			}
+		})
 	}
 }

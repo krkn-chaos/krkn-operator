@@ -17,6 +17,7 @@ limitations under the License.
 package websocket
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 	"time"
@@ -256,7 +257,7 @@ func TestBroadcastJobsPageUpdate(t *testing.T) {
 	time.Sleep(10 * time.Millisecond)
 
 	// Trigger page update
-	broadcaster.BroadcastJobsPageUpdate()
+	broadcaster.BroadcastJobsPageUpdate(context.Background())
 
 	select {
 	case data := <-client.send:
@@ -332,7 +333,7 @@ func TestBroadcastJobsPageUpdate_Dedup(t *testing.T) {
 	time.Sleep(10 * time.Millisecond)
 
 	// First broadcast should send
-	broadcaster.BroadcastJobsPageUpdate()
+	broadcaster.BroadcastJobsPageUpdate(context.Background())
 
 	select {
 	case <-client.send:
@@ -342,13 +343,79 @@ func TestBroadcastJobsPageUpdate_Dedup(t *testing.T) {
 	}
 
 	// Second broadcast with same data should be deduplicated
-	broadcaster.BroadcastJobsPageUpdate()
+	broadcaster.BroadcastJobsPageUpdate(context.Background())
 
 	select {
 	case <-client.send:
 		t.Error("expected second broadcast to be deduplicated (no message)")
 	case <-time.After(100 * time.Millisecond):
 		// expected: no message due to dedup
+	}
+}
+
+func TestUnsubscribe_CleansUpJobsState(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = krknv1alpha1.AddToScheme(scheme)
+
+	sr := &krknv1alpha1.KrknScenarioRun{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              "sr-1",
+			Namespace:         "default",
+			CreationTimestamp: metav1.NewTime(time.Now()),
+			Labels:            map[string]string{},
+		},
+		Status: krknv1alpha1.KrknScenarioRunStatus{Phase: "Running"},
+	}
+
+	fakeClient := fakeclient.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(sr).
+		Build()
+
+	hub := NewHub()
+	go hub.Run()
+
+	broadcaster := NewBroadcaster(hub, &mockAuthzChecker{}, fakeClient, "default")
+
+	client := &Client{
+		userID:  "test-user",
+		isAdmin: true,
+		send:    make(chan []byte, 256),
+		subscriptions: map[string]map[string]bool{
+			"jobs": {"*": true},
+		},
+		paginationState: map[string]*PaginationClientState{
+			"jobs": {Page: 1, Limit: 10},
+		},
+	}
+
+	hub.register <- client
+	time.Sleep(10 * time.Millisecond)
+
+	// Unsubscribe from jobs
+	client.Unsubscribe("jobs", []string{"*"})
+
+	// Verify subscription and pagination state cleaned up
+	client.mu.RLock()
+	_, hasSub := client.subscriptions["jobs"]
+	_, hasPS := client.paginationState["jobs"]
+	client.mu.RUnlock()
+
+	if hasSub {
+		t.Error("expected jobs subscription to be removed after unsubscribe")
+	}
+	if hasPS {
+		t.Error("expected jobs pagination state to be removed after unsubscribe")
+	}
+
+	// Broadcast should NOT send to unsubscribed client
+	broadcaster.BroadcastJobsPageUpdate(context.Background())
+
+	select {
+	case <-client.send:
+		t.Error("expected no message after unsubscribe")
+	case <-time.After(100 * time.Millisecond):
+		// expected: no message
 	}
 }
 

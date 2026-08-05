@@ -218,6 +218,46 @@ func TestListJobs_Empty(t *testing.T) {
 	}
 }
 
+func TestListJobs_LimitOnlyReturnsAll(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = krknv1alpha1.AddToScheme(scheme)
+
+	now := time.Now()
+	sr1 := makeScenarioRun("sr-1", now.Add(-2*time.Hour))
+	sr2 := makeScenarioRun("sr-2", now.Add(-1*time.Hour))
+	gr1 := makeGraphRun("gr-1", now)
+
+	fakeClient := fakeclient.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(sr1, sr2, gr1).
+		Build()
+	fakeClientset := fake.NewSimpleClientset()
+	handler := NewTestHandler(fakeClient, fakeClientset, "default", "localhost:50051")
+
+	// Only limit param, no page → should return ALL items (not truncated to page 1)
+	req := httptest.NewRequest("GET", "/api/v2/jobs?limit=2", nil)
+	ctx := context.WithValue(req.Context(), auth.UserClaimsKey, &auth.Claims{
+		UserID: "admin@example.com",
+		Role:   "admin",
+	})
+	req = req.WithContext(ctx)
+	w := httptest.NewRecorder()
+
+	handler.ListJobs(w, req)
+
+	var response UnifiedJobsResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("failed to unmarshal response: %v", err)
+	}
+
+	if len(response.Jobs) != 3 {
+		t.Errorf("expected all 3 jobs when only limit param provided, got %d", len(response.Jobs))
+	}
+	if response.Pagination.Page != 0 {
+		t.Errorf("expected page=0 (unpaginated), got %d", response.Pagination.Page)
+	}
+}
+
 func TestListJobs_SkipsGraphRunChildren(t *testing.T) {
 	scheme := runtime.NewScheme()
 	_ = krknv1alpha1.AddToScheme(scheme)

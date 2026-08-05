@@ -323,19 +323,19 @@ func (b *Broadcaster) BroadcastGraphRunDeleted(graphRun *krknv1alpha1.KrknGraphR
 
 // BroadcastJobsPageUpdate recomputes the paginated jobs page for each "jobs" subscriber
 // and sends an updated snapshot if the page content has changed.
-func (b *Broadcaster) BroadcastJobsPageUpdate() {
+func (b *Broadcaster) BroadcastJobsPageUpdate(ctx context.Context) {
 	logger := log.Log.WithName("websocket-broadcast-jobs")
 
 	// List all ScenarioRuns
 	var scenarioRuns krknv1alpha1.KrknScenarioRunList
-	if err := b.k8sClient.List(context.Background(), &scenarioRuns, k8sclient.InNamespace(b.namespace)); err != nil {
+	if err := b.k8sClient.List(ctx, &scenarioRuns, k8sclient.InNamespace(b.namespace)); err != nil {
 		logger.Error(err, "Failed to list scenario runs for jobs page update")
 		return
 	}
 
 	// List all GraphRuns
 	var graphRuns krknv1alpha1.KrknGraphRunList
-	if err := b.k8sClient.List(context.Background(), &graphRuns, k8sclient.InNamespace(b.namespace)); err != nil {
+	if err := b.k8sClient.List(ctx, &graphRuns, k8sclient.InNamespace(b.namespace)); err != nil {
 		logger.Error(err, "Failed to list graph runs for jobs page update")
 		return
 	}

@@ -195,7 +195,8 @@ func (c *Client) Subscribe(resourceType string, resourceIDs []string) {
 	}
 }
 
-// Unsubscribe removes resource subscriptions for a client
+// Unsubscribe removes resource subscriptions for a client.
+// Cleans up the resource key and pagination state when no subscriptions remain.
 func (c *Client) Unsubscribe(resourceType string, resourceIDs []string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -207,20 +208,32 @@ func (c *Client) Unsubscribe(resourceType string, resourceIDs []string) {
 	for _, id := range resourceIDs {
 		delete(c.subscriptions[resourceType], id)
 	}
+
+	if len(c.subscriptions[resourceType]) == 0 {
+		delete(c.subscriptions, resourceType)
+		delete(c.paginationState, resourceType)
+	}
 }
 
 // ForEachSubscriber calls fn for each client subscribed to the given resource type.
-// The caller must not call Hub methods inside fn to avoid deadlock.
+// Snapshots the matching client set under a short lock so fn can do expensive work
+// without blocking hub register/unregister.
 func (h *Hub) ForEachSubscriber(resourceType string, fn func(*Client)) {
 	h.mu.RLock()
-	defer h.mu.RUnlock()
+	subscribers := make([]*Client, 0, len(h.clients))
 	for client := range h.clients {
 		client.mu.RLock()
-		_, subscribed := client.subscriptions[resourceType]
+		subs, ok := client.subscriptions[resourceType]
+		hasActive := ok && len(subs) > 0
 		client.mu.RUnlock()
-		if subscribed {
-			fn(client)
+		if hasActive {
+			subscribers = append(subscribers, client)
 		}
+	}
+	h.mu.RUnlock()
+
+	for _, client := range subscribers {
+		fn(client)
 	}
 }
 

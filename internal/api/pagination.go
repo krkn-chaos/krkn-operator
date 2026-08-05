@@ -55,29 +55,32 @@ func PaginateSlice[T any](items []T, page, limit int) ([]T, PaginationMeta) {
 	return items[offset:end], meta
 }
 
+const maxPageSize = 500
+
 // ParsePaginationParams parses page and limit query parameters from the request.
-// Returns (0, 0) if no pagination params are present (meaning "return all").
+// Returns (0, 0) if the page param is absent (meaning "return all").
+// The limit param is only read when page is present.
 func ParsePaginationParams(r *http.Request, defaultLimit int) (page, limit int) {
 	pageStr := r.URL.Query().Get("page")
-	limitStr := r.URL.Query().Get("limit")
-
-	if pageStr == "" && limitStr == "" {
+	if pageStr == "" {
 		return 0, 0
 	}
 
 	page = 1
 	limit = defaultLimit
 
-	if pageStr != "" {
-		if p, err := strconv.Atoi(pageStr); err == nil && p > 0 {
-			page = p
-		}
+	if p, err := strconv.Atoi(pageStr); err == nil && p > 0 {
+		page = p
 	}
 
-	if limitStr != "" {
+	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
 		if l, err := strconv.Atoi(limitStr); err == nil && l > 0 {
 			limit = l
 		}
+	}
+
+	if limit > maxPageSize {
+		limit = maxPageSize
 	}
 
 	return page, limit

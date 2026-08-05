@@ -93,7 +93,7 @@ func (h *scenarioRunEventHandler) OnAdd(obj interface{}, _ bool) {
 	// Broadcaster will deduplicate via cache, so always call it
 	h.broadcaster.BroadcastScenarioRunUpdate(run)       // Lightweight (no clusterJobs)
 	h.broadcaster.BroadcastScenarioRunDetailUpdate(run) // Full detail (with clusterJobs)
-	h.broadcaster.BroadcastJobsPageUpdate()             // Unified paginated view
+	h.broadcaster.BroadcastJobsPageUpdate(context.Background())             // Unified paginated view
 }
 
 func (h *scenarioRunEventHandler) OnUpdate(oldObj, newObj interface{}) {
@@ -124,7 +124,7 @@ func (h *scenarioRunEventHandler) OnUpdate(oldObj, newObj interface{}) {
 
 	h.broadcaster.BroadcastScenarioRunUpdate(newRun)       // Lightweight (no clusterJobs)
 	h.broadcaster.BroadcastScenarioRunDetailUpdate(newRun) // Full detail (with clusterJobs)
-	h.broadcaster.BroadcastJobsPageUpdate()                // Unified paginated view
+	h.broadcaster.BroadcastJobsPageUpdate(context.Background())                // Unified paginated view
 
 	// Update dashboard with current active runs count
 	h.broadcastDashboardUpdate(context.Background())
@@ -150,7 +150,7 @@ func (h *scenarioRunEventHandler) OnDelete(obj interface{}) {
 
 	h.logger.V(1).Info("ScenarioRun deleted", "name", run.Name)
 	h.broadcaster.BroadcastScenarioRunDeleted(run)
-	h.broadcaster.BroadcastJobsPageUpdate()
+	h.broadcaster.BroadcastJobsPageUpdate(context.Background())
 }
 
 // graphRunEventHandler handles GraphRun events and broadcasts to WebSocket clients
@@ -163,7 +163,7 @@ func (h *graphRunEventHandler) OnAdd(obj interface{}, _ bool) {
 	run := obj.(*krknv1alpha1.KrknGraphRun)
 	h.logger.V(1).Info("GraphRun added", "name", run.Name)
 	h.broadcaster.BroadcastGraphRunUpdate(run, "created")
-	h.broadcaster.BroadcastJobsPageUpdate()
+	h.broadcaster.BroadcastJobsPageUpdate(context.Background())
 }
 
 func (h *graphRunEventHandler) OnUpdate(oldObj, newObj interface{}) {
@@ -185,7 +185,7 @@ func (h *graphRunEventHandler) OnUpdate(oldObj, newObj interface{}) {
 		"completedNodes", newRun.Status.Summary.CompletedNodes)
 
 	h.broadcaster.BroadcastGraphRunUpdate(newRun, "updated")
-	h.broadcaster.BroadcastJobsPageUpdate()
+	h.broadcaster.BroadcastJobsPageUpdate(context.Background())
 }
 
 func (h *graphRunEventHandler) OnDelete(obj interface{}) {
@@ -208,7 +208,7 @@ func (h *graphRunEventHandler) OnDelete(obj interface{}) {
 
 	h.logger.V(1).Info("GraphRun deleted", "name", run.Name)
 	h.broadcaster.BroadcastGraphRunDeleted(run)
-	h.broadcaster.BroadcastJobsPageUpdate()
+	h.broadcaster.BroadcastJobsPageUpdate(context.Background())
 }
 
 // hasScenarioRunStatusChanged checks if ScenarioRun status has meaningful changes
