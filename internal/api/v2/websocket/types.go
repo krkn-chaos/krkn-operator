@@ -9,6 +9,7 @@ import (
 // ScenarioRunStatusResponse - copy of internal/api type to avoid import cycle
 type ScenarioRunStatusResponse struct {
 	ScenarioRunName   string      `json:"scenarioRunName"`
+	ScenarioName      string      `json:"scenarioName,omitempty"`
 	Phase             string      `json:"phase"`
 	TotalTargets      int         `json:"totalTargets"`
 	SuccessfulJobs    int         `json:"successfulJobs"`
@@ -19,21 +20,25 @@ type ScenarioRunStatusResponse struct {
 	RegistryName      string      `json:"registryName,omitempty"`
 	GraphRunName      string      `json:"graphRunName,omitempty"`
 	GraphNodeID       string      `json:"graphNodeId,omitempty"`
+	CustomRunName     string      `json:"customRunName,omitempty"`
 	CreationTimestamp string      `json:"creationTimestamp,omitempty"`
 }
 
 // GraphRunResponse - WebSocket response for GraphRun (same fields as REST API)
 type GraphRunResponse struct {
-	GraphRunName      string                      `json:"graphRunName"`
-	Phase             string                      `json:"phase"`
-	Summary           GraphRunSummaryResponse     `json:"summary"`
-	NodeStatuses      []NodeStatusResponse        `json:"nodeStatuses,omitempty"`
-	ResolvedLevels    [][]string                  `json:"resolvedLevels"`
-	StartTime         *metav1.Time                `json:"startTime,omitempty"`
-	CompletionTime    *metav1.Time                `json:"completionTime,omitempty"`
-	OwnerUserID       string                      `json:"ownerUserId,omitempty"`
-	CreationTimestamp string                      `json:"creationTimestamp,omitempty"`
-	ResiliencyScores  []GraphClusterScoreResponse `json:"resiliencyScores,omitempty"`
+	GraphRunName            string                      `json:"graphRunName"`
+	Name                    string                      `json:"name,omitempty"`
+	Phase                   string                      `json:"phase"`
+	Summary                 GraphRunSummaryResponse     `json:"summary"`
+	NodeStatuses            []NodeStatusResponse        `json:"nodeStatuses,omitempty"`
+	ResolvedLevels          [][]string                  `json:"resolvedLevels"`
+	StartTime               *metav1.Time                `json:"startTime,omitempty"`
+	CompletionTime          *metav1.Time                `json:"completionTime,omitempty"`
+	OwnerUserID             string                      `json:"ownerUserId,omitempty"`
+	CreationTimestamp       string                      `json:"creationTimestamp,omitempty"`
+	ResiliencyScores        []GraphClusterScoreResponse `json:"resiliencyScores,omitempty"`
+	ResiliencyScoreEnabled  bool                        `json:"resiliencyScoreEnabled,omitempty"`
+	ResiliencyScoreBaseline *float64                    `json:"resiliencyScoreBaseline,omitempty"`
 }
 
 // NodeStatusResponse represents a node in the graph run

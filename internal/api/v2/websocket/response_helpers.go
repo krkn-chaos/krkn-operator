@@ -10,11 +10,13 @@ import (
 )
 
 // WSUnifiedJobItem represents a single item in the unified jobs list for WebSocket responses.
+// Uses the same typed envelope as REST UnifiedJobItem for frontend compatibility.
 type WSUnifiedJobItem struct {
-	Type      string      `json:"type"`      // "scenarioRun" or "graphRun"
-	Name      string      `json:"name"`
-	CreatedAt string      `json:"createdAt"` // RFC3339 timestamp
-	Data      interface{} `json:"data"`      // ScenarioRunStatusResponse or GraphRunResponse
+	Type        string                    `json:"type"`                  // "scenarioRun" or "graphRun"
+	Name        string                    `json:"name"`
+	CreatedAt   string                    `json:"createdAt"`             // RFC3339 timestamp
+	ScenarioRun *ScenarioRunStatusResponse `json:"scenarioRun,omitempty"`
+	GraphRun    *GraphRunResponse          `json:"graphRun,omitempty"`
 }
 
 // WSUnifiedJobsSnapshot represents the paginated jobs snapshot sent to WebSocket clients.
@@ -31,21 +33,23 @@ func buildUnifiedJobList(scenarioRuns []krknv1alpha1.KrknScenarioRun, graphRuns 
 		if sr.Labels["krkn.dev/graph-run"] != "" {
 			continue
 		}
+		resp := buildScenarioRunResponse(sr)
 		jobs = append(jobs, WSUnifiedJobItem{
-			Type:      "scenarioRun",
-			Name:      sr.Name,
-			CreatedAt: sr.CreationTimestamp.Format(time.RFC3339),
-			Data:      buildScenarioRunResponse(sr),
+			Type:        "scenarioRun",
+			Name:        sr.Name,
+			CreatedAt:   sr.CreationTimestamp.Format(time.RFC3339),
+			ScenarioRun: &resp,
 		})
 	}
 
 	for i := range graphRuns {
 		gr := &graphRuns[i]
+		resp := buildGraphRunResponse(gr)
 		jobs = append(jobs, WSUnifiedJobItem{
 			Type:      "graphRun",
 			Name:      gr.Name,
 			CreatedAt: gr.CreationTimestamp.Format(time.RFC3339),
-			Data:      buildGraphRunResponse(gr),
+			GraphRun:  &resp,
 		})
 	}
 
@@ -93,6 +97,7 @@ func paginateJobItems(items []WSUnifiedJobItem, page, limit int) ([]WSUnifiedJob
 func buildScenarioRunResponse(run *krknv1alpha1.KrknScenarioRun) ScenarioRunStatusResponse {
 	return ScenarioRunStatusResponse{
 		ScenarioRunName:   run.Name,
+		ScenarioName:      run.Spec.ScenarioName,
 		Phase:             run.Status.Phase,
 		TotalTargets:      run.Status.TotalTargets,
 		SuccessfulJobs:    run.Status.SuccessfulJobs,
@@ -103,6 +108,7 @@ func buildScenarioRunResponse(run *krknv1alpha1.KrknScenarioRun) ScenarioRunStat
 		RegistryName:      run.Spec.RegistryName,
 		GraphRunName:      run.Labels["krkn.dev/graph-run"],
 		GraphNodeID:       run.Labels["krkn.dev/graph-node"],
+		CustomRunName:     run.Spec.CustomRunName,
 		CreationTimestamp: run.CreationTimestamp.Format(time.RFC3339),
 	}
 }
@@ -111,6 +117,7 @@ func buildScenarioRunResponse(run *krknv1alpha1.KrknScenarioRun) ScenarioRunStat
 func buildScenarioRunDetailResponse(run *krknv1alpha1.KrknScenarioRun) ScenarioRunStatusResponse {
 	return ScenarioRunStatusResponse{
 		ScenarioRunName:   run.Name,
+		ScenarioName:      run.Spec.ScenarioName,
 		Phase:             run.Status.Phase,
 		TotalTargets:      run.Status.TotalTargets,
 		SuccessfulJobs:    run.Status.SuccessfulJobs,
@@ -121,6 +128,7 @@ func buildScenarioRunDetailResponse(run *krknv1alpha1.KrknScenarioRun) ScenarioR
 		RegistryName:      run.Spec.RegistryName,
 		GraphRunName:      run.Labels["krkn.dev/graph-run"],
 		GraphNodeID:       run.Labels["krkn.dev/graph-node"],
+		CustomRunName:     run.Spec.CustomRunName,
 		CreationTimestamp: run.CreationTimestamp.Format(time.RFC3339),
 	}
 }
@@ -174,6 +182,7 @@ func convertMetaTime(t *metav1.Time) *time.Time {
 func buildGraphRunResponse(run *krknv1alpha1.KrknGraphRun) GraphRunResponse {
 	return GraphRunResponse{
 		GraphRunName: run.Name,
+		Name:         run.Name,
 		Phase:        run.Status.Phase,
 		Summary: GraphRunSummaryResponse{
 			TotalNodes:     run.Status.Summary.TotalNodes,
@@ -182,13 +191,15 @@ func buildGraphRunResponse(run *krknv1alpha1.KrknGraphRun) GraphRunResponse {
 			FailedNodes:    run.Status.Summary.FailedNodes,
 			PendingNodes:   run.Status.Summary.PendingNodes,
 		},
-		NodeStatuses:      nil,
-		ResolvedLevels:    run.Status.ResolvedLevels,
-		StartTime:         run.Status.StartTime,
-		CompletionTime:    run.Status.CompletionTime,
-		OwnerUserID:       run.Spec.OwnerUserID,
-		CreationTimestamp: run.CreationTimestamp.Format(time.RFC3339),
-		ResiliencyScores:  convertGraphClusterScoresForSnapshot(run.Status.ResiliencyScores),
+		NodeStatuses:            nil,
+		ResolvedLevels:          run.Status.ResolvedLevels,
+		StartTime:               run.Status.StartTime,
+		CompletionTime:          run.Status.CompletionTime,
+		OwnerUserID:             run.Spec.OwnerUserID,
+		CreationTimestamp:       run.CreationTimestamp.Format(time.RFC3339),
+		ResiliencyScores:        convertGraphClusterScoresForSnapshot(run.Status.ResiliencyScores),
+		ResiliencyScoreEnabled:  run.Spec.ResiliencyScoreEnabled,
+		ResiliencyScoreBaseline: run.Spec.ResiliencyScoreBaseline,
 	}
 }
 

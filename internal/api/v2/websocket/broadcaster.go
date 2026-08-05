@@ -200,6 +200,7 @@ func (b *Broadcaster) BroadcastGraphRunUpdate(graphRun *krknv1alpha1.KrknGraphRu
 	// Build the SAME response as REST API
 	response := GraphRunResponse{
 		GraphRunName: graphRun.Name,
+		Name:         graphRun.Name,
 		Phase:        graphRun.Status.Phase,
 		Summary: GraphRunSummaryResponse{
 			TotalNodes:     graphRun.Status.Summary.TotalNodes,
@@ -208,13 +209,15 @@ func (b *Broadcaster) BroadcastGraphRunUpdate(graphRun *krknv1alpha1.KrknGraphRu
 			FailedNodes:    graphRun.Status.Summary.FailedNodes,
 			PendingNodes:   graphRun.Status.Summary.PendingNodes,
 		},
-		NodeStatuses:      convertNodeStatusesWithScores(graphRun.Status.NodeStatuses, graphRun.Status.ResiliencyScores),
-		ResolvedLevels:    graphRun.Status.ResolvedLevels,
-		StartTime:         graphRun.Status.StartTime,
-		CompletionTime:    graphRun.Status.CompletionTime,
-		OwnerUserID:       graphRun.Spec.OwnerUserID,
-		CreationTimestamp: graphRun.CreationTimestamp.Format(time.RFC3339),
-		ResiliencyScores:  b.convertGraphClusterScores(graphRun.Status.ResiliencyScores),
+		NodeStatuses:            convertNodeStatusesWithScores(graphRun.Status.NodeStatuses, graphRun.Status.ResiliencyScores),
+		ResolvedLevels:          graphRun.Status.ResolvedLevels,
+		StartTime:               graphRun.Status.StartTime,
+		CompletionTime:          graphRun.Status.CompletionTime,
+		OwnerUserID:             graphRun.Spec.OwnerUserID,
+		CreationTimestamp:       graphRun.CreationTimestamp.Format(time.RFC3339),
+		ResiliencyScores:        b.convertGraphClusterScores(graphRun.Status.ResiliencyScores),
+		ResiliencyScoreEnabled:  graphRun.Spec.ResiliencyScoreEnabled,
+		ResiliencyScoreBaseline: graphRun.Spec.ResiliencyScoreBaseline,
 	}
 
 	msg := ServerMessage{
