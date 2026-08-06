@@ -31,6 +31,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"golang.org/x/sync/errgroup"
 	"github.com/gorilla/websocket"
 	"github.com/krkn-chaos/krknctl/pkg/config"
 	"github.com/krkn-chaos/krknctl/pkg/provider"
@@ -788,17 +789,7 @@ func (h *Handler) PostScenarios(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	scenarios := make([]ScenarioTag, 0)
-	if scenarioTags != nil {
-		for _, tag := range *scenarioTags {
-			scenarios = append(scenarios, ScenarioTag{
-				Name:         tag.Name,
-				Digest:       tag.Digest,
-				Size:         tag.Size,
-				LastModified: tag.LastModified,
-			})
-		}
-	}
+	scenarios := filterScenariosByIsAScenario(ctx, scenarioProvider, scenarioTags, apiRegistry)
 
 	// Return response
 	response := ScenariosResponse{
@@ -806,6 +797,73 @@ func (h *Handler) PostScenarios(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, response)
+}
+
+// maxConcurrentDetailFetches limits how many GetScenarioDetail calls run in parallel
+// to avoid overwhelming the upstream registry.
+const maxConcurrentDetailFetches = 10
+
+// filterScenariosByIsAScenario concurrently fetches detail for each tag and returns
+// only those with IsAScenario == true, preserving input order.
+// Uses a fixed worker pool so goroutine count is bounded and context cancellation
+// stops queued work immediately (ongoing GetScenarioDetail calls finish since the
+// upstream interface does not accept a context).
+func filterScenariosByIsAScenario(ctx context.Context, scenarioProvider provider.ScenarioDataProvider, scenarioTags *[]models.ScenarioTag, registry *models.RegistryV2) []ScenarioTag {
+	if scenarioTags == nil || len(*scenarioTags) == 0 {
+		return []ScenarioTag{}
+	}
+
+	tags := *scenarioTags
+	results := make([]*ScenarioTag, len(tags))
+
+	work := make(chan int, len(tags))
+	for i := range tags {
+		work <- i
+	}
+	close(work)
+
+	workerCount := maxConcurrentDetailFetches
+	if len(tags) < workerCount {
+		workerCount = len(tags)
+	}
+
+	g, gCtx := errgroup.WithContext(ctx)
+	for w := 0; w < workerCount; w++ {
+		g.Go(func() error {
+			for i := range work {
+				if gCtx.Err() != nil {
+					return nil
+				}
+
+				t := tags[i]
+				detail, err := scenarioProvider.GetScenarioDetail(t.Name, registry)
+				if err != nil {
+					log.FromContext(ctx).V(1).Info("Skipping scenario: failed to get detail", "scenario", t.Name, "error", err)
+					continue
+				}
+				if detail == nil || !detail.IsAScenario {
+					continue
+				}
+
+				results[i] = &ScenarioTag{
+					Name:         t.Name,
+					Digest:       t.Digest,
+					Size:         t.Size,
+					LastModified: t.LastModified,
+				}
+			}
+			return nil
+		})
+	}
+	_ = g.Wait()
+
+	scenarios := make([]ScenarioTag, 0, len(tags))
+	for _, r := range results {
+		if r != nil {
+			scenarios = append(scenarios, *r)
+		}
+	}
+	return scenarios
 }
 
 // extractPathSuffix extracts a suffix from a URL path given a prefix.
