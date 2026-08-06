@@ -28,10 +28,10 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/google/uuid"
+	"golang.org/x/sync/errgroup"
 	"github.com/gorilla/websocket"
 	"github.com/krkn-chaos/krknctl/pkg/config"
 	"github.com/krkn-chaos/krknctl/pkg/provider"
@@ -799,48 +799,56 @@ func (h *Handler) PostScenarios(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, response)
 }
 
+// maxConcurrentDetailFetches limits how many GetScenarioDetail calls run in parallel
+// to avoid overwhelming the upstream registry.
+const maxConcurrentDetailFetches = 10
+
 // filterScenariosByIsAScenario concurrently fetches detail for each tag and returns
-// only those with IsAScenario == true.
+// only those with IsAScenario == true, preserving input order.
 func filterScenariosByIsAScenario(ctx context.Context, scenarioProvider provider.ScenarioDataProvider, scenarioTags *[]models.ScenarioTag, registry *models.RegistryV2) []ScenarioTag {
-	scenarios := make([]ScenarioTag, 0)
-	if scenarioTags == nil {
-		return scenarios
+	if scenarioTags == nil || len(*scenarioTags) == 0 {
+		return []ScenarioTag{}
 	}
 
-	var (
-		mu      sync.Mutex
-		wg      sync.WaitGroup
-		sem     = make(chan struct{}, 10)
-	)
+	tags := *scenarioTags
+	results := make([]*ScenarioTag, len(tags))
 
-	for _, tag := range *scenarioTags {
-		wg.Add(1)
-		go func(t models.ScenarioTag) {
-			defer wg.Done()
-			sem <- struct{}{}
-			defer func() { <-sem }()
+	g, gCtx := errgroup.WithContext(ctx)
+	g.SetLimit(maxConcurrentDetailFetches)
+
+	for i, tag := range tags {
+		i, t := i, tag
+		g.Go(func() error {
+			if gCtx.Err() != nil {
+				return nil
+			}
 
 			detail, err := scenarioProvider.GetScenarioDetail(t.Name, registry)
 			if err != nil {
 				log.FromContext(ctx).V(1).Info("Skipping scenario: failed to get detail", "scenario", t.Name, "error", err)
-				return
+				return nil
 			}
 			if detail == nil || !detail.IsAScenario {
-				return
+				return nil
 			}
 
-			mu.Lock()
-			scenarios = append(scenarios, ScenarioTag{
+			results[i] = &ScenarioTag{
 				Name:         t.Name,
 				Digest:       t.Digest,
 				Size:         t.Size,
 				LastModified: t.LastModified,
-			})
-			mu.Unlock()
-		}(tag)
+			}
+			return nil
+		})
 	}
-	wg.Wait()
+	_ = g.Wait()
 
+	scenarios := make([]ScenarioTag, 0, len(tags))
+	for _, r := range results {
+		if r != nil {
+			scenarios = append(scenarios, *r)
+		}
+	}
 	return scenarios
 }
 
