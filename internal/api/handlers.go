@@ -28,6 +28,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -788,17 +789,7 @@ func (h *Handler) PostScenarios(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	scenarios := make([]ScenarioTag, 0)
-	if scenarioTags != nil {
-		for _, tag := range *scenarioTags {
-			scenarios = append(scenarios, ScenarioTag{
-				Name:         tag.Name,
-				Digest:       tag.Digest,
-				Size:         tag.Size,
-				LastModified: tag.LastModified,
-			})
-		}
-	}
+	scenarios := filterScenariosByIsAScenario(ctx, scenarioProvider, scenarioTags, apiRegistry)
 
 	// Return response
 	response := ScenariosResponse{
@@ -806,6 +797,51 @@ func (h *Handler) PostScenarios(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, response)
+}
+
+// filterScenariosByIsAScenario concurrently fetches detail for each tag and returns
+// only those with IsAScenario == true.
+func filterScenariosByIsAScenario(ctx context.Context, scenarioProvider provider.ScenarioDataProvider, scenarioTags *[]models.ScenarioTag, registry *models.RegistryV2) []ScenarioTag {
+	scenarios := make([]ScenarioTag, 0)
+	if scenarioTags == nil {
+		return scenarios
+	}
+
+	var (
+		mu      sync.Mutex
+		wg      sync.WaitGroup
+		sem     = make(chan struct{}, 10)
+	)
+
+	for _, tag := range *scenarioTags {
+		wg.Add(1)
+		go func(t models.ScenarioTag) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			detail, err := scenarioProvider.GetScenarioDetail(t.Name, registry)
+			if err != nil {
+				log.FromContext(ctx).V(1).Info("Skipping scenario: failed to get detail", "scenario", t.Name, "error", err)
+				return
+			}
+			if detail == nil || !detail.IsAScenario {
+				return
+			}
+
+			mu.Lock()
+			scenarios = append(scenarios, ScenarioTag{
+				Name:         t.Name,
+				Digest:       t.Digest,
+				Size:         t.Size,
+				LastModified: t.LastModified,
+			})
+			mu.Unlock()
+		}(tag)
+	}
+	wg.Wait()
+
+	return scenarios
 }
 
 // extractPathSuffix extracts a suffix from a URL path given a prefix.
