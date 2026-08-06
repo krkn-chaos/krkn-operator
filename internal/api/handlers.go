@@ -805,6 +805,9 @@ const maxConcurrentDetailFetches = 10
 
 // filterScenariosByIsAScenario concurrently fetches detail for each tag and returns
 // only those with IsAScenario == true, preserving input order.
+// Uses a fixed worker pool so goroutine count is bounded and context cancellation
+// stops queued work immediately (ongoing GetScenarioDetail calls finish since the
+// upstream interface does not accept a context).
 func filterScenariosByIsAScenario(ctx context.Context, scenarioProvider provider.ScenarioDataProvider, scenarioTags *[]models.ScenarioTag, registry *models.RegistryV2) []ScenarioTag {
 	if scenarioTags == nil || len(*scenarioTags) == 0 {
 		return []ScenarioTag{}
@@ -813,30 +816,41 @@ func filterScenariosByIsAScenario(ctx context.Context, scenarioProvider provider
 	tags := *scenarioTags
 	results := make([]*ScenarioTag, len(tags))
 
+	work := make(chan int, len(tags))
+	for i := range tags {
+		work <- i
+	}
+	close(work)
+
+	workerCount := maxConcurrentDetailFetches
+	if len(tags) < workerCount {
+		workerCount = len(tags)
+	}
+
 	g, gCtx := errgroup.WithContext(ctx)
-	g.SetLimit(maxConcurrentDetailFetches)
-
-	for i, tag := range tags {
-		i, t := i, tag
+	for w := 0; w < workerCount; w++ {
 		g.Go(func() error {
-			if gCtx.Err() != nil {
-				return nil
-			}
+			for i := range work {
+				if gCtx.Err() != nil {
+					return nil
+				}
 
-			detail, err := scenarioProvider.GetScenarioDetail(t.Name, registry)
-			if err != nil {
-				log.FromContext(ctx).V(1).Info("Skipping scenario: failed to get detail", "scenario", t.Name, "error", err)
-				return nil
-			}
-			if detail == nil || !detail.IsAScenario {
-				return nil
-			}
+				t := tags[i]
+				detail, err := scenarioProvider.GetScenarioDetail(t.Name, registry)
+				if err != nil {
+					log.FromContext(ctx).V(1).Info("Skipping scenario: failed to get detail", "scenario", t.Name, "error", err)
+					continue
+				}
+				if detail == nil || !detail.IsAScenario {
+					continue
+				}
 
-			results[i] = &ScenarioTag{
-				Name:         t.Name,
-				Digest:       t.Digest,
-				Size:         t.Size,
-				LastModified: t.LastModified,
+				results[i] = &ScenarioTag{
+					Name:         t.Name,
+					Digest:       t.Digest,
+					Size:         t.Size,
+					LastModified: t.LastModified,
+				}
 			}
 			return nil
 		})
