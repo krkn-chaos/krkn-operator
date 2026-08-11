@@ -8,20 +8,23 @@ import (
 
 // ScenarioRunStatusResponse - copy of internal/api type to avoid import cycle
 type ScenarioRunStatusResponse struct {
-	ScenarioRunName   string      `json:"scenarioRunName"`
-	ScenarioName      string      `json:"scenarioName,omitempty"`
-	Phase             string      `json:"phase"`
-	TotalTargets      int         `json:"totalTargets"`
-	SuccessfulJobs    int         `json:"successfulJobs"`
-	FailedJobs        int         `json:"failedJobs"`
-	RunningJobs       int         `json:"runningJobs"`
-	ClusterJobs       interface{} `json:"clusterJobs,omitempty"`
-	OwnerUserID       string      `json:"ownerUserId,omitempty"`
-	RegistryName      string      `json:"registryName,omitempty"`
-	GraphRunName      string      `json:"graphRunName,omitempty"`
-	GraphNodeID       string      `json:"graphNodeId,omitempty"`
-	CustomRunName     string      `json:"customRunName,omitempty"`
-	CreationTimestamp string      `json:"creationTimestamp,omitempty"`
+	ScenarioRunName        string                           `json:"scenarioRunName"`
+	ScenarioName           string                           `json:"scenarioName,omitempty"`
+	Phase                  string                           `json:"phase"`
+	TotalTargets           int                              `json:"totalTargets"`
+	SuccessfulJobs         int                              `json:"successfulJobs"`
+	FailedJobs             int                              `json:"failedJobs"`
+	RunningJobs            int                              `json:"runningJobs"`
+	ClusterJobs            interface{}                      `json:"clusterJobs,omitempty"`
+	OwnerUserID            string                           `json:"ownerUserId,omitempty"`
+	RegistryName           string                           `json:"registryName,omitempty"`
+	GraphRunName           string                           `json:"graphRunName,omitempty"`
+	GraphNodeID            string                           `json:"graphNodeId,omitempty"`
+	CustomRunName          string                           `json:"customRunName,omitempty"`
+	CreationTimestamp      string                           `json:"creationTimestamp,omitempty"`
+	ResiliencyScoreEnabled bool                             `json:"resiliencyScoreEnabled,omitempty"`
+	ResiliencyScore        *float64                         `json:"resiliencyScore,omitempty"`
+	ResiliencyScores       []ClusterResiliencyScoreResponse `json:"resiliencyScores,omitempty"`
 }
 
 // GraphRunResponse - WebSocket response for GraphRun (same fields as REST API)
@@ -126,11 +129,12 @@ type ServerMessage struct {
 	Stats      *WSJobStatsSummary `json:"stats,omitempty"`      // aggregate job stats (for "jobs" resource)
 }
 
+
 // ClientMessage is sent from client to server
 type ClientMessage struct {
-	Action   string   `json:"action"`          // "subscribe", "unsubscribe"
-	Resource string   `json:"resource"`        // "run", "graphrun", "dashboard", "jobs"
-	IDs      []string `json:"ids,omitempty"`   // specific resource IDs (empty = wildcard)
+	Action   string   `json:"action"`            // "subscribe", "unsubscribe"
+	Resource string   `json:"resource"`          // "run", "graphrun", "dashboard", "jobs"
+	IDs      []string `json:"ids,omitempty"`     // specific resource IDs (empty = wildcard)
 	Page     *int     `json:"page,omitempty"`  // page number for paginated subscriptions (1-based)
 	Limit    *int     `json:"limit,omitempty"` // items per page for paginated subscriptions
 }

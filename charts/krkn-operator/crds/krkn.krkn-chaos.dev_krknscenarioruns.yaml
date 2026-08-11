@@ -57,6 +57,10 @@ spec:
           spec:
             description: KrknScenarioRunSpec defines the desired state of KrknScenarioRun
             properties:
+              customRunName:
+                description: CustomRunName is a user-provided label for the run, displayed
+                  in the console
+                type: string
               environment:
                 additionalProperties:
                   type: string
@@ -113,6 +117,17 @@ spec:
               registryURL:
                 description: RegistryURL is the URL of the container registry
                 type: string
+              resiliencyScoreEnabled:
+                description: |-
+                  ResiliencyScoreEnabled enables resiliency score calculation for this scenario run.
+                  When enabled:
+                  1. RESILIENCY_SCORE=true environment variable is set in all scenario pods
+                  2. Upon completion, the controller parses pod logs for KRKN_RESILIENCY_REPORT_JSON markers
+                     and populates Status.ResiliencyScores
+
+                  For standalone runs (not part of a GraphRun), this field controls scoring directly.
+                  For GraphRun-created ScenarioRuns, the GraphRun reconciler handles scoring regardless of this field.
+                type: boolean
               retryBackoff:
                 default: exponential
                 description: RetryBackoff determines the backoff strategy for retries
@@ -317,7 +332,8 @@ spec:
                   ResiliencyScores contains per-cluster resiliency scores for this scenario run.
                   Each entry represents the score calculated from the pod logs of a specific cluster.
                   When a scenario runs on multiple clusters, this array will contain one entry per cluster.
-                  Populated only when the parent KrknGraphRun has Spec.ResiliencyScoreEnabled set to true.
+                  Populated when Spec.ResiliencyScoreEnabled is true (standalone runs) or when the
+                  parent KrknGraphRun has Spec.ResiliencyScoreEnabled set to true (graph runs).
                 items:
                   description: ClusterResiliencyScore represents the resiliency score
                     for a specific cluster
