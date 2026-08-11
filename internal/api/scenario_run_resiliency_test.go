@@ -211,3 +211,58 @@ func TestListScenarioRuns_WithResiliencyScores(t *testing.T) {
 
 	assert.Empty(t, scoreMap["scenario-run-3"])
 }
+
+func TestAverageResiliencyScore(t *testing.T) {
+	tests := []struct {
+		name   string
+		scores []krknv1alpha1.ClusterResiliencyScore
+		want   *float64
+	}{
+		{
+			name:   "nil scores returns nil",
+			scores: nil,
+			want:   nil,
+		},
+		{
+			name:   "empty scores returns nil",
+			scores: []krknv1alpha1.ClusterResiliencyScore{},
+			want:   nil,
+		},
+		{
+			name: "all calculated - averages correctly",
+			scores: []krknv1alpha1.ClusterResiliencyScore{
+				{ClusterName: "c1", Score: 80, Status: "calculated"},
+				{ClusterName: "c2", Score: 100, Status: "calculated"},
+			},
+			want: floatPtr(90.0),
+		},
+		{
+			name: "skips error entries in average",
+			scores: []krknv1alpha1.ClusterResiliencyScore{
+				{ClusterName: "c1", Score: 80, Status: "calculated"},
+				{ClusterName: "c2", Status: "error", Message: "logs unavailable"},
+			},
+			want: floatPtr(80.0),
+		},
+		{
+			name: "all error entries returns nil",
+			scores: []krknv1alpha1.ClusterResiliencyScore{
+				{ClusterName: "c1", Status: "error", Message: "logs unavailable"},
+			},
+			want: nil,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := averageResiliencyScore(tc.scores)
+			if tc.want == nil {
+				assert.Nil(t, got)
+			} else {
+				assert.InDelta(t, *tc.want, *got, 0.001)
+			}
+		})
+	}
+}
+
+func floatPtr(f float64) *float64 { return &f }

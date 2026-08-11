@@ -377,6 +377,26 @@ func (r *KrknScenarioRunReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		scenarioRun.Status.Message = signatureFailure.Error()
 	}
 
+	// Calculate resiliency scores for standalone runs (not graph-run children)
+	// once the run reaches a terminal phase. Per-cluster entries are persisted
+	// with status "calculated" or "error"; the reconciler retries while any
+	// cluster has "error" status. Best-effort: never blocks terminal phase
+	// persistence.
+	resiliencyRequeue := false
+	if _, isGraphRun := scenarioRun.Labels["krkn.dev/graph-run"]; !isGraphRun {
+		if scenarioRun.Spec.ResiliencyScoreEnabled && r.hasIncompleteResiliencyScores(&scenarioRun) {
+			isTerminal := scenarioRun.Status.Phase == "Succeeded" ||
+				scenarioRun.Status.Phase == "Failed" ||
+				scenarioRun.Status.Phase == "PartiallyFailed"
+			if isTerminal {
+				if err := r.calculateResiliencyScores(ctx, &scenarioRun); err != nil {
+					logger.Error(err, "failed to calculate resiliency scores, will retry")
+					resiliencyRequeue = true
+				}
+			}
+		}
+	}
+
 	logger.Info("reconcile loop completed",
 		"scenarioRun", scenarioRun.Name,
 		"phase", scenarioRun.Status.Phase,
@@ -428,6 +448,11 @@ func (r *KrknScenarioRunReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 			"phase", scenarioRun.Status.Phase,
 			"runningJobs", scenarioRun.Status.RunningJobs)
 		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+	}
+
+	// Requeue to retry resiliency score collection after status has been persisted.
+	if resiliencyRequeue {
+		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
 	}
 
 	return ctrl.Result{}, nil
@@ -718,6 +743,21 @@ func (r *KrknScenarioRunReconciler) prepareJobResources(
 		envVars = append(envVars, corev1.EnvVar{
 			Name:  key,
 			Value: value,
+		})
+	}
+
+	// Inject RESILIENCY_SCORE env var for standalone runs (not graph-run children).
+	// Strip any user-provided value first to prevent conflicts, matching graph-run behavior.
+	if _, isGraphRun := scenarioRun.Labels["krkn.dev/graph-run"]; !isGraphRun && scenarioRun.Spec.ResiliencyScoreEnabled {
+		filtered := envVars[:0]
+		for _, ev := range envVars {
+			if ev.Name != "RESILIENCY_SCORE" {
+				filtered = append(filtered, ev)
+			}
+		}
+		envVars = append(filtered, corev1.EnvVar{
+			Name:  "RESILIENCY_SCORE",
+			Value: "true",
 		})
 	}
 
@@ -1363,6 +1403,21 @@ func (r *KrknScenarioRunReconciler) getKubeconfigFromProvider(ctx context.Contex
 	return clusterConfig.Kubeconfig, nil
 }
 
+// hasIncompleteResiliencyScores returns true when resiliency score calculation
+// should be (re-)attempted: either no scores exist yet, or at least one cluster
+// entry has status "error".
+func (r *KrknScenarioRunReconciler) hasIncompleteResiliencyScores(scenarioRun *krknv1alpha1.KrknScenarioRun) bool {
+	if len(scenarioRun.Status.ResiliencyScores) == 0 {
+		return true
+	}
+	for _, s := range scenarioRun.Status.ResiliencyScores {
+		if s.Status == "error" {
+			return true
+		}
+	}
+	return false
+}
+
 // statusEqual compares two KrknScenarioRunStatus to determine if they are equal
 // This is a semantic comparison that handles pointer fields correctly
 func (r *KrknScenarioRunReconciler) statusEqual(old, new *krknv1alpha1.KrknScenarioRunStatus) bool {
@@ -1396,6 +1451,11 @@ func (r *KrknScenarioRunReconciler) statusEqual(old, new *krknv1alpha1.KrknScena
 		if !r.jobStatusEqual(&old.ClusterJobs[i], &new.ClusterJobs[i]) {
 			return false
 		}
+	}
+
+	// Compare ResiliencyScores
+	if !reflect.DeepEqual(old.ResiliencyScores, new.ResiliencyScores) {
+		return false
 	}
 
 	// Compare Conditions array
