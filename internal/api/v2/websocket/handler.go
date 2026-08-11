@@ -116,6 +116,7 @@ func NewHandler(hub *Hub, k8sClient k8sclient.Client, namespace string, authz Au
 // @Description **Available endpoints:**
 // @Description - `/api/v2/ws/runs` - Subscribe to scenario run updates
 // @Description - `/api/v2/ws/graphruns` - Subscribe to graph run updates
+// @Description - `/api/v2/ws/jobs` - Subscribe to unified jobs list (paginated scenario runs + graph runs)
 // @Description - `/api/v2/ws/dashboard/active-runs` - Subscribe to dashboard updates
 // @Tags websocket
 // @Accept json
@@ -126,6 +127,7 @@ func NewHandler(hub *Hub, k8sClient k8sclient.Client, namespace string, authz Au
 // @Success 101 {object} websocket.ServerMessage "Switching protocols - WebSocket upgrade successful"
 // @Router /v2/ws/runs [get]
 // @Router /v2/ws/graphruns [get]
+// @Router /v2/ws/jobs [get]
 // @Router /v2/ws/dashboard/active-runs [get]
 func (h *Handler) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 	logger := log.Log.WithName("websocket-v2")
