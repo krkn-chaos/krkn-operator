@@ -170,6 +170,41 @@ func TestValidateCreateRequest(t *testing.T) {
 			name: "baremetal valid",
 			req:  CreateCloudCredentialRequest{Name: "test", Provider: ProviderBaremetal, BMCUser: "admin", BMCPassword: "secret", BMCAddr: "192.168.1.100"},
 		},
+		// VMware
+		{
+			name:    "vmware missing vsphere ip",
+			req:     CreateCloudCredentialRequest{Name: "test", Provider: ProviderVMware, VSphereUsername: "u", VSpherePassword: "p"},
+			wantErr: "vsphereIp is required",
+		},
+		{
+			name:    "vmware missing vsphere username",
+			req:     CreateCloudCredentialRequest{Name: "test", Provider: ProviderVMware, VSphereIP: "10.0.0.1", VSpherePassword: "p"},
+			wantErr: "vsphereUsername is required",
+		},
+		{
+			name:    "vmware missing vsphere password",
+			req:     CreateCloudCredentialRequest{Name: "test", Provider: ProviderVMware, VSphereIP: "10.0.0.1", VSphereUsername: "u"},
+			wantErr: "vspherePassword is required",
+		},
+		{
+			name: "vmware valid",
+			req:  CreateCloudCredentialRequest{Name: "test", Provider: ProviderVMware, VSphereIP: "10.0.0.1", VSphereUsername: "admin@vsphere.local", VSpherePassword: "secret"},
+		},
+		// IBM Cloud
+		{
+			name:    "ibmcloud missing url",
+			req:     CreateCloudCredentialRequest{Name: "test", Provider: ProviderIBMCloud, IBMCAPIKey: "key"},
+			wantErr: "ibmcUrl is required",
+		},
+		{
+			name:    "ibmcloud missing apikey",
+			req:     CreateCloudCredentialRequest{Name: "test", Provider: ProviderIBMCloud, IBMCURL: "https://us-south.iaas.cloud.ibm.com/v1"},
+			wantErr: "ibmcApikey is required",
+		},
+		{
+			name: "ibmcloud valid",
+			req:  CreateCloudCredentialRequest{Name: "test", Provider: ProviderIBMCloud, IBMCURL: "https://us-south.iaas.cloud.ibm.com/v1", IBMCAPIKey: "my-api-key"},
+		},
 		// Reserved names
 		{
 			name:    "reserved name 'baremetal'",

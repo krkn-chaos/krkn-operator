@@ -30,6 +30,8 @@ var reservedNames = map[string]bool{
 	"azure":     true,
 	"openstack": true,
 	"baremetal": true,
+	"vmware":    true,
+	"ibmcloud":  true,
 }
 
 // ValidateCreateRequest validates a CreateCloudCredentialRequest
@@ -51,7 +53,9 @@ func ValidateCreateRequest(req *CreateCloudCredentialRequest) error {
 		req.GCPServiceAccountJSON,
 		req.AzureTenantID, req.AzureClientID, req.AzureClientSecret, req.AzureSubscriptionID,
 		req.OSAuthURL, req.OSUsername, req.OSPassword, req.OSProjectName,
-		req.BMCUser, req.BMCPassword, req.BMCAddr)
+		req.BMCUser, req.BMCPassword, req.BMCAddr,
+		req.VSphereIP, req.VSphereUsername, req.VSpherePassword,
+		req.IBMCURL, req.IBMCAPIKey)
 }
 
 // ValidateUpdateRequest validates an UpdateCloudCredentialRequest against the existing provider
@@ -61,7 +65,9 @@ func ValidateUpdateRequest(req *UpdateCloudCredentialRequest, existingProvider s
 		req.GCPServiceAccountJSON,
 		req.AzureTenantID, req.AzureClientID, req.AzureClientSecret, req.AzureSubscriptionID,
 		req.OSAuthURL, req.OSUsername, req.OSPassword, req.OSProjectName,
-		req.BMCUser, req.BMCPassword, req.BMCAddr)
+		req.BMCUser, req.BMCPassword, req.BMCAddr,
+		req.VSphereIP, req.VSphereUsername, req.VSpherePassword,
+		req.IBMCURL, req.IBMCAPIKey)
 }
 
 func validateProviderFields(provider string,
@@ -70,6 +76,8 @@ func validateProviderFields(provider string,
 	azTenant, azClient, azSecret, azSub string,
 	osAuth, osUser, osPass, osProject string,
 	bmcUser, bmcPass, bmcAddr string,
+	vsphereIP, vsphereUser, vspherePass string,
+	ibmcURL, ibmcAPIKey string,
 ) error {
 	switch provider {
 	case ProviderAWS:
@@ -125,6 +133,23 @@ func validateProviderFields(provider string,
 		if bmcAddr == "" {
 			return fmt.Errorf("bmcAddr is required for Baremetal provider")
 		}
+	case ProviderVMware:
+		if vsphereIP == "" {
+			return fmt.Errorf("vsphereIp is required for VMware provider")
+		}
+		if vsphereUser == "" {
+			return fmt.Errorf("vsphereUsername is required for VMware provider")
+		}
+		if vspherePass == "" {
+			return fmt.Errorf("vspherePassword is required for VMware provider")
+		}
+	case ProviderIBMCloud:
+		if ibmcURL == "" {
+			return fmt.Errorf("ibmcUrl is required for IBM Cloud provider")
+		}
+		if ibmcAPIKey == "" {
+			return fmt.Errorf("ibmcApikey is required for IBM Cloud provider")
+		}
 	}
 	return nil
 }
@@ -138,6 +163,8 @@ func validateProviderFieldsForUpdate(provider string,
 	azTenant, azClient, azSecret, azSub string,
 	osAuth, osUser, osPass, osProject string,
 	bmcUser, bmcPass, bmcAddr string,
+	vsphereIP, vsphereUser, vspherePass string,
+	ibmcURL, ibmcAPIKey string,
 ) error {
 	if provider == ProviderGCP && gcpJSON != "" {
 		if err := validateGCPServiceAccountJSON(gcpJSON); err != nil {

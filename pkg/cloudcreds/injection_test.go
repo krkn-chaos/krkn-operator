@@ -237,6 +237,87 @@ func TestInjectCredentialsBaremetal(t *testing.T) {
 	}
 }
 
+func TestInjectCredentialsVMware(t *testing.T) {
+	secret := makeSecret("vmware-prod", ProviderVMware, map[string][]byte{
+		SecretKeyVSphereIP:       []byte("10.0.0.1"),
+		SecretKeyVSphereUsername: []byte("admin@vsphere.local"),
+		SecretKeyVSpherePassword: []byte("secret"),
+	})
+
+	envVars, volumes, mounts, err := InjectCredentials(secret)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(volumes) != 0 || len(mounts) != 0 {
+		t.Error("expected no volumes or mounts for VMware")
+	}
+	if len(envVars) != 4 {
+		t.Fatalf("expected 4 env vars, got %d", len(envVars))
+	}
+
+	cloudTypeFound := false
+	for _, env := range envVars {
+		if env.Name == "CLOUD_TYPE" {
+			cloudTypeFound = true
+			if env.Value != "vmware" {
+				t.Errorf("CLOUD_TYPE value = %q, want %q", env.Value, "vmware")
+			}
+		}
+	}
+	if !cloudTypeFound {
+		t.Error("expected CLOUD_TYPE env var")
+	}
+
+	for _, env := range envVars {
+		if env.Name == "CLOUD_TYPE" {
+			continue
+		}
+		if env.ValueFrom == nil || env.ValueFrom.SecretKeyRef == nil {
+			t.Errorf("env var %s should use SecretKeyRef", env.Name)
+		}
+	}
+}
+
+func TestInjectCredentialsIBMCloud(t *testing.T) {
+	secret := makeSecret("ibm-prod", ProviderIBMCloud, map[string][]byte{
+		SecretKeyIBMCURL:    []byte("https://us-south.iaas.cloud.ibm.com/v1"),
+		SecretKeyIBMCAPIKey: []byte("my-api-key"),
+	})
+
+	envVars, volumes, mounts, err := InjectCredentials(secret)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(volumes) != 0 || len(mounts) != 0 {
+		t.Error("expected no volumes or mounts for IBM Cloud")
+	}
+	if len(envVars) != 3 {
+		t.Fatalf("expected 3 env vars, got %d", len(envVars))
+	}
+
+	cloudTypeFound := false
+	for _, env := range envVars {
+		if env.Name == "CLOUD_TYPE" {
+			cloudTypeFound = true
+			if env.Value != "ibmcloud" {
+				t.Errorf("CLOUD_TYPE value = %q, want %q", env.Value, "ibmcloud")
+			}
+		}
+	}
+	if !cloudTypeFound {
+		t.Error("expected CLOUD_TYPE env var")
+	}
+
+	for _, env := range envVars {
+		if env.Name == "CLOUD_TYPE" {
+			continue
+		}
+		if env.ValueFrom == nil || env.ValueFrom.SecretKeyRef == nil {
+			t.Errorf("env var %s should use SecretKeyRef", env.Name)
+		}
+	}
+}
+
 func TestInjectCredentialsMissingProviderLabel(t *testing.T) {
 	secret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{

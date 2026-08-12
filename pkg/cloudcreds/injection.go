@@ -48,6 +48,10 @@ func InjectCredentials(secret *corev1.Secret) ([]corev1.EnvVar, []corev1.Volume,
 		return injectOpenStack(secret.Name), nil, nil, nil
 	case ProviderBaremetal:
 		return injectBaremetal(secret.Name), nil, nil, nil
+	case ProviderVMware:
+		return injectVMware(secret.Name), nil, nil, nil
+	case ProviderIBMCloud:
+		return injectIBMCloud(secret.Name), nil, nil, nil
 	default:
 		return nil, nil, nil, fmt.Errorf("unsupported cloud provider: %s", provider)
 	}
@@ -125,5 +129,22 @@ func injectBaremetal(secretName string) []corev1.EnvVar {
 		{Name: "BMC_USER", ValueFrom: secretKeyRef(secretName, SecretKeyBMCUser)},
 		{Name: "BMC_PASSWORD", ValueFrom: secretKeyRef(secretName, SecretKeyBMCPassword)},
 		{Name: "BMC_ADDR", ValueFrom: secretKeyRef(secretName, SecretKeyBMCAddr)},
+	}
+}
+
+func injectVMware(secretName string) []corev1.EnvVar {
+	return []corev1.EnvVar{
+		{Name: "CLOUD_TYPE", Value: "vmware"},
+		{Name: "VSPHERE_IP", ValueFrom: secretKeyRef(secretName, SecretKeyVSphereIP)},
+		{Name: "VSPHERE_USERNAME", ValueFrom: secretKeyRef(secretName, SecretKeyVSphereUsername)},
+		{Name: "VSPHERE_PASSWORD", ValueFrom: secretKeyRef(secretName, SecretKeyVSpherePassword)},
+	}
+}
+
+func injectIBMCloud(secretName string) []corev1.EnvVar {
+	return []corev1.EnvVar{
+		{Name: "CLOUD_TYPE", Value: "ibmcloud"},
+		{Name: "IBMC_URL", ValueFrom: secretKeyRef(secretName, SecretKeyIBMCURL)},
+		{Name: "IBMC_APIKEY", ValueFrom: secretKeyRef(secretName, SecretKeyIBMCAPIKey)},
 	}
 }

@@ -27,6 +27,8 @@ const (
 	ProviderAzure     = "azure"
 	ProviderOpenStack = "openstack"
 	ProviderBaremetal = "baremetal"
+	ProviderVMware    = "vmware"
+	ProviderIBMCloud  = "ibmcloud"
 )
 
 // Secret data key constants for each provider
@@ -56,6 +58,15 @@ const (
 	SecretKeyBMCUser     = "bmc-user"
 	SecretKeyBMCPassword = "bmc-password"
 	SecretKeyBMCAddr     = "bmc-addr"
+
+	// VMware vSphere
+	SecretKeyVSphereIP       = "vsphere-ip"
+	SecretKeyVSphereUsername = "vsphere-username"
+	SecretKeyVSpherePassword = "vsphere-password"
+
+	// IBM Cloud
+	SecretKeyIBMCURL    = "ibmc-url"
+	SecretKeyIBMCAPIKey = "ibmc-apikey"
 )
 
 // CreateCloudCredentialRequest represents the request to create a cloud credential config
@@ -91,6 +102,15 @@ type CreateCloudCredentialRequest struct {
 	BMCUser     string `json:"bmcUser,omitempty"`
 	BMCPassword string `json:"bmcPassword,omitempty"`
 	BMCAddr     string `json:"bmcAddr,omitempty"`
+
+	// VMware vSphere fields
+	VSphereIP       string `json:"vsphereIp,omitempty"`
+	VSphereUsername string `json:"vsphereUsername,omitempty"`
+	VSpherePassword string `json:"vspherePassword,omitempty"`
+
+	// IBM Cloud fields
+	IBMCURL    string `json:"ibmcUrl,omitempty"`
+	IBMCAPIKey string `json:"ibmcApikey,omitempty"`
 }
 
 // UpdateCloudCredentialRequest represents the request to update a cloud credential config.
@@ -125,6 +145,15 @@ type UpdateCloudCredentialRequest struct {
 	BMCUser     string `json:"bmcUser,omitempty"`
 	BMCPassword string `json:"bmcPassword,omitempty"`
 	BMCAddr     string `json:"bmcAddr,omitempty"`
+
+	// VMware vSphere fields
+	VSphereIP       string `json:"vsphereIp,omitempty"`
+	VSphereUsername string `json:"vsphereUsername,omitempty"`
+	VSpherePassword string `json:"vspherePassword,omitempty"`
+
+	// IBM Cloud fields
+	IBMCURL    string `json:"ibmcUrl,omitempty"`
+	IBMCAPIKey string `json:"ibmcApikey,omitempty"`
 }
 
 // CloudCredentialResponse represents a cloud credential in API responses.
@@ -171,4 +200,6 @@ var ValidProviders = map[string]bool{
 	ProviderAzure:     true,
 	ProviderOpenStack: true,
 	ProviderBaremetal: true,
+	ProviderVMware:    true,
+	ProviderIBMCloud:  true,
 }
