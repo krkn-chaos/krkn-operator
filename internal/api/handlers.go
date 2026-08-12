@@ -31,13 +31,13 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"golang.org/x/sync/errgroup"
 	"github.com/gorilla/websocket"
 	"github.com/krkn-chaos/krknctl/pkg/config"
 	"github.com/krkn-chaos/krknctl/pkg/provider"
 	"github.com/krkn-chaos/krknctl/pkg/provider/factory"
 	"github.com/krkn-chaos/krknctl/pkg/provider/models"
 	"github.com/krkn-chaos/krknctl/pkg/typing"
+	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	corev1 "k8s.io/api/core/v1"
@@ -1381,6 +1381,26 @@ func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Validate cloud credential access if specified
+	if req.CloudCredentialRef != "" {
+		credSecret, err := h.loadCloudCredentialSecret(ctx, req.CloudCredentialRef)
+		if err != nil {
+			logger.Error(err, "Failed to load cloud credential for run", "name", req.CloudCredentialRef)
+			writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+				Error:   "bad_request",
+				Message: fmt.Sprintf("Cloud credential '%s' not found or inaccessible", req.CloudCredentialRef),
+			})
+			return
+		}
+		if !h.canAccessCloudCredential(ctx, credSecret) {
+			writeJSONError(w, http.StatusForbidden, ErrorResponse{
+				Error:   "forbidden",
+				Message: fmt.Sprintf("Access denied to cloud credential '%s'", req.CloudCredentialRef),
+			})
+			return
+		}
+	}
+
 	// Create KrknScenarioRun CR
 	// Extract user claims for ownership tracking (defensive check for tests)
 	claims := auth.GetClaimsFromContext(ctx)
@@ -1427,6 +1447,11 @@ func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
 		if registryConfig.Password != nil {
 			scenarioRun.Spec.Password = *registryConfig.Password
 		}
+	}
+
+	// Set cloud credential reference on CRD spec (controller handles SecretKeyRef injection)
+	if req.CloudCredentialRef != "" {
+		scenarioRun.Spec.CloudCredentialRef = req.CloudCredentialRef
 	}
 
 	// Convert FileMount from API type to CRD type (merged from inline Files and translated FileReferences)

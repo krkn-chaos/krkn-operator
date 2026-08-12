@@ -214,6 +214,10 @@ func NewServer(port int, client client.Client, clientset kubernetes.Interface, n
 	// Elasticsearch config endpoints - admin only
 	mux.Handle(ElasticsearchConfigsPath, authMw.RequireAuth(http.HandlerFunc(handler.ElasticsearchConfigsRouter)))
 	mux.Handle(ElasticsearchConfigsPath+"/", authMw.RequireAuth(http.HandlerFunc(handler.ElasticsearchConfigsRouter)))
+	// Cloud credential endpoints
+	mux.Handle(CloudCredentialsAvailablePath, authMw.RequireAuth(http.HandlerFunc(handler.ListAvailableCloudCredentials)))
+	mux.Handle(CloudCredentialsPath, authMw.RequireAuth(http.HandlerFunc(handler.CloudCredentialsRouter)))
+	mux.Handle(CloudCredentialsPath+"/", authMw.RequireAuth(http.HandlerFunc(handler.CloudCredentialsRouter)))
 
 	// ==================== API v2 Endpoints ====================
 	// v2 REST endpoints reuse v1 handlers (backward compatible)
