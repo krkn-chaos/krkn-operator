@@ -543,6 +543,13 @@ func buildCloudCredentialSecretData(req *cloudcreds.CreateCloudCredentialRequest
 		data[cloudcreds.SecretKeyBMCUser] = []byte(req.BMCUser)
 		data[cloudcreds.SecretKeyBMCPassword] = []byte(req.BMCPassword)
 		data[cloudcreds.SecretKeyBMCAddr] = []byte(req.BMCAddr)
+	case cloudcreds.ProviderVMware:
+		data[cloudcreds.SecretKeyVSphereIP] = []byte(req.VSphereIP)
+		data[cloudcreds.SecretKeyVSphereUsername] = []byte(req.VSphereUsername)
+		data[cloudcreds.SecretKeyVSpherePassword] = []byte(req.VSpherePassword)
+	case cloudcreds.ProviderIBMCloud:
+		data[cloudcreds.SecretKeyIBMCURL] = []byte(req.IBMCURL)
+		data[cloudcreds.SecretKeyIBMCAPIKey] = []byte(req.IBMCAPIKey)
 	}
 
 	return data
@@ -604,6 +611,23 @@ func updateCloudCredentialSecretData(secret *corev1.Secret, provider string, req
 		}
 		if req.BMCAddr != "" {
 			secret.Data[cloudcreds.SecretKeyBMCAddr] = []byte(req.BMCAddr)
+		}
+	case cloudcreds.ProviderVMware:
+		if req.VSphereIP != "" {
+			secret.Data[cloudcreds.SecretKeyVSphereIP] = []byte(req.VSphereIP)
+		}
+		if req.VSphereUsername != "" {
+			secret.Data[cloudcreds.SecretKeyVSphereUsername] = []byte(req.VSphereUsername)
+		}
+		if req.VSpherePassword != "" {
+			secret.Data[cloudcreds.SecretKeyVSpherePassword] = []byte(req.VSpherePassword)
+		}
+	case cloudcreds.ProviderIBMCloud:
+		if req.IBMCURL != "" {
+			secret.Data[cloudcreds.SecretKeyIBMCURL] = []byte(req.IBMCURL)
+		}
+		if req.IBMCAPIKey != "" {
+			secret.Data[cloudcreds.SecretKeyIBMCAPIKey] = []byte(req.IBMCAPIKey)
 		}
 	}
 }
