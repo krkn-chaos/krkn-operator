@@ -46,6 +46,8 @@ func InjectCredentials(secret *corev1.Secret) ([]corev1.EnvVar, []corev1.Volume,
 		return injectAzure(secret.Name), nil, nil, nil
 	case ProviderOpenStack:
 		return injectOpenStack(secret.Name), nil, nil, nil
+	case ProviderBaremetal:
+		return injectBaremetal(secret.Name), nil, nil, nil
 	default:
 		return nil, nil, nil, fmt.Errorf("unsupported cloud provider: %s", provider)
 	}
@@ -114,5 +116,14 @@ func injectOpenStack(secretName string) []corev1.EnvVar {
 		{Name: "OS_PASSWORD", ValueFrom: secretKeyRef(secretName, SecretKeyOSPassword)},
 		{Name: "OS_PROJECT_NAME", ValueFrom: secretKeyRef(secretName, SecretKeyOSProjectName)},
 		{Name: "OS_DOMAIN_NAME", ValueFrom: secretKeyRef(secretName, SecretKeyOSDomainName)},
+	}
+}
+
+func injectBaremetal(secretName string) []corev1.EnvVar {
+	return []corev1.EnvVar{
+		{Name: "CLOUD_TYPE", Value: "bm"},
+		{Name: "BMC_USER", ValueFrom: secretKeyRef(secretName, SecretKeyBMCUser)},
+		{Name: "BMC_PASSWORD", ValueFrom: secretKeyRef(secretName, SecretKeyBMCPassword)},
+		{Name: "BMC_ADDR", ValueFrom: secretKeyRef(secretName, SecretKeyBMCAddr)},
 	}
 }

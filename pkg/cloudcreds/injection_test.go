@@ -188,6 +188,55 @@ func TestInjectCredentialsOpenStack(t *testing.T) {
 	}
 }
 
+func TestInjectCredentialsBaremetal(t *testing.T) {
+	secret := makeSecret("bm-prod", ProviderBaremetal, map[string][]byte{
+		SecretKeyBMCUser:     []byte("admin"),
+		SecretKeyBMCPassword: []byte("secret"),
+		SecretKeyBMCAddr:     []byte("192.168.1.100"),
+	})
+
+	envVars, volumes, mounts, err := InjectCredentials(secret)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(volumes) != 0 || len(mounts) != 0 {
+		t.Error("expected no volumes or mounts for Baremetal")
+	}
+	if len(envVars) != 4 {
+		t.Fatalf("expected 4 env vars, got %d", len(envVars))
+	}
+
+	// CLOUD_TYPE should be a plain value, not SecretKeyRef
+	cloudTypeFound := false
+	for _, env := range envVars {
+		if env.Name == "CLOUD_TYPE" {
+			cloudTypeFound = true
+			if env.Value != "bm" {
+				t.Errorf("CLOUD_TYPE value = %q, want %q", env.Value, "bm")
+			}
+			if env.ValueFrom != nil {
+				t.Error("CLOUD_TYPE should use Value, not ValueFrom")
+			}
+		}
+	}
+	if !cloudTypeFound {
+		t.Error("expected CLOUD_TYPE env var")
+	}
+
+	// BMC_USER, BMC_PASSWORD, BMC_ADDR should use SecretKeyRef
+	for _, env := range envVars {
+		if env.Name == "CLOUD_TYPE" {
+			continue
+		}
+		if env.ValueFrom == nil || env.ValueFrom.SecretKeyRef == nil {
+			t.Errorf("env var %s should use SecretKeyRef", env.Name)
+		}
+		if env.ValueFrom != nil && env.ValueFrom.SecretKeyRef != nil && env.ValueFrom.SecretKeyRef.Name != "bm-prod" {
+			t.Errorf("env var %s secret name = %q, want %q", env.Name, env.ValueFrom.SecretKeyRef.Name, "bm-prod")
+		}
+	}
+}
+
 func TestInjectCredentialsMissingProviderLabel(t *testing.T) {
 	secret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
