@@ -91,9 +91,9 @@ func (h *scenarioRunEventHandler) OnAdd(obj interface{}, _ bool) {
 
 	h.logger.V(1).Info("ScenarioRun added", "name", run.Name)
 	// Broadcaster will deduplicate via cache, so always call it
-	h.broadcaster.BroadcastScenarioRunUpdate(run)       // Lightweight (no clusterJobs)
-	h.broadcaster.BroadcastScenarioRunDetailUpdate(run) // Full detail (with clusterJobs)
-	h.broadcaster.BroadcastJobsPageUpdate(context.Background())             // Unified paginated view
+	h.broadcaster.BroadcastScenarioRunUpdate(run)               // Lightweight (no clusterJobs)
+	h.broadcaster.BroadcastScenarioRunDetailUpdate(run)         // Full detail (with clusterJobs)
+	h.broadcaster.BroadcastJobsPageUpdate(context.Background()) // Unified paginated view
 }
 
 func (h *scenarioRunEventHandler) OnUpdate(oldObj, newObj interface{}) {
@@ -122,9 +122,9 @@ func (h *scenarioRunEventHandler) OnUpdate(oldObj, newObj interface{}) {
 		"newPhase", newRun.Status.Phase,
 		"runningJobs", newRun.Status.RunningJobs)
 
-	h.broadcaster.BroadcastScenarioRunUpdate(newRun)       // Lightweight (no clusterJobs)
-	h.broadcaster.BroadcastScenarioRunDetailUpdate(newRun) // Full detail (with clusterJobs)
-	h.broadcaster.BroadcastJobsPageUpdate(context.Background())                // Unified paginated view
+	h.broadcaster.BroadcastScenarioRunUpdate(newRun)            // Lightweight (no clusterJobs)
+	h.broadcaster.BroadcastScenarioRunDetailUpdate(newRun)      // Full detail (with clusterJobs)
+	h.broadcaster.BroadcastJobsPageUpdate(context.Background()) // Unified paginated view
 
 	// Update dashboard with current active runs count
 	h.broadcastDashboardUpdate(context.Background())
