@@ -25,6 +25,11 @@ import (
 // reservedNames are credential names that would collide with API sub-path routes
 var reservedNames = map[string]bool{
 	"available": true,
+	"aws":       true,
+	"gcp":       true,
+	"azure":     true,
+	"openstack": true,
+	"baremetal": true,
 }
 
 // ValidateCreateRequest validates a CreateCloudCredentialRequest
@@ -45,7 +50,8 @@ func ValidateCreateRequest(req *CreateCloudCredentialRequest) error {
 	return validateProviderFields(req.Provider, req.AWSAccessKeyID, req.AWSSecretAccessKey, req.AWSDefaultRegion,
 		req.GCPServiceAccountJSON,
 		req.AzureTenantID, req.AzureClientID, req.AzureClientSecret, req.AzureSubscriptionID,
-		req.OSAuthURL, req.OSUsername, req.OSPassword, req.OSProjectName)
+		req.OSAuthURL, req.OSUsername, req.OSPassword, req.OSProjectName,
+		req.BMCUser, req.BMCPassword, req.BMCAddr)
 }
 
 // ValidateUpdateRequest validates an UpdateCloudCredentialRequest against the existing provider
@@ -54,7 +60,8 @@ func ValidateUpdateRequest(req *UpdateCloudCredentialRequest, existingProvider s
 		req.AWSAccessKeyID, req.AWSSecretAccessKey, req.AWSDefaultRegion,
 		req.GCPServiceAccountJSON,
 		req.AzureTenantID, req.AzureClientID, req.AzureClientSecret, req.AzureSubscriptionID,
-		req.OSAuthURL, req.OSUsername, req.OSPassword, req.OSProjectName)
+		req.OSAuthURL, req.OSUsername, req.OSPassword, req.OSProjectName,
+		req.BMCUser, req.BMCPassword, req.BMCAddr)
 }
 
 func validateProviderFields(provider string,
@@ -62,6 +69,7 @@ func validateProviderFields(provider string,
 	gcpJSON string,
 	azTenant, azClient, azSecret, azSub string,
 	osAuth, osUser, osPass, osProject string,
+	bmcUser, bmcPass, bmcAddr string,
 ) error {
 	switch provider {
 	case ProviderAWS:
@@ -107,6 +115,16 @@ func validateProviderFields(provider string,
 		if osProject == "" {
 			return fmt.Errorf("osProjectName is required for OpenStack provider")
 		}
+	case ProviderBaremetal:
+		if bmcUser == "" {
+			return fmt.Errorf("bmcUser is required for Baremetal provider")
+		}
+		if bmcPass == "" {
+			return fmt.Errorf("bmcPassword is required for Baremetal provider")
+		}
+		if bmcAddr == "" {
+			return fmt.Errorf("bmcAddr is required for Baremetal provider")
+		}
 	}
 	return nil
 }
@@ -119,6 +137,7 @@ func validateProviderFieldsForUpdate(provider string,
 	gcpJSON string,
 	azTenant, azClient, azSecret, azSub string,
 	osAuth, osUser, osPass, osProject string,
+	bmcUser, bmcPass, bmcAddr string,
 ) error {
 	if provider == ProviderGCP && gcpJSON != "" {
 		if err := validateGCPServiceAccountJSON(gcpJSON); err != nil {

@@ -26,6 +26,7 @@ const (
 	ProviderGCP       = "gcp"
 	ProviderAzure     = "azure"
 	ProviderOpenStack = "openstack"
+	ProviderBaremetal = "baremetal"
 )
 
 // Secret data key constants for each provider
@@ -50,6 +51,11 @@ const (
 	SecretKeyOSPassword    = "os-password"
 	SecretKeyOSProjectName = "os-project-name"
 	SecretKeyOSDomainName  = "os-domain-name"
+
+	// Baremetal (IPMI/BMC)
+	SecretKeyBMCUser     = "bmc-user"
+	SecretKeyBMCPassword = "bmc-password"
+	SecretKeyBMCAddr     = "bmc-addr"
 )
 
 // CreateCloudCredentialRequest represents the request to create a cloud credential config
@@ -80,6 +86,11 @@ type CreateCloudCredentialRequest struct {
 	OSPassword    string `json:"osPassword,omitempty"`
 	OSProjectName string `json:"osProjectName,omitempty"`
 	OSDomainName  string `json:"osDomainName,omitempty"`
+
+	// Baremetal (IPMI/BMC) fields
+	BMCUser     string `json:"bmcUser,omitempty"`
+	BMCPassword string `json:"bmcPassword,omitempty"`
+	BMCAddr     string `json:"bmcAddr,omitempty"`
 }
 
 // UpdateCloudCredentialRequest represents the request to update a cloud credential config.
@@ -109,6 +120,11 @@ type UpdateCloudCredentialRequest struct {
 	OSPassword    string `json:"osPassword,omitempty"`
 	OSProjectName string `json:"osProjectName,omitempty"`
 	OSDomainName  string `json:"osDomainName,omitempty"`
+
+	// Baremetal (IPMI/BMC) fields
+	BMCUser     string `json:"bmcUser,omitempty"`
+	BMCPassword string `json:"bmcPassword,omitempty"`
+	BMCAddr     string `json:"bmcAddr,omitempty"`
 }
 
 // CloudCredentialResponse represents a cloud credential in API responses.
@@ -154,4 +170,5 @@ var ValidProviders = map[string]bool{
 	ProviderGCP:       true,
 	ProviderAzure:     true,
 	ProviderOpenStack: true,
+	ProviderBaremetal: true,
 }

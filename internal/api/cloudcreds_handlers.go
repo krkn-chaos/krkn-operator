@@ -539,6 +539,10 @@ func buildCloudCredentialSecretData(req *cloudcreds.CreateCloudCredentialRequest
 		if req.OSDomainName != "" {
 			data[cloudcreds.SecretKeyOSDomainName] = []byte(req.OSDomainName)
 		}
+	case cloudcreds.ProviderBaremetal:
+		data[cloudcreds.SecretKeyBMCUser] = []byte(req.BMCUser)
+		data[cloudcreds.SecretKeyBMCPassword] = []byte(req.BMCPassword)
+		data[cloudcreds.SecretKeyBMCAddr] = []byte(req.BMCAddr)
 	}
 
 	return data
@@ -590,6 +594,16 @@ func updateCloudCredentialSecretData(secret *corev1.Secret, provider string, req
 		}
 		if req.OSDomainName != "" {
 			secret.Data[cloudcreds.SecretKeyOSDomainName] = []byte(req.OSDomainName)
+		}
+	case cloudcreds.ProviderBaremetal:
+		if req.BMCUser != "" {
+			secret.Data[cloudcreds.SecretKeyBMCUser] = []byte(req.BMCUser)
+		}
+		if req.BMCPassword != "" {
+			secret.Data[cloudcreds.SecretKeyBMCPassword] = []byte(req.BMCPassword)
+		}
+		if req.BMCAddr != "" {
+			secret.Data[cloudcreds.SecretKeyBMCAddr] = []byte(req.BMCAddr)
 		}
 	}
 }

@@ -150,6 +150,32 @@ func TestValidateCreateRequest(t *testing.T) {
 			name: "openstack valid",
 			req:  CreateCloudCredentialRequest{Name: "test", Provider: ProviderOpenStack, OSAuthURL: "http://auth:5000/v3", OSUsername: "admin", OSPassword: "secret", OSProjectName: "myproject"},
 		},
+		// Baremetal
+		{
+			name:    "baremetal missing bmc user",
+			req:     CreateCloudCredentialRequest{Name: "test", Provider: ProviderBaremetal, BMCPassword: "p", BMCAddr: "192.168.1.100"},
+			wantErr: "bmcUser is required",
+		},
+		{
+			name:    "baremetal missing bmc password",
+			req:     CreateCloudCredentialRequest{Name: "test", Provider: ProviderBaremetal, BMCUser: "admin", BMCAddr: "192.168.1.100"},
+			wantErr: "bmcPassword is required",
+		},
+		{
+			name:    "baremetal missing bmc addr",
+			req:     CreateCloudCredentialRequest{Name: "test", Provider: ProviderBaremetal, BMCUser: "admin", BMCPassword: "p"},
+			wantErr: "bmcAddr is required",
+		},
+		{
+			name: "baremetal valid",
+			req:  CreateCloudCredentialRequest{Name: "test", Provider: ProviderBaremetal, BMCUser: "admin", BMCPassword: "secret", BMCAddr: "192.168.1.100"},
+		},
+		// Reserved names
+		{
+			name:    "reserved name 'baremetal'",
+			req:     CreateCloudCredentialRequest{Name: "baremetal", Provider: ProviderBaremetal, BMCUser: "u", BMCPassword: "p", BMCAddr: "a"},
+			wantErr: "reserved",
+		},
 	}
 
 	for _, tt := range tests {
