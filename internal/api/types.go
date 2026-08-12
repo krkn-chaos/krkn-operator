@@ -405,6 +405,8 @@ type ScenarioRunListItem struct {
 type ScenarioRunListResponse struct {
 	// ScenarioRuns is the list of scenario runs
 	ScenarioRuns []ScenarioRunListItem `json:"scenarioRuns"`
+	// Pagination contains pagination metadata
+	Pagination PaginationMeta `json:"pagination"`
 }
 
 // PaginationMeta contains pagination metadata for paginated responses.
