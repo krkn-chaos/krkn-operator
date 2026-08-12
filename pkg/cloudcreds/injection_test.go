@@ -53,8 +53,8 @@ func TestInjectCredentialsAWS(t *testing.T) {
 	if len(mounts) != 0 {
 		t.Errorf("expected 0 mounts, got %d", len(mounts))
 	}
-	if len(envVars) != 3 {
-		t.Fatalf("expected 3 env vars, got %d", len(envVars))
+	if len(envVars) != 4 {
+		t.Fatalf("expected 4 env vars (CLOUD_TYPE + 3 AWS), got %d", len(envVars))
 	}
 
 	expectedEnvs := map[string]string{
@@ -64,6 +64,12 @@ func TestInjectCredentialsAWS(t *testing.T) {
 	}
 
 	for _, env := range envVars {
+		if env.Name == "CLOUD_TYPE" {
+			if env.Value != "aws" {
+				t.Errorf("CLOUD_TYPE = %q, want %q", env.Value, "aws")
+			}
+			continue
+		}
 		expectedKey, ok := expectedEnvs[env.Name]
 		if !ok {
 			t.Errorf("unexpected env var: %s", env.Name)
@@ -92,16 +98,19 @@ func TestInjectCredentialsGCP(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if len(envVars) != 1 {
-		t.Fatalf("expected 1 env var, got %d", len(envVars))
+	if len(envVars) != 2 {
+		t.Fatalf("expected 2 env vars (CLOUD_TYPE + GOOGLE_APPLICATION_CREDENTIALS), got %d", len(envVars))
 	}
-	if envVars[0].Name != "GOOGLE_APPLICATION_CREDENTIALS" {
-		t.Errorf("env var name = %q, want GOOGLE_APPLICATION_CREDENTIALS", envVars[0].Name)
+	if envVars[0].Name != "CLOUD_TYPE" || envVars[0].Value != "gcp" {
+		t.Errorf("first env var = %q=%q, want CLOUD_TYPE=gcp", envVars[0].Name, envVars[0].Value)
 	}
-	if envVars[0].Value != gcpMountPath {
-		t.Errorf("env var value = %q, want %q", envVars[0].Value, gcpMountPath)
+	if envVars[1].Name != "GOOGLE_APPLICATION_CREDENTIALS" {
+		t.Errorf("env var name = %q, want GOOGLE_APPLICATION_CREDENTIALS", envVars[1].Name)
 	}
-	if envVars[0].ValueFrom != nil {
+	if envVars[1].Value != gcpMountPath {
+		t.Errorf("env var value = %q, want %q", envVars[1].Value, gcpMountPath)
+	}
+	if envVars[1].ValueFrom != nil {
 		t.Error("GOOGLE_APPLICATION_CREDENTIALS should use Value, not ValueFrom")
 	}
 
@@ -147,11 +156,17 @@ func TestInjectCredentialsAzure(t *testing.T) {
 	if len(volumes) != 0 || len(mounts) != 0 {
 		t.Error("expected no volumes or mounts for Azure")
 	}
-	if len(envVars) != 4 {
-		t.Fatalf("expected 4 env vars, got %d", len(envVars))
+	if len(envVars) != 5 {
+		t.Fatalf("expected 5 env vars (CLOUD_TYPE + 4 Azure), got %d", len(envVars))
 	}
 
 	for _, env := range envVars {
+		if env.Name == "CLOUD_TYPE" {
+			if env.Value != "azure" {
+				t.Errorf("CLOUD_TYPE = %q, want %q", env.Value, "azure")
+			}
+			continue
+		}
 		if env.ValueFrom == nil || env.ValueFrom.SecretKeyRef == nil {
 			t.Errorf("env var %s should use SecretKeyRef", env.Name)
 		}
@@ -177,13 +192,22 @@ func TestInjectCredentialsOpenStack(t *testing.T) {
 	if len(volumes) != 0 || len(mounts) != 0 {
 		t.Error("expected no volumes or mounts for OpenStack")
 	}
-	if len(envVars) != 5 {
-		t.Fatalf("expected 5 env vars, got %d", len(envVars))
+	if len(envVars) != 6 {
+		t.Fatalf("expected 6 env vars (CLOUD_TYPE + 5 OpenStack), got %d", len(envVars))
 	}
 
 	for _, env := range envVars {
+		if env.Name == "CLOUD_TYPE" {
+			if env.Value != "openstack" {
+				t.Errorf("CLOUD_TYPE = %q, want %q", env.Value, "openstack")
+			}
+			continue
+		}
 		if env.ValueFrom == nil || env.ValueFrom.SecretKeyRef == nil {
 			t.Errorf("env var %s should use SecretKeyRef", env.Name)
+		}
+		if env.Name == "OS_DOMAIN_NAME" && env.ValueFrom.SecretKeyRef.Optional == nil {
+			t.Error("OS_DOMAIN_NAME SecretKeyRef should have Optional set")
 		}
 	}
 }

@@ -68,6 +68,7 @@ func secretKeyRef(secretName, key string) *corev1.EnvVarSource {
 
 func injectAWS(secretName string) []corev1.EnvVar {
 	return []corev1.EnvVar{
+		{Name: "CLOUD_TYPE", Value: "aws"},
 		{Name: "AWS_ACCESS_KEY_ID", ValueFrom: secretKeyRef(secretName, SecretKeyAWSAccessKeyID)},
 		{Name: "AWS_SECRET_ACCESS_KEY", ValueFrom: secretKeyRef(secretName, SecretKeyAWSSecretAccessKey)},
 		{Name: "AWS_DEFAULT_REGION", ValueFrom: secretKeyRef(secretName, SecretKeyAWSDefaultRegion)},
@@ -76,6 +77,7 @@ func injectAWS(secretName string) []corev1.EnvVar {
 
 func injectGCP(secretName string) ([]corev1.EnvVar, []corev1.Volume, []corev1.VolumeMount) {
 	envVars := []corev1.EnvVar{
+		{Name: "CLOUD_TYPE", Value: "gcp"},
 		{Name: "GOOGLE_APPLICATION_CREDENTIALS", Value: gcpMountPath},
 	}
 
@@ -106,6 +108,7 @@ func injectGCP(secretName string) ([]corev1.EnvVar, []corev1.Volume, []corev1.Vo
 
 func injectAzure(secretName string) []corev1.EnvVar {
 	return []corev1.EnvVar{
+		{Name: "CLOUD_TYPE", Value: "azure"},
 		{Name: "AZURE_TENANT_ID", ValueFrom: secretKeyRef(secretName, SecretKeyAzureTenantID)},
 		{Name: "AZURE_CLIENT_ID", ValueFrom: secretKeyRef(secretName, SecretKeyAzureClientID)},
 		{Name: "AZURE_CLIENT_SECRET", ValueFrom: secretKeyRef(secretName, SecretKeyAzureClientSecret)},
@@ -114,12 +117,20 @@ func injectAzure(secretName string) []corev1.EnvVar {
 }
 
 func injectOpenStack(secretName string) []corev1.EnvVar {
+	optional := true
 	return []corev1.EnvVar{
+		{Name: "CLOUD_TYPE", Value: "openstack"},
 		{Name: "OS_AUTH_URL", ValueFrom: secretKeyRef(secretName, SecretKeyOSAuthURL)},
 		{Name: "OS_USERNAME", ValueFrom: secretKeyRef(secretName, SecretKeyOSUsername)},
 		{Name: "OS_PASSWORD", ValueFrom: secretKeyRef(secretName, SecretKeyOSPassword)},
 		{Name: "OS_PROJECT_NAME", ValueFrom: secretKeyRef(secretName, SecretKeyOSProjectName)},
-		{Name: "OS_DOMAIN_NAME", ValueFrom: secretKeyRef(secretName, SecretKeyOSDomainName)},
+		{Name: "OS_DOMAIN_NAME", ValueFrom: &corev1.EnvVarSource{
+			SecretKeyRef: &corev1.SecretKeySelector{
+				LocalObjectReference: corev1.LocalObjectReference{Name: secretName},
+				Key:                  SecretKeyOSDomainName,
+				Optional:             &optional,
+			},
+		}},
 	}
 }
 

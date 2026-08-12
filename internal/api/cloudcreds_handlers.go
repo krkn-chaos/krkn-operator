@@ -18,6 +18,7 @@ package api
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -74,9 +75,9 @@ func (h *Handler) CreateCloudCredential(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if exists {
-		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
-			Error:   "bad_request",
-			Message: fmt.Sprintf("Cloud credential '%s' already exists", req.Name),
+		writeJSONError(w, http.StatusConflict, ErrorResponse{
+			Error:   "conflict",
+			Message: fmt.Sprintf("A secret named '%s' already exists", req.Name),
 		})
 		return
 	}
@@ -370,7 +371,12 @@ func (h *Handler) ListAvailableCloudCredentials(w http.ResponseWriter, r *http.R
 
 	var credentials []cloudcreds.CloudCredentialResponse
 	for i := range secretList.Items {
-		if h.canAccessCloudCredential(ctx, &secretList.Items[i]) {
+		allowed, err := h.canAccessCloudCredential(ctx, &secretList.Items[i])
+		if err != nil {
+			logger.Error(err, "Failed to check access for cloud credential", "name", secretList.Items[i].Name)
+			continue
+		}
+		if allowed {
 			credentials = append(credentials, buildCloudCredentialResponse(&secretList.Items[i]))
 		}
 	}
@@ -430,7 +436,9 @@ func (h *Handler) CloudCredentialsRouter(w http.ResponseWriter, r *http.Request)
 	})
 }
 
-// cloudCredentialExists checks whether a cloud credential Secret exists
+// cloudCredentialExists checks whether a Secret with the given name exists.
+// Returns true if ANY Secret with that name exists (not just cloud credentials),
+// to prevent AlreadyExists errors when creating.
 func (h *Handler) cloudCredentialExists(ctx context.Context, name string) (bool, error) {
 	var secret corev1.Secret
 	err := h.client.Get(ctx, types.NamespacedName{
@@ -443,7 +451,7 @@ func (h *Handler) cloudCredentialExists(ctx context.Context, name string) (bool,
 		}
 		return false, err
 	}
-	return secret.Labels[cloudcreds.AppComponentLabel] == cloudcreds.ComponentCloudCredential, nil
+	return true, nil
 }
 
 // loadCloudCredentialSecret loads a cloud credential Secret by name
@@ -463,24 +471,25 @@ func (h *Handler) loadCloudCredentialSecret(ctx context.Context, name string) (*
 	return &secret, nil
 }
 
-// canAccessCloudCredential checks if the current user can access a cloud credential
-func (h *Handler) canAccessCloudCredential(ctx context.Context, secret *corev1.Secret) bool {
+// canAccessCloudCredential checks if the current user can access a cloud credential.
+// Returns (allowed, error) so callers can distinguish access denial from internal failures.
+func (h *Handler) canAccessCloudCredential(ctx context.Context, secret *corev1.Secret) (bool, error) {
 	claims := auth.GetClaimsFromContext(ctx)
 	if claims == nil {
-		return false
+		return false, nil
 	}
 
 	if auth.IsAdmin(ctx) {
-		return true
+		return true, nil
 	}
 
 	if secret.Labels[cloudcreds.AvailableToAllLabel] == "true" {
-		return true
+		return true, nil
 	}
 
 	userGroups, err := groupauth.GetUserGroups(ctx, h.client, claims.UserID, h.namespace)
 	if err != nil {
-		return false
+		return false, fmt.Errorf("failed to check group membership: %w", err)
 	}
 
 	secretGroups := cloudcreds.ExtractGroupsFromLabels(secret.Labels)
@@ -492,11 +501,11 @@ func (h *Handler) canAccessCloudCredential(ctx context.Context, secret *corev1.S
 
 	for _, sg := range secretGroups {
 		if userGroupNames[sg] {
-			return true
+			return true, nil
 		}
 	}
 
-	return false
+	return false, nil
 }
 
 // buildCloudCredentialResponse constructs a CloudCredentialResponse from a Secret.
@@ -525,7 +534,8 @@ func buildCloudCredentialSecretData(req *cloudcreds.CreateCloudCredentialRequest
 		data[cloudcreds.SecretKeyAWSSecretAccessKey] = []byte(req.AWSSecretAccessKey)
 		data[cloudcreds.SecretKeyAWSDefaultRegion] = []byte(req.AWSDefaultRegion)
 	case cloudcreds.ProviderGCP:
-		data[cloudcreds.SecretKeyGCPServiceAccountJSON] = []byte(req.GCPServiceAccountJSON)
+		decoded, _ := base64.StdEncoding.DecodeString(req.GCPServiceAccountJSON)
+		data[cloudcreds.SecretKeyGCPServiceAccountJSON] = decoded
 	case cloudcreds.ProviderAzure:
 		data[cloudcreds.SecretKeyAzureTenantID] = []byte(req.AzureTenantID)
 		data[cloudcreds.SecretKeyAzureClientID] = []byte(req.AzureClientID)
@@ -571,7 +581,8 @@ func updateCloudCredentialSecretData(secret *corev1.Secret, provider string, req
 		}
 	case cloudcreds.ProviderGCP:
 		if req.GCPServiceAccountJSON != "" {
-			secret.Data[cloudcreds.SecretKeyGCPServiceAccountJSON] = []byte(req.GCPServiceAccountJSON)
+			decoded, _ := base64.StdEncoding.DecodeString(req.GCPServiceAccountJSON)
+			secret.Data[cloudcreds.SecretKeyGCPServiceAccountJSON] = decoded
 		}
 	case cloudcreds.ProviderAzure:
 		if req.AzureTenantID != "" {

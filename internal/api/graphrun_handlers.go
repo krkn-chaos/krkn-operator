@@ -462,7 +462,16 @@ func (h *Handler) CreateGraphRun(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
-		if !h.canAccessCloudCredential(ctx, credSecret) {
+		allowed, accessErr := h.canAccessCloudCredential(ctx, credSecret)
+		if accessErr != nil {
+			logger.Error(accessErr, "Failed to check cloud credential access", "name", req.CloudCredentialRef)
+			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+				Error:   "internal_error",
+				Message: "Failed to verify cloud credential access",
+			})
+			return
+		}
+		if !allowed {
 			writeJSONError(w, http.StatusForbidden, ErrorResponse{
 				Error:   "forbidden",
 				Message: fmt.Sprintf("Access denied to cloud credential '%s'", req.CloudCredentialRef),
@@ -481,7 +490,16 @@ func (h *Handler) CreateGraphRun(w http.ResponseWriter, r *http.Request) {
 				})
 				return
 			}
-			if !h.canAccessCloudCredential(ctx, credSecret) {
+			allowed, accessErr := h.canAccessCloudCredential(ctx, credSecret)
+			if accessErr != nil {
+				logger.Error(accessErr, "Failed to check cloud credential access", "nodeID", nodeID, "name", node.CloudCredentialRef)
+				writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+					Error:   "internal_error",
+					Message: "Failed to verify cloud credential access",
+				})
+				return
+			}
+			if !allowed {
 				writeJSONError(w, http.StatusForbidden, ErrorResponse{
 					Error:   "forbidden",
 					Message: fmt.Sprintf("Access denied to cloud credential '%s' for node '%s'", node.CloudCredentialRef, nodeID),
