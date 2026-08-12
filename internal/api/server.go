@@ -305,6 +305,7 @@ func NewServer(port int, client client.Client, clientset kubernetes.Interface, n
 	mux.Handle(ElasticsearchQueryPath, authMw.RequireAuth(http.HandlerFunc(handler.QueryElasticsearchTelemetry)))
 	// Cloud credential endpoints
 	mux.Handle(CloudCredentialsAvailablePath, authMw.RequireAuth(http.HandlerFunc(handler.ListAvailableCloudCredentials)))
+	mux.Handle(CloudCredentialsAvailablePath+"/", authMw.RequireAuth(http.HandlerFunc(handler.ListAvailableCloudCredentials)))
 	mux.Handle(CloudCredentialsPath, authMw.RequireAuth(http.HandlerFunc(handler.CloudCredentialsRouter)))
 	mux.Handle(CloudCredentialsPath+"/", authMw.RequireAuth(http.HandlerFunc(handler.CloudCredentialsRouter)))
 
