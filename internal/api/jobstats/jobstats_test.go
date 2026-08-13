@@ -13,14 +13,14 @@ type mockJob struct {
 	graphFailed          int
 }
 
-func (m mockJob) JobType() string            { return m.jobType }
-func (m mockJob) ScenarioSucceeded() int     { return m.scenarioSucc }
-func (m mockJob) ScenarioFailed() int        { return m.scenarioFail }
-func (m mockJob) ScenarioRunning() int       { return m.scenarioRunning }
-func (m mockJob) ScenarioTotalTargets() int  { return m.scenarioTotalTargets }
-func (m mockJob) GraphTotal() int            { return m.graphTotal }
-func (m mockJob) GraphCompleted() int        { return m.graphCompleted }
-func (m mockJob) GraphFailed() int           { return m.graphFailed }
+func (m mockJob) JobType() string           { return m.jobType }
+func (m mockJob) ScenarioSucceeded() int    { return m.scenarioSucc }
+func (m mockJob) ScenarioFailed() int       { return m.scenarioFail }
+func (m mockJob) ScenarioRunning() int      { return m.scenarioRunning }
+func (m mockJob) ScenarioTotalTargets() int { return m.scenarioTotalTargets }
+func (m mockJob) GraphTotal() int           { return m.graphTotal }
+func (m mockJob) GraphCompleted() int       { return m.graphCompleted }
+func (m mockJob) GraphFailed() int          { return m.graphFailed }
 
 func TestCompute(t *testing.T) {
 	tests := []struct {

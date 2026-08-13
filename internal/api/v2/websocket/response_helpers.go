@@ -20,14 +20,49 @@ type WSUnifiedJobItem struct {
 	GraphRun    *GraphRunResponse          `json:"graphRun,omitempty"`
 }
 
-func (w WSUnifiedJobItem) JobType() string            { return w.Type }
-func (w WSUnifiedJobItem) ScenarioSucceeded() int      { if w.ScenarioRun != nil { return w.ScenarioRun.SuccessfulJobs }; return 0 }
-func (w WSUnifiedJobItem) ScenarioFailed() int         { if w.ScenarioRun != nil { return w.ScenarioRun.FailedJobs }; return 0 }
-func (w WSUnifiedJobItem) ScenarioRunning() int        { if w.ScenarioRun != nil { return w.ScenarioRun.RunningJobs }; return 0 }
-func (w WSUnifiedJobItem) ScenarioTotalTargets() int   { if w.ScenarioRun != nil { return w.ScenarioRun.TotalTargets }; return 0 }
-func (w WSUnifiedJobItem) GraphTotal() int             { if w.GraphRun != nil { return w.GraphRun.Summary.TotalNodes }; return 0 }
-func (w WSUnifiedJobItem) GraphCompleted() int         { if w.GraphRun != nil { return w.GraphRun.Summary.CompletedNodes }; return 0 }
-func (w WSUnifiedJobItem) GraphFailed() int            { if w.GraphRun != nil { return w.GraphRun.Summary.FailedNodes }; return 0 }
+func (w WSUnifiedJobItem) JobType() string { return w.Type }
+func (w WSUnifiedJobItem) ScenarioSucceeded() int {
+	if w.ScenarioRun != nil {
+		return w.ScenarioRun.SuccessfulJobs
+	}
+	return 0
+}
+func (w WSUnifiedJobItem) ScenarioFailed() int {
+	if w.ScenarioRun != nil {
+		return w.ScenarioRun.FailedJobs
+	}
+	return 0
+}
+func (w WSUnifiedJobItem) ScenarioRunning() int {
+	if w.ScenarioRun != nil {
+		return w.ScenarioRun.RunningJobs
+	}
+	return 0
+}
+func (w WSUnifiedJobItem) ScenarioTotalTargets() int {
+	if w.ScenarioRun != nil {
+		return w.ScenarioRun.TotalTargets
+	}
+	return 0
+}
+func (w WSUnifiedJobItem) GraphTotal() int {
+	if w.GraphRun != nil {
+		return w.GraphRun.Summary.TotalNodes
+	}
+	return 0
+}
+func (w WSUnifiedJobItem) GraphCompleted() int {
+	if w.GraphRun != nil {
+		return w.GraphRun.Summary.CompletedNodes
+	}
+	return 0
+}
+func (w WSUnifiedJobItem) GraphFailed() int {
+	if w.GraphRun != nil {
+		return w.GraphRun.Summary.FailedNodes
+	}
+	return 0
+}
 
 // WSUnifiedJobsSnapshot represents the paginated jobs snapshot sent to WebSocket clients.
 type WSUnifiedJobsSnapshot struct {

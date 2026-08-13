@@ -2114,7 +2114,7 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 // @Param phase query string false "Filter by phase (Running, Succeeded, Failed)"
 // @Param scenarioName query string false "Filter by scenario name"
 // @Param page query int false "Page number (1-based). Omit for all results."
-// @Param limit query int false "Items per page (default 20, max 500). Only used when page is set."
+// @Param limit query int false "Items per page (defaults to jobs.defaultPageSize config, fallback 20; max 500). Only used when page is set."
 // @Success 200 {object} ScenarioRunListResponse "List of scenario runs with pagination"
 // @Failure 500 {object} ErrorResponse "Internal server error"
 // @Security BearerAuth
@@ -2172,6 +2172,9 @@ func (h *Handler) ListScenarioRuns(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sort.Slice(runs, func(i, j int) bool {
+		if runs[i].CreatedAt.Equal(runs[j].CreatedAt) {
+			return runs[i].ScenarioRunName < runs[j].ScenarioRunName
+		}
 		return runs[i].CreatedAt.After(runs[j].CreatedAt)
 	})
 
