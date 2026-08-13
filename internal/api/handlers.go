@@ -439,7 +439,7 @@ func (h *Handler) PostTarget(w http.ResponseWriter, r *http.Request) {
 	// Build labels with owner tracking
 	labels := make(map[string]string)
 	if claims != nil {
-		labels["krkn.krkn-chaos.dev/owner-user"] = sanitizeUserID(claims.UserID)
+		labels["krkn.krkn-chaos.dev/owner-user"] = groupauth.SanitizeUserIDForLabel(claims.UserID)
 	}
 
 	// Create a new KrknTargetRequest CR
@@ -553,7 +553,7 @@ func (h *Handler) DeleteTargetByUUID(w http.ResponseWriter, r *http.Request) {
 
 	// Extract owner from label
 	ownerLabel := targetRequest.Labels["krkn.krkn-chaos.dev/owner-user"]
-	currentUserSanitized := sanitizeUserID(claims.UserID)
+	currentUserSanitized := groupauth.SanitizeUserIDForLabel(claims.UserID)
 
 	if ownerLabel != currentUserSanitized {
 		logger.Info("Denying delete - user is not the owner",
@@ -1389,7 +1389,7 @@ func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
 	labels := make(map[string]string)
 	ownerUserID := ""
 	if claims != nil {
-		labels["krkn.krkn-chaos.dev/owner-user"] = sanitizeUserID(claims.UserID)
+		labels["krkn.krkn-chaos.dev/owner-user"] = groupauth.SanitizeUserIDForLabel(claims.UserID)
 		ownerUserID = claims.UserID
 	}
 	if req.CustomRunName != "" {

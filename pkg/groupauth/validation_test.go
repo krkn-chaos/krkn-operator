@@ -401,7 +401,10 @@ func TestBuildClusterAPIURLMap(t *testing.T) {
 		},
 	}
 
-	result := buildClusterAPIURLMap(targetRequest)
+	result, err := buildClusterAPIURLMap(targetRequest)
+	if err != nil {
+		t.Fatalf("buildClusterAPIURLMap() unexpected error: %v", err)
+	}
 
 	expected := map[string]string{
 		"cluster1": "https://api.cluster1.com",
@@ -422,6 +425,72 @@ func TestBuildClusterAPIURLMap(t *testing.T) {
 		if gotURL != wantURL {
 			t.Errorf("buildClusterAPIURLMap() cluster %s = %s, want %s", clusterName, gotURL, wantURL)
 		}
+	}
+}
+
+func TestBuildClusterAPIURLMap_SameNameSameURL(t *testing.T) {
+	// Same cluster name with same API URL across providers is allowed (idempotent)
+	targetRequest := &krknv1alpha1.KrknTargetRequest{
+		Status: krknv1alpha1.KrknTargetRequestStatus{
+			TargetData: map[string][]krknv1alpha1.ClusterTarget{
+				"provider1": {
+					{
+						ClusterName:   "shared-cluster",
+						ClusterAPIURL: "https://api.shared.com",
+					},
+				},
+				"provider2": {
+					{
+						ClusterName:   "shared-cluster",
+						ClusterAPIURL: "https://api.shared.com",
+					},
+				},
+			},
+		},
+	}
+
+	result, err := buildClusterAPIURLMap(targetRequest)
+	if err != nil {
+		t.Fatalf("buildClusterAPIURLMap() should not error when same cluster has same URL, got: %v", err)
+	}
+
+	if url, ok := result["shared-cluster"]; !ok || url != "https://api.shared.com" {
+		t.Errorf("buildClusterAPIURLMap() shared-cluster = %q, want %q", url, "https://api.shared.com")
+	}
+}
+
+func TestBuildClusterAPIURLMap_Collision(t *testing.T) {
+	// Same cluster name with DIFFERENT API URLs across providers must return an error
+	targetRequest := &krknv1alpha1.KrknTargetRequest{
+		Status: krknv1alpha1.KrknTargetRequestStatus{
+			TargetData: map[string][]krknv1alpha1.ClusterTarget{
+				"provider1": {
+					{
+						ClusterName:   "cluster1",
+						ClusterAPIURL: "https://api.provider1-cluster1.com",
+					},
+				},
+				"provider2": {
+					{
+						ClusterName:   "cluster1",
+						ClusterAPIURL: "https://api.provider2-cluster1.com",
+					},
+				},
+			},
+		},
+	}
+
+	_, err := buildClusterAPIURLMap(targetRequest)
+	if err == nil {
+		t.Fatal("buildClusterAPIURLMap() should return error for cluster name collision with different API URLs")
+	}
+
+	if !contains(err.Error(), "cluster name collision") {
+		t.Errorf("buildClusterAPIURLMap() error should mention collision, got: %v", err)
+	}
+
+	if !contains(err.Error(), "cluster1") {
+		t.Errorf("buildClusterAPIURLMap() error should mention the colliding cluster name, got: %v", err)
 	}
 }
 

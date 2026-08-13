@@ -22,7 +22,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"strings"
 
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
 	"github.com/krkn-chaos/krkn-operator/pkg/auth"
@@ -57,17 +56,6 @@ func (h *Handler) requireAdminForMethods(w http.ResponseWriter, r *http.Request,
 	}
 
 	return true
-}
-
-// sanitizeUserID converts an email address to a valid Kubernetes label value.
-// Replaces @ and . with -, then converts to lowercase to comply with
-// Kubernetes label value requirements (RFC 1123).
-//
-// Example: "user@example.com" -> "user-example-com"
-func sanitizeUserID(email string) string {
-	sanitized := strings.ReplaceAll(email, "@", "-")
-	sanitized = strings.ReplaceAll(sanitized, ".", "-")
-	return strings.ToLower(sanitized)
 }
 
 // checkScenarioRunAccess verifies if the authenticated user has permission to access

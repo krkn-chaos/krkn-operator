@@ -34,6 +34,7 @@ import (
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
 	"github.com/krkn-chaos/krkn-operator/pkg/auth"
 	"github.com/krkn-chaos/krkn-operator/pkg/files"
+	"github.com/krkn-chaos/krkn-operator/pkg/groupauth"
 )
 
 // setupFilesTestHandler creates a test Handler with fake client
@@ -254,7 +255,7 @@ func TestCreateFile(t *testing.T) {
 					userLabels[labelKey] = "true"
 				}
 
-				userName := "krknuser-" + sanitizeUserID(tt.userID)
+				userName := groupauth.SanitizeUserIDForResourceName(tt.userID)
 				role := "user"
 				if tt.isAdmin {
 					role = "admin"
@@ -694,7 +695,7 @@ func TestUpdateFile(t *testing.T) {
 					userLabels[labelKey] = "true"
 				}
 
-				userName := "krknuser-" + sanitizeUserID(tt.userID)
+				userName := groupauth.SanitizeUserIDForResourceName(tt.userID)
 				role := "user"
 				if tt.isAdmin {
 					role = "admin"
@@ -912,7 +913,7 @@ func TestDeleteFile(t *testing.T) {
 					userLabels[labelKey] = "true"
 				}
 
-				userName := "krknuser-" + sanitizeUserID(tt.userID)
+				userName := groupauth.SanitizeUserIDForResourceName(tt.userID)
 				role := "user"
 				if tt.isAdmin {
 					role = "admin"
@@ -1242,7 +1243,7 @@ func TestCanAccessFile(t *testing.T) {
 func createTestAdminUser(handler *Handler) {
 	user := &krknv1alpha1.KrknUser{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "krknuser-" + sanitizeUserID("admin@test.example"),
+			Name:      groupauth.SanitizeUserIDForResourceName("admin@test.example"),
 			Namespace: handler.namespace,
 		},
 		Spec: krknv1alpha1.KrknUserSpec{

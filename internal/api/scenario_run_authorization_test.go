@@ -33,11 +33,13 @@ import (
 
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
 	"github.com/krkn-chaos/krkn-operator/pkg/auth"
+	"github.com/krkn-chaos/krkn-operator/pkg/groupauth"
 	"k8s.io/client-go/kubernetes/fake"
 )
 
-// TestSanitizeUserID tests the email sanitization for Kubernetes labels
-func TestSanitizeUserID(t *testing.T) {
+// TestSanitizeUserIDForLabel tests the email sanitization for Kubernetes labels
+// via the consolidated groupauth.SanitizeUserIDForLabel function.
+func TestSanitizeUserIDForLabel(t *testing.T) {
 	tests := []struct {
 		name     string
 		email    string
@@ -67,9 +69,9 @@ func TestSanitizeUserID(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := sanitizeUserID(tt.email)
+			result := groupauth.SanitizeUserIDForLabel(tt.email)
 			if result != tt.expected {
-				t.Errorf("sanitizeUserID(%s) = %s, want %s", tt.email, result, tt.expected)
+				t.Errorf("SanitizeUserIDForLabel(%s) = %s, want %s", tt.email, result, tt.expected)
 			}
 		})
 	}
