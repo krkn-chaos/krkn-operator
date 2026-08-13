@@ -110,18 +110,18 @@ type WSPaginationMeta struct {
 
 // ServerMessage is sent from server to client
 type ServerMessage struct {
-	Resource   string            `json:"resource"`              // "run", "graphrun", "dashboard", "jobs"
-	ID         string            `json:"id,omitempty"`          // resource ID (empty for dashboard/jobs)
-	Event      string            `json:"event"`                 // "updated", "deleted", "snapshot"
-	Data       interface{}       `json:"data"`                  // payload
-	Pagination *WSPaginationMeta `json:"pagination,omitempty"`  // pagination metadata (for "jobs" resource)
+	Resource   string            `json:"resource"`             // "run", "graphrun", "dashboard", "jobs"
+	ID         string            `json:"id,omitempty"`         // resource ID (empty for dashboard/jobs)
+	Event      string            `json:"event"`                // "updated", "deleted", "snapshot"
+	Data       interface{}       `json:"data"`                 // payload
+	Pagination *WSPaginationMeta `json:"pagination,omitempty"` // pagination metadata (for "jobs" resource)
 }
 
 // ClientMessage is sent from client to server
 type ClientMessage struct {
-	Action   string   `json:"action"`        // "subscribe", "unsubscribe"
-	Resource string   `json:"resource"`      // "run", "graphrun", "dashboard", "jobs"
-	IDs      []string `json:"ids,omitempty"` // specific resource IDs (empty = wildcard)
+	Action   string   `json:"action"`          // "subscribe", "unsubscribe"
+	Resource string   `json:"resource"`        // "run", "graphrun", "dashboard", "jobs"
+	IDs      []string `json:"ids,omitempty"`   // specific resource IDs (empty = wildcard)
 	Page     *int     `json:"page,omitempty"`  // page number for paginated subscriptions (1-based)
 	Limit    *int     `json:"limit,omitempty"` // items per page for paginated subscriptions
 }

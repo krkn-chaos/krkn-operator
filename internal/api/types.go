@@ -164,6 +164,9 @@ type ScenarioRunRequest struct {
 	// credentials (ES_PASSWORD, and any ES_* vars not already in Environment) are
 	// injected server-side so the password is never transmitted by the client.
 	ElasticsearchConfigName string `json:"elasticsearchConfigName,omitempty"`
+	// CloudCredentialRef, if set, names a saved cloud credential Secret whose
+	// reference is set on the CRD spec for controller-level SecretKeyRef injection.
+	CloudCredentialRef string `json:"cloudCredentialRef,omitempty"`
 	// Private registry configuration (optional)
 	ScenariosRequest
 }
@@ -776,6 +779,8 @@ type GraphRunCreateRequest struct {
 	TargetRequestID string `json:"targetRequestId"`
 	// TargetClusters is a map of provider-name to list of cluster names
 	TargetClusters map[string][]string `json:"targetClusters"`
+	// CloudCredentialRef is the default cloud credential for all nodes (optional)
+	CloudCredentialRef string `json:"cloudCredentialRef,omitempty"`
 }
 
 // GraphRunListItem represents a single item in the graph runs list

@@ -12,9 +12,9 @@ import (
 // WSUnifiedJobItem represents a single item in the unified jobs list for WebSocket responses.
 // Uses the same typed envelope as REST UnifiedJobItem for frontend compatibility.
 type WSUnifiedJobItem struct {
-	Type        string                    `json:"type"`                  // "scenarioRun" or "graphRun"
-	Name        string                    `json:"name"`
-	CreatedAt   string                    `json:"createdAt"`             // RFC3339 timestamp
+	Type        string                     `json:"type"` // "scenarioRun" or "graphRun"
+	Name        string                     `json:"name"`
+	CreatedAt   string                     `json:"createdAt"` // RFC3339 timestamp
 	ScenarioRun *ScenarioRunStatusResponse `json:"scenarioRun,omitempty"`
 	GraphRun    *GraphRunResponse          `json:"graphRun,omitempty"`
 }

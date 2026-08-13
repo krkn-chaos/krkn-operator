@@ -148,6 +148,10 @@ type KrknScenarioRunSpec struct {
 	// +optional
 	RegistryName string `json:"registryName,omitempty"`
 
+	// CloudCredentialRef is the name of the cloud credential Secret to inject into the scenario pod
+	// +optional
+	CloudCredentialRef string `json:"cloudCredentialRef,omitempty"`
+
 	// MaxRetries is the maximum number of times to retry failed jobs
 	// +optional
 	// +kubebuilder:default=3

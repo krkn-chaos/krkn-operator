@@ -113,7 +113,6 @@ func filterUsers(users []krknv1alpha1.KrknUser, role, activeParam, search string
 	return filtered
 }
 
-
 // sanitizeUsername converts an email to a valid Kubernetes resource name of the
 // form "krknuser-<sanitized>".
 //
