@@ -63,6 +63,7 @@ import (
 	"time"
 
 	httpSwagger "github.com/swaggo/http-swagger"
+	"golang.org/x/time/rate"
 	"k8s.io/client-go/kubernetes"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -79,6 +80,7 @@ type Server struct {
 	v2Handler      *v2.Handler
 	authMiddleware *auth.Middleware
 	secretManager  *auth.SecretManager
+	stopCh         chan struct{} // signals background goroutines (e.g., rate limiter cleanup) to stop
 }
 
 // NewServer creates a new API server
@@ -110,18 +112,32 @@ func NewServer(port int, client client.Client, clientset kubernetes.Interface, n
 	}
 	authMw := auth.NewLazyMiddleware(getTokenGen)
 
+	// Set up user active status check: after JWT validation, verify the user account
+	// is still active by looking up the KrknUser CR. Uses a 1-minute TTL cache to
+	// avoid hitting the API server on every request.
+	userChecker := newK8sUserStatusChecker(client, namespace)
+	cachedChecker := auth.NewCachedUserStatusChecker(userChecker, 1*time.Minute)
+	authMw.SetUserStatusChecker(cachedChecker)
+
 	// Create v2 handler (WebSocket support only, REST reuses v1 handlers)
 	getTokenGenCtx := func(ctx context.Context) (*auth.TokenGenerator, error) {
 		return secretManager.GetTokenGenerator()
 	}
 	v2Handler := v2.NewHandler(client, namespace, handler, getTokenGenCtx) // handler implements AuthorizationChecker
 
+	// Create per-IP rate limiter for auth endpoints: 5 requests per minute, burst of 10
+	// This mitigates brute-force login attempts and registration abuse
+	authRateLimiter := newIPRateLimiter(rate.Every(12*time.Second), 10) // 5 per minute = 1 every 12s
+	stopCh := make(chan struct{})
+	authRateLimiter.startCleanup(10*time.Minute, 10*time.Minute, stopCh)
+	authRateLimit := rateLimitMiddleware(authRateLimiter)
+
 	mux := http.NewServeMux()
 
-	// Public authentication endpoints (no auth required)
-	mux.HandleFunc(AuthIsRegistered, handler.IsRegistered)
-	mux.HandleFunc(AuthRegister, handler.Register)
-	mux.HandleFunc(AuthLogin, handler.Login)
+	// Public authentication endpoints (no auth required, rate-limited)
+	mux.Handle(AuthIsRegistered, authRateLimit(http.HandlerFunc(handler.IsRegistered)))
+	mux.Handle(AuthRegister, authRateLimit(http.HandlerFunc(handler.Register)))
+	mux.Handle(AuthLogin, authRateLimit(http.HandlerFunc(handler.Login)))
 
 	// Authenticated endpoints - user and admin access
 	mux.Handle(HealthPath, authMw.RequireAuth(http.HandlerFunc(handler.HealthCheck)))
@@ -271,6 +287,7 @@ func NewServer(port int, client client.Client, clientset kubernetes.Interface, n
 		v2Handler:      v2Handler,
 		authMiddleware: authMw,
 		secretManager:  secretManager,
+		stopCh:         stopCh,
 	}
 }
 
@@ -323,8 +340,11 @@ startServer:
 	}
 }
 
-// Shutdown gracefully shuts down the API server
+// Shutdown gracefully shuts down the API server and stops background goroutines
 func (s *Server) Shutdown() error {
+	// Stop background goroutines (rate limiter cleanup, etc.)
+	close(s.stopCh)
+
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	return s.server.Shutdown(ctx)

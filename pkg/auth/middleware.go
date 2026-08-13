@@ -22,6 +22,8 @@ import (
 	"context"
 	"net/http"
 	"strings"
+	"sync"
+	"time"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
@@ -48,10 +50,84 @@ const (
 	RoleUser Role = "user"
 )
 
+// UserStatusChecker checks whether a user account is still active.
+// Implementations should look up the user (e.g., KrknUser CR) and return
+// whether the account is active. This interface decouples the auth middleware
+// from Kubernetes API types, keeping the pkg/auth package reusable.
+type UserStatusChecker interface {
+	// IsUserActive returns true if the user account identified by userID is active.
+	// It may use caching to avoid hitting the backing store on every request.
+	IsUserActive(ctx context.Context, userID string) (bool, error)
+}
+
+// userStatusCacheEntry stores a cached active status with its expiry time.
+type userStatusCacheEntry struct {
+	active  bool
+	expires time.Time
+}
+
+// CachedUserStatusChecker wraps a UserStatusChecker with a TTL cache to avoid
+// looking up user status on every authenticated request.
+type CachedUserStatusChecker struct {
+	checker UserStatusChecker
+	mu      sync.RWMutex
+	cache   map[string]userStatusCacheEntry
+	ttl     time.Duration
+}
+
+// NewCachedUserStatusChecker creates a new cached user status checker.
+//
+// Parameters:
+//   - checker: the underlying checker that performs the actual lookup
+//   - ttl: how long to cache each result (e.g., 1 minute)
+//
+// Returns a CachedUserStatusChecker instance.
+func NewCachedUserStatusChecker(checker UserStatusChecker, ttl time.Duration) *CachedUserStatusChecker {
+	return &CachedUserStatusChecker{
+		checker: checker,
+		cache:   make(map[string]userStatusCacheEntry),
+		ttl:     ttl,
+	}
+}
+
+// IsUserActive checks the cache first, then falls back to the underlying checker.
+func (c *CachedUserStatusChecker) IsUserActive(ctx context.Context, userID string) (bool, error) {
+	c.mu.RLock()
+	entry, exists := c.cache[userID]
+	c.mu.RUnlock()
+
+	if exists && time.Now().Before(entry.expires) {
+		return entry.active, nil
+	}
+
+	// Cache miss or expired -- look up the user
+	active, err := c.checker.IsUserActive(ctx, userID)
+	if err != nil {
+		return false, err
+	}
+
+	c.mu.Lock()
+	c.cache[userID] = userStatusCacheEntry{
+		active:  active,
+		expires: time.Now().Add(c.ttl),
+	}
+	c.mu.Unlock()
+
+	return active, nil
+}
+
+// InvalidateUser removes a user from the cache, forcing a fresh lookup on the next request.
+func (c *CachedUserStatusChecker) InvalidateUser(userID string) {
+	c.mu.Lock()
+	delete(c.cache, userID)
+	c.mu.Unlock()
+}
+
 // Middleware provides HTTP middleware for JWT authentication and authorization
 type Middleware struct {
-	tokenGen       *TokenGenerator
-	tokenGenLoader func() *TokenGenerator
+	tokenGen          *TokenGenerator
+	tokenGenLoader    func() *TokenGenerator
+	userStatusChecker UserStatusChecker
 }
 
 // NewMiddleware creates a new authentication middleware
@@ -76,6 +152,17 @@ func NewLazyMiddleware(tokenGenLoader func() *TokenGenerator) *Middleware {
 	return &Middleware{
 		tokenGenLoader: tokenGenLoader,
 	}
+}
+
+// SetUserStatusChecker sets the user status checker on the middleware.
+// When set, the middleware will verify that the user account is still active
+// after JWT validation succeeds. If the user is inactive, the request is
+// rejected with 401 Unauthorized.
+//
+// Parameters:
+//   - checker: the UserStatusChecker to use (typically a CachedUserStatusChecker)
+func (m *Middleware) SetUserStatusChecker(checker UserStatusChecker) {
+	m.userStatusChecker = checker
 }
 
 // RequireAuth is a middleware that requires a valid JWT token
@@ -133,6 +220,31 @@ func (m *Middleware) RequireAuth(next http.Handler) http.Handler {
 			)
 			http.Error(w, `{"error":"unauthorized","message":"Invalid or expired token"}`, http.StatusUnauthorized)
 			return
+		}
+
+		// Check if the user account is still active (if a checker is configured)
+		if m.userStatusChecker != nil {
+			active, err := m.userStatusChecker.IsUserActive(r.Context(), claims.UserID)
+			if err != nil {
+				logger.Error(err, "Failed to check user active status",
+					"path", r.URL.Path,
+					"method", r.Method,
+					"userId", claims.UserID,
+				)
+				// Fail open on transient errors would be a security risk.
+				// Fail closed: deny access if we cannot verify user status.
+				http.Error(w, `{"error":"internal_error","message":"Failed to verify user account status"}`, http.StatusInternalServerError)
+				return
+			}
+			if !active {
+				logger.Info("Authentication failed: user account is inactive",
+					"path", r.URL.Path,
+					"method", r.Method,
+					"userId", claims.UserID,
+				)
+				http.Error(w, `{"error":"unauthorized","message":"User account is inactive"}`, http.StatusUnauthorized)
+				return
+			}
 		}
 
 		logger.V(1).Info("Authentication successful",

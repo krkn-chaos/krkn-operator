@@ -1656,10 +1656,7 @@ func (h *Handler) GetScenarioRunStatus(w http.ResponseWriter, r *http.Request) {
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
-	CheckOrigin: func(r *http.Request) bool {
-		// Allow all origins for now - in production you should validate the origin
-		return true
-	},
+	CheckOrigin:     checkWebSocketOrigin,
 	// Support "access_token" subprotocol for JWT authentication
 	Subprotocols: []string{"access_token"},
 }
