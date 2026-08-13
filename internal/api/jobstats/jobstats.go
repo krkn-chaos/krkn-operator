@@ -1,3 +1,4 @@
+// Package jobstats provides aggregate job statistics computation for the krkn-operator API.
 package jobstats
 
 // Summary contains aggregate job statistics computed across all runs.
