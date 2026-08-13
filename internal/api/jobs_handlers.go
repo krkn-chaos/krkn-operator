@@ -85,6 +85,9 @@ func (h *Handler) ListJobs(w http.ResponseWriter, r *http.Request) {
 	// Build unified list
 	jobs := BuildUnifiedJobList(filteredScenarioRuns, filteredGraphRuns)
 
+	// Compute aggregate stats from the full list before pagination
+	stats := ComputeJobStats(jobs)
+
 	// Parse pagination params
 	page, limit := ParsePaginationParams(r, getDefaultPageSize())
 
@@ -96,17 +99,44 @@ func (h *Handler) ListJobs(w http.ResponseWriter, r *http.Request) {
 			Pagination: PaginationMeta{
 				Total: len(jobs),
 			},
+			Stats: stats,
 		}
 	} else {
 		paginated, meta := PaginateSlice(jobs, page, limit)
 		response = UnifiedJobsResponse{
 			Jobs:       paginated,
 			Pagination: meta,
+			Stats:      stats,
 		}
 	}
 
 	logger.Info("Listed jobs", "total", response.Pagination.Total, "page", response.Pagination.Page, "returned", len(response.Jobs))
 	writeJSON(w, http.StatusOK, response)
+}
+
+// ComputeJobStats computes aggregate job statistics from the full unified job list.
+// For scenarioRun items it sums SuccessfulJobs/FailedJobs from ScenarioRunListItem.
+// For graphRun items it sums CompletedNodes/FailedNodes from GraphRunListItem.Summary.
+func ComputeJobStats(jobs []UnifiedJobItem) JobStatsSummary {
+	var stats JobStatsSummary
+	for _, job := range jobs {
+		switch job.Type {
+		case "scenarioRun":
+			if job.ScenarioRun != nil {
+				stats.TotalJobs += job.ScenarioRun.SuccessfulJobs + job.ScenarioRun.FailedJobs + job.ScenarioRun.RunningJobs
+				stats.SucceededJobs += job.ScenarioRun.SuccessfulJobs
+				stats.FailedJobs += job.ScenarioRun.FailedJobs
+			}
+		case "graphRun":
+			if job.GraphRun != nil {
+				s := job.GraphRun.Summary
+				stats.TotalJobs += s.TotalNodes
+				stats.SucceededJobs += s.CompletedNodes
+				stats.FailedJobs += s.FailedNodes
+			}
+		}
+	}
+	return stats
 }
 
 // BuildUnifiedJobList merges standalone ScenarioRuns and GraphRuns into a single

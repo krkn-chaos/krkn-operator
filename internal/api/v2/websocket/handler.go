@@ -642,15 +642,19 @@ func (h *Handler) sendJobsSnapshot(ctx context.Context, client *Client, logger l
 		limit = ps.Limit
 	}
 
+	// Compute stats from the full list before pagination
+	stats := computeWSJobStats(allJobs)
+
 	// Paginate
 	pageItems, meta := paginateJobItems(allJobs, page, limit)
 
-	snapshot := WSUnifiedJobsSnapshot{Jobs: pageItems}
+	snapshot := WSUnifiedJobsSnapshot{Jobs: pageItems, Stats: stats}
 	msg := ServerMessage{
 		Resource:   "jobs",
 		Event:      "snapshot",
 		Data:       snapshot,
 		Pagination: &meta,
+		Stats:      &stats,
 	}
 
 	data, err := json.Marshal(msg)

@@ -12,16 +12,17 @@ import (
 // WSUnifiedJobItem represents a single item in the unified jobs list for WebSocket responses.
 // Uses the same typed envelope as REST UnifiedJobItem for frontend compatibility.
 type WSUnifiedJobItem struct {
-	Type        string                    `json:"type"`                  // "scenarioRun" or "graphRun"
-	Name        string                    `json:"name"`
-	CreatedAt   string                    `json:"createdAt"`             // RFC3339 timestamp
+	Type        string                     `json:"type"` // "scenarioRun" or "graphRun"
+	Name        string                     `json:"name"`
+	CreatedAt   string                     `json:"createdAt"` // RFC3339 timestamp
 	ScenarioRun *ScenarioRunStatusResponse `json:"scenarioRun,omitempty"`
 	GraphRun    *GraphRunResponse          `json:"graphRun,omitempty"`
 }
 
 // WSUnifiedJobsSnapshot represents the paginated jobs snapshot sent to WebSocket clients.
 type WSUnifiedJobsSnapshot struct {
-	Jobs []WSUnifiedJobItem `json:"jobs"`
+	Jobs  []WSUnifiedJobItem `json:"jobs"`
+	Stats WSJobStatsSummary  `json:"stats"`
 }
 
 // buildUnifiedJobList merges standalone ScenarioRuns and GraphRuns into a unified sorted list.
@@ -90,6 +91,29 @@ func paginateJobItems(items []WSUnifiedJobItem, page, limit int) ([]WSUnifiedJob
 	}
 
 	return items[offset:end], meta
+}
+
+// computeWSJobStats computes aggregate job statistics from the full unified job list.
+func computeWSJobStats(jobs []WSUnifiedJobItem) WSJobStatsSummary {
+	var stats WSJobStatsSummary
+	for _, job := range jobs {
+		switch job.Type {
+		case "scenarioRun":
+			if job.ScenarioRun != nil {
+				stats.TotalJobs += job.ScenarioRun.SuccessfulJobs + job.ScenarioRun.FailedJobs + job.ScenarioRun.RunningJobs
+				stats.SucceededJobs += job.ScenarioRun.SuccessfulJobs
+				stats.FailedJobs += job.ScenarioRun.FailedJobs
+			}
+		case "graphRun":
+			if job.GraphRun != nil {
+				s := job.GraphRun.Summary
+				stats.TotalJobs += s.TotalNodes
+				stats.SucceededJobs += s.CompletedNodes
+				stats.FailedJobs += s.FailedNodes
+			}
+		}
+	}
+	return stats
 }
 
 // buildScenarioRunResponse builds the response with sanitized clusterJobs (no ClusterAPIURL).

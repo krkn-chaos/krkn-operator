@@ -433,12 +433,24 @@ type UnifiedJobItem struct {
 	GraphRun *GraphRunListItem `json:"graphRun,omitempty"`
 }
 
+// JobStatsSummary contains aggregate job statistics computed across all runs (not just the current page).
+type JobStatsSummary struct {
+	// TotalJobs is the total number of individual jobs/nodes across all runs
+	TotalJobs int `json:"totalJobs"`
+	// SucceededJobs is the number of successfully completed jobs/nodes
+	SucceededJobs int `json:"succeededJobs"`
+	// FailedJobs is the number of failed jobs/nodes
+	FailedJobs int `json:"failedJobs"`
+}
+
 // UnifiedJobsResponse represents the response for GET /api/v2/jobs
 type UnifiedJobsResponse struct {
 	// Jobs is the list of unified job items
 	Jobs []UnifiedJobItem `json:"jobs"`
 	// Pagination contains pagination metadata
 	Pagination PaginationMeta `json:"pagination"`
+	// Stats contains aggregate job statistics across all runs
+	Stats JobStatsSummary `json:"stats"`
 }
 
 // ActiveRunsOverviewResponse represents the response for GET /api/v1/dashboard/active-runs
