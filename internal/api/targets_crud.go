@@ -27,6 +27,7 @@ import (
 
 	"github.com/google/uuid"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -48,8 +49,8 @@ func (h *Handler) fetchTarget(ctx context.Context, targetUUID string) (*krknv1al
 	}, &target)
 
 	if err != nil {
-		if client.IgnoreNotFound(err) == nil {
-			return nil, fmt.Errorf("target with UUID '%s' not found", targetUUID)
+		if apierrors.IsNotFound(err) {
+			return nil, err
 		}
 		return nil, fmt.Errorf("failed to get target: %w", err)
 	}
@@ -547,7 +548,7 @@ func (h *Handler) TargetsCRUDRouter(w http.ResponseWriter, r *http.Request) {
 // writeTargetFetchError writes appropriate error response based on the fetch error.
 func (h *Handler) writeTargetFetchError(w http.ResponseWriter, err error) {
 	statusCode := http.StatusInternalServerError
-	if strings.Contains(err.Error(), "not found") {
+	if apierrors.IsNotFound(err) {
 		statusCode = http.StatusNotFound
 	}
 	writeJSONError(w, statusCode, ErrorResponse{
