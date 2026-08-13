@@ -22,7 +22,6 @@ package api
 // +kubebuilder:rbac:groups=krkn.krkn-chaos.dev,resources=krknoperatortargetproviderconfigs/status,verbs=get
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -43,31 +42,38 @@ import (
 // PostProviderConfig handles POST /api/v1/provider-config endpoint
 // Creates a new KrknOperatorTargetProviderConfig CR and returns the UUID
 func (h *Handler) PostProviderConfig(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	logger := log.FromContext(ctx)
+
 	// Use common function to create provider config request
 	uuid, err := provider.CreateProviderConfigRequest(
-		context.Background(),
+		ctx,
 		h.client,
 		h.namespace,
 		"", // Let the function generate the name
 	)
 	if err != nil {
+		logger.Error(err, "Failed to create KrknOperatorTargetProviderConfig")
 		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
 			Error:   "internal_error",
-			Message: "Failed to create KrknOperatorTargetProviderConfig: " + err.Error(),
+			Message: "Failed to create KrknOperatorTargetProviderConfig",
 		})
 		return
 	}
 
-	// Return 102 Processing with the UUID
+	// Return 202 Accepted with the UUID
 	response := map[string]string{
 		"uuid": uuid,
 	}
-	writeJSON(w, http.StatusProcessing, response)
+	writeJSON(w, http.StatusAccepted, response)
 }
 
 // GetProviderConfigByUUID handles GET /api/v1/provider-config/{uuid} endpoint
 // Returns 100 Continue when pending, 200 OK with config_data when Completed
 func (h *Handler) GetProviderConfigByUUID(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	logger := log.FromContext(ctx)
+
 	uuid, err := extractPathSuffix(r.URL.Path, ProviderConfigPath+"/")
 	if err != nil {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
@@ -78,7 +84,7 @@ func (h *Handler) GetProviderConfigByUUID(w http.ResponseWriter, r *http.Request
 	}
 
 	var config krknv1alpha1.KrknOperatorTargetProviderConfig
-	if err := h.client.Get(context.Background(), types.NamespacedName{
+	if err := h.client.Get(ctx, types.NamespacedName{
 		Name:      uuid,
 		Namespace: h.namespace,
 	}, &config); err != nil {
@@ -88,9 +94,10 @@ func (h *Handler) GetProviderConfigByUUID(w http.ResponseWriter, r *http.Request
 				Message: "KrknOperatorTargetProviderConfig not found",
 			})
 		} else {
+			logger.Error(err, "Failed to fetch KrknOperatorTargetProviderConfig", "uuid", uuid)
 			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
 				Error:   "internal_error",
-				Message: "Failed to fetch KrknOperatorTargetProviderConfig: " + err.Error(),
+				Message: "Failed to fetch KrknOperatorTargetProviderConfig",
 			})
 		}
 		return

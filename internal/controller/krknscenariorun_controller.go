@@ -281,7 +281,7 @@ func (r *KrknScenarioRunReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 				ClusterAPIURL:  outcome.target.clusterAPIURL,
 				JobID:          uuid.New().String(),
 				Phase:          "Failed",
-				Message:        fmt.Sprintf("Job creation failed: %v", outcome.err),
+				Message:        "Job creation failed",
 				FailureReason:  "JobCreationFailed",
 				StartTime:      &now,
 				CompletionTime: &now,
