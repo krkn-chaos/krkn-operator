@@ -1588,3 +1588,46 @@ func TestConvertInputFields(t *testing.T) {
 		})
 	}
 }
+
+func TestMaskToken(t *testing.T) {
+	tests := []struct {
+		name     string
+		token    string
+		expected string
+	}{
+		{
+			name:     "empty string",
+			token:    "",
+			expected: "***",
+		},
+		{
+			name:     "short token under 20 chars",
+			token:    "abcdef",
+			expected: "***",
+		},
+		{
+			name:     "exactly 20 chars",
+			token:    "12345678901234567890",
+			expected: "***",
+		},
+		{
+			name:     "21 chars shows first 10 and last 10",
+			token:    "123456789012345678901",
+			expected: "1234567890...2345678901",
+		},
+		{
+			name:     "long JWT-like token",
+			token:    "access_token.eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.payload.signature",
+			expected: "access_tok....signature",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := maskToken(tt.token)
+			if result != tt.expected {
+				t.Errorf("maskToken(%q) = %q, want %q", tt.token, result, tt.expected)
+			}
+		})
+	}
+}

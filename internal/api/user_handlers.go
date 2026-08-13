@@ -858,6 +858,13 @@ func (h *Handler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 
 	logger.Info("Password updated successfully", "userID", userID)
 
+	// Audit log: record when an admin changes another user's password
+	if isAdmin && !isSelf {
+		logger.Info("admin changed user password",
+			"admin", claims.UserID,
+			"targetUser", userID)
+	}
+
 	writeJSON(w, http.StatusOK, ChangePasswordResponse{
 		Message: "Password updated successfully",
 	})

@@ -624,6 +624,16 @@ func convertInputFields(fields []typing.InputField) []InputFieldResponse {
 	return result
 }
 
+// maskToken redacts the middle of a sensitive token string for safe logging.
+// It preserves the first 10 and last 10 characters, replacing the rest with "...".
+// Tokens shorter than 20 characters are fully masked as "***".
+func maskToken(token string) string {
+	if len(token) <= 20 {
+		return "***"
+	}
+	return token[:10] + "..." + token[len(token)-10:]
+}
+
 // writeJSON writes a JSON response with the given status code
 func writeJSON(w http.ResponseWriter, status int, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
@@ -644,6 +654,9 @@ func writeJSONError(w http.ResponseWriter, status int, err ErrorResponse) {
 // callGetNodesGRPC calls the data provider gRPC service to get nodes
 func (h *Handler) callGetNodesGRPC(kubeconfigBase64 string) ([]string, error) {
 	// Create gRPC connection
+	// NOTE: insecure.NewCredentials() is acceptable here because the gRPC data provider
+	// runs as a sidecar container within the same pod, communicating over localhost.
+	// For cross-node or external gRPC communication, TLS credentials must be used instead.
 	conn, err := grpc.NewClient(
 		h.grpcServerAddr,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
@@ -1710,7 +1723,7 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 	// Format: "access_token.<jwt_token>"
 	protocols := r.Header.Get("Sec-WebSocket-Protocol")
 	logger.V(1).Info("📋 Received WebSocket headers",
-		"Sec-WebSocket-Protocol", protocols,
+		"Sec-WebSocket-Protocol", maskToken(protocols),
 		"Sec-WebSocket-Version", r.Header.Get("Sec-WebSocket-Version"),
 		"Sec-WebSocket-Key", r.Header.Get("Sec-WebSocket-Key"))
 
@@ -1726,7 +1739,7 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 	// Parse protocol: split on first '.' to separate prefix from token
 	// Example: "access_token.eyJhbGc..." → ["access_token", "eyJhbGc..."]
 	logger.V(1).Info("🔍 Parsing Sec-WebSocket-Protocol",
-		"raw_protocol", protocols,
+		"raw_protocol", maskToken(protocols),
 		"protocol_length", len(protocols))
 
 	protocolParts := strings.SplitN(protocols, ".", 2)
@@ -1765,13 +1778,7 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Mask token for logging (show first/last 10 chars)
-	maskedToken := func() string {
-		if len(token) <= 20 {
-			return "***"
-		}
-		return token[:10] + "..." + token[len(token)-10:]
-	}()
+	maskedToken := maskToken(token)
 
 	logger.Info("🔑 JWT token extracted from subprotocol",
 		"token_length", len(token),

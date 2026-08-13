@@ -308,6 +308,9 @@ func (s *Server) Start(ctx context.Context) error {
 startServer:
 	errChan := make(chan error, 1)
 	go func() {
+		// NOTE: The server listens on plain HTTP. TLS termination is expected to be
+		// handled externally by the Kubernetes Ingress controller, service mesh
+		// (e.g. Istio), or a reverse proxy in front of this service.
 		if err := s.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			errChan <- err
 		}
@@ -330,7 +333,13 @@ func (s *Server) Shutdown() error {
 	return s.server.Shutdown(ctx)
 }
 
-// loggingMiddleware is a logging middleware for HTTP requests
+// loggingMiddleware is a logging middleware for HTTP requests.
+//
+// PII notice: This middleware logs client IP addresses (RemoteAddr) and raw query
+// parameters, which may contain personally identifiable information. Operators
+// should ensure log retention and access policies comply with applicable data
+// protection regulations (e.g. GDPR). Consider configuring log scrubbing in the
+// log aggregation pipeline if query parameters may carry sensitive values.
 func loggingMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
