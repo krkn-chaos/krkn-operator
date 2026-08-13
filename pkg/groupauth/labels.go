@@ -23,6 +23,9 @@ import (
 	"strings"
 )
 
+// groupNameRegex matches characters that are NOT valid in Kubernetes label names.
+var groupNameRegex = regexp.MustCompile(`[^a-zA-Z0-9\-_.]+`)
+
 // GroupLabelKey returns the label key for a group name
 // Example: "dev-team" -> "group.krkn.krkn-chaos.dev/dev-team"
 func GroupLabelKey(groupName string) string {
@@ -52,7 +55,7 @@ func ExtractGroupNamesFromLabels(labels map[string]string) []string {
 // Note: Does NOT truncate. Caller must validate length (63 char limit for K8s labels).
 func SanitizeGroupName(groupName string) string {
 	// Replace invalid characters with hyphens
-	sanitized := regexp.MustCompile(`[^a-zA-Z0-9\-_.]+`).ReplaceAllString(groupName, "-")
+	sanitized := groupNameRegex.ReplaceAllString(groupName, "-")
 
 	// Trim leading/trailing hyphens, underscores, and dots
 	sanitized = strings.Trim(sanitized, "-_.")

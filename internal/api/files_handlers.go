@@ -870,19 +870,23 @@ func (h *Handler) isFileOwnerOrAdmin(ctx context.Context, configMap *corev1.Conf
 
 // buildFileResponse builds a FileResponse from a ConfigMap
 func buildFileResponse(configMap *corev1.ConfigMap) files.FileResponse {
-	// Extract content and studioLayout from data
-	content := ""
-	studioLayout := ""
-	for k, v := range configMap.Data {
-		switch k {
-		case "studioLayout.json":
-			studioLayout = v
-		default:
-			content = v
+	logicalName := configMap.Annotations[files.WorkflowNameAnnotation]
+
+	// Access studioLayout by its well-known key.
+	studioLayout := configMap.Data["studioLayout.json"]
+
+	// Look up the content by the logical filename stored in the annotation.
+	// If the annotation is missing or the key does not exist in Data (e.g. legacy
+	// ConfigMaps), fall back to the first Data key that is not studioLayout.json.
+	content, ok := configMap.Data[logicalName]
+	if !ok || logicalName == "" {
+		for k, v := range configMap.Data {
+			if k != "studioLayout.json" {
+				content = v
+				break
+			}
 		}
 	}
-
-	logicalName := configMap.Annotations[files.WorkflowNameAnnotation]
 
 	return files.FileResponse{
 		FileID:         files.ExtractFileIDFromLabels(configMap.Labels),
@@ -985,30 +989,32 @@ func isValidConfigMapKey(key string) bool {
 	return true
 }
 
-func validateCreateFileRequest(ctx context.Context, k8sClient client.Client, req *files.CreateFileRequest, namespace string, isAdmin bool, userID string) error {
+// validateFileFields validates the common fields shared by create and update file requests:
+// fileName, content, groups, availableToAll, and group existence.
+func validateFileFields(ctx context.Context, k8sClient client.Client, fileName, content string, groups []string, availableToAll bool, namespace string, isAdmin bool, userID string) error {
 	// Validate file name
-	if req.FileName == "" {
+	if fileName == "" {
 		return fmt.Errorf("fileName is required")
 	}
 
 	// Validate fileName is a valid ConfigMap key (alphanumeric, -, _, .)
 	// ConfigMap keys must match: [a-zA-Z0-9._-]+
-	if !isValidConfigMapKey(req.FileName) {
+	if !isValidConfigMapKey(fileName) {
 		return fmt.Errorf("fileName contains invalid characters (allowed: alphanumeric, -, _, .)")
 	}
 
 	// Validate content is not empty
-	if req.Content == "" {
+	if content == "" {
 		return fmt.Errorf("content is required")
 	}
 
 	// Validate content is valid JSON or YAML
-	if err := files.ValidateFileContent(req.Content); err != nil {
+	if err := files.ValidateFileContent(content); err != nil {
 		return err
 	}
 
 	// Validate file groups (max 1, mutually exclusive with availableToAll)
-	if err := files.ValidateFileGroups(req.Groups, req.AvailableToAll); err != nil {
+	if err := files.ValidateFileGroups(groups, availableToAll); err != nil {
 		return err
 	}
 
@@ -1025,12 +1031,12 @@ func validateCreateFileRequest(ctx context.Context, k8sClient client.Client, req
 	}
 
 	// Validate user permissions (non-admin can assign to their own group or make public)
-	if err := files.ValidateUserFilePermissions(isAdmin, req.Groups, req.AvailableToAll, userGroups); err != nil {
+	if err := files.ValidateUserFilePermissions(isAdmin, groups, availableToAll, userGroups); err != nil {
 		return err
 	}
 
 	// Validate groups exist
-	for _, groupName := range req.Groups {
+	for _, groupName := range groups {
 		var group krknv1alpha1.KrknUserGroup
 		err := k8sClient.Get(ctx, types.NamespacedName{
 			Name:      groupName,
@@ -1047,66 +1053,13 @@ func validateCreateFileRequest(ctx context.Context, k8sClient client.Client, req
 	return nil
 }
 
+func validateCreateFileRequest(ctx context.Context, k8sClient client.Client, req *files.CreateFileRequest, namespace string, isAdmin bool, userID string) error {
+	return validateFileFields(ctx, k8sClient, req.FileName, req.Content, req.Groups, req.AvailableToAll, namespace, isAdmin, userID)
+}
+
 // validateUpdateFileRequest validates an UpdateFileRequest
 func validateUpdateFileRequest(ctx context.Context, k8sClient client.Client, req *files.UpdateFileRequest, namespace string, isAdmin bool, userID string) error {
-	// Validate file name
-	if req.FileName == "" {
-		return fmt.Errorf("fileName is required")
-	}
-
-	// Validate fileName is a valid ConfigMap key (alphanumeric, -, _, .)
-	if !isValidConfigMapKey(req.FileName) {
-		return fmt.Errorf("fileName contains invalid characters (allowed: alphanumeric, -, _, .)")
-	}
-
-	// Validate content is not empty
-	if req.Content == "" {
-		return fmt.Errorf("content is required")
-	}
-
-	// Validate content is valid JSON or YAML
-	if err := files.ValidateFileContent(req.Content); err != nil {
-		return err
-	}
-
-	// Validate file groups (max 1, mutually exclusive with availableToAll)
-	if err := files.ValidateFileGroups(req.Groups, req.AvailableToAll); err != nil {
-		return err
-	}
-
-	// Get user's groups for permission validation
-	userGroupsObjs, err := groupauth.GetUserGroups(ctx, k8sClient, userID, namespace)
-	if err != nil {
-		return fmt.Errorf("failed to get user groups: %w", err)
-	}
-
-	// Extract group names
-	userGroups := make([]string, len(userGroupsObjs))
-	for i, ug := range userGroupsObjs {
-		userGroups[i] = ug.Name
-	}
-
-	// Validate user permissions (non-admin can assign to their own group or make public)
-	if err := files.ValidateUserFilePermissions(isAdmin, req.Groups, req.AvailableToAll, userGroups); err != nil {
-		return err
-	}
-
-	// Validate groups exist
-	for _, groupName := range req.Groups {
-		var group krknv1alpha1.KrknUserGroup
-		err := k8sClient.Get(ctx, types.NamespacedName{
-			Name:      groupName,
-			Namespace: namespace,
-		}, &group)
-		if err != nil {
-			if apierrors.IsNotFound(err) {
-				return fmt.Errorf("group '%s' does not exist", groupName)
-			}
-			return fmt.Errorf("failed to validate group '%s': %w", groupName, err)
-		}
-	}
-
-	return nil
+	return validateFileFields(ctx, k8sClient, req.FileName, req.Content, req.Groups, req.AvailableToAll, namespace, isAdmin, userID)
 }
 
 // ensureFileTypeExists creates a KrknFileType if it doesn't exist (auto-creation pattern).
