@@ -398,7 +398,10 @@ func (h *Handler) GetTargetByUUID(w http.ResponseWriter, r *http.Request) {
 		Namespace: h.namespace,
 	}, &targetRequest); err != nil {
 		if client.IgnoreNotFound(err) == nil {
-			w.WriteHeader(http.StatusNotFound)
+			writeJSONError(w, http.StatusNotFound, ErrorResponse{
+				Error:   "not_found",
+				Message: "Target not found",
+			})
 		} else {
 			log.FromContext(ctx).Error(err, "Failed to fetch KrknTargetRequest", "uuid", uuid)
 			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
@@ -628,7 +631,10 @@ func convertInputFields(fields []typing.InputField) []InputFieldResponse {
 func writeJSON(w http.ResponseWriter, status int, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(data) // If encoding fails, client gets partial response
+	if err := json.NewEncoder(w).Encode(data); err != nil {
+		logger := log.Log.WithName("api")
+		logger.Error(err, "Failed to encode JSON response")
+	}
 }
 
 // writeJSONError writes a JSON error response with the given status code
@@ -2641,7 +2647,10 @@ func (h *Handler) ScenariosRunRouter(w http.ResponseWriter, r *http.Request) {
 		case http.MethodGet:
 			h.ListScenarioRuns(w, r)
 		default:
-			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			writeJSONError(w, http.StatusMethodNotAllowed, ErrorResponse{
+				Error:   "method_not_allowed",
+				Message: "Method not allowed",
+			})
 		}
 		return
 	}
@@ -2656,7 +2665,10 @@ func (h *Handler) ScenariosRunRouter(w http.ResponseWriter, r *http.Request) {
 			if r.Method == http.MethodGet {
 				h.GetScenarioReplay(w, r)
 			} else {
-				http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+				writeJSONError(w, http.StatusMethodNotAllowed, ErrorResponse{
+					Error:   "method_not_allowed",
+					Message: "Method not allowed",
+				})
 			}
 			return
 		}
@@ -2669,7 +2681,10 @@ func (h *Handler) ScenariosRunRouter(w http.ResponseWriter, r *http.Request) {
 			case http.MethodDelete:
 				h.DeleteSingleJob(w, r)
 			default:
-				http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+				writeJSONError(w, http.StatusMethodNotAllowed, ErrorResponse{
+					Error:   "method_not_allowed",
+					Message: "Method not allowed",
+				})
 			}
 			return
 		}
@@ -2681,12 +2696,18 @@ func (h *Handler) ScenariosRunRouter(w http.ResponseWriter, r *http.Request) {
 		case http.MethodDelete:
 			h.DeleteScenarioRunComplete(w, r)
 		default:
-			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			writeJSONError(w, http.StatusMethodNotAllowed, ErrorResponse{
+				Error:   "method_not_allowed",
+				Message: "Method not allowed",
+			})
 		}
 		return
 	}
 
-	http.Error(w, "Not found", http.StatusNotFound)
+	writeJSONError(w, http.StatusNotFound, ErrorResponse{
+		Error:   "not_found",
+		Message: "Not found",
+	})
 }
 
 // convertMetaTime converts metav1.Time to *time.Time

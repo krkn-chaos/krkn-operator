@@ -700,7 +700,10 @@ func (h *Handler) GraphRunsRouter(w http.ResponseWriter, r *http.Request) {
 		case http.MethodPost:
 			h.CreateGraphRun(w, r)
 		default:
-			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			writeJSONError(w, http.StatusMethodNotAllowed, ErrorResponse{
+				Error:   "method_not_allowed",
+				Message: "Method not allowed",
+			})
 		}
 		return
 	}
@@ -713,12 +716,18 @@ func (h *Handler) GraphRunsRouter(w http.ResponseWriter, r *http.Request) {
 		case http.MethodDelete:
 			h.DeleteGraphRun(w, r)
 		default:
-			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			writeJSONError(w, http.StatusMethodNotAllowed, ErrorResponse{
+				Error:   "method_not_allowed",
+				Message: "Method not allowed",
+			})
 		}
 		return
 	}
 
-	http.Error(w, "Not found", http.StatusNotFound)
+	writeJSONError(w, http.StatusNotFound, ErrorResponse{
+		Error:   "not_found",
+		Message: "Not found",
+	})
 }
 
 // parseBoolHeader parses a header value as a boolean, accepting common representations.
