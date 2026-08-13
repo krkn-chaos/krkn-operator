@@ -74,18 +74,7 @@ func NewHandler(hub *Hub, k8sClient k8sclient.Client, namespace string, authz Au
 		upgrader: websocket.Upgrader{
 			ReadBufferSize:  1024,
 			WriteBufferSize: 1024,
-			CheckOrigin: func(r *http.Request) bool {
-				// SECURITY: Intentionally permissive (allows all origins)
-				// Rationale:
-				// 1. Authentication/authorization is enforced via JWT in Sec-WebSocket-Protocol
-				// 2. Invalid/missing JWT → connection refused at upgrade time
-				// 3. Valid JWT but insufficient permissions → filtered broadcasts (authz layer)
-				// 4. CORS-style origin checks don't prevent token theft attacks
-				// 5. Allows legitimate cross-origin use (e.g., separate frontend domain)
-				//
-				// If stricter origin validation is needed, configure an allowlist here.
-				return true
-			},
+			CheckOrigin:     checkWebSocketOriginV2,
 		},
 		pingInterval:   54 * time.Second,
 		pongWait:       60 * time.Second,
