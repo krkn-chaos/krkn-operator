@@ -19,10 +19,118 @@ Assisted-by: Claude Sonnet 4.5 (claude-sonnet-4-5@20250929)
 package api
 
 import (
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
 	_ "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
 )
+
+// TestMaxBodySizeMiddleware verifies that the maxBodySizeMiddleware correctly
+// limits request body size for POST/PUT/PATCH methods and passes through
+// GET/DELETE requests without modification.
+func TestMaxBodySizeMiddleware(t *testing.T) {
+	const maxBytes int64 = 1024 // 1 KB limit for testing
+
+	// echoHandler reads the full body and echoes it back.
+	// If reading fails (body too large), it returns 413.
+	echoHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			// MaxBytesReader returns an error when body exceeds limit
+			w.WriteHeader(http.StatusRequestEntityTooLarge)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(body)
+	})
+
+	handler := maxBodySizeMiddleware(maxBytes)(echoHandler)
+
+	tests := []struct {
+		name           string
+		method         string
+		bodySize       int
+		expectedStatus int
+	}{
+		{
+			name:           "POST within limit",
+			method:         http.MethodPost,
+			bodySize:       512,
+			expectedStatus: http.StatusOK,
+		},
+		{
+			name:           "POST exceeds limit",
+			method:         http.MethodPost,
+			bodySize:       2048,
+			expectedStatus: http.StatusRequestEntityTooLarge,
+		},
+		{
+			name:           "PUT within limit",
+			method:         http.MethodPut,
+			bodySize:       512,
+			expectedStatus: http.StatusOK,
+		},
+		{
+			name:           "PUT exceeds limit",
+			method:         http.MethodPut,
+			bodySize:       2048,
+			expectedStatus: http.StatusRequestEntityTooLarge,
+		},
+		{
+			name:           "PATCH within limit",
+			method:         http.MethodPatch,
+			bodySize:       512,
+			expectedStatus: http.StatusOK,
+		},
+		{
+			name:           "PATCH exceeds limit",
+			method:         http.MethodPatch,
+			bodySize:       2048,
+			expectedStatus: http.StatusRequestEntityTooLarge,
+		},
+		{
+			name:           "GET not limited",
+			method:         http.MethodGet,
+			bodySize:       2048,
+			expectedStatus: http.StatusOK,
+		},
+		{
+			name:           "DELETE not limited",
+			method:         http.MethodDelete,
+			bodySize:       2048,
+			expectedStatus: http.StatusOK,
+		},
+		{
+			name:           "POST at exact limit",
+			method:         http.MethodPost,
+			bodySize:       1024,
+			expectedStatus: http.StatusOK,
+		},
+		{
+			name:           "POST one byte over limit",
+			method:         http.MethodPost,
+			bodySize:       1025,
+			expectedStatus: http.StatusRequestEntityTooLarge,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			body := strings.NewReader(strings.Repeat("x", tt.bodySize))
+			req := httptest.NewRequest(tt.method, "/test", body)
+			w := httptest.NewRecorder()
+
+			handler.ServeHTTP(w, req)
+
+			if w.Code != tt.expectedStatus {
+				t.Errorf("expected status %d, got %d", tt.expectedStatus, w.Code)
+			}
+		})
+	}
+}
 
 // TestWorkflowsAvailableMethodGuard is a compile-time check that ensures
 // the method guard exists in server.go for /workflows/available endpoint.

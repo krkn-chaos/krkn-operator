@@ -338,10 +338,12 @@ func NewServer(port int, client client.Client, clientset kubernetes.Interface, n
 		http.NotFound(w, r)
 	})
 
-	// Wrap mux with logging middleware
+	// Wrap mux with middleware chain: logging -> body size limit -> routes
+	// maxBodySize is 10MB, applied only to POST/PUT/PATCH requests
+	const maxBodySize int64 = 10 << 20 // 10 MB
 	server := &http.Server{
 		Addr:              fmt.Sprintf(":%d", port),
-		Handler:           loggingMiddleware(mux),
+		Handler:           loggingMiddleware(maxBodySizeMiddleware(maxBodySize)(mux)),
 		ReadHeaderTimeout: 30 * time.Second,  // Prevent Slowloris attacks
 		ReadTimeout:       60 * time.Second,  // Total request read timeout
 		WriteTimeout:      60 * time.Second,  // Response write timeout
@@ -423,6 +425,26 @@ func (s *Server) Shutdown() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	return s.server.Shutdown(ctx)
+}
+
+// maxBodySizeMiddleware returns middleware that limits request body size for
+// POST, PUT, and PATCH methods using http.MaxBytesReader. This prevents
+// clients from sending excessively large payloads that could exhaust memory.
+// GET, DELETE, and other methods are passed through without modification.
+//
+// When the limit is exceeded, http.MaxBytesReader causes subsequent body reads
+// to fail with *http.MaxBytesError. Handlers decode the request body via
+// decodeJSONBody, which maps that error to a 413 Request Entity Too Large JSON
+// response so payload-too-large is not misreported as a generic 400.
+func maxBodySizeMiddleware(maxBytes int64) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == http.MethodPost || r.Method == http.MethodPut || r.Method == http.MethodPatch {
+				r.Body = http.MaxBytesReader(w, r.Body, maxBytes)
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
 }
 
 // loggingMiddleware is a logging middleware for HTTP requests.

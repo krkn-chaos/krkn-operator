@@ -24,6 +24,7 @@ import (
 	"strings"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
@@ -38,9 +39,9 @@ func (h *Handler) ListProviders(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	logger := log.FromContext(ctx)
 
-	// List all KrknOperatorTargetProvider CRs
+	// List all KrknOperatorTargetProvider CRs in the operator namespace
 	var providerList krknv1alpha1.KrknOperatorTargetProviderList
-	if err := h.client.List(ctx, &providerList); err != nil {
+	if err := h.client.List(ctx, &providerList, client.InNamespace(h.namespace)); err != nil {
 		logger.Error(err, "Failed to list KrknOperatorTargetProvider CRs")
 		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
 			Error:   "internal_error",
@@ -94,9 +95,9 @@ func (h *Handler) UpdateProviderStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Find provider by name (iterate through all providers in all namespaces)
+	// Find provider by name in the operator namespace
 	var providerList krknv1alpha1.KrknOperatorTargetProviderList
-	if err := h.client.List(ctx, &providerList); err != nil {
+	if err := h.client.List(ctx, &providerList, client.InNamespace(h.namespace)); err != nil {
 		logger.Error(err, "Failed to list providers")
 		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
 			Error:   "internal_error",
