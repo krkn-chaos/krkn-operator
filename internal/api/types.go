@@ -405,6 +405,8 @@ type ScenarioRunListItem struct {
 type ScenarioRunListResponse struct {
 	// ScenarioRuns is the list of scenario runs
 	ScenarioRuns []ScenarioRunListItem `json:"scenarioRuns"`
+	// Pagination contains pagination metadata
+	Pagination PaginationMeta `json:"pagination"`
 }
 
 // PaginationMeta contains pagination metadata for paginated responses.
@@ -434,14 +436,49 @@ type UnifiedJobItem struct {
 	GraphRun *GraphRunListItem `json:"graphRun,omitempty"`
 }
 
-func (u UnifiedJobItem) JobType() string            { return u.Type }
-func (u UnifiedJobItem) ScenarioSucceeded() int      { if u.ScenarioRun != nil { return u.ScenarioRun.SuccessfulJobs }; return 0 }
-func (u UnifiedJobItem) ScenarioFailed() int         { if u.ScenarioRun != nil { return u.ScenarioRun.FailedJobs }; return 0 }
-func (u UnifiedJobItem) ScenarioRunning() int        { if u.ScenarioRun != nil { return u.ScenarioRun.RunningJobs }; return 0 }
-func (u UnifiedJobItem) ScenarioTotalTargets() int   { if u.ScenarioRun != nil { return u.ScenarioRun.TotalTargets }; return 0 }
-func (u UnifiedJobItem) GraphTotal() int             { if u.GraphRun != nil { return u.GraphRun.Summary.TotalNodes }; return 0 }
-func (u UnifiedJobItem) GraphCompleted() int         { if u.GraphRun != nil { return u.GraphRun.Summary.CompletedNodes }; return 0 }
-func (u UnifiedJobItem) GraphFailed() int            { if u.GraphRun != nil { return u.GraphRun.Summary.FailedNodes }; return 0 }
+func (u UnifiedJobItem) JobType() string { return u.Type }
+func (u UnifiedJobItem) ScenarioSucceeded() int {
+	if u.ScenarioRun != nil {
+		return u.ScenarioRun.SuccessfulJobs
+	}
+	return 0
+}
+func (u UnifiedJobItem) ScenarioFailed() int {
+	if u.ScenarioRun != nil {
+		return u.ScenarioRun.FailedJobs
+	}
+	return 0
+}
+func (u UnifiedJobItem) ScenarioRunning() int {
+	if u.ScenarioRun != nil {
+		return u.ScenarioRun.RunningJobs
+	}
+	return 0
+}
+func (u UnifiedJobItem) ScenarioTotalTargets() int {
+	if u.ScenarioRun != nil {
+		return u.ScenarioRun.TotalTargets
+	}
+	return 0
+}
+func (u UnifiedJobItem) GraphTotal() int {
+	if u.GraphRun != nil {
+		return u.GraphRun.Summary.TotalNodes
+	}
+	return 0
+}
+func (u UnifiedJobItem) GraphCompleted() int {
+	if u.GraphRun != nil {
+		return u.GraphRun.Summary.CompletedNodes
+	}
+	return 0
+}
+func (u UnifiedJobItem) GraphFailed() int {
+	if u.GraphRun != nil {
+		return u.GraphRun.Summary.FailedNodes
+	}
+	return 0
+}
 
 // JobStatsSummary contains aggregate job statistics computed across all runs (not just the current page).
 type JobStatsSummary = jobstats.Summary

@@ -26,6 +26,7 @@ import (
 	"net/http"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -2112,7 +2113,9 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 // @Produce json
 // @Param phase query string false "Filter by phase (Running, Succeeded, Failed)"
 // @Param scenarioName query string false "Filter by scenario name"
-// @Success 200 {array} object "List of scenario runs"
+// @Param page query int false "Page number (1-based). Omit for all results."
+// @Param limit query int false "Items per page (defaults to jobs.defaultPageSize config, fallback 20; max 500). Only used when page is set."
+// @Success 200 {object} ScenarioRunListResponse "List of scenario runs with pagination"
 // @Failure 500 {object} ErrorResponse "Internal server error"
 // @Security BearerAuth
 // @Router /scenarios/run [get]
@@ -2168,8 +2171,27 @@ func (h *Handler) ListScenarioRuns(w http.ResponseWriter, r *http.Request) {
 		runs = append(runs, run)
 	}
 
-	response := ScenarioRunListResponse{
-		ScenarioRuns: runs,
+	sort.Slice(runs, func(i, j int) bool {
+		if runs[i].CreatedAt.Equal(runs[j].CreatedAt) {
+			return runs[i].ScenarioRunName < runs[j].ScenarioRunName
+		}
+		return runs[i].CreatedAt.After(runs[j].CreatedAt)
+	})
+
+	page, limit := ParsePaginationParams(r, getDefaultPageSize())
+
+	var response ScenarioRunListResponse
+	if page == 0 {
+		response = ScenarioRunListResponse{
+			ScenarioRuns: runs,
+			Pagination:   PaginationMeta{Total: len(runs)},
+		}
+	} else {
+		paginated, meta := PaginateSlice(runs, page, limit)
+		response = ScenarioRunListResponse{
+			ScenarioRuns: paginated,
+			Pagination:   meta,
+		}
 	}
 
 	writeJSON(w, http.StatusOK, response)
