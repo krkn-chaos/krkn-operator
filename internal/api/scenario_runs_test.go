@@ -127,7 +127,9 @@ func TestListScenarioRuns(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			scheme := runtime.NewScheme()
-			_ = krknv1alpha1.AddToScheme(scheme)
+			if err := krknv1alpha1.AddToScheme(scheme); err != nil {
+				t.Fatalf("failed to add scheme: %v", err)
+			}
 
 			builder := fakeclient.NewClientBuilder().WithScheme(scheme)
 			for _, r := range tt.runs {
@@ -179,7 +181,9 @@ func TestListScenarioRuns(t *testing.T) {
 
 func TestListScenarioRuns_PhaseFilter(t *testing.T) {
 	scheme := runtime.NewScheme()
-	_ = krknv1alpha1.AddToScheme(scheme)
+	if err := krknv1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatalf("failed to add scheme: %v", err)
+	}
 
 	now := time.Now()
 	running := makeScenarioRun("sr-running", now)
