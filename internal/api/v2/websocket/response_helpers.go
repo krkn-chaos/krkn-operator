@@ -6,22 +6,33 @@ import (
 	"time"
 
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
+	"github.com/krkn-chaos/krkn-operator/internal/api/jobstats"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // WSUnifiedJobItem represents a single item in the unified jobs list for WebSocket responses.
 // Uses the same typed envelope as REST UnifiedJobItem for frontend compatibility.
 type WSUnifiedJobItem struct {
-	Type        string                    `json:"type"`                  // "scenarioRun" or "graphRun"
-	Name        string                    `json:"name"`
-	CreatedAt   string                    `json:"createdAt"`             // RFC3339 timestamp
+	Type        string                     `json:"type"` // "scenarioRun" or "graphRun"
+	Name        string                     `json:"name"`
+	CreatedAt   string                     `json:"createdAt"` // RFC3339 timestamp
 	ScenarioRun *ScenarioRunStatusResponse `json:"scenarioRun,omitempty"`
 	GraphRun    *GraphRunResponse          `json:"graphRun,omitempty"`
 }
 
+func (w WSUnifiedJobItem) JobType() string            { return w.Type }
+func (w WSUnifiedJobItem) ScenarioSucceeded() int      { if w.ScenarioRun != nil { return w.ScenarioRun.SuccessfulJobs }; return 0 }
+func (w WSUnifiedJobItem) ScenarioFailed() int         { if w.ScenarioRun != nil { return w.ScenarioRun.FailedJobs }; return 0 }
+func (w WSUnifiedJobItem) ScenarioRunning() int        { if w.ScenarioRun != nil { return w.ScenarioRun.RunningJobs }; return 0 }
+func (w WSUnifiedJobItem) ScenarioTotalTargets() int   { if w.ScenarioRun != nil { return w.ScenarioRun.TotalTargets }; return 0 }
+func (w WSUnifiedJobItem) GraphTotal() int             { if w.GraphRun != nil { return w.GraphRun.Summary.TotalNodes }; return 0 }
+func (w WSUnifiedJobItem) GraphCompleted() int         { if w.GraphRun != nil { return w.GraphRun.Summary.CompletedNodes }; return 0 }
+func (w WSUnifiedJobItem) GraphFailed() int            { if w.GraphRun != nil { return w.GraphRun.Summary.FailedNodes }; return 0 }
+
 // WSUnifiedJobsSnapshot represents the paginated jobs snapshot sent to WebSocket clients.
 type WSUnifiedJobsSnapshot struct {
-	Jobs []WSUnifiedJobItem `json:"jobs"`
+	Jobs  []WSUnifiedJobItem `json:"jobs"`
+	Stats WSJobStatsSummary  `json:"stats"`
 }
 
 // buildUnifiedJobList merges standalone ScenarioRuns and GraphRuns into a unified sorted list.
@@ -90,6 +101,12 @@ func paginateJobItems(items []WSUnifiedJobItem, page, limit int) ([]WSUnifiedJob
 	}
 
 	return items[offset:end], meta
+}
+
+// computeWSJobStats computes aggregate job statistics from the full unified job list.
+func computeWSJobStats(jobs []WSUnifiedJobItem) WSJobStatsSummary {
+	s := jobstats.Compute(jobs)
+	return WSJobStatsSummary(s)
 }
 
 // buildScenarioRunResponse builds the response with sanitized clusterJobs (no ClusterAPIURL).

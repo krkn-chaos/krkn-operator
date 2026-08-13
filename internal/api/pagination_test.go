@@ -24,14 +24,14 @@ import (
 
 func TestPaginateSlice(t *testing.T) {
 	tests := []struct {
-		name          string
-		items         []int
-		page          int
-		limit         int
-		wantLen       int
-		wantFirst     int // -1 to skip
-		wantTotal     int
-		wantTotalPgs  int
+		name         string
+		items        []int
+		page         int
+		limit        int
+		wantLen      int
+		wantFirst    int // -1 to skip
+		wantTotal    int
+		wantTotalPgs int
 	}{
 		{"FirstPage", []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}, 1, 3, 3, 1, 10, 4},
 		{"MiddlePage", []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}, 2, 3, 3, 4, 10, 4},

@@ -22,6 +22,7 @@ import (
 	"strconv"
 
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
+	"github.com/krkn-chaos/krkn-operator/internal/api/jobstats"
 	kvstore "github.com/krkn-chaos/krkn-operator/pkg/configstore"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -85,6 +86,9 @@ func (h *Handler) ListJobs(w http.ResponseWriter, r *http.Request) {
 	// Build unified list
 	jobs := BuildUnifiedJobList(filteredScenarioRuns, filteredGraphRuns)
 
+	// Compute aggregate stats from the full list before pagination
+	stats := ComputeJobStats(jobs)
+
 	// Parse pagination params
 	page, limit := ParsePaginationParams(r, getDefaultPageSize())
 
@@ -96,17 +100,24 @@ func (h *Handler) ListJobs(w http.ResponseWriter, r *http.Request) {
 			Pagination: PaginationMeta{
 				Total: len(jobs),
 			},
+			Stats: stats,
 		}
 	} else {
 		paginated, meta := PaginateSlice(jobs, page, limit)
 		response = UnifiedJobsResponse{
 			Jobs:       paginated,
 			Pagination: meta,
+			Stats:      stats,
 		}
 	}
 
 	logger.Info("Listed jobs", "total", response.Pagination.Total, "page", response.Pagination.Page, "returned", len(response.Jobs))
 	writeJSON(w, http.StatusOK, response)
+}
+
+// ComputeJobStats computes aggregate job statistics from the full unified job list.
+func ComputeJobStats(jobs []UnifiedJobItem) JobStatsSummary {
+	return jobstats.Compute(jobs)
 }
 
 // BuildUnifiedJobList merges standalone ScenarioRuns and GraphRuns into a single

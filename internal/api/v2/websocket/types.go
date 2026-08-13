@@ -99,6 +99,14 @@ type ClusterJobResponse struct {
 	FailureReason   string     `json:"failureReason,omitempty"`
 }
 
+// WSJobStatsSummary contains aggregate job statistics for WebSocket responses.
+// Duplicated from internal/api to avoid import cycles.
+type WSJobStatsSummary struct {
+	TotalJobs     int `json:"totalJobs"`
+	SucceededJobs int `json:"succeededJobs"`
+	FailedJobs    int `json:"failedJobs"`
+}
+
 // WSPaginationMeta contains pagination metadata for paginated WebSocket responses.
 // Duplicated from internal/api to avoid import cycles.
 type WSPaginationMeta struct {
@@ -110,18 +118,19 @@ type WSPaginationMeta struct {
 
 // ServerMessage is sent from server to client
 type ServerMessage struct {
-	Resource   string            `json:"resource"`              // "run", "graphrun", "dashboard", "jobs"
-	ID         string            `json:"id,omitempty"`          // resource ID (empty for dashboard/jobs)
-	Event      string            `json:"event"`                 // "updated", "deleted", "snapshot"
-	Data       interface{}       `json:"data"`                  // payload
-	Pagination *WSPaginationMeta `json:"pagination,omitempty"`  // pagination metadata (for "jobs" resource)
+	Resource   string             `json:"resource"`             // "run", "graphrun", "dashboard", "jobs"
+	ID         string             `json:"id,omitempty"`         // resource ID (empty for dashboard/jobs)
+	Event      string             `json:"event"`                // "updated", "deleted", "snapshot"
+	Data       interface{}        `json:"data"`                 // payload
+	Pagination *WSPaginationMeta  `json:"pagination,omitempty"` // pagination metadata (for "jobs" resource)
+	Stats      *WSJobStatsSummary `json:"stats,omitempty"`      // aggregate job stats (for "jobs" resource)
 }
 
 // ClientMessage is sent from client to server
 type ClientMessage struct {
-	Action   string   `json:"action"`        // "subscribe", "unsubscribe"
-	Resource string   `json:"resource"`      // "run", "graphrun", "dashboard", "jobs"
-	IDs      []string `json:"ids,omitempty"` // specific resource IDs (empty = wildcard)
+	Action   string   `json:"action"`          // "subscribe", "unsubscribe"
+	Resource string   `json:"resource"`        // "run", "graphrun", "dashboard", "jobs"
+	IDs      []string `json:"ids,omitempty"`   // specific resource IDs (empty = wildcard)
 	Page     *int     `json:"page,omitempty"`  // page number for paginated subscriptions (1-based)
 	Limit    *int     `json:"limit,omitempty"` // items per page for paginated subscriptions
 }
