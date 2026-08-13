@@ -23,6 +23,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
+	"github.com/krkn-chaos/krkn-operator/internal/api/jobstats"
 	"github.com/krkn-chaos/krkn-operator/pkg/files"
 )
 
@@ -433,15 +434,17 @@ type UnifiedJobItem struct {
 	GraphRun *GraphRunListItem `json:"graphRun,omitempty"`
 }
 
+func (u UnifiedJobItem) JobType() string            { return u.Type }
+func (u UnifiedJobItem) ScenarioSucceeded() int      { if u.ScenarioRun != nil { return u.ScenarioRun.SuccessfulJobs }; return 0 }
+func (u UnifiedJobItem) ScenarioFailed() int         { if u.ScenarioRun != nil { return u.ScenarioRun.FailedJobs }; return 0 }
+func (u UnifiedJobItem) ScenarioRunning() int        { if u.ScenarioRun != nil { return u.ScenarioRun.RunningJobs }; return 0 }
+func (u UnifiedJobItem) ScenarioTotalTargets() int   { if u.ScenarioRun != nil { return u.ScenarioRun.TotalTargets }; return 0 }
+func (u UnifiedJobItem) GraphTotal() int             { if u.GraphRun != nil { return u.GraphRun.Summary.TotalNodes }; return 0 }
+func (u UnifiedJobItem) GraphCompleted() int         { if u.GraphRun != nil { return u.GraphRun.Summary.CompletedNodes }; return 0 }
+func (u UnifiedJobItem) GraphFailed() int            { if u.GraphRun != nil { return u.GraphRun.Summary.FailedNodes }; return 0 }
+
 // JobStatsSummary contains aggregate job statistics computed across all runs (not just the current page).
-type JobStatsSummary struct {
-	// TotalJobs is the total number of individual jobs/nodes across all runs
-	TotalJobs int `json:"totalJobs"`
-	// SucceededJobs is the number of successfully completed jobs/nodes
-	SucceededJobs int `json:"succeededJobs"`
-	// FailedJobs is the number of failed jobs/nodes
-	FailedJobs int `json:"failedJobs"`
-}
+type JobStatsSummary = jobstats.Summary
 
 // UnifiedJobsResponse represents the response for GET /api/v2/jobs
 type UnifiedJobsResponse struct {

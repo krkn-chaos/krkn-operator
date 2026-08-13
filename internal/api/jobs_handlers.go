@@ -22,6 +22,7 @@ import (
 	"strconv"
 
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
+	"github.com/krkn-chaos/krkn-operator/internal/api/jobstats"
 	kvstore "github.com/krkn-chaos/krkn-operator/pkg/configstore"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -115,28 +116,8 @@ func (h *Handler) ListJobs(w http.ResponseWriter, r *http.Request) {
 }
 
 // ComputeJobStats computes aggregate job statistics from the full unified job list.
-// For scenarioRun items it sums SuccessfulJobs/FailedJobs from ScenarioRunListItem.
-// For graphRun items it sums CompletedNodes/FailedNodes from GraphRunListItem.Summary.
 func ComputeJobStats(jobs []UnifiedJobItem) JobStatsSummary {
-	var stats JobStatsSummary
-	for _, job := range jobs {
-		switch job.Type {
-		case "scenarioRun":
-			if job.ScenarioRun != nil {
-				stats.TotalJobs += job.ScenarioRun.SuccessfulJobs + job.ScenarioRun.FailedJobs + job.ScenarioRun.RunningJobs
-				stats.SucceededJobs += job.ScenarioRun.SuccessfulJobs
-				stats.FailedJobs += job.ScenarioRun.FailedJobs
-			}
-		case "graphRun":
-			if job.GraphRun != nil {
-				s := job.GraphRun.Summary
-				stats.TotalJobs += s.TotalNodes
-				stats.SucceededJobs += s.CompletedNodes
-				stats.FailedJobs += s.FailedNodes
-			}
-		}
-	}
-	return stats
+	return jobstats.Compute(jobs)
 }
 
 // BuildUnifiedJobList merges standalone ScenarioRuns and GraphRuns into a single

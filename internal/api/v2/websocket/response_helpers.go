@@ -6,6 +6,7 @@ import (
 	"time"
 
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
+	"github.com/krkn-chaos/krkn-operator/internal/api/jobstats"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -18,6 +19,15 @@ type WSUnifiedJobItem struct {
 	ScenarioRun *ScenarioRunStatusResponse `json:"scenarioRun,omitempty"`
 	GraphRun    *GraphRunResponse          `json:"graphRun,omitempty"`
 }
+
+func (w WSUnifiedJobItem) JobType() string            { return w.Type }
+func (w WSUnifiedJobItem) ScenarioSucceeded() int      { if w.ScenarioRun != nil { return w.ScenarioRun.SuccessfulJobs }; return 0 }
+func (w WSUnifiedJobItem) ScenarioFailed() int         { if w.ScenarioRun != nil { return w.ScenarioRun.FailedJobs }; return 0 }
+func (w WSUnifiedJobItem) ScenarioRunning() int        { if w.ScenarioRun != nil { return w.ScenarioRun.RunningJobs }; return 0 }
+func (w WSUnifiedJobItem) ScenarioTotalTargets() int   { if w.ScenarioRun != nil { return w.ScenarioRun.TotalTargets }; return 0 }
+func (w WSUnifiedJobItem) GraphTotal() int             { if w.GraphRun != nil { return w.GraphRun.Summary.TotalNodes }; return 0 }
+func (w WSUnifiedJobItem) GraphCompleted() int         { if w.GraphRun != nil { return w.GraphRun.Summary.CompletedNodes }; return 0 }
+func (w WSUnifiedJobItem) GraphFailed() int            { if w.GraphRun != nil { return w.GraphRun.Summary.FailedNodes }; return 0 }
 
 // WSUnifiedJobsSnapshot represents the paginated jobs snapshot sent to WebSocket clients.
 type WSUnifiedJobsSnapshot struct {
@@ -95,25 +105,8 @@ func paginateJobItems(items []WSUnifiedJobItem, page, limit int) ([]WSUnifiedJob
 
 // computeWSJobStats computes aggregate job statistics from the full unified job list.
 func computeWSJobStats(jobs []WSUnifiedJobItem) WSJobStatsSummary {
-	var stats WSJobStatsSummary
-	for _, job := range jobs {
-		switch job.Type {
-		case "scenarioRun":
-			if job.ScenarioRun != nil {
-				stats.TotalJobs += job.ScenarioRun.SuccessfulJobs + job.ScenarioRun.FailedJobs + job.ScenarioRun.RunningJobs
-				stats.SucceededJobs += job.ScenarioRun.SuccessfulJobs
-				stats.FailedJobs += job.ScenarioRun.FailedJobs
-			}
-		case "graphRun":
-			if job.GraphRun != nil {
-				s := job.GraphRun.Summary
-				stats.TotalJobs += s.TotalNodes
-				stats.SucceededJobs += s.CompletedNodes
-				stats.FailedJobs += s.FailedNodes
-			}
-		}
-	}
-	return stats
+	s := jobstats.Compute(jobs)
+	return WSJobStatsSummary(s)
 }
 
 // buildScenarioRunResponse builds the response with sanitized clusterJobs (no ClusterAPIURL).
