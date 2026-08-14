@@ -452,6 +452,7 @@ func (h *Handler) CreateGraphRun(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Validate cloud credential access if specified (graph-level and per-node)
+	req.CloudCredentialRef = strings.TrimSpace(req.CloudCredentialRef)
 	if req.CloudCredentialRef != "" {
 		credSecret, err := h.loadCloudCredentialSecret(ctx, req.CloudCredentialRef)
 		if err != nil {

@@ -1382,6 +1382,7 @@ func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Validate cloud credential access if specified
+	req.CloudCredentialRef = strings.TrimSpace(req.CloudCredentialRef)
 	if req.CloudCredentialRef != "" {
 		credSecret, err := h.loadCloudCredentialSecret(ctx, req.CloudCredentialRef)
 		if err != nil {

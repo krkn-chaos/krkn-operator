@@ -65,23 +65,6 @@ func (h *Handler) CreateCloudCredential(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	exists, err := h.cloudCredentialExists(ctx, req.Name)
-	if err != nil {
-		logger.Error(err, "Failed to check for existing cloud credential", "name", req.Name)
-		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
-			Error:   "internal_error",
-			Message: "Failed to check for existing cloud credential",
-		})
-		return
-	}
-	if exists {
-		writeJSONError(w, http.StatusConflict, ErrorResponse{
-			Error:   "conflict",
-			Message: fmt.Sprintf("A secret named '%s' already exists", req.Name),
-		})
-		return
-	}
-
 	claims := auth.GetClaimsFromContext(ctx)
 	createdBy := ""
 	if claims != nil {
@@ -104,6 +87,13 @@ func (h *Handler) CreateCloudCredential(w http.ResponseWriter, r *http.Request) 
 	}
 
 	if err := h.client.Create(ctx, secret); err != nil {
+		if apierrors.IsAlreadyExists(err) {
+			writeJSONError(w, http.StatusConflict, ErrorResponse{
+				Error:   "conflict",
+				Message: fmt.Sprintf("A secret named '%s' already exists", req.Name),
+			})
+			return
+		}
 		logger.Error(err, "Failed to create cloud credential secret", "name", req.Name)
 		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
 			Error:   "internal_error",
