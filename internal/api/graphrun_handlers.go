@@ -686,11 +686,12 @@ func convertNodeStatusesWithScores(nodeStatuses []krknv1alpha1.NodeStatus, graph
 
 // GraphRunsRouter routes GraphRun HTTP requests to appropriate handlers
 func (h *Handler) GraphRunsRouter(w http.ResponseWriter, r *http.Request) {
-	path := r.URL.Path
+	path := strings.Replace(r.URL.Path, "/api/v2/", "/api/v1/", 1)
 
-	// Normalize v2 paths to v1 for backward-compatible routing
-	// v2 REST endpoints reuse v1 handler logic (same behavior, different path prefix)
-	path = strings.Replace(path, "/api/v2/", "/api/v1/", 1)
+	// Normalize v2 paths to v1 so downstream handlers can parse with v1 prefixes
+	if path != r.URL.Path {
+		r.URL.Path = path
+	}
 
 	// Root endpoint: /api/v1/graphruns (or /api/v2/graphruns normalized)
 	if path == GraphRunsPath {
@@ -707,6 +708,16 @@ func (h *Handler) GraphRunsRouter(w http.ResponseWriter, r *http.Request) {
 
 	// Nested endpoints: /api/v1/graphruns/:name
 	if strings.HasPrefix(path, GraphRunsPath+"/") {
+		// Check for /{graphRunName}/config pattern (GET only - graph run config)
+		if strings.HasSuffix(path, "/config") {
+			if r.Method == http.MethodGet {
+				h.GetGraphRunConfig(w, r)
+			} else {
+				http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			}
+			return
+		}
+
 		switch r.Method {
 		case http.MethodGet:
 			h.GetGraphRun(w, r)
