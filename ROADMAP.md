@@ -1,11 +1,11 @@
 # Krkn-Operator Roadmap
 
 **Updated:** 2026-08-14
-**Cadence:** Release 1 end of August 2026, then 9-week cycles
+**Cadence:** Release 1 on 2026-08-18, then 9-week cycles
 
 ---
 
-## Release 1 — 2026-08-29
+## Release 1 — 2026-08-18
 **Theme: Elasticsearch, Rerun, Workflow Templates**
 
 | Issue | Summary | GitHub |
@@ -27,7 +27,7 @@
 
 ---
 
-## Release 2 — 2026-10-30
+## Release 2 — 2026-10-20
 **Theme: UX Hardening, Observability, Docs**
 
 | Issue | Summary | GitHub |
@@ -51,7 +51,7 @@
 
 ---
 
-## Release 3 — 2027-01-02
+## Release 3 — 2026-12-22
 **Theme: Multi-cluster, Advanced Features, Test Coverage**
 
 | Issue | Summary | GitHub |
@@ -69,7 +69,7 @@
 
 ---
 
-## Release 4 — 2027-03-05
+## Release 4 — 2027-02-23
 **Theme: Scale, Security, Community/Ecosystem**
 
 | Issue | Summary | GitHub |
