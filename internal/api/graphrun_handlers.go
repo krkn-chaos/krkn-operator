@@ -707,6 +707,16 @@ func (h *Handler) GraphRunsRouter(w http.ResponseWriter, r *http.Request) {
 
 	// Nested endpoints: /api/v1/graphruns/:name
 	if strings.HasPrefix(path, GraphRunsPath+"/") {
+		// Check for /{graphRunName}/config pattern (GET only - graph run config)
+		if strings.HasSuffix(path, "/config") {
+			if r.Method == http.MethodGet {
+				h.GetGraphRunConfig(w, r)
+			} else {
+				http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			}
+			return
+		}
+
 		switch r.Method {
 		case http.MethodGet:
 			h.GetGraphRun(w, r)

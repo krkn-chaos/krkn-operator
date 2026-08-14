@@ -2661,6 +2661,16 @@ func (h *Handler) ScenariosRunRouter(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		// Check for /{scenarioRunName}/config pattern (GET only - scenario run config)
+		if strings.HasSuffix(path, "/config") {
+			if r.Method == http.MethodGet {
+				h.GetScenarioRunConfig(w, r)
+			} else {
+				http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			}
+			return
+		}
+
 		// Check for /jobs/{jobID} pattern (GET or DELETE single job)
 		if strings.HasPrefix(path, ScenariosRunJobsPath+"/") {
 			switch r.Method {
