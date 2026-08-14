@@ -46,7 +46,7 @@ func ValidateCreateRequest(req *CreateCloudCredentialRequest) error {
 		return fmt.Errorf("provider is required")
 	}
 	if !ValidProviders[req.Provider] {
-		return fmt.Errorf("provider must be one of: aws, gcp, azure, openstack")
+		return fmt.Errorf("provider must be one of: aws, gcp, azure, openstack, baremetal, vmware, ibmcloud")
 	}
 
 	return validateProviderFields(req.Provider, req.AWSAccessKeyID, req.AWSSecretAccessKey, req.AWSDefaultRegion,
