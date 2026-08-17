@@ -4,7 +4,6 @@
 ![pr-checks](https://github.com/krkn-chaos/krkn-operator/actions/workflows/pr-checks.yml/badge.svg)
 ![coverage](https://krkn-chaos.github.io/krkn-lib-docs/coverage_badge_krkn-operator.svg)
 
-# krkn-operator
 
 **Centralized, multi-cluster chaos engineering for Kubernetes and OpenShift.**
 
