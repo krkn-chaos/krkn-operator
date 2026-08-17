@@ -17,7 +17,6 @@ Krkn Operator is a Kubernetes-native platform built on the [Krkn](https://github
 <img width="2872" height="1848" alt="image" src="https://github.com/user-attachments/assets/19391c24-760e-495e-83ef-1f944bd196be" />
 
 
-📖 **[Documentation](https://krkn-chaos.gateway.scarf.sh/krkn-operator/docs?source=github)**
 
 ## Quick Start
 
@@ -28,7 +27,7 @@ helm install krkn-operator oci://quay.io/krkn-chaos/charts/krkn-operator --versi
   -n krkn-operator-system --create-namespace
 ```
 
-For configuration, usage, compatibility, and advanced installation options, see the **[official documentation](https://krkn-chaos.gateway.scarf.sh/krkn-operator/docs?source=github)**.
+📖 For configuration, usage, compatibility, and advanced installation options, see the official documentation.📖 For configuration, usage, compatibility, and advanced installation options, see the **[official documentation](https://krkn-chaos.gateway.scarf.sh/krkn-operator/docs?source=github)**.
 
 ## Development
 
