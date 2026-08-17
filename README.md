@@ -29,6 +29,11 @@ helm install krkn-operator oci://quay.io/krkn-chaos/charts/krkn-operator --versi
 
 📖 For configuration, usage, compatibility, and advanced installation options, see the official documentation.📖 For configuration, usage, compatibility, and advanced installation options, see the **[official documentation](https://krkn-chaos.gateway.scarf.sh/krkn-operator/docs?source=github)**.
 
+## Ecosystem
+
+- [krkn-operator-console](https://krkn-chaos.gateway.scarf.sh/krkn-operator/console?source=github-main) — Web console and Chaos Studio for Krkn Operator.
+- [krkn-operator-acm](https://krkn-chaos.gateway.scarf.sh/krkn-operator/acm?source=github-main) — Open Cluster Management and Red Hat ACM integration for multi-cluster environments.
+
 ## Development
 
 Interested in contributing or running Krkn Operator from source? See [CONTRIBUTING.md](CONTRIBUTING.md).
