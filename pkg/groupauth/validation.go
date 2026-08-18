@@ -69,7 +69,10 @@ func ValidateScenarioRunAccess(
 	aggregatedPermissions := AggregateClusterPermissions(userGroups)
 
 	// 3. Build clusterName -> apiURL mapping from TargetRequest
-	clusterAPIURLMap := buildClusterAPIURLMap(targetRequest)
+	clusterAPIURLMap, err := buildClusterAPIURLMap(targetRequest)
+	if err != nil {
+		return fmt.Errorf("failed to build cluster API URL map: %w", err)
+	}
 
 	// 4. Validate each target cluster
 	for provider, clusterNames := range targetClusters {
@@ -163,17 +166,22 @@ func FilterClustersByPermission(
 	return filtered, nil
 }
 
-// buildClusterAPIURLMap builds a map from cluster name to API URL
-func buildClusterAPIURLMap(targetRequest *krknv1alpha1.KrknTargetRequest) map[string]string {
+// buildClusterAPIURLMap builds a map from cluster name to API URL.
+// Returns an error if two providers register the same cluster name with different API URLs,
+// which would indicate a cluster name collision that could lead to authorization bypass.
+func buildClusterAPIURLMap(targetRequest *krknv1alpha1.KrknTargetRequest) (map[string]string, error) {
 	result := make(map[string]string)
 
 	for _, targets := range targetRequest.Status.TargetData {
 		for _, cluster := range targets {
+			if existing, ok := result[cluster.ClusterName]; ok && existing != cluster.ClusterAPIURL {
+				return nil, fmt.Errorf("cluster name collision: %q registered by multiple providers with different API URLs (%s vs %s)", cluster.ClusterName, existing, cluster.ClusterAPIURL)
+			}
 			result[cluster.ClusterName] = cluster.ClusterAPIURL
 		}
 	}
 
-	return result
+	return result, nil
 }
 
 // countClusters counts total clusters in targetClusters map

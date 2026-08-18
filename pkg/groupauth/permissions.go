@@ -43,7 +43,7 @@ func GetUserGroups(ctx context.Context, k8sClient client.Client, userID, namespa
 	logger := log.FromContext(ctx).WithName("groupauth.GetUserGroups")
 
 	// Fetch KrknUser by email
-	userName := sanitizeUserID(userID)
+	userName := SanitizeUserIDForResourceName(userID)
 	user := &krknv1alpha1.KrknUser{}
 	if err := k8sClient.Get(ctx, client.ObjectKey{Name: userName, Namespace: namespace}, user); err != nil {
 		return nil, fmt.Errorf("failed to get user %s: %w", userID, err)
@@ -195,13 +195,23 @@ func CountGroupMembers(ctx context.Context, k8sClient client.Client, groupName, 
 	return len(userList.Items), nil
 }
 
-// sanitizeUserID converts an email address to a valid Kubernetes resource name.
-// Replaces @ and . with -, converts to lowercase, and adds prefix.
+// SanitizeUserIDForResourceName converts an email address to a valid Kubernetes resource name.
+// It replaces @ and . with -, converts to lowercase, and adds the "krknuser-" prefix.
+// Use this when constructing a KrknUser resource name for Kubernetes API lookups.
 //
 // Example: "user@example.com" -> "krknuser-user-example-com"
-func sanitizeUserID(email string) string {
-	name := strings.ReplaceAll(email, "@", "-")
-	name = strings.ReplaceAll(name, ".", "-")
-	name = strings.ToLower(name)
-	return fmt.Sprintf("krknuser-%s", name)
+func SanitizeUserIDForResourceName(email string) string {
+	return fmt.Sprintf("krknuser-%s", SanitizeUserIDForLabel(email))
+}
+
+// SanitizeUserIDForLabel converts an email address to a valid Kubernetes label value.
+// It replaces @ and . with -, then converts to lowercase to comply with
+// Kubernetes label value requirements (RFC 1123). No prefix is added.
+// Use this when setting or comparing owner-user labels on Kubernetes resources.
+//
+// Example: "user@example.com" -> "user-example-com"
+func SanitizeUserIDForLabel(email string) string {
+	sanitized := strings.ReplaceAll(email, "@", "-")
+	sanitized = strings.ReplaceAll(sanitized, ".", "-")
+	return strings.ToLower(sanitized)
 }
