@@ -148,40 +148,46 @@ func computeWSJobStats(jobs []WSUnifiedJobItem) WSJobStatsSummary {
 // Used for both lightweight "run" broadcasts and "run" snapshots.
 func buildScenarioRunResponse(run *krknv1alpha1.KrknScenarioRun) ScenarioRunStatusResponse {
 	return ScenarioRunStatusResponse{
-		ScenarioRunName:   run.Name,
-		ScenarioName:      run.Spec.ScenarioName,
-		Phase:             run.Status.Phase,
-		TotalTargets:      run.Status.TotalTargets,
-		SuccessfulJobs:    run.Status.SuccessfulJobs,
-		FailedJobs:        run.Status.FailedJobs,
-		RunningJobs:       run.Status.RunningJobs,
-		ClusterJobs:       sanitizedClusterJobs(run.Status.ClusterJobs),
-		OwnerUserID:       run.Spec.OwnerUserID,
-		RegistryName:      run.Spec.RegistryName,
-		GraphRunName:      run.Labels["krkn.dev/graph-run"],
-		GraphNodeID:       run.Labels["krkn.dev/graph-node"],
-		CustomRunName:     run.Spec.CustomRunName,
-		CreationTimestamp: run.CreationTimestamp.Format(time.RFC3339),
+		ScenarioRunName:        run.Name,
+		ScenarioName:           run.Spec.ScenarioName,
+		Phase:                  run.Status.Phase,
+		TotalTargets:           run.Status.TotalTargets,
+		SuccessfulJobs:         run.Status.SuccessfulJobs,
+		FailedJobs:             run.Status.FailedJobs,
+		RunningJobs:            run.Status.RunningJobs,
+		ClusterJobs:            sanitizedClusterJobs(run.Status.ClusterJobs),
+		OwnerUserID:            run.Spec.OwnerUserID,
+		RegistryName:           run.Spec.RegistryName,
+		GraphRunName:           run.Labels["krkn.dev/graph-run"],
+		GraphNodeID:            run.Labels["krkn.dev/graph-node"],
+		CustomRunName:          run.Spec.CustomRunName,
+		CreationTimestamp:      run.CreationTimestamp.Format(time.RFC3339),
+		ResiliencyScoreEnabled: run.Spec.ResiliencyScoreEnabled,
+		ResiliencyScore:        averageResiliencyScore(run.Status.ResiliencyScores),
+		ResiliencyScores:       convertClusterResiliencyScoresWS(run.Status.ResiliencyScores),
 	}
 }
 
 // buildScenarioRunDetailResponse builds FULL response with sanitized clusterJobs for detail view.
 func buildScenarioRunDetailResponse(run *krknv1alpha1.KrknScenarioRun) ScenarioRunStatusResponse {
 	return ScenarioRunStatusResponse{
-		ScenarioRunName:   run.Name,
-		ScenarioName:      run.Spec.ScenarioName,
-		Phase:             run.Status.Phase,
-		TotalTargets:      run.Status.TotalTargets,
-		SuccessfulJobs:    run.Status.SuccessfulJobs,
-		FailedJobs:        run.Status.FailedJobs,
-		RunningJobs:       run.Status.RunningJobs,
-		ClusterJobs:       sanitizedClusterJobs(run.Status.ClusterJobs),
-		OwnerUserID:       run.Spec.OwnerUserID,
-		RegistryName:      run.Spec.RegistryName,
-		GraphRunName:      run.Labels["krkn.dev/graph-run"],
-		GraphNodeID:       run.Labels["krkn.dev/graph-node"],
-		CustomRunName:     run.Spec.CustomRunName,
-		CreationTimestamp: run.CreationTimestamp.Format(time.RFC3339),
+		ScenarioRunName:        run.Name,
+		ScenarioName:           run.Spec.ScenarioName,
+		Phase:                  run.Status.Phase,
+		TotalTargets:           run.Status.TotalTargets,
+		SuccessfulJobs:         run.Status.SuccessfulJobs,
+		FailedJobs:             run.Status.FailedJobs,
+		RunningJobs:            run.Status.RunningJobs,
+		ClusterJobs:            sanitizedClusterJobs(run.Status.ClusterJobs),
+		OwnerUserID:            run.Spec.OwnerUserID,
+		RegistryName:           run.Spec.RegistryName,
+		GraphRunName:           run.Labels["krkn.dev/graph-run"],
+		GraphNodeID:            run.Labels["krkn.dev/graph-node"],
+		CustomRunName:          run.Spec.CustomRunName,
+		CreationTimestamp:      run.CreationTimestamp.Format(time.RFC3339),
+		ResiliencyScoreEnabled: run.Spec.ResiliencyScoreEnabled,
+		ResiliencyScore:        averageResiliencyScore(run.Status.ResiliencyScores),
+		ResiliencyScores:       convertClusterResiliencyScoresWS(run.Status.ResiliencyScores),
 	}
 }
 
@@ -217,6 +223,32 @@ func convertClusterJobs(jobs []krknv1alpha1.ClusterJobStatus) []ClusterJobRespon
 			MaxRetries:      job.MaxRetries,
 			CancelRequested: job.CancelRequested,
 			FailureReason:   job.FailureReason,
+		}
+	}
+	return result
+}
+
+func averageResiliencyScore(scores []krknv1alpha1.ClusterResiliencyScore) *float64 {
+	if len(scores) == 0 {
+		return nil
+	}
+	var sum float64
+	for _, s := range scores {
+		sum += s.Score
+	}
+	avg := sum / float64(len(scores))
+	return &avg
+}
+
+func convertClusterResiliencyScoresWS(scores []krknv1alpha1.ClusterResiliencyScore) []ClusterResiliencyScoreResponse {
+	if scores == nil {
+		return nil
+	}
+	result := make([]ClusterResiliencyScoreResponse, len(scores))
+	for i, s := range scores {
+		result[i] = ClusterResiliencyScoreResponse{
+			ClusterName: s.ClusterName,
+			Score:       s.Score,
 		}
 	}
 	return result

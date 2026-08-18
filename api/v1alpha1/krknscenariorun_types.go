@@ -163,6 +163,17 @@ type KrknScenarioRunSpec struct {
 	// +optional
 	// +kubebuilder:default="10s"
 	RetryDelay string `json:"retryDelay,omitempty"`
+
+	// ResiliencyScoreEnabled enables resiliency score calculation for this scenario run.
+	// When enabled:
+	// 1. RESILIENCY_SCORE=true environment variable is set in all scenario pods
+	// 2. Upon completion, the controller parses pod logs for KRKN_RESILIENCY_REPORT_JSON markers
+	//    and populates Status.ResiliencyScores
+	//
+	// For standalone runs (not part of a GraphRun), this field controls scoring directly.
+	// For GraphRun-created ScenarioRuns, the GraphRun reconciler handles scoring regardless of this field.
+	// +optional
+	ResiliencyScoreEnabled bool `json:"resiliencyScoreEnabled,omitempty"`
 }
 
 // KrknScenarioRunStatus defines the observed state of KrknScenarioRun
@@ -190,7 +201,8 @@ type KrknScenarioRunStatus struct {
 	// ResiliencyScores contains per-cluster resiliency scores for this scenario run.
 	// Each entry represents the score calculated from the pod logs of a specific cluster.
 	// When a scenario runs on multiple clusters, this array will contain one entry per cluster.
-	// Populated only when the parent KrknGraphRun has Spec.ResiliencyScoreEnabled set to true.
+	// Populated when Spec.ResiliencyScoreEnabled is true (standalone runs) or when the
+	// parent KrknGraphRun has Spec.ResiliencyScoreEnabled set to true (graph runs).
 	// +optional
 	ResiliencyScores []ClusterResiliencyScore `json:"resiliencyScores,omitempty"`
 

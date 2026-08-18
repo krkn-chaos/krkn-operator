@@ -165,6 +165,10 @@ type ScenarioRunRequest struct {
 	// credentials (ES_PASSWORD, and any ES_* vars not already in Environment) are
 	// injected server-side so the password is never transmitted by the client.
 	ElasticsearchConfigName string `json:"elasticsearchConfigName,omitempty"`
+	// ResiliencyScoreEnabled enables resiliency score calculation for this scenario run.
+	// When true, RESILIENCY_SCORE=true is set in scenario pods and the controller
+	// calculates scores from pod logs upon completion.
+	ResiliencyScoreEnabled bool `json:"resiliencyScoreEnabled,omitempty"`
 	// Private registry configuration (optional)
 	ScenariosRequest
 }
@@ -333,6 +337,8 @@ type ScenarioRunStatusResponse struct {
 	GraphNodeID string `json:"graphNodeId,omitempty"`
 	// CustomRunName is the user-provided label for this run
 	CustomRunName string `json:"customRunName,omitempty"`
+	// ResiliencyScoreEnabled indicates whether resiliency scoring is enabled for this run
+	ResiliencyScoreEnabled bool `json:"resiliencyScoreEnabled,omitempty"`
 	// ResiliencyScore is the individual resiliency score for this scenario run node
 	ResiliencyScore *float64 `json:"resiliencyScore,omitempty"`
 	// ResiliencyScores contains per-cluster resiliency scores
@@ -395,6 +401,8 @@ type ScenarioRunListItem struct {
 	GraphNodeID string `json:"graphNodeId,omitempty"`
 	// CustomRunName is the user-provided label for this run
 	CustomRunName string `json:"customRunName,omitempty"`
+	// ResiliencyScoreEnabled indicates whether resiliency scoring is enabled for this run
+	ResiliencyScoreEnabled bool `json:"resiliencyScoreEnabled,omitempty"`
 	// ResiliencyScore is the individual resiliency score for this scenario run node
 	ResiliencyScore *float64 `json:"resiliencyScore,omitempty"`
 	// ResiliencyScores contains per-cluster resiliency scores
