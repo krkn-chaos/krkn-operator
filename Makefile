@@ -107,9 +107,11 @@ help: ## Display this help.
 
 ##@ Development
 
+# the helm chart ships its own copy of the CRDs, generate it rather than maintaining it by hand
 .PHONY: manifests
 manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole and CustomResourceDefinition objects.
 	$(CONTROLLER_GEN) rbac:roleName=manager-role crd:allowDangerousTypes=true webhook paths="./..." output:crd:artifacts:config=config/crd/bases
+	cp config/crd/bases/*.yaml charts/krkn-operator/crds/
 
 .PHONY: generate
 generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.
