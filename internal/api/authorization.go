@@ -125,7 +125,10 @@ func (h *Handler) checkScenarioRunAccessWithAction(
 
 	// Defensive check - should never happen with RequireAuth middleware
 	if claims == nil {
-		http.Error(w, `{"error":"unauthorized","message":"No authentication claims found"}`, http.StatusUnauthorized)
+		writeJSONError(w, http.StatusUnauthorized, ErrorResponse{
+			Error:   "unauthorized",
+			Message: "No authentication claims found",
+		})
 		return false
 	}
 
@@ -136,7 +139,10 @@ func (h *Handler) checkScenarioRunAccessWithAction(
 
 	// Reject runs without jobs (defensive - should not happen for new runs)
 	if len(scenarioRun.Status.ClusterJobs) == 0 {
-		http.Error(w, `{"error":"forbidden","message":"Access denied. This scenario run has no jobs"}`, http.StatusForbidden)
+		writeJSONError(w, http.StatusForbidden, ErrorResponse{
+			Error:   "forbidden",
+			Message: "Access denied. This scenario run has no jobs",
+		})
 		return false
 	}
 
@@ -152,13 +158,18 @@ func (h *Handler) checkScenarioRunAccessWithAction(
 		log.FromContext(ctx).Error(err, "Failed to check scenario run access",
 			"userID", claims.UserID,
 			"action", requiredAction)
-		http.Error(w, `{"error":"internal_error","message":"Failed to validate access"}`, http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+			Error:   "internal_error",
+			Message: "Failed to validate access",
+		})
 		return false
 	}
 
 	if !hasAccess {
-		errorMsg := fmt.Sprintf(`{"error":"forbidden","message":"Access denied. You do not have permission to %s this scenario run"}`, actionName)
-		http.Error(w, errorMsg, http.StatusForbidden)
+		writeJSONError(w, http.StatusForbidden, ErrorResponse{
+			Error:   "forbidden",
+			Message: fmt.Sprintf("Access denied. You do not have permission to %s this scenario run", actionName),
+		})
 		return false
 	}
 
@@ -351,7 +362,10 @@ func (h *Handler) checkJobAccess(
 
 	// Defensive check
 	if claims == nil {
-		http.Error(w, `{"error":"unauthorized","message":"No authentication claims found"}`, http.StatusUnauthorized)
+		writeJSONError(w, http.StatusUnauthorized, ErrorResponse{
+			Error:   "unauthorized",
+			Message: "No authentication claims found",
+		})
 		return false
 	}
 
@@ -362,7 +376,10 @@ func (h *Handler) checkJobAccess(
 
 	// Check if job has ClusterAPIURL
 	if job.ClusterAPIURL == "" {
-		http.Error(w, `{"error":"forbidden","message":"Access denied. Job has no cluster API URL"}`, http.StatusForbidden)
+		writeJSONError(w, http.StatusForbidden, ErrorResponse{
+			Error:   "forbidden",
+			Message: "Access denied. Job has no cluster API URL",
+		})
 		return false
 	}
 
@@ -381,13 +398,18 @@ func (h *Handler) checkJobAccess(
 			"userID", claims.UserID,
 			"jobID", job.JobID,
 			"action", requiredAction)
-		http.Error(w, `{"error":"internal_error","message":"Failed to validate access"}`, http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+			Error:   "internal_error",
+			Message: "Failed to validate access",
+		})
 		return false
 	}
 
 	if !hasAccess {
-		errorMsg := fmt.Sprintf(`{"error":"forbidden","message":"Access denied. You do not have permission to %s this job"}`, actionName)
-		http.Error(w, errorMsg, http.StatusForbidden)
+		writeJSONError(w, http.StatusForbidden, ErrorResponse{
+			Error:   "forbidden",
+			Message: fmt.Sprintf("Access denied. You do not have permission to %s this job", actionName),
+		})
 		return false
 	}
 
