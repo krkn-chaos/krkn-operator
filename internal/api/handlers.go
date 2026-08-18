@@ -1094,9 +1094,10 @@ func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
 	// Parse request body
 	var req ScenarioRunRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		logger.Error(err, "Failed to decode scenario run request body")
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
 			Error:   "bad_request",
-			Message: "Invalid request body: " + err.Error(),
+			Message: "Invalid request body",
 		})
 		return
 	}
@@ -2000,7 +2001,7 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 			_ = conn.WriteMessage(websocket.TextMessage, []byte("ERROR: Pod no longer exists — logs may have been cleaned up")) // Best-effort error reporting
 		} else {
 			logger.Error(err, "Failed to get pod", "jobID", jobID, "podName", targetJob.PodName)
-			_ = conn.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("ERROR: Failed to get pod: %s", err.Error()))) // Best-effort error reporting
+			_ = conn.WriteMessage(websocket.TextMessage, []byte("ERROR: Failed to get pod")) // Best-effort error reporting
 		}
 		return
 	}
@@ -2043,7 +2044,7 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 			"jobID", jobID,
 			"podName", pod.Name,
 			"namespace", h.namespace)
-		_ = conn.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("ERROR: Failed to open log stream: %s", err.Error()))) // Best-effort error reporting
+		_ = conn.WriteMessage(websocket.TextMessage, []byte("ERROR: Failed to open log stream")) // Best-effort error reporting
 		return
 	}
 	defer stream.Close()
@@ -2083,7 +2084,7 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 			"jobID", jobID,
 			"podName", pod.Name,
 			"linesStreamed", lineCount)
-		_ = conn.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("ERROR: Log stream error: %s", err.Error()))) // Best-effort error reporting
+		_ = conn.WriteMessage(websocket.TextMessage, []byte("ERROR: Log stream error")) // Best-effort error reporting
 		return
 	}
 
