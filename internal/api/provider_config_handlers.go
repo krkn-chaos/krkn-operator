@@ -140,7 +140,7 @@ func (h *Handler) UpdateProviderConfigValues(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	logger.Info("📥 Received provider config update request",
+	logger.Info("Received provider config update request",
 		"uuid", uuid,
 		"provider_name", req.ProviderName,
 		"values_count", len(req.Values),
@@ -207,7 +207,7 @@ func (h *Handler) UpdateProviderConfigValues(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	logger.Info("📋 Provider config data found",
+	logger.Info("Provider config data found",
 		"provider_name", req.ProviderName,
 		"configmap_name", providerData.ConfigMap,
 		"namespace", providerData.Namespace,
@@ -215,16 +215,16 @@ func (h *Handler) UpdateProviderConfigValues(w http.ResponseWriter, r *http.Requ
 
 	// Validate all values against schema
 	var updatedFields []string
-	logger.V(1).Info("🔍 Starting validation of values against schema",
+	logger.V(1).Info("Starting validation of values against schema",
 		"schema_json", providerData.ConfigSchema)
 
 	for key, value := range req.Values {
-		logger.V(1).Info("🔍 Validating field",
+		logger.V(1).Info("Validating field",
 			"key", key,
 			"value", value)
 
 		if err := ValidateValueAgainstSchema(key, value, providerData.ConfigSchema); err != nil {
-			logger.Error(err, "❌ Validation failed",
+			logger.Error(err, "Validation failed",
 				"key", key,
 				"value", value,
 				"schema", providerData.ConfigSchema)
@@ -244,7 +244,7 @@ func (h *Handler) UpdateProviderConfigValues(w http.ResponseWriter, r *http.Requ
 			})
 			return
 		}
-		logger.V(1).Info("✅ Field validated successfully", "key", key)
+		logger.V(1).Info("Field validated successfully", "key", key)
 		updatedFields = append(updatedFields, key)
 	}
 
@@ -323,7 +323,7 @@ func (h *Handler) UpdateProviderConfigValues(w http.ResponseWriter, r *http.Requ
 		// Don't fail the request, just log the error
 		// The ConfigMap was updated successfully
 	} else {
-		logger.Info("✅ Deleted KrknOperatorTargetProviderConfig after successful ConfigMap update",
+		logger.Info("Deleted KrknOperatorTargetProviderConfig after successful ConfigMap update",
 			"uuid", uuid)
 	}
 

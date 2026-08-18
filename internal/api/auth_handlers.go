@@ -486,7 +486,7 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get token generator from SecretManager
-	tokenGen, err := h.getTokenGenerator(ctx)
+	tokenGen, err := h.getTokenGenerator()
 	if err != nil {
 		logger.Error(err, "Failed to get token generator")
 		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{

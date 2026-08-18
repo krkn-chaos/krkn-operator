@@ -293,12 +293,12 @@ func (s *Server) Start(ctx context.Context) error {
 			return ctx.Err()
 
 		case <-timeout:
-			logger.Error(nil, "❌ Timeout waiting for JWT secret to be ready")
+			logger.Error(nil, "Timeout waiting for JWT secret to be ready")
 			return fmt.Errorf("timeout waiting for JWT secret to be ready after 2 minutes")
 
 		case <-ticker.C:
 			if s.secretManager.IsReady() {
-				logger.Info("✅ JWT secret ready, starting HTTP server", "addr", s.server.Addr)
+				logger.Info("JWT secret ready, starting HTTP server", "addr", s.server.Addr)
 				goto startServer
 			}
 			logger.V(1).Info("Waiting for JWT secret to be ready...")
@@ -313,7 +313,7 @@ startServer:
 		}
 	}()
 
-	logger.Info("🚀 REST API server started and accepting connections", "addr", s.server.Addr)
+	logger.Info("REST API server started and accepting connections", "addr", s.server.Addr)
 
 	select {
 	case err := <-errChan:
