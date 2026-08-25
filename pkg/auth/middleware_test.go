@@ -410,172 +410,92 @@ func TestIsAdminFromContext_NoAuth(t *testing.T) {
 	}
 }
 
-func TestRequireAuth_InactiveUser(t *testing.T) {
-	tg := NewTokenGenerator(
-		[]byte("test-secret-key-at-least-32-bytes-long"),
-		24*time.Hour,
-		"krkn-operator",
-	)
-	middleware := NewMiddleware(tg)
+// TestRequireAuth_UserStatus exercises the user active-status branch of
+// RequireAuth. All cases share the same setup (valid token, wrap handler, issue
+// request) and differ only by the configured status checker and the expected
+// outcome, so they are expressed as a single table-driven test.
+func TestRequireAuth_UserStatus(t *testing.T) {
+	const userID = "[email protected]"
 
-	// Set up a status checker that marks our user as inactive
-	checker := &mockUserStatusChecker{
-		activeUsers: map[string]bool{
-			"[email protected]": false,
+	tests := []struct {
+		name           string
+		checker        UserStatusChecker // nil means no checker configured
+		expectedStatus int
+		expectCalled   bool
+	}{
+		{
+			name: "inactive user - rejected",
+			checker: &mockUserStatusChecker{
+				activeUsers: map[string]bool{userID: false},
+				errUsers:    make(map[string]error),
+			},
+			expectedStatus: http.StatusUnauthorized,
+			expectCalled:   false,
 		},
-		errUsers: make(map[string]error),
-	}
-	middleware.SetUserStatusChecker(checker)
-
-	token, err := tg.GenerateToken("[email protected]", "user", "Inactive", "User", "Org")
-	if err != nil {
-		t.Fatalf("Failed to generate token: %v", err)
-	}
-
-	handlerCalled := false
-	testHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		handlerCalled = true
-	})
-
-	handler := middleware.RequireAuth(testHandler)
-
-	req := httptest.NewRequest("GET", "/test", nil)
-	req.Header.Set("Authorization", "Bearer "+token)
-	w := httptest.NewRecorder()
-
-	handler.ServeHTTP(w, req)
-
-	if w.Code != http.StatusUnauthorized {
-		t.Errorf("Expected status %d, got %d", http.StatusUnauthorized, w.Code)
-	}
-	if handlerCalled {
-		t.Error("Handler should not be called for inactive user")
-	}
-}
-
-func TestRequireAuth_ActiveUser(t *testing.T) {
-	tg := NewTokenGenerator(
-		[]byte("test-secret-key-at-least-32-bytes-long"),
-		24*time.Hour,
-		"krkn-operator",
-	)
-	middleware := NewMiddleware(tg)
-
-	// Set up a status checker that marks our user as active
-	checker := &mockUserStatusChecker{
-		activeUsers: map[string]bool{
-			"[email protected]": true,
+		{
+			name: "active user - allowed",
+			checker: &mockUserStatusChecker{
+				activeUsers: map[string]bool{userID: true},
+				errUsers:    make(map[string]error),
+			},
+			expectedStatus: http.StatusOK,
+			expectCalled:   true,
 		},
-		errUsers: make(map[string]error),
-	}
-	middleware.SetUserStatusChecker(checker)
-
-	token, err := tg.GenerateToken("[email protected]", "user", "Active", "User", "Org")
-	if err != nil {
-		t.Fatalf("Failed to generate token: %v", err)
-	}
-
-	handlerCalled := false
-	testHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		handlerCalled = true
-		w.WriteHeader(http.StatusOK)
-	})
-
-	handler := middleware.RequireAuth(testHandler)
-
-	req := httptest.NewRequest("GET", "/test", nil)
-	req.Header.Set("Authorization", "Bearer "+token)
-	w := httptest.NewRecorder()
-
-	handler.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Errorf("Expected status %d, got %d", http.StatusOK, w.Code)
-	}
-	if !handlerCalled {
-		t.Error("Handler should be called for active user")
-	}
-}
-
-func TestRequireAuth_UserStatusCheckError(t *testing.T) {
-	tg := NewTokenGenerator(
-		[]byte("test-secret-key-at-least-32-bytes-long"),
-		24*time.Hour,
-		"krkn-operator",
-	)
-	middleware := NewMiddleware(tg)
-
-	// Set up a status checker that returns an error
-	checker := &mockUserStatusChecker{
-		activeUsers: make(map[string]bool),
-		errUsers: map[string]error{
-			"[email protected]": fmt.Errorf("k8s API unavailable"),
+		{
+			name: "checker error - fails closed",
+			checker: &mockUserStatusChecker{
+				activeUsers: make(map[string]bool),
+				errUsers:    map[string]error{userID: fmt.Errorf("k8s API unavailable")},
+			},
+			expectedStatus: http.StatusInternalServerError,
+			expectCalled:   false,
+		},
+		{
+			name:           "no checker configured - backward compatible passthrough",
+			checker:        nil,
+			expectedStatus: http.StatusOK,
+			expectCalled:   true,
 		},
 	}
-	middleware.SetUserStatusChecker(checker)
 
-	token, err := tg.GenerateToken("[email protected]", "user", "Error", "User", "Org")
-	if err != nil {
-		t.Fatalf("Failed to generate token: %v", err)
-	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tg := NewTokenGenerator(
+				[]byte("test-secret-key-at-least-32-bytes-long"),
+				24*time.Hour,
+				"krkn-operator",
+			)
+			middleware := NewMiddleware(tg)
+			if tt.checker != nil {
+				middleware.SetUserStatusChecker(tt.checker)
+			}
 
-	handlerCalled := false
-	testHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		handlerCalled = true
-	})
+			token, err := tg.GenerateToken(userID, "user", "Test", "User", "Org")
+			if err != nil {
+				t.Fatalf("Failed to generate token: %v", err)
+			}
 
-	handler := middleware.RequireAuth(testHandler)
+			handlerCalled := false
+			testHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				handlerCalled = true
+				w.WriteHeader(http.StatusOK)
+			})
 
-	req := httptest.NewRequest("GET", "/test", nil)
-	req.Header.Set("Authorization", "Bearer "+token)
-	w := httptest.NewRecorder()
+			handler := middleware.RequireAuth(testHandler)
 
-	handler.ServeHTTP(w, req)
+			req := httptest.NewRequest("GET", "/test", nil)
+			req.Header.Set("Authorization", "Bearer "+token)
+			w := httptest.NewRecorder()
 
-	// Should fail closed (500 Internal Server Error)
-	if w.Code != http.StatusInternalServerError {
-		t.Errorf("Expected status %d, got %d", http.StatusInternalServerError, w.Code)
-	}
-	if handlerCalled {
-		t.Error("Handler should not be called when status check fails")
-	}
-}
+			handler.ServeHTTP(w, req)
 
-func TestRequireAuth_NoStatusChecker(t *testing.T) {
-	// When no status checker is set, the middleware should allow requests
-	// (backward compatible behavior)
-	tg := NewTokenGenerator(
-		[]byte("test-secret-key-at-least-32-bytes-long"),
-		24*time.Hour,
-		"krkn-operator",
-	)
-	middleware := NewMiddleware(tg)
-	// Deliberately NOT setting a user status checker
-
-	token, err := tg.GenerateToken("[email protected]", "user", "Test", "User", "Org")
-	if err != nil {
-		t.Fatalf("Failed to generate token: %v", err)
-	}
-
-	handlerCalled := false
-	testHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		handlerCalled = true
-		w.WriteHeader(http.StatusOK)
-	})
-
-	handler := middleware.RequireAuth(testHandler)
-
-	req := httptest.NewRequest("GET", "/test", nil)
-	req.Header.Set("Authorization", "Bearer "+token)
-	w := httptest.NewRecorder()
-
-	handler.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Errorf("Expected status %d, got %d", http.StatusOK, w.Code)
-	}
-	if !handlerCalled {
-		t.Error("Handler should be called when no status checker is configured")
+			if w.Code != tt.expectedStatus {
+				t.Errorf("Expected status %d, got %d", tt.expectedStatus, w.Code)
+			}
+			if handlerCalled != tt.expectCalled {
+				t.Errorf("Expected handler called=%v, got %v", tt.expectCalled, handlerCalled)
+			}
+		})
 	}
 }
 
@@ -656,6 +576,74 @@ func TestCachedUserStatusChecker_Invalidation(t *testing.T) {
 	active, _ = cached.IsUserActive(ctx, "[email protected]")
 	if active {
 		t.Error("Expected user to be inactive after cache invalidation")
+	}
+}
+
+func TestNewCachedUserStatusChecker_NilCheckerPanics(t *testing.T) {
+	defer func() {
+		if r := recover(); r == nil {
+			t.Error("Expected panic when checker is nil, got none")
+		}
+	}()
+	_ = NewCachedUserStatusChecker(nil, time.Minute)
+}
+
+func TestNewCachedUserStatusChecker_NonPositiveTTLDefaults(t *testing.T) {
+	underlying := &mockUserStatusChecker{
+		activeUsers: map[string]bool{"[email protected]": true},
+		errUsers:    make(map[string]error),
+	}
+
+	for _, ttl := range []time.Duration{0, -5 * time.Second} {
+		cached := NewCachedUserStatusChecker(underlying, ttl)
+		if cached.ttl != defaultUserStatusCacheTTL {
+			t.Errorf("ttl=%v: expected default %v, got %v", ttl, defaultUserStatusCacheTTL, cached.ttl)
+		}
+	}
+}
+
+// TestCachedUserStatusChecker_EvictsExpiredEntries verifies that entries whose
+// TTL has elapsed do not accumulate in the cache indefinitely: an unrelated
+// lookup after expiry sweeps stale records so memory stays bounded.
+func TestCachedUserStatusChecker_EvictsExpiredEntries(t *testing.T) {
+	const (
+		userA = "user-a"
+		userB = "user-b"
+	)
+	underlying := &mockUserStatusChecker{
+		activeUsers: map[string]bool{
+			userA: true,
+			userB: true,
+		},
+		errUsers: make(map[string]error),
+	}
+
+	// Very short TTL so entries expire almost immediately.
+	cached := NewCachedUserStatusChecker(underlying, time.Millisecond)
+	ctx := context.Background()
+
+	// Populate an entry, then let it expire.
+	if _, err := cached.IsUserActive(ctx, userA); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	time.Sleep(5 * time.Millisecond)
+
+	// A lookup for a different user triggers the opportunistic sweep of expired
+	// entries during the write path.
+	if _, err := cached.IsUserActive(ctx, userB); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	cached.mu.RLock()
+	_, aStillCached := cached.cache[userA]
+	size := len(cached.cache)
+	cached.mu.RUnlock()
+
+	if aStillCached {
+		t.Error("expected expired entry for userA to be evicted")
+	}
+	if size != 1 {
+		t.Errorf("expected cache to hold only the fresh entry, got %d entries", size)
 	}
 }
 

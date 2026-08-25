@@ -18,48 +18,14 @@ package websocket
 
 import (
 	"net/http"
-	"net/url"
 
-	"sigs.k8s.io/controller-runtime/pkg/log"
+	"github.com/krkn-chaos/krkn-operator/pkg/wsorigin"
 )
 
-// checkWebSocketOriginV2 validates the Origin header for WebSocket upgrade requests.
-// It applies a safe default policy:
-//   - Requests without an Origin header are allowed (non-browser clients like CLI tools).
-//   - Same-origin requests are allowed (Origin host matches request Host).
-//   - Cross-origin requests are rejected.
-//
-// This prevents cross-site WebSocket hijacking (CSWSH) attacks where a malicious
-// web page attempts to establish a WebSocket connection using the victim's credentials.
+// checkWebSocketOriginV2 validates the Origin header for v2 WebSocket upgrade
+// requests. It delegates to the shared wsorigin.IsSameOrigin policy so v1 and
+// v2 enforce identical, scheme-aware same-origin checks and prevent cross-site
+// WebSocket hijacking (CSWSH) attacks.
 func checkWebSocketOriginV2(r *http.Request) bool {
-	origin := r.Header.Get("Origin")
-	if origin == "" {
-		// Non-browser clients (CLI, testing tools) don't send Origin
-		return true
-	}
-
-	// Parse the origin URL to extract the host
-	originURL, err := url.Parse(origin)
-	if err != nil {
-		logger := log.Log.WithName("websocket-v2-origin")
-		logger.Info("Rejected WebSocket connection: malformed Origin header",
-			"origin", origin,
-			"client_ip", r.RemoteAddr,
-		)
-		return false
-	}
-
-	// Allow same-origin requests
-	host := r.Host
-	if originURL.Host == host {
-		return true
-	}
-
-	logger := log.Log.WithName("websocket-v2-origin")
-	logger.Info("Rejected cross-origin WebSocket connection",
-		"origin", origin,
-		"host", host,
-		"client_ip", r.RemoteAddr,
-	)
-	return false
+	return wsorigin.IsSameOrigin(r)
 }

@@ -66,6 +66,10 @@ type userStatusCacheEntry struct {
 	expires time.Time
 }
 
+// defaultUserStatusCacheTTL is used when a non-positive TTL is supplied to
+// NewCachedUserStatusChecker, ensuring the cache always has sane semantics.
+const defaultUserStatusCacheTTL = 1 * time.Minute
+
 // CachedUserStatusChecker wraps a UserStatusChecker with a TTL cache to avoid
 // looking up user status on every authenticated request.
 type CachedUserStatusChecker struct {
@@ -78,11 +82,26 @@ type CachedUserStatusChecker struct {
 // NewCachedUserStatusChecker creates a new cached user status checker.
 //
 // Parameters:
-//   - checker: the underlying checker that performs the actual lookup
-//   - ttl: how long to cache each result (e.g., 1 minute)
+//   - checker: the underlying checker that performs the actual lookup. Must not
+//     be nil; passing nil panics because it is an unrecoverable programmer error
+//     (every cache miss would otherwise panic at request time).
+//   - ttl: how long to cache each result (e.g., 1 minute). Values <= 0 are
+//     replaced with defaultUserStatusCacheTTL so the cache never caches forever
+//     or degrades to caching nothing unexpectedly.
 //
 // Returns a CachedUserStatusChecker instance.
 func NewCachedUserStatusChecker(checker UserStatusChecker, ttl time.Duration) *CachedUserStatusChecker {
+	if checker == nil {
+		panic("auth: NewCachedUserStatusChecker requires a non-nil checker")
+	}
+	if ttl <= 0 {
+		log.Log.WithName("user-status-cache").Info(
+			"Non-positive TTL supplied; falling back to default",
+			"suppliedTTL", ttl,
+			"defaultTTL", defaultUserStatusCacheTTL,
+		)
+		ttl = defaultUserStatusCacheTTL
+	}
 	return &CachedUserStatusChecker{
 		checker: checker,
 		cache:   make(map[string]userStatusCacheEntry),
@@ -91,29 +110,57 @@ func NewCachedUserStatusChecker(checker UserStatusChecker, ttl time.Duration) *C
 }
 
 // IsUserActive checks the cache first, then falls back to the underlying checker.
+// Expired entries are evicted on access so memory does not grow with the number
+// of unique userIDs ever seen — the cache is bounded to roughly the set of users
+// active within the TTL window.
 func (c *CachedUserStatusChecker) IsUserActive(ctx context.Context, userID string) (bool, error) {
+	now := time.Now()
+
 	c.mu.RLock()
 	entry, exists := c.cache[userID]
 	c.mu.RUnlock()
 
-	if exists && time.Now().Before(entry.expires) {
+	if exists && now.Before(entry.expires) {
 		return entry.active, nil
 	}
 
 	// Cache miss or expired -- look up the user
 	active, err := c.checker.IsUserActive(ctx, userID)
 	if err != nil {
+		// Drop any stale entry so a failing lookup does not leave an expired
+		// record lingering in the map indefinitely.
+		if exists {
+			c.mu.Lock()
+			if e, ok := c.cache[userID]; ok && !e.expires.After(now) {
+				delete(c.cache, userID)
+			}
+			c.mu.Unlock()
+		}
 		return false, err
 	}
 
 	c.mu.Lock()
+	// Opportunistically sweep other expired entries while holding the write
+	// lock. This reclaims records for users no longer making requests, keeping
+	// the cache from growing without bound.
+	c.evictExpiredLocked(now)
 	c.cache[userID] = userStatusCacheEntry{
 		active:  active,
-		expires: time.Now().Add(c.ttl),
+		expires: now.Add(c.ttl),
 	}
 	c.mu.Unlock()
 
 	return active, nil
+}
+
+// evictExpiredLocked removes all entries whose TTL has elapsed relative to now.
+// The caller must hold c.mu for writing.
+func (c *CachedUserStatusChecker) evictExpiredLocked(now time.Time) {
+	for id, entry := range c.cache {
+		if !entry.expires.After(now) {
+			delete(c.cache, id)
+		}
+	}
 }
 
 // InvalidateUser removes a user from the cache, forcing a fresh lookup on the next request.

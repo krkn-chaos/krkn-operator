@@ -18,6 +18,7 @@ package api
 
 import (
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -140,10 +141,17 @@ func TestIPRateLimiter_CleanupPreservesFresh(t *testing.T) {
 }
 
 func TestExtractClientIP(t *testing.T) {
+	// A proxy range trusted to set forwarding headers in the relevant cases.
+	trustedProxy, invalid := parseTrustedProxyCIDRs("192.168.0.0/16")
+	if len(invalid) != 0 {
+		t.Fatalf("unexpected invalid CIDRs: %v", invalid)
+	}
+
 	tests := []struct {
 		name       string
 		headers    map[string]string
 		remoteAddr string
+		trusted    []*net.IPNet
 		expectedIP string
 	}{
 		{
@@ -157,31 +165,62 @@ func TestExtractClientIP(t *testing.T) {
 			expectedIP: "192.168.1.1",
 		},
 		{
-			name:       "from X-Forwarded-For single IP",
+			name:       "forwarding headers ignored when no trusted proxies configured",
 			headers:    map[string]string{"X-Forwarded-For": "10.0.0.1"},
 			remoteAddr: "192.168.1.1:12345",
+			expectedIP: "192.168.1.1", // spoofable header is ignored, RemoteAddr wins
+		},
+		{
+			name:       "forwarding headers ignored when peer is not trusted",
+			headers:    map[string]string{"X-Forwarded-For": "10.0.0.1"},
+			remoteAddr: "203.0.113.9:12345", // not in trusted range
+			trusted:    trustedProxy,
+			expectedIP: "203.0.113.9",
+		},
+		{
+			name:       "X-Forwarded-For honored from trusted proxy",
+			headers:    map[string]string{"X-Forwarded-For": "10.0.0.1"},
+			remoteAddr: "192.168.1.1:12345",
+			trusted:    trustedProxy,
 			expectedIP: "10.0.0.1",
 		},
 		{
-			name:       "from X-Forwarded-For multiple IPs",
+			name:       "X-Forwarded-For multiple IPs uses leftmost from trusted proxy",
 			headers:    map[string]string{"X-Forwarded-For": "10.0.0.1, 10.0.0.2, 10.0.0.3"},
 			remoteAddr: "192.168.1.1:12345",
+			trusted:    trustedProxy,
 			expectedIP: "10.0.0.1",
 		},
 		{
-			name:       "from X-Real-IP",
+			name:       "X-Real-IP honored from trusted proxy",
 			headers:    map[string]string{"X-Real-IP": "172.16.0.1"},
 			remoteAddr: "192.168.1.1:12345",
+			trusted:    trustedProxy,
 			expectedIP: "172.16.0.1",
 		},
 		{
-			name: "X-Forwarded-For takes priority over X-Real-IP",
+			name: "X-Forwarded-For takes priority over X-Real-IP from trusted proxy",
 			headers: map[string]string{
 				"X-Forwarded-For": "10.0.0.1",
 				"X-Real-IP":       "172.16.0.1",
 			},
 			remoteAddr: "192.168.1.1:12345",
+			trusted:    trustedProxy,
 			expectedIP: "10.0.0.1",
+		},
+		{
+			name:       "invalid forwarded IP from trusted proxy falls back to RemoteAddr",
+			headers:    map[string]string{"X-Forwarded-For": "not-an-ip"},
+			remoteAddr: "192.168.1.1:12345",
+			trusted:    trustedProxy,
+			expectedIP: "192.168.1.1",
+		},
+		{
+			name:       "IPv6 forwarded IP is canonicalized",
+			headers:    map[string]string{"X-Forwarded-For": "2001:DB8::1"},
+			remoteAddr: "192.168.1.1:12345",
+			trusted:    trustedProxy,
+			expectedIP: "2001:db8::1",
 		},
 	}
 
@@ -193,11 +232,56 @@ func TestExtractClientIP(t *testing.T) {
 				req.Header.Set(k, v)
 			}
 
-			ip := extractClientIP(req)
+			ip := extractClientIP(req, tt.trusted)
 			if ip != tt.expectedIP {
 				t.Errorf("Expected IP %q, got %q", tt.expectedIP, ip)
 			}
 		})
+	}
+}
+
+func TestParseTrustedProxyCIDRs(t *testing.T) {
+	nets, invalid := parseTrustedProxyCIDRs("10.0.0.0/8, 192.168.1.5 , , bogus, 2001:db8::/32")
+	if len(nets) != 3 {
+		t.Errorf("expected 3 valid entries, got %d", len(nets))
+	}
+	if len(invalid) != 1 || invalid[0] != "bogus" {
+		t.Errorf("expected [bogus] invalid, got %v", invalid)
+	}
+
+	// Bare IP is promoted to a host route that matches only itself.
+	if !isTrustedProxy(net.ParseIP("192.168.1.5"), nets) {
+		t.Error("expected 192.168.1.5 to be trusted")
+	}
+	if isTrustedProxy(net.ParseIP("192.168.1.6"), nets) {
+		t.Error("did not expect 192.168.1.6 to be trusted")
+	}
+	// CIDR range matches members.
+	if !isTrustedProxy(net.ParseIP("10.1.2.3"), nets) {
+		t.Error("expected 10.1.2.3 to be trusted")
+	}
+}
+
+func TestIPRateLimiter_EvictsOldestWhenAtCapacity(t *testing.T) {
+	limiter := newIPRateLimiter(rate.Limit(1), 1)
+	limiter.maxEntries = 2
+
+	limiter.getLimiter("10.0.0.1")
+	// Ensure a distinct, older lastSeen for the first entry.
+	limiter.mu.Lock()
+	limiter.limiters["10.0.0.1"].lastSeen = time.Now().Add(-time.Hour)
+	limiter.mu.Unlock()
+
+	limiter.getLimiter("10.0.0.2")
+	limiter.getLimiter("10.0.0.3") // triggers eviction of the oldest (10.0.0.1)
+
+	limiter.mu.Lock()
+	defer limiter.mu.Unlock()
+	if len(limiter.limiters) != 2 {
+		t.Errorf("expected map bounded to 2 entries, got %d", len(limiter.limiters))
+	}
+	if _, ok := limiter.limiters["10.0.0.1"]; ok {
+		t.Error("expected oldest entry 10.0.0.1 to be evicted")
 	}
 }
 

@@ -76,6 +76,36 @@ func TestCheckWebSocketOrigin(t *testing.T) {
 			origin:   "https://other.api.example.com",
 			expected: false,
 		},
+		{
+			name:     "origin implicit default port matches host explicit :443 - allowed",
+			host:     "api.example.com:443",
+			origin:   "https://api.example.com",
+			expected: true,
+		},
+		{
+			name:     "origin explicit default port matches host without port - allowed",
+			host:     "api.example.com",
+			origin:   "https://api.example.com:443",
+			expected: true,
+		},
+		{
+			name:     "case-insensitive host match - allowed",
+			host:     "API.Example.COM",
+			origin:   "https://api.example.com",
+			expected: true,
+		},
+		{
+			name:     "null origin - rejected",
+			host:     "api.example.com",
+			origin:   "null",
+			expected: false,
+		},
+		{
+			name:     "IPv6 same origin - allowed",
+			host:     "[::1]:8080",
+			origin:   "http://[::1]:8080",
+			expected: true,
+		},
 	}
 
 	for _, tt := range tests {

@@ -59,6 +59,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -80,8 +81,18 @@ type Server struct {
 	v2Handler      *v2.Handler
 	authMiddleware *auth.Middleware
 	secretManager  *auth.SecretManager
-	stopCh         chan struct{} // signals background goroutines (e.g., rate limiter cleanup) to stop
+	// cancelCleanup stops background goroutines (e.g., rate limiter cleanup).
+	// context.CancelFunc is idempotent, so Shutdown can be called multiple times
+	// safely without panicking.
+	cancelCleanup context.CancelFunc
 }
+
+// TrustedProxyCIDRsEnv is the environment variable used to configure the
+// comma-separated CIDR ranges (or bare IPs) whose forwarding headers
+// (X-Forwarded-For / X-Real-IP) are trusted when deriving the client IP for
+// rate limiting. When unset, forwarding headers are ignored and RemoteAddr is
+// always used, preventing clients from spoofing rate-limit keys.
+const TrustedProxyCIDRsEnv = "TRUSTED_PROXY_CIDRS"
 
 // NewServer creates a new API server
 //
@@ -128,8 +139,20 @@ func NewServer(port int, client client.Client, clientset kubernetes.Interface, n
 	// Create per-IP rate limiter for auth endpoints: 5 requests per minute, burst of 10
 	// This mitigates brute-force login attempts and registration abuse
 	authRateLimiter := newIPRateLimiter(rate.Every(12*time.Second), 10) // 5 per minute = 1 every 12s
-	stopCh := make(chan struct{})
-	authRateLimiter.startCleanup(10*time.Minute, 10*time.Minute, stopCh)
+
+	// Trust forwarding headers only from explicitly configured proxies so
+	// clients cannot spoof the rate-limit key. Unset means RemoteAddr is used.
+	if raw := os.Getenv(TrustedProxyCIDRsEnv); raw != "" {
+		cidrs, invalid := parseTrustedProxyCIDRs(raw)
+		authRateLimiter.setTrustedProxies(cidrs)
+		if len(invalid) > 0 {
+			log.Log.WithName("rate-limiter").Info("Ignoring invalid trusted proxy CIDRs",
+				"invalid", invalid, "env", TrustedProxyCIDRsEnv)
+		}
+	}
+
+	cleanupCtx, cancelCleanup := context.WithCancel(context.Background())
+	authRateLimiter.startCleanup(cleanupCtx, 10*time.Minute, 10*time.Minute)
 	authRateLimit := rateLimitMiddleware(authRateLimiter)
 
 	mux := http.NewServeMux()
@@ -287,7 +310,7 @@ func NewServer(port int, client client.Client, clientset kubernetes.Interface, n
 		v2Handler:      v2Handler,
 		authMiddleware: authMw,
 		secretManager:  secretManager,
-		stopCh:         stopCh,
+		cancelCleanup:  cancelCleanup,
 	}
 }
 
@@ -340,10 +363,14 @@ startServer:
 	}
 }
 
-// Shutdown gracefully shuts down the API server and stops background goroutines
+// Shutdown gracefully shuts down the API server and stops background goroutines.
+// It is safe to call multiple times: context.CancelFunc is idempotent, so
+// repeated or concurrent invocations do not panic.
 func (s *Server) Shutdown() error {
 	// Stop background goroutines (rate limiter cleanup, etc.)
-	close(s.stopCh)
+	if s.cancelCleanup != nil {
+		s.cancelCleanup()
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
