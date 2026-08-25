@@ -136,15 +136,24 @@ func NewServer(port int, client client.Client, clientset kubernetes.Interface, n
 	}
 	v2Handler := v2.NewHandler(client, namespace, handler, getTokenGenCtx) // handler implements AuthorizationChecker
 
-	// Create per-IP rate limiter for auth endpoints: 5 requests per minute, burst of 10
-	// This mitigates brute-force login attempts and registration abuse
-	authRateLimiter := newIPRateLimiter(rate.Every(12*time.Second), 10) // 5 per minute = 1 every 12s
+	// Strict per-IP rate limiter for the login endpoint only: 5 requests per
+	// minute, burst of 10. Login is the password brute-force surface, so it is
+	// the one endpoint that warrants aggressive limiting.
+	loginRateLimiter := newIPRateLimiter(rate.Every(12*time.Second), 10) // 5 per minute = 1 every 12s
+
+	// Permissive per-IP rate limiter for the other public auth endpoints
+	// (is-registered, register). These carry no password-guessing surface
+	// (is-registered is a global boolean the console polls repeatedly; register
+	// is gated elsewhere), so the limiter here only guards against outright abuse
+	// without interfering with normal frontend use.
+	publicAuthRateLimiter := newIPRateLimiter(rate.Every(time.Second), 30) // 60 per minute, burst 30
 
 	// Trust forwarding headers only from explicitly configured proxies so
 	// clients cannot spoof the rate-limit key. Unset means RemoteAddr is used.
 	if raw := os.Getenv(TrustedProxyCIDRsEnv); raw != "" {
 		cidrs, invalid := parseTrustedProxyCIDRs(raw)
-		authRateLimiter.setTrustedProxies(cidrs)
+		loginRateLimiter.setTrustedProxies(cidrs)
+		publicAuthRateLimiter.setTrustedProxies(cidrs)
 		if len(invalid) > 0 {
 			log.Log.WithName("rate-limiter").Info("Ignoring invalid trusted proxy CIDRs",
 				"invalid", invalid, "env", TrustedProxyCIDRsEnv)
@@ -152,15 +161,18 @@ func NewServer(port int, client client.Client, clientset kubernetes.Interface, n
 	}
 
 	cleanupCtx, cancelCleanup := context.WithCancel(context.Background())
-	authRateLimiter.startCleanup(cleanupCtx, 10*time.Minute, 10*time.Minute)
-	authRateLimit := rateLimitMiddleware(authRateLimiter)
+	loginRateLimiter.startCleanup(cleanupCtx, 10*time.Minute, 10*time.Minute)
+	publicAuthRateLimiter.startCleanup(cleanupCtx, 10*time.Minute, 10*time.Minute)
+	loginRateLimit := rateLimitMiddleware(loginRateLimiter)
+	publicAuthRateLimit := rateLimitMiddleware(publicAuthRateLimiter)
 
 	mux := http.NewServeMux()
 
-	// Public authentication endpoints (no auth required, rate-limited)
-	mux.Handle(AuthIsRegistered, authRateLimit(http.HandlerFunc(handler.IsRegistered)))
-	mux.Handle(AuthRegister, authRateLimit(http.HandlerFunc(handler.Register)))
-	mux.Handle(AuthLogin, authRateLimit(http.HandlerFunc(handler.Login)))
+	// Public authentication endpoints (no auth required). Only login is strictly
+	// limited (brute-force protection); the rest are loosely limited.
+	mux.Handle(AuthIsRegistered, publicAuthRateLimit(http.HandlerFunc(handler.IsRegistered)))
+	mux.Handle(AuthRegister, publicAuthRateLimit(http.HandlerFunc(handler.Register)))
+	mux.Handle(AuthLogin, loginRateLimit(http.HandlerFunc(handler.Login)))
 
 	// Authenticated endpoints - user and admin access
 	mux.Handle(HealthPath, authMw.RequireAuth(http.HandlerFunc(handler.HealthCheck)))
