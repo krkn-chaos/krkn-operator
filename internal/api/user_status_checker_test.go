@@ -42,7 +42,9 @@ func newUserStatusScheme(t *testing.T) *runtime.Scheme {
 func newKrknUser(userID string, active bool) *krknv1alpha1.KrknUser {
 	return &krknv1alpha1.KrknUser{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      sanitizeResourceName(userID),
+			// CRs are created as "krknuser-<sanitized>"; use the same helper as
+			// registration so the test reflects the real naming convention.
+			Name:      sanitizeUsername(userID),
 			Namespace: "krkn-system",
 		},
 		Spec: krknv1alpha1.KrknUserSpec{

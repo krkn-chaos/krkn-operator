@@ -52,8 +52,9 @@ func newK8sUserStatusChecker(k8sClient client.Client, namespace string) *k8sUser
 //
 // Returns false if the user is not found (account may have been deleted).
 func (c *k8sUserStatusChecker) IsUserActive(ctx context.Context, userID string) (bool, error) {
-	// KrknUser CRs are named by sanitizing the email address
-	resourceName := sanitizeResourceName(userID)
+	// KrknUser CRs are named "krknuser-<sanitized-email>". Use the same helper
+	// registration uses so the lookup name matches the created resource.
+	resourceName := sanitizeUsername(userID)
 
 	var user krknv1alpha1.KrknUser
 	if err := c.k8sClient.Get(ctx, client.ObjectKey{
