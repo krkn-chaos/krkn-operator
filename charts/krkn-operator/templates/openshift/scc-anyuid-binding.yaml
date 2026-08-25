@@ -1,17 +1,22 @@
 {{- if .Capabilities.APIVersions.Has "security.openshift.io/v1/SecurityContextConstraints" }}
+{{- $scc := .Values.scenarioRunner.scc | default "privileged" }}
+{{- if not (has $scc (list "anyuid" "privileged")) }}
+{{- fail (printf "scenarioRunner.scc must be 'anyuid' or 'privileged', got: '%s'" $scc) }}
+{{- end }}
 ---
-# Equivalent to: oc adm policy add-scc-to-user anyuid -z krkn-operator-krkn-scenario-runner
-# Grants OpenShift's built-in anyuid SCC to scenario-runner ServiceAccount
+# Grants OpenShift SCC to scenario-runner ServiceAccount.
+# Configurable via .Values.scenarioRunner.scc (default: privileged).
+# Node-level scenarios (node-network, node-cpu-hog, etc.) require "privileged".
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: {{ include "krkn-operator.fullname" . }}-scenario-runner-anyuid
+  name: {{ include "krkn-operator.fullname" . }}-scenario-runner-scc
   labels:
     {{- include "krkn-operator.labels" . | nindent 4 }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: system:openshift:scc:anyuid
+  name: {{ printf "system:openshift:scc:%s" $scc }}
 subjects:
 - kind: ServiceAccount
   name: {{ include "krkn-operator.fullname" . }}-krkn-scenario-runner

@@ -253,11 +253,25 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Detect OpenShift by checking for the SCC API, enable privileged scenario pods.
+	// Override with SCENARIO_PRIVILEGED=true/false env var.
+	privilegedScenarios := false
+	if envVal := os.Getenv("SCENARIO_PRIVILEGED"); envVal != "" {
+		privilegedScenarios = envVal == "true"
+	} else {
+		_, err := clientset.Discovery().ServerResourcesForGroupVersion("security.openshift.io/v1")
+		if err == nil {
+			privilegedScenarios = true
+			setupLog.Info("OpenShift detected, enabling privileged scenario pods for node-level scenarios")
+		}
+	}
+
 	if err = (&controller.KrknScenarioRunReconciler{
-		Client:    mgr.GetClient(),
-		Scheme:    mgr.GetScheme(),
-		Clientset: clientset,
-		Namespace: krknNamespace,
+		Client:              mgr.GetClient(),
+		Scheme:              mgr.GetScheme(),
+		Clientset:           clientset,
+		Namespace:           krknNamespace,
+		PrivilegedScenarios: privilegedScenarios,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "KrknScenarioRun")
 		os.Exit(1)
