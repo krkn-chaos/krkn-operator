@@ -72,6 +72,7 @@ import (
 	_ "github.com/krkn-chaos/krkn-operator/internal/api/docs" // Import generated docs
 	v2 "github.com/krkn-chaos/krkn-operator/internal/api/v2"
 	"github.com/krkn-chaos/krkn-operator/pkg/auth"
+	"github.com/krkn-chaos/krkn-operator/pkg/wsorigin"
 )
 
 // Server represents the REST API server
@@ -93,6 +94,14 @@ type Server struct {
 // rate limiting. When unset, forwarding headers are ignored and RemoteAddr is
 // always used, preventing clients from spoofing rate-limit keys.
 const TrustedProxyCIDRsEnv = "TRUSTED_PROXY_CIDRS"
+
+// WebSocketAllowedOriginsEnv is the environment variable used to configure a
+// comma-separated list of extra origins (e.g. "http://localhost:3000") that are
+// accepted for WebSocket upgrades in addition to same-origin requests. When
+// unset, only same-origin WebSocket connections are allowed. Use this when the
+// browser origin legitimately differs from the API Host, such as a console dev
+// server that proxies to the API.
+const WebSocketAllowedOriginsEnv = "WEBSOCKET_ALLOWED_ORIGINS"
 
 // NewServer creates a new API server
 //
@@ -157,6 +166,18 @@ func NewServer(port int, client client.Client, clientset kubernetes.Interface, n
 		if len(invalid) > 0 {
 			log.Log.WithName("rate-limiter").Info("Ignoring invalid trusted proxy CIDRs",
 				"invalid", invalid, "env", TrustedProxyCIDRsEnv)
+		}
+	}
+
+	// Allow WebSocket upgrades from extra origins (in addition to same-origin)
+	// when explicitly configured. Unset means same-origin only. This is needed
+	// when the browser origin differs from the API Host, e.g. a console dev
+	// server that proxies to the API.
+	if raw := os.Getenv(WebSocketAllowedOriginsEnv); raw != "" {
+		origins := strings.Split(raw, ",")
+		if invalid := wsorigin.SetAllowedOrigins(origins); len(invalid) > 0 {
+			log.Log.WithName("websocket-origin").Info("Ignoring invalid allowed origins",
+				"invalid", invalid, "env", WebSocketAllowedOriginsEnv)
 		}
 	}
 

@@ -59,3 +59,60 @@ func TestIsSameOrigin(t *testing.T) {
 		})
 	}
 }
+
+func TestSetAllowedOrigins(t *testing.T) {
+	// Reset the global allow-list after the test so other tests keep the
+	// strict same-origin-only default.
+	t.Cleanup(func() { SetAllowedOrigins(nil) })
+
+	invalid := SetAllowedOrigins([]string{
+		"http://localhost:3000",
+		" https://console.example.com ", // trimmed
+		"",                              // skipped
+		"not-a-valid-origin",            // invalid: no scheme/host
+	})
+
+	if len(invalid) != 1 || invalid[0] != "not-a-valid-origin" {
+		t.Fatalf("expected exactly the malformed entry to be reported invalid, got %v", invalid)
+	}
+
+	tests := []struct {
+		name     string
+		host     string
+		origin   string
+		expected bool
+	}{
+		{name: "same-origin still allowed", host: "localhost:8080", origin: "http://localhost:8080", expected: true},
+		{name: "configured cross-origin allowed", host: "localhost:8080", origin: "http://localhost:3000", expected: true},
+		{name: "configured origin implicit default port", host: "localhost:8080", origin: "https://console.example.com", expected: true},
+		{name: "configured origin case-insensitive", host: "localhost:8080", origin: "http://LOCALHOST:3000", expected: true},
+		{name: "unconfigured cross-origin still rejected", host: "localhost:8080", origin: "http://evil.example.com", expected: false},
+		{name: "configured host wrong port rejected", host: "localhost:8080", origin: "http://localhost:3001", expected: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest("GET", "/ws", nil)
+			req.Host = tt.host
+			req.Header.Set("Origin", tt.origin)
+
+			if got := IsSameOrigin(req); got != tt.expected {
+				t.Errorf("IsSameOrigin() = %v, want %v (host=%q, origin=%q)",
+					got, tt.expected, tt.host, tt.origin)
+			}
+		})
+	}
+}
+
+func TestSetAllowedOrigins_EmptyRestoresStrict(t *testing.T) {
+	SetAllowedOrigins([]string{"http://localhost:3000"})
+	SetAllowedOrigins(nil) // restore strict policy
+
+	req := httptest.NewRequest("GET", "/ws", nil)
+	req.Host = "localhost:8080"
+	req.Header.Set("Origin", "http://localhost:3000")
+
+	if IsSameOrigin(req) {
+		t.Error("expected cross-origin request to be rejected after allow-list cleared")
+	}
+}

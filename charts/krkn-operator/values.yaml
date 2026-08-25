@@ -58,6 +58,20 @@ auth:
   # Example: "10.0.0.0/8,192.168.0.0/16"
   trustedProxyCIDRs: ""
 
+  # Extra origins allowed for WebSocket connections (comma-separated).
+  # Passed to the operator as the WEBSOCKET_ALLOWED_ORIGINS environment variable.
+  #
+  # WebSocket upgrades (cluster terminal, live log streaming) are restricted to
+  # same-origin requests to prevent cross-site WebSocket hijacking. When the
+  # browser origin legitimately differs from the API Host — e.g. a console dev
+  # server on a different port that proxies to the API — list those origins here.
+  #
+  # Leave empty (default) for same-origin-only, which is correct for the normal
+  # in-cluster deployment where the console is served from the same origin.
+  #
+  # Example: "http://localhost:3000,https://console.example.com"
+  websocketAllowedOrigins: ""
+
 ## Core Operator
 operator:
   enabled: true
