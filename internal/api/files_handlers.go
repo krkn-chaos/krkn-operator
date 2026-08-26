@@ -873,15 +873,23 @@ func buildFileResponse(configMap *corev1.ConfigMap) files.FileResponse {
 	logicalName := configMap.Annotations[files.WorkflowNameAnnotation]
 
 	// Access studioLayout by its well-known key.
-	studioLayout := configMap.Data["studioLayout.json"]
+	studioLayout := configMap.Data[files.StudioLayoutFileName]
 
-	// Look up the content by the logical filename stored in the annotation.
-	// If the annotation is missing or the key does not exist in Data (e.g. legacy
-	// ConfigMaps), fall back to the first Data key that is not studioLayout.json.
-	content, ok := configMap.Data[logicalName]
-	if !ok || logicalName == "" {
+	// Determine the Data key that holds the file content. Workflow templates always
+	// store content under the fixed WorkflowFileName key (the annotation holds the
+	// user-facing name, not a Data key). Regular files store content under their
+	// logical file name.
+	contentKey := logicalName
+	if files.ExtractFilePurposeFromLabels(configMap.Labels) == files.FilePurposeWorkflow {
+		contentKey = files.WorkflowFileName
+	}
+
+	// Look up the content by the resolved key. If the key is missing or empty (e.g.
+	// legacy ConfigMaps), fall back to the first Data key that is not studioLayout.json.
+	content, ok := configMap.Data[contentKey]
+	if !ok || contentKey == "" {
 		for k, v := range configMap.Data {
-			if k != "studioLayout.json" {
+			if k != files.StudioLayoutFileName {
 				content = v
 				break
 			}

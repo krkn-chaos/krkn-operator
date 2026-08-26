@@ -362,7 +362,7 @@ func NewServer(port int, client client.Client, clientset kubernetes.Interface, n
 // It waits for the JWT SecretManager to be ready before accepting traffic
 func (s *Server) Start(ctx context.Context) error {
 	logger := log.FromContext(ctx)
-	logger.Info("🌐 Starting REST API server (waiting for JWT secret to be ready)", "addr", s.server.Addr)
+	logger.Info("Starting REST API server (waiting for JWT secret to be ready)", "addr", s.server.Addr)
 
 	// Wait for JWT SecretManager to be ready before starting HTTP server
 	// This prevents the server from accepting requests before authentication is configured
@@ -377,8 +377,9 @@ func (s *Server) Start(ctx context.Context) error {
 			return ctx.Err()
 
 		case <-timeout:
-			logger.Error(nil, "Timeout waiting for JWT secret to be ready")
-			return fmt.Errorf("timeout waiting for JWT secret to be ready after 2 minutes")
+			err := fmt.Errorf("timeout waiting for JWT secret to be ready after 2 minutes")
+			logger.Error(err, "Timeout waiting for JWT secret to be ready")
+			return err
 
 		case <-ticker.C:
 			if s.secretManager.IsReady() {

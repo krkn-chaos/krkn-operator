@@ -1778,7 +1778,7 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 		"Sec-WebSocket-Key", r.Header.Get("Sec-WebSocket-Key"))
 
 	if protocols == "" {
-		logger.Info("WebSocket authentication failed: missing Sec-WebSocket-Protocol header",
+		logger.Error(errors.New("missing Sec-WebSocket-Protocol header"), "WebSocket authentication failed",
 			"path", r.URL.Path,
 			"client_ip", r.RemoteAddr,
 			"headers", sanitizeHeaders(r.Header))
@@ -1809,7 +1809,7 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 		}())
 
 	if len(protocolParts) != 2 || protocolParts[0] != "access_token" {
-		logger.Info("WebSocket authentication failed: invalid protocol format",
+		logger.Error(errors.New("invalid Sec-WebSocket-Protocol format"), "WebSocket authentication failed",
 			"path", r.URL.Path,
 			"protocol", maskToken(protocols),
 			"parts_count", len(protocolParts),
@@ -1821,7 +1821,7 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 
 	token := protocolParts[1]
 	if token == "" {
-		logger.Info("WebSocket authentication failed: empty token in subprotocol",
+		logger.Error(errors.New("empty token in subprotocol"), "WebSocket authentication failed",
 			"path", r.URL.Path,
 			"client_ip", r.RemoteAddr)
 		http.Error(w, "Unauthorized: Missing authentication token", http.StatusUnauthorized)
@@ -1846,9 +1846,8 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 	logger.Info("Validating JWT token")
 	claims, err := tokenGen.ValidateToken(token)
 	if err != nil {
-		logger.Info("WebSocket authentication failed: invalid token",
+		logger.Error(err, "WebSocket authentication failed: invalid token",
 			"path", r.URL.Path,
-			"error", err.Error(),
 			"token_preview", maskedToken,
 			"client_ip", r.RemoteAddr)
 		http.Error(w, "Unauthorized: Invalid or expired token", http.StatusUnauthorized)

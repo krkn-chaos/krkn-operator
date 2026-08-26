@@ -514,6 +514,25 @@ func TestGetTarget_NotFound(t *testing.T) {
 	if w.Code != http.StatusNotFound {
 		t.Errorf("Expected status %d, got %d", http.StatusNotFound, w.Code)
 	}
+
+	// The response must carry a stable, sanitized message keyed on the UUID and must
+	// not leak Kubernetes implementation details (resource group/kind) from the raw
+	// StatusError.
+	var resp ErrorResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("Failed to decode error response: %v", err)
+	}
+
+	wantMessage := "target with UUID 'non-existent-uuid' not found"
+	if resp.Message != wantMessage {
+		t.Errorf("Expected message %q, got %q", wantMessage, resp.Message)
+	}
+	if resp.Error != "not_found" {
+		t.Errorf("Expected error code %q, got %q", "not_found", resp.Error)
+	}
+	if strings.Contains(resp.Message, "krknoperatortargets") || strings.Contains(resp.Message, "krkn.krkn-chaos.dev") {
+		t.Errorf("Response leaks Kubernetes implementation details: %q", resp.Message)
+	}
 }
 
 func TestDeleteTarget(t *testing.T) {

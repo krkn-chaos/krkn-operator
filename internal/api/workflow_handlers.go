@@ -120,10 +120,10 @@ func (h *Handler) CreateWorkflow(w http.ResponseWriter, r *http.Request) {
 
 	// Delegate to file creation (reuse ALL file logic)
 	fileReq := files.CreateFileRequest{
-		FileName:       "workflow.json",  // Standard filename for workflows
-		Content:        content,          // Graph JSON
-		StudioLayout:   studioLayoutJSON, // Studio visual layout (optional)
-		WorkflowName:   req.WorkflowName, // User-defined workflow name
+		FileName:       files.WorkflowFileName, // Standard filename for workflows
+		Content:        content,                // Graph JSON
+		StudioLayout:   studioLayoutJSON,       // Studio visual layout (optional)
+		WorkflowName:   req.WorkflowName,       // User-defined workflow name
 		Description:    req.Description,
 		FileType:       req.FileType,              // User categorization (optional)
 		Groups:         req.Groups,                // RBAC groups
@@ -420,7 +420,7 @@ func (h *Handler) UpdateWorkflow(w http.ResponseWriter, r *http.Request) {
 	// Delegate to file update
 	workflowNamePtr := &req.WorkflowName // Convert to pointer (always set for workflows)
 	fileReq := files.UpdateFileRequest{
-		FileName:       "workflow.json",
+		FileName:       files.WorkflowFileName,
 		Content:        content,
 		StudioLayout:   studioLayoutJSON,
 		WorkflowName:   workflowNamePtr, // Always set for workflow updates
@@ -547,7 +547,7 @@ func convertConfigMapToWorkflowInfo(cm *corev1.ConfigMap) workflows.WorkflowInfo
 
 	// Parse graph to count nodes (exclude metadata nodes starting with _)
 	nodeCount := 0
-	if content, exists := cm.Data["workflow.json"]; exists {
+	if content, exists := cm.Data[files.WorkflowFileName]; exists {
 		graph, err := workflows.FromFileContent(content)
 		if err == nil {
 			for nodeID := range graph {
@@ -623,7 +623,7 @@ func (h *Handler) createFileInternal(ctx context.Context, req files.CreateFileRe
 	}
 	// Add studioLayout if provided
 	if req.StudioLayout != "" {
-		data["studioLayout.json"] = req.StudioLayout
+		data[files.StudioLayoutFileName] = req.StudioLayout
 	}
 
 	// Create ConfigMap
@@ -861,7 +861,7 @@ func (h *Handler) updateFileInternal(ctx context.Context, fileID string, req fil
 	}
 	// Add studioLayout if provided
 	if req.StudioLayout != "" {
-		data["studioLayout.json"] = req.StudioLayout
+		data[files.StudioLayoutFileName] = req.StudioLayout
 	}
 	configMap.Data = data
 
