@@ -21,27 +21,22 @@ import (
 	"testing"
 )
 
-func TestIsSameOrigin(t *testing.T) {
+// TestIsAllowedOrigin_NoEnforcement verifies the default (opt-in) behavior:
+// with no allow-list configured, every origin is accepted, including ones that
+// differ from the Host. This is the non-breaking default.
+func TestIsAllowedOrigin_NoEnforcement(t *testing.T) {
+	// Ensure no allow-list is configured for this test.
+	SetAllowedOrigins(nil)
+
 	tests := []struct {
-		name     string
-		host     string
-		origin   string
-		expected bool
+		name   string
+		host   string
+		origin string
 	}{
-		{name: "no origin allowed", host: "localhost:8080", origin: "", expected: true},
-		{name: "exact same origin", host: "localhost:8080", origin: "http://localhost:8080", expected: true},
-		{name: "https implicit port vs bare host", host: "api.example.com", origin: "https://api.example.com", expected: true},
-		{name: "https implicit port vs host :443", host: "api.example.com:443", origin: "https://api.example.com", expected: true},
-		{name: "https explicit :443 vs bare host", host: "api.example.com", origin: "https://api.example.com:443", expected: true},
-		{name: "http implicit port vs host :80", host: "api.example.com:80", origin: "http://api.example.com", expected: true},
-		{name: "case-insensitive hostname", host: "API.Example.COM:8080", origin: "http://api.example.com:8080", expected: true},
-		{name: "ipv6 same origin", host: "[::1]:8080", origin: "http://[::1]:8080", expected: true},
-		{name: "different host rejected", host: "api.example.com", origin: "https://evil.example.com", expected: false},
-		{name: "different explicit port rejected", host: "localhost:8080", origin: "http://localhost:3000", expected: false},
-		{name: "non-default origin port vs bare host rejected", host: "api.example.com", origin: "https://api.example.com:8443", expected: false},
-		{name: "malformed origin rejected", host: "localhost:8080", origin: "://nope", expected: false},
-		{name: "null origin rejected", host: "api.example.com", origin: "null", expected: false},
-		{name: "empty-host origin rejected", host: "api.example.com", origin: "https://", expected: false},
+		{name: "no origin", host: "localhost:8080", origin: ""},
+		{name: "same origin", host: "localhost:8080", origin: "http://localhost:8080"},
+		{name: "cross origin still allowed", host: "localhost:8080", origin: "http://localhost:3000"},
+		{name: "foreign origin allowed", host: "api.example.com", origin: "https://evil.example.com"},
 	}
 
 	for _, tt := range tests {
@@ -51,18 +46,18 @@ func TestIsSameOrigin(t *testing.T) {
 			if tt.origin != "" {
 				req.Header.Set("Origin", tt.origin)
 			}
-
-			if got := IsSameOrigin(req); got != tt.expected {
-				t.Errorf("IsSameOrigin() = %v, want %v (host=%q, origin=%q)",
-					got, tt.expected, tt.host, tt.origin)
+			if !IsAllowedOrigin(req) {
+				t.Errorf("IsAllowedOrigin() = false, want true with enforcement off (host=%q, origin=%q)",
+					tt.host, tt.origin)
 			}
 		})
 	}
 }
 
-func TestSetAllowedOrigins(t *testing.T) {
-	// Reset the global allow-list after the test so other tests keep the
-	// strict same-origin-only default.
+// TestIsAllowedOrigin_Enforced verifies that once an allow-list is configured,
+// same-origin and allow-listed origins are accepted and everything else is
+// rejected, with scheme-aware normalization.
+func TestIsAllowedOrigin_Enforced(t *testing.T) {
 	t.Cleanup(func() { SetAllowedOrigins(nil) })
 
 	invalid := SetAllowedOrigins([]string{
@@ -71,7 +66,6 @@ func TestSetAllowedOrigins(t *testing.T) {
 		"",                              // skipped
 		"not-a-valid-origin",            // invalid: no scheme/host
 	})
-
 	if len(invalid) != 1 || invalid[0] != "not-a-valid-origin" {
 		t.Fatalf("expected exactly the malformed entry to be reported invalid, got %v", invalid)
 	}
@@ -82,37 +76,49 @@ func TestSetAllowedOrigins(t *testing.T) {
 		origin   string
 		expected bool
 	}{
-		{name: "same-origin still allowed", host: "localhost:8080", origin: "http://localhost:8080", expected: true},
-		{name: "configured cross-origin allowed", host: "localhost:8080", origin: "http://localhost:3000", expected: true},
-		{name: "configured origin implicit default port", host: "localhost:8080", origin: "https://console.example.com", expected: true},
-		{name: "configured origin case-insensitive", host: "localhost:8080", origin: "http://LOCALHOST:3000", expected: true},
-		{name: "unconfigured cross-origin still rejected", host: "localhost:8080", origin: "http://evil.example.com", expected: false},
-		{name: "configured host wrong port rejected", host: "localhost:8080", origin: "http://localhost:3001", expected: false},
+		{name: "no origin allowed", host: "localhost:8080", origin: "", expected: true},
+		{name: "same origin allowed", host: "localhost:8080", origin: "http://localhost:8080", expected: true},
+		{name: "same origin implicit https port", host: "api.example.com", origin: "https://api.example.com", expected: true},
+		{name: "same origin ipv6", host: "[::1]:8080", origin: "http://[::1]:8080", expected: true},
+		{name: "same origin case-insensitive", host: "API.Example.COM:8080", origin: "http://api.example.com:8080", expected: true},
+		{name: "allow-listed origin", host: "localhost:8080", origin: "http://localhost:3000", expected: true},
+		{name: "allow-listed implicit default port", host: "localhost:8080", origin: "https://console.example.com", expected: true},
+		{name: "allow-listed case-insensitive", host: "localhost:8080", origin: "http://LOCALHOST:3000", expected: true},
+		{name: "unlisted cross-origin rejected", host: "localhost:8080", origin: "http://evil.example.com", expected: false},
+		{name: "allow-listed host wrong port rejected", host: "localhost:8080", origin: "http://localhost:3001", expected: false},
+		{name: "malformed origin rejected", host: "localhost:8080", origin: "://nope", expected: false},
+		{name: "null origin rejected", host: "api.example.com", origin: "null", expected: false},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			req := httptest.NewRequest("GET", "/ws", nil)
 			req.Host = tt.host
-			req.Header.Set("Origin", tt.origin)
-
-			if got := IsSameOrigin(req); got != tt.expected {
-				t.Errorf("IsSameOrigin() = %v, want %v (host=%q, origin=%q)",
+			if tt.origin != "" {
+				req.Header.Set("Origin", tt.origin)
+			}
+			if got := IsAllowedOrigin(req); got != tt.expected {
+				t.Errorf("IsAllowedOrigin() = %v, want %v (host=%q, origin=%q)",
 					got, tt.expected, tt.host, tt.origin)
 			}
 		})
 	}
 }
 
-func TestSetAllowedOrigins_EmptyRestoresStrict(t *testing.T) {
+// TestSetAllowedOrigins_EmptyDisablesEnforcement verifies that clearing the
+// allow-list returns to the accept-all default.
+func TestSetAllowedOrigins_EmptyDisablesEnforcement(t *testing.T) {
 	SetAllowedOrigins([]string{"http://localhost:3000"})
-	SetAllowedOrigins(nil) // restore strict policy
 
 	req := httptest.NewRequest("GET", "/ws", nil)
 	req.Host = "localhost:8080"
-	req.Header.Set("Origin", "http://localhost:3000")
+	req.Header.Set("Origin", "http://evil.example.com")
+	if IsAllowedOrigin(req) {
+		t.Fatal("expected unlisted origin to be rejected while enforcing")
+	}
 
-	if IsSameOrigin(req) {
-		t.Error("expected cross-origin request to be rejected after allow-list cleared")
+	SetAllowedOrigins(nil) // disable enforcement
+	if !IsAllowedOrigin(req) {
+		t.Error("expected all origins to be allowed after clearing the allow-list")
 	}
 }

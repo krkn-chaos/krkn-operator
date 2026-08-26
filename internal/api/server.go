@@ -95,12 +95,16 @@ type Server struct {
 // always used, preventing clients from spoofing rate-limit keys.
 const TrustedProxyCIDRsEnv = "TRUSTED_PROXY_CIDRS"
 
-// WebSocketAllowedOriginsEnv is the environment variable used to configure a
-// comma-separated list of extra origins (e.g. "http://localhost:3000") that are
-// accepted for WebSocket upgrades in addition to same-origin requests. When
-// unset, only same-origin WebSocket connections are allowed. Use this when the
-// browser origin legitimately differs from the API Host, such as a console dev
-// server that proxies to the API.
+// WebSocketAllowedOriginsEnv is the environment variable used to enable and
+// configure WebSocket Origin enforcement. It takes a comma-separated list of
+// origins (e.g. "https://console.example.com") that are accepted in addition to
+// same-origin requests.
+//
+// Enforcement is opt-in: when unset (the default), all origins are accepted.
+// This is safe because WebSocket auth uses a JWT in the Sec-WebSocket-Protocol
+// subprotocol (not ambient cookies), so cross-site WebSocket hijacking does not
+// apply. Set this only to add same-origin + allow-list enforcement as optional
+// defense-in-depth.
 const WebSocketAllowedOriginsEnv = "WEBSOCKET_ALLOWED_ORIGINS"
 
 // NewServer creates a new API server
@@ -169,22 +173,22 @@ func NewServer(port int, client client.Client, clientset kubernetes.Interface, n
 		}
 	}
 
-	// Allow WebSocket upgrades from extra origins (in addition to same-origin)
-	// when explicitly configured. Unset means same-origin only. This is needed
-	// when the browser origin differs from the API Host, e.g. a console dev
-	// server that proxies to the API.
+	// WebSocket Origin enforcement is opt-in. When configured, only same-origin
+	// requests and the listed origins may open WebSocket connections; when unset
+	// (default) all origins are accepted (auth is via a JWT subprotocol, not
+	// ambient cookies, so CSWSH does not apply).
 	if raw := os.Getenv(WebSocketAllowedOriginsEnv); raw != "" {
 		origins := strings.Split(raw, ",")
 		invalid := wsorigin.SetAllowedOrigins(origins)
-		log.Log.WithName("websocket-origin").Info("Configured extra allowed WebSocket origins",
-			"origins", origins, "env", WebSocketAllowedOriginsEnv)
+		log.Log.WithName("websocket-origin").Info("WebSocket origin enforcement enabled",
+			"allowedOrigins", origins, "env", WebSocketAllowedOriginsEnv)
 		if len(invalid) > 0 {
 			log.Log.WithName("websocket-origin").Info("Ignoring invalid allowed origins",
 				"invalid", invalid, "env", WebSocketAllowedOriginsEnv)
 		}
 	} else {
 		log.Log.WithName("websocket-origin").Info(
-			"No extra WebSocket origins configured; same-origin only",
+			"WebSocket origin enforcement disabled; all origins allowed (auth is via JWT subprotocol)",
 			"env", WebSocketAllowedOriginsEnv)
 	}
 

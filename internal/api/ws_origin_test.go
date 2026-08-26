@@ -19,9 +19,17 @@ package api
 import (
 	"net/http/httptest"
 	"testing"
+
+	"github.com/krkn-chaos/krkn-operator/pkg/wsorigin"
 )
 
 func TestCheckWebSocketOrigin(t *testing.T) {
+	// Origin enforcement is opt-in; enable it (with an unrelated allow-listed
+	// origin) so the same-origin / cross-origin expectations below are actually
+	// exercised through the wrapper.
+	wsorigin.SetAllowedOrigins([]string{"https://allowed.example.com"})
+	t.Cleanup(func() { wsorigin.SetAllowedOrigins(nil) })
+
 	tests := []struct {
 		name     string
 		host     string
@@ -104,6 +112,12 @@ func TestCheckWebSocketOrigin(t *testing.T) {
 			name:     "IPv6 same origin - allowed",
 			host:     "[::1]:8080",
 			origin:   "http://[::1]:8080",
+			expected: true,
+		},
+		{
+			name:     "allow-listed cross origin - allowed",
+			host:     "localhost:8080",
+			origin:   "https://allowed.example.com",
 			expected: true,
 		},
 	}

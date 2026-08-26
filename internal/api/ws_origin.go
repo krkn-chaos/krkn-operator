@@ -23,9 +23,9 @@ import (
 )
 
 // checkWebSocketOrigin validates the Origin header for v1 WebSocket upgrade
-// requests. It delegates to the shared wsorigin.IsSameOrigin policy so v1 and
-// v2 enforce identical, scheme-aware same-origin checks and prevent cross-site
-// WebSocket hijacking (CSWSH) attacks.
+// requests. It delegates to the shared wsorigin.IsAllowedOrigin policy so v1 and
+// v2 enforce an identical origin policy (opt-in same-origin + allow-list; see
+// the wsorigin package documentation).
 func checkWebSocketOrigin(r *http.Request) bool {
-	return wsorigin.IsSameOrigin(r)
+	return wsorigin.IsAllowedOrigin(r)
 }

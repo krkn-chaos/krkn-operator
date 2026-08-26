@@ -14,9 +14,20 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// Package wsorigin provides same-origin validation for WebSocket upgrade
-// requests. It is shared by the v1 and v2 API WebSocket upgraders so the
-// origin policy stays consistent and is defined in a single place.
+// Package wsorigin provides Origin validation for WebSocket upgrade requests.
+// It is shared by the v1 and v2 API WebSocket upgraders so the origin policy
+// stays consistent and is defined in a single place.
+//
+// Origin enforcement is OPT-IN. By default (no allow-list configured) all
+// origins are accepted, which restores the pre-hardening behavior and avoids
+// breaking deployments where the browser origin legitimately differs from the
+// API Host (a console served on a separate origin, or one behind a proxy that
+// rewrites the Host header). This is safe because WebSocket authentication uses
+// a JWT carried in the Sec-WebSocket-Protocol subprotocol — not ambient cookies
+// — so cross-site WebSocket hijacking (CSWSH) is not exploitable: a malicious
+// cross-origin page cannot read the origin-scoped token and therefore cannot
+// authenticate. Configuring an allow-list turns on same-origin + allow-list
+// enforcement as optional defense-in-depth.
 package wsorigin
 
 import (
@@ -28,21 +39,22 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
-// allowedOrigins holds the set of extra origins (in canonical
-// "scheme://host:port" form) that are accepted in addition to same-origin
-// requests. It is stored atomically so it can be configured once at startup
-// and read concurrently by upgrade handlers without a data race.
+// allowedOrigins holds the set of explicitly-permitted origins (in canonical
+// "scheme://host:port" form). When empty, origin enforcement is disabled and
+// all origins are accepted. It is stored atomically so it can be configured
+// once at startup and read concurrently by upgrade handlers without a data
+// race.
 var allowedOrigins atomic.Pointer[map[string]struct{}]
 
-// SetAllowedOrigins configures additional origins that IsSameOrigin will accept
-// beyond strict same-origin requests. Each entry is a full origin such as
-// "http://localhost:3000". This is intended to be called once at startup — for
-// example to allow a console dev server hosted on a different origin than the
-// API. Passing no (or only empty) origins restores the strict same-origin-only
-// policy.
+// SetAllowedOrigins enables origin enforcement and configures the origins that
+// IsAllowedOrigin will accept (in addition to same-origin requests). Each entry
+// is a full origin such as "http://localhost:3000". This is intended to be
+// called once at startup.
 //
-// Entries that cannot be parsed as an origin with both a scheme and host are
-// ignored and returned in the invalid slice so the caller can log them.
+// Passing no (or only empty) origins leaves enforcement disabled, i.e. all
+// origins are accepted. Entries that cannot be parsed as an origin with both a
+// scheme and host are ignored and returned in the invalid slice so the caller
+// can log them.
 func SetAllowedOrigins(origins []string) (invalid []string) {
 	set := make(map[string]struct{}, len(origins))
 	for _, o := range origins {
@@ -61,17 +73,6 @@ func SetAllowedOrigins(origins []string) (invalid []string) {
 	return invalid
 }
 
-// isExplicitlyAllowed reports whether the given parsed Origin URL matches one of
-// the origins configured via SetAllowedOrigins.
-func isExplicitlyAllowed(originURL *url.URL) bool {
-	set := allowedOrigins.Load()
-	if set == nil || len(*set) == 0 {
-		return false
-	}
-	_, ok := (*set)[canonicalOrigin(originURL)]
-	return ok
-}
-
 // canonicalOrigin renders a URL as a normalized "scheme://host:port" string:
 // scheme and host are lowercased and the scheme's default port is filled in
 // when absent, so equivalent representations compare equal.
@@ -85,34 +86,37 @@ func canonicalOrigin(u *url.URL) string {
 	return scheme + "://" + host + ":" + port
 }
 
-// IsSameOrigin validates the Origin header of a WebSocket upgrade request
-// against the request Host. It applies a safe default policy that prevents
-// cross-site WebSocket hijacking (CSWSH) attacks:
+// IsAllowedOrigin reports whether a WebSocket upgrade request may proceed based
+// on its Origin header. The policy is:
 //
 //   - Requests without an Origin header are allowed (non-browser clients such
 //     as CLI tools and test harnesses do not send Origin).
-//   - Same-origin requests are allowed. Comparison is scheme-aware and
-//     normalized: hostnames are compared case-insensitively and ports are
-//     compared using their scheme defaults (80 for http/ws, 443 for
-//     https/wss). This ensures equivalent representations match — e.g. an
-//     Origin of "https://api.example.com" (implicit :443) is treated as the
-//     same origin as a Host of "api.example.com:443", and IPv6 brackets and
-//     letter case do not cause false rejections.
-//   - Origins explicitly allow-listed via SetAllowedOrigins are also accepted.
-//     This is an opt-in escape hatch for deployments where the browser origin
-//     legitimately differs from the API Host (e.g. a console dev server on a
-//     different port that proxies to the API).
-//   - Everything else (different host, different explicit port, malformed or
-//     "null" Origin) is rejected.
+//   - When no allow-list is configured (the default), all origins are allowed.
+//     Enforcement is opt-in; see the package documentation for why this is safe
+//     given the JWT-in-subprotocol authentication model.
+//   - When an allow-list IS configured, only same-origin requests and origins
+//     on the list are allowed; everything else (different host, different
+//     explicit port, malformed or "null" Origin) is rejected. Same-origin
+//     comparison is scheme-aware and normalized: hostnames are compared
+//     case-insensitively and ports are compared using their scheme defaults
+//     (80 for http/ws, 443 for https/wss), so equivalent representations match
+//     and IPv6 brackets or letter case do not cause false rejections.
 //
 // Note: r.Host is used as the trusted server identity. Forwarded host headers
 // (e.g. X-Forwarded-Host) are intentionally NOT consulted because they are
 // attacker-controllable; deployments that terminate TLS in front of the server
 // should ensure the proxy preserves the Host header.
-func IsSameOrigin(r *http.Request) bool {
+func IsAllowedOrigin(r *http.Request) bool {
 	origin := r.Header.Get("Origin")
 	if origin == "" {
 		// Non-browser clients (CLI, testing tools) don't send Origin.
+		return true
+	}
+
+	set := allowedOrigins.Load()
+	if set == nil || len(*set) == 0 {
+		// Enforcement is opt-in: with no allow-list configured, accept all
+		// origins (auth is via a JWT subprotocol, not ambient cookies).
 		return true
 	}
 
@@ -137,14 +141,13 @@ func IsSameOrigin(r *http.Request) bool {
 		origPort = defaultPort(origScheme)
 	}
 
+	// Same-origin is always allowed when enforcing.
 	if reqHost == origHost && portsMatch(reqPort, origPort, origScheme) {
 		return true
 	}
 
-	// Fall back to the explicitly-configured allow-list (opt-in) before
-	// rejecting, so legitimately cross-origin clients can be permitted without
-	// weakening the same-origin default.
-	if isExplicitlyAllowed(originURL) {
+	// Otherwise the origin must be on the configured allow-list.
+	if _, ok := (*set)[canonicalOrigin(originURL)]; ok {
 		return true
 	}
 

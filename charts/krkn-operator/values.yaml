@@ -58,18 +58,25 @@ auth:
   # Example: "10.0.0.0/8,192.168.0.0/16"
   trustedProxyCIDRs: ""
 
-  # Extra origins allowed for WebSocket connections (comma-separated).
+  # WebSocket Origin enforcement (comma-separated list of allowed origins).
   # Passed to the operator as the WEBSOCKET_ALLOWED_ORIGINS environment variable.
   #
-  # WebSocket upgrades (cluster terminal, live log streaming) are restricted to
-  # same-origin requests to prevent cross-site WebSocket hijacking. When the
-  # browser origin legitimately differs from the API Host — e.g. a console dev
-  # server on a different port that proxies to the API — list those origins here.
+  # There IS an optional Origin-based access control for WebSocket upgrades
+  # (cluster terminal, live log streaming), but it is OPT-IN and OFF by default:
   #
-  # Leave empty (default) for same-origin-only, which is correct for the normal
-  # in-cluster deployment where the console is served from the same origin.
+  #   - Empty (default): all origins are accepted. This is safe because
+  #     WebSocket connections authenticate with a JWT sent in the
+  #     Sec-WebSocket-Protocol subprotocol (not browser cookies), so cross-site
+  #     WebSocket hijacking (CSWSH) is not exploitable — a malicious page cannot
+  #     read the origin-scoped token and therefore cannot connect.
+  #   - Non-empty: enables enforcement. Only same-origin requests and the listed
+  #     origins may open WebSocket connections. Use this as optional
+  #     defense-in-depth when you want to pin the allowed browser origins.
   #
-  # Example: "http://localhost:3000,https://console.example.com"
+  # Note: enabling enforcement can reject legitimate traffic behind proxies that
+  # rewrite the Host header, so only turn it on if you understand your ingress.
+  #
+  # Example: "https://console.example.com,http://localhost:3000"
   websocketAllowedOrigins: ""
 
 ## Core Operator
