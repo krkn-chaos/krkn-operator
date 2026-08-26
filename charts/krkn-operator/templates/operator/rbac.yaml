@@ -64,6 +64,8 @@ rules:
   - ""
   resources:
   - persistentvolumeclaims
+  - batch
+  - jobs
   verbs:
   - get
   - list
