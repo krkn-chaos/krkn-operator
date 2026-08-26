@@ -23,6 +23,7 @@ import (
 	"errors"
 	"testing"
 
+	routev1 "github.com/openshift/api/route/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -57,6 +58,12 @@ func TestResolveKrknAIEnabledPrecedence(t *testing.T) {
 				t.Fatalf("enabled=%t error=%v, want enabled=%t error=%t", enabled, err, tt.enabled, tt.wantError)
 			}
 		})
+	}
+}
+
+func TestManagerSchemeRegistersOpenShiftRoutes(t *testing.T) {
+	if !scheme.Recognizes(routev1.SchemeGroupVersion.WithKind("Route")) {
+		t.Fatal("manager scheme does not recognize OpenShift Route")
 	}
 }
 

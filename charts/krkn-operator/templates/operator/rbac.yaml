@@ -69,6 +69,16 @@ rules:
   - list
   - watch
 - apiGroups:
+  - batch
+  resources:
+  - jobs
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - watch
+- apiGroups:
   - krkn.krkn-chaos.dev
   resources:
   - krkncategories
@@ -247,6 +257,45 @@ rules:
   - get
   - list
   - watch
+- apiGroups:
+  - ""
+  resources:
+  - namespaces
+  - configmaps
+  - secrets
+  - services
+  verbs:
+  - create
+  - delete
+  - get
+- apiGroups:
+  - ""
+  resources:
+  - pods
+  verbs:
+  - delete
+  - list
+- apiGroups:
+  - ""
+  resources:
+  - pods
+  verbs:
+  - deletecollection
+- apiGroups:
+  - apps
+  resources:
+  - deployments
+  verbs:
+  - create
+  - delete
+- apiGroups:
+  - route.openshift.io
+  resources:
+  - routes
+  verbs:
+  - get
+  - create
+  - delete
 - apiGroups:
   - krkn.krkn-chaos.dev
   resources:
