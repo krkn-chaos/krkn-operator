@@ -175,10 +175,17 @@ func NewServer(port int, client client.Client, clientset kubernetes.Interface, n
 	// server that proxies to the API.
 	if raw := os.Getenv(WebSocketAllowedOriginsEnv); raw != "" {
 		origins := strings.Split(raw, ",")
-		if invalid := wsorigin.SetAllowedOrigins(origins); len(invalid) > 0 {
+		invalid := wsorigin.SetAllowedOrigins(origins)
+		log.Log.WithName("websocket-origin").Info("Configured extra allowed WebSocket origins",
+			"origins", origins, "env", WebSocketAllowedOriginsEnv)
+		if len(invalid) > 0 {
 			log.Log.WithName("websocket-origin").Info("Ignoring invalid allowed origins",
 				"invalid", invalid, "env", WebSocketAllowedOriginsEnv)
 		}
+	} else {
+		log.Log.WithName("websocket-origin").Info(
+			"No extra WebSocket origins configured; same-origin only",
+			"env", WebSocketAllowedOriginsEnv)
 	}
 
 	cleanupCtx, cancelCleanup := context.WithCancel(context.Background())
