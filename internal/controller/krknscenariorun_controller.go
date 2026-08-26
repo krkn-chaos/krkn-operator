@@ -181,12 +181,12 @@ func (r *KrknScenarioRunReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 			// If it's a conflict error, just requeue - the object was modified concurrently
 			if apierrors.IsConflict(err) {
 				logger.Info("conflict on status initialization, will retry on next reconcile")
-				return ctrl.Result{Requeue: true}, nil
+				return ctrl.Result{RequeueAfter: 100 * time.Millisecond}, nil
 			}
 			logger.Error(err, "failed to initialize status")
 			return ctrl.Result{}, err
 		}
-		return ctrl.Result{Requeue: true}, nil
+		return ctrl.Result{RequeueAfter: 100 * time.Millisecond}, nil
 	}
 
 	// Snapshot status BEFORE any job creation so that appended failure entries are
@@ -374,7 +374,7 @@ func (r *KrknScenarioRunReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 			// and will be re-fetched on next reconcile with fresh data
 			if apierrors.IsConflict(err) {
 				logger.Info("conflict on status update, will retry on next reconcile")
-				return ctrl.Result{Requeue: true}, nil
+				return ctrl.Result{RequeueAfter: 100 * time.Millisecond}, nil
 			}
 			logger.Error(err, "failed to update status")
 			return ctrl.Result{}, err

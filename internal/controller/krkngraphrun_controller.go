@@ -154,7 +154,7 @@ func (r *KrknGraphRunReconciler) Reconcile(ctx context.Context, req ctrl.Request
 			return ctrl.Result{}, err
 		}
 		// Requeue to continue processing with finalizer added
-		return ctrl.Result{Requeue: true}, nil
+		return ctrl.Result{RequeueAfter: 100 * time.Millisecond}, nil
 	}
 
 	// 3. Initialize status if first reconcile
@@ -163,11 +163,11 @@ func (r *KrknGraphRunReconciler) Reconcile(ctx context.Context, req ctrl.Request
 			logger.Error(err, "failed to initialize status")
 			// If it's a conflict error, just requeue - the object was modified concurrently
 			if apierrors.IsConflict(err) {
-				return ctrl.Result{Requeue: true}, nil
+				return ctrl.Result{RequeueAfter: 100 * time.Millisecond}, nil
 			}
 			return ctrl.Result{}, err
 		}
-		return ctrl.Result{Requeue: true}, nil
+		return ctrl.Result{RequeueAfter: 100 * time.Millisecond}, nil
 	}
 
 	// 4. Skip reconciliation if GraphRun is in a terminal state
@@ -184,12 +184,12 @@ func (r *KrknGraphRunReconciler) Reconcile(ctx context.Context, req ctrl.Request
 			// If it's a conflict error, just requeue - the object was modified concurrently
 			// and will be re-fetched on next reconcile with fresh data
 			if apierrors.IsConflict(err) {
-				return ctrl.Result{Requeue: true}, nil
+				return ctrl.Result{RequeueAfter: 100 * time.Millisecond}, nil
 			}
 			// For other errors, mark as Failed
 			return r.updateStatusWithError(ctx, &graphRun, err)
 		}
-		return ctrl.Result{Requeue: true}, nil
+		return ctrl.Result{RequeueAfter: 100 * time.Millisecond}, nil
 	}
 
 	// 5. Query existing KrknScenarioRuns for this graph
@@ -232,7 +232,7 @@ func (r *KrknGraphRunReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		if err := r.Status().Update(ctx, &graphRun); err != nil {
 			if apierrors.IsConflict(err) {
 				logger.Info("conflict on final status update, will retry on next reconcile")
-				return ctrl.Result{Requeue: true}, nil
+				return ctrl.Result{RequeueAfter: 100 * time.Millisecond}, nil
 			}
 			logger.Error(err, "failed to update global status")
 			return ctrl.Result{}, err
@@ -707,7 +707,7 @@ func (r *KrknGraphRunReconciler) handleFailFast(
 	if err := r.Status().Update(ctx, graphRun); err != nil {
 		if apierrors.IsConflict(err) {
 			logger.Info("conflict in handleFailFast, will retry on next reconcile")
-			return ctrl.Result{Requeue: true}, true, nil
+			return ctrl.Result{RequeueAfter: 100 * time.Millisecond}, true, nil
 		}
 		return ctrl.Result{}, true, err
 	}

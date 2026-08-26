@@ -152,7 +152,7 @@ func (r *KrknOperatorTargetProviderConfigReconciler) Reconcile(ctx context.Conte
 	if err := r.Status().Update(ctx, &config); err != nil {
 		if isConflictError(err) {
 			logger.Info("Conflict updating provider config, will retry")
-			return ctrl.Result{Requeue: true}, nil
+			return ctrl.Result{RequeueAfter: 100 * time.Millisecond}, nil
 		}
 		logger.Error(err, "Failed to update provider config")
 		return ctrl.Result{}, err
