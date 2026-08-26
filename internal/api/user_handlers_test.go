@@ -26,16 +26,53 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/client-go/kubernetes/fake"
 	fakeclient "sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
 	"github.com/krkn-chaos/krkn-operator/pkg/auth"
 )
+
+// capturedLogEntry records a single log call (message plus its key/value pairs)
+// so tests can assert that specific audit log entries were emitted.
+type capturedLogEntry struct {
+	msg           string
+	keysAndValues []interface{}
+}
+
+// captureLogSink is a minimal logr.LogSink that appends every Info/Error call to
+// a shared slice. It lets tests verify security-audit logging behavior (e.g. that
+// an admin password change emits an audit entry) without parsing formatted output.
+type captureLogSink struct {
+	entries *[]capturedLogEntry
+}
+
+func (s captureLogSink) Init(logr.RuntimeInfo) {}
+func (s captureLogSink) Enabled(int) bool      { return true }
+func (s captureLogSink) Info(_ int, msg string, kv ...interface{}) {
+	*s.entries = append(*s.entries, capturedLogEntry{msg: msg, keysAndValues: kv})
+}
+func (s captureLogSink) Error(_ error, msg string, kv ...interface{}) {
+	*s.entries = append(*s.entries, capturedLogEntry{msg: msg, keysAndValues: kv})
+}
+func (s captureLogSink) WithValues(...interface{}) logr.LogSink { return s }
+func (s captureLogSink) WithName(string) logr.LogSink           { return s }
+
+// kvValue returns the value paired with the given key in a logr key/value slice.
+func kvValue(kv []interface{}, key string) (interface{}, bool) {
+	for i := 0; i+1 < len(kv); i += 2 {
+		if k, ok := kv[i].(string); ok && k == key {
+			return kv[i+1], true
+		}
+	}
+	return nil, false
+}
 
 // setupUserTestHandler creates a test handler with the given users and secrets
 func setupUserTestHandler(objects ...runtime.Object) *Handler {
@@ -787,6 +824,82 @@ func TestChangePassword_AdminChange_NoCurrentPassword(t *testing.T) {
 
 	if w.Code != http.StatusOK {
 		t.Errorf("Expected status %d, got %d: %s", http.StatusOK, w.Code, w.Body.String())
+	}
+}
+
+// TestChangePassword_AdminChangesOtherUser_EmitsAuditLog verifies that when an
+// admin changes ANOTHER user's password, a security-audit log entry is emitted
+// recording both the acting admin and the target user IDs. This guards against
+// regressions that would silently drop the audit trail for admin actions.
+func TestChangePassword_AdminChangesOtherUser_EmitsAuditLog(t *testing.T) {
+	targetUser, targetSecret := createTestUser("user1@test.local", "Test", "User", "user", true)
+	handler := setupUserTestHandler(targetUser, targetSecret)
+
+	var entries []capturedLogEntry
+	logger := logr.New(captureLogSink{entries: &entries})
+
+	reqBody := `{"newPassword": "NewPass456"}`
+	req := httptest.NewRequest("PATCH", UsersPath+"/user1@test.local/password", strings.NewReader(reqBody))
+	// Admin acts on a DIFFERENT user, so the change is admin-driven (isAdmin && !isSelf).
+	claims := &auth.Claims{UserID: "admin@test.local", Role: "admin"}
+	ctx := context.WithValue(context.Background(), auth.UserClaimsKey, claims)
+	ctx = log.IntoContext(ctx, logger)
+	req = req.WithContext(ctx)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	handler.ChangePassword(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("Expected status %d, got %d: %s", http.StatusOK, w.Code, w.Body.String())
+	}
+
+	var auditEntry *capturedLogEntry
+	for i := range entries {
+		if entries[i].msg == "admin changed user password" {
+			auditEntry = &entries[i]
+			break
+		}
+	}
+	if auditEntry == nil {
+		t.Fatalf("Expected audit log entry 'admin changed user password' to be emitted, got entries: %+v", entries)
+	}
+
+	if admin, ok := kvValue(auditEntry.keysAndValues, "admin"); !ok || admin != "admin@test.local" {
+		t.Errorf("Expected audit log admin=admin@test.local, got %v (present=%v)", admin, ok)
+	}
+	if target, ok := kvValue(auditEntry.keysAndValues, "targetUser"); !ok || target != "user1@test.local" {
+		t.Errorf("Expected audit log targetUser=user1@test.local, got %v (present=%v)", target, ok)
+	}
+}
+
+// TestChangePassword_SelfChange_NoAdminAuditLog verifies that a user changing
+// their OWN password does NOT emit the admin audit entry, so the audit trail
+// stays scoped to genuine admin-on-other-user actions.
+func TestChangePassword_SelfChange_NoAdminAuditLog(t *testing.T) {
+	user1, secret1 := createTestUser("user1@test.local", "Test", "User", "user", true)
+	handler := setupUserTestHandler(user1, secret1)
+
+	var entries []capturedLogEntry
+	logger := logr.New(captureLogSink{entries: &entries})
+
+	reqBody := `{"currentPassword": "TestPass123", "newPassword": "NewPass456"}`
+	req := httptest.NewRequest("PATCH", UsersPath+"/user1@test.local/password", strings.NewReader(reqBody))
+	ctx := log.IntoContext(createUserContext("user1@test.local"), logger)
+	req = req.WithContext(ctx)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	handler.ChangePassword(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("Expected status %d, got %d: %s", http.StatusOK, w.Code, w.Body.String())
+	}
+
+	for _, e := range entries {
+		if e.msg == "admin changed user password" {
+			t.Errorf("Did not expect admin audit log entry for a self password change, got: %+v", e)
+		}
 	}
 }
 

@@ -713,7 +713,10 @@ func (h *Handler) DeleteUser(w http.ResponseWriter, r *http.Request) {
 // Changes user password (admin can change any password, users can change own password)
 func (h *Handler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 	ctx := context.Background()
-	logger := log.FromContext(ctx).WithName("change-password")
+	// Derive the logger from the request context so request-scoped values
+	// (and, in tests, an injected capturing logger) are honored. The k8s client
+	// calls keep using a background context for consistency with sibling handlers.
+	logger := log.FromContext(r.Context()).WithName("change-password")
 
 	// Extract userID from path
 	userID, err := extractPathSuffix(r.URL.Path, UsersPath+"/")
