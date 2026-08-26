@@ -69,7 +69,10 @@ func TestSanitizeUserIDForLabel(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := groupauth.SanitizeUserIDForLabel(tt.email)
+			result, err := groupauth.SanitizeUserIDForLabel(tt.email)
+			if err != nil {
+				t.Fatalf("SanitizeUserIDForLabel(%s) unexpected error: %v", tt.email, err)
+			}
 			if result != tt.expected {
 				t.Errorf("SanitizeUserIDForLabel(%s) = %s, want %s", tt.email, result, tt.expected)
 			}

@@ -20,6 +20,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 
@@ -29,6 +30,37 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
+
+// writeScenarioRunAccessError maps an error returned by
+// groupauth.ValidateScenarioRunAccess to an appropriate HTTP error response.
+//
+// A cluster name collision (groupauth.ClusterNameCollisionError) is a server-side
+// data-integrity/misconfiguration condition, not a caller permission problem, so it
+// is reported as a generic 500 without exposing internal cluster details. All other
+// errors represent a permission denial for the caller and are returned as 403 with
+// the (already client-safe) error message.
+func writeScenarioRunAccessError(ctx context.Context, w http.ResponseWriter, userID string, err error) {
+	logger := log.FromContext(ctx)
+
+	var collisionErr *groupauth.ClusterNameCollisionError
+	if errors.As(err, &collisionErr) {
+		logger.Error(err, "cluster name collision while validating scenario run access", "userID", userID)
+		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+			Error:   "internal_error",
+			Message: "internal error validating cluster access",
+		})
+		return
+	}
+
+	logger.Info("User lacks permission to run scenarios on requested clusters",
+		"userID", userID,
+		"error", err.Error(),
+	)
+	writeJSONError(w, http.StatusForbidden, ErrorResponse{
+		Error:   "forbidden",
+		Message: err.Error(),
+	})
+}
 
 // requireAdminForMethods checks if the user is admin for specific HTTP methods
 // If the method requires admin and user is not admin, returns false and writes error response

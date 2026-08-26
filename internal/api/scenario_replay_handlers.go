@@ -150,14 +150,7 @@ func (h *Handler) GetScenarioReplay(w http.ResponseWriter, r *http.Request) {
 			scenarioRun.Spec.TargetClusters,
 			targetRequest,
 		); err != nil {
-			logger.Info("User lacks permission to replay scenario",
-				"userID", claims.UserID,
-				"error", err.Error(),
-			)
-			writeJSONError(w, http.StatusForbidden, ErrorResponse{
-				Error:   "forbidden",
-				Message: err.Error(),
-			})
+			writeScenarioRunAccessError(ctx, w, claims.UserID, err)
 			return
 		}
 	}

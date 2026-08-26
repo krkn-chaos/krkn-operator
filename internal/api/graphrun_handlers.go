@@ -393,14 +393,7 @@ func (h *Handler) CreateGraphRun(w http.ResponseWriter, r *http.Request) {
 			req.TargetClusters,
 			targetRequest,
 		); err != nil {
-			logger.Info("User lacks permission to run graph on requested clusters",
-				"userID", userClaims.UserID,
-				"error", err.Error(),
-			)
-			writeJSONError(w, http.StatusForbidden, ErrorResponse{
-				Error:   "forbidden",
-				Message: err.Error(),
-			})
+			writeScenarioRunAccessError(ctx, w, userClaims.UserID, err)
 			return
 		}
 	}

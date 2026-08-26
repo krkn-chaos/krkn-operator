@@ -439,7 +439,16 @@ func (h *Handler) PostTarget(w http.ResponseWriter, r *http.Request) {
 	// Build labels with owner tracking
 	labels := make(map[string]string)
 	if claims != nil {
-		labels["krkn.krkn-chaos.dev/owner-user"] = groupauth.SanitizeUserIDForLabel(claims.UserID)
+		ownerLabel, err := groupauth.SanitizeUserIDForLabel(claims.UserID)
+		if err != nil {
+			log.FromContext(ctx).Error(err, "Failed to sanitize user ID for owner label", "userID", claims.UserID)
+			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+				Error:   "internal_error",
+				Message: "Failed to process user identity",
+			})
+			return
+		}
+		labels["krkn.krkn-chaos.dev/owner-user"] = ownerLabel
 	}
 
 	// Create a new KrknTargetRequest CR
@@ -553,7 +562,15 @@ func (h *Handler) DeleteTargetByUUID(w http.ResponseWriter, r *http.Request) {
 
 	// Extract owner from label
 	ownerLabel := targetRequest.Labels["krkn.krkn-chaos.dev/owner-user"]
-	currentUserSanitized := groupauth.SanitizeUserIDForLabel(claims.UserID)
+	currentUserSanitized, err := groupauth.SanitizeUserIDForLabel(claims.UserID)
+	if err != nil {
+		logger.Error(err, "Failed to sanitize user ID for owner comparison", "userID", claims.UserID)
+		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+			Error:   "internal_error",
+			Message: "Failed to process user identity",
+		})
+		return
+	}
 
 	if ownerLabel != currentUserSanitized {
 		logger.Info("Denying delete - user is not the owner",
@@ -1206,14 +1223,7 @@ func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
 			req.TargetClusters,
 			targetRequest,
 		); err != nil {
-			logger.Info("User lacks permission to run scenarios on requested clusters",
-				"userID", userClaims.UserID,
-				"error", err.Error(),
-			)
-			writeJSONError(w, http.StatusForbidden, ErrorResponse{
-				Error:   "forbidden",
-				Message: err.Error(),
-			})
+			writeScenarioRunAccessError(ctx, w, userClaims.UserID, err)
 			return
 		}
 
@@ -1389,7 +1399,16 @@ func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
 	labels := make(map[string]string)
 	ownerUserID := ""
 	if claims != nil {
-		labels["krkn.krkn-chaos.dev/owner-user"] = groupauth.SanitizeUserIDForLabel(claims.UserID)
+		ownerLabel, err := groupauth.SanitizeUserIDForLabel(claims.UserID)
+		if err != nil {
+			logger.Error(err, "Failed to sanitize user ID for owner label", "userID", claims.UserID)
+			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+				Error:   "internal_error",
+				Message: "Failed to process user identity",
+			})
+			return
+		}
+		labels["krkn.krkn-chaos.dev/owner-user"] = ownerLabel
 		ownerUserID = claims.UserID
 	}
 	if req.CustomRunName != "" {

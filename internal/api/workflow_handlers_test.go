@@ -33,7 +33,6 @@ import (
 	fakeclient "sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
-	"github.com/krkn-chaos/krkn-operator/pkg/groupauth"
 	"github.com/krkn-chaos/krkn-operator/pkg/workflows"
 )
 
@@ -207,7 +206,7 @@ func TestCreateWorkflow(t *testing.T) {
 			for _, group := range tt.userGroups {
 				labels["group.krkn.krkn-chaos.dev/"+group] = "true"
 			}
-			userName := groupauth.SanitizeUserIDForResourceName(tt.userID)
+			userName := mustSanitizeUserIDForResourceName(t, tt.userID)
 			user := &krknv1alpha1.KrknUser{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      userName,
@@ -435,7 +434,7 @@ func TestListAvailableWorkflows(t *testing.T) {
 	}
 
 	// Create user
-	userName := groupauth.SanitizeUserIDForResourceName("user@test.example")
+	userName := mustSanitizeUserIDForResourceName(t, "user@test.example")
 	user := &krknv1alpha1.KrknUser{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      userName,
@@ -621,7 +620,7 @@ func TestNodeCountAccuracy(t *testing.T) {
 		t.Fatalf("Failed to create test workflow: %v", err)
 	}
 
-	userName := groupauth.SanitizeUserIDForResourceName("admin@test.example")
+	userName := mustSanitizeUserIDForResourceName(t, "admin@test.example")
 	user := &krknv1alpha1.KrknUser{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      userName,
@@ -830,7 +829,7 @@ func TestCreateWorkflow_DuplicateName(t *testing.T) {
 	// Create user
 	user := &krknv1alpha1.KrknUser{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      groupauth.SanitizeUserIDForResourceName("admin@test.example"),
+			Name:      mustSanitizeUserIDForResourceName(t, "admin@test.example"),
 			Namespace: handler.namespace,
 		},
 		Spec: krknv1alpha1.KrknUserSpec{
@@ -879,7 +878,7 @@ func TestUpdateWorkflow_RenameConflict(t *testing.T) {
 	// Create user
 	user := &krknv1alpha1.KrknUser{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      groupauth.SanitizeUserIDForResourceName("admin@test.example"),
+			Name:      mustSanitizeUserIDForResourceName(t, "admin@test.example"),
 			Namespace: handler.namespace,
 		},
 		Spec: krknv1alpha1.KrknUserSpec{

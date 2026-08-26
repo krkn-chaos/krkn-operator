@@ -20,6 +20,7 @@ package groupauth
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -27,6 +28,26 @@ import (
 
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
 )
+
+// ClusterNameCollisionError indicates that two providers registered the same
+// cluster name with different API URLs in a KrknTargetRequest's status.
+//
+// This is a server-side data-integrity / misconfiguration condition, not a user
+// permission problem. Its Error() message deliberately omits the conflicting API
+// URLs so that it can be safely surfaced to API clients without leaking internal
+// cluster endpoints; the full detail is exposed through the struct fields for
+// server-side logging only.
+type ClusterNameCollisionError struct {
+	ClusterName string
+	ExistingURL string
+	ConflictURL string
+}
+
+// Error returns a client-safe message that names only the colliding cluster,
+// never the API URLs.
+func (e *ClusterNameCollisionError) Error() string {
+	return fmt.Sprintf("cluster name collision: %q is registered by multiple providers with different API URLs", e.ClusterName)
+}
 
 // ValidateScenarioRunAccess validates that a user has permission to run scenarios
 // on all specified target clusters.
@@ -71,6 +92,19 @@ func ValidateScenarioRunAccess(
 	// 3. Build clusterName -> apiURL mapping from TargetRequest
 	clusterAPIURLMap, err := buildClusterAPIURLMap(targetRequest)
 	if err != nil {
+		// Log the full detail (including the conflicting API URLs) server-side so
+		// operators can diagnose the misconfiguration, but return the typed error
+		// unwrapped so callers can distinguish this data-integrity condition from
+		// a genuine permission denial and avoid leaking URLs to clients.
+		var collisionErr *ClusterNameCollisionError
+		if errors.As(err, &collisionErr) {
+			logger.Error(err, "cluster name collision in target request",
+				"clusterName", collisionErr.ClusterName,
+				"existingAPIURL", collisionErr.ExistingURL,
+				"conflictingAPIURL", collisionErr.ConflictURL,
+			)
+			return err
+		}
 		return fmt.Errorf("failed to build cluster API URL map: %w", err)
 	}
 
@@ -175,7 +209,11 @@ func buildClusterAPIURLMap(targetRequest *krknv1alpha1.KrknTargetRequest) (map[s
 	for _, targets := range targetRequest.Status.TargetData {
 		for _, cluster := range targets {
 			if existing, ok := result[cluster.ClusterName]; ok && existing != cluster.ClusterAPIURL {
-				return nil, fmt.Errorf("cluster name collision: %q registered by multiple providers with different API URLs (%s vs %s)", cluster.ClusterName, existing, cluster.ClusterAPIURL)
+				return nil, &ClusterNameCollisionError{
+					ClusterName: cluster.ClusterName,
+					ExistingURL: existing,
+					ConflictURL: cluster.ClusterAPIURL,
+				}
 			}
 			result[cluster.ClusterName] = cluster.ClusterAPIURL
 		}
