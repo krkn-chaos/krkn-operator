@@ -30,6 +30,7 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	routev1 "github.com/openshift/api/route/v1"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
@@ -77,6 +78,7 @@ var (
 
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	utilruntime.Must(routev1.AddToScheme(scheme))
 
 	utilruntime.Must(krknv1alpha1.AddToScheme(scheme))
 	// +kubebuilder:scaffold:scheme
@@ -500,6 +502,14 @@ func main() {
 		}
 	}
 
+	// Setup VisualizeJobController to watch krkn-visualize deployment Jobs
+	if err = (&controller.VisualizeJobController{
+		Client:    mgr.GetClient(),
+		Namespace: krknNamespace,
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "VisualizeJobController")
+		os.Exit(1)
+	}
 	// +kubebuilder:scaffold:builder
 
 	// Setup JWT SecretManager (must start BEFORE API server)
