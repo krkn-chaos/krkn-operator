@@ -61,6 +61,14 @@ rules:
   verbs:
   - get
 - apiGroups:
+  - batch
+  resources:
+  - jobs
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
   - krkn.krkn-chaos.dev
   resources:
   - krkncategories
