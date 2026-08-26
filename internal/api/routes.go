@@ -113,3 +113,8 @@ const (
 const (
 	ElasticsearchConfigsPath = APIBasePath + "/elasticsearch-configs"
 )
+
+// krkn-visualize endpoints
+const (
+	VisualizePath = APIBasePath + "/visualize"
+)
