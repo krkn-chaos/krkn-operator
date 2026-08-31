@@ -215,6 +215,13 @@ func NewServer(port int, client client.Client, clientset kubernetes.Interface, n
 	mux.Handle(ElasticsearchConfigsPath, authMw.RequireAuth(http.HandlerFunc(handler.ElasticsearchConfigsRouter)))
 	mux.Handle(ElasticsearchConfigsPath+"/", authMw.RequireAuth(http.HandlerFunc(handler.ElasticsearchConfigsRouter)))
 
+	// Backup and restore endpoints - admin only
+	mux.Handle(BackupsPath, authMw.RequireAuth(http.HandlerFunc(handler.ListBackups)))
+	mux.Handle(BackupPath, authMw.RequireAuth(http.HandlerFunc(handler.PostBackup)))
+	mux.Handle(BackupPath+"/", authMw.RequireAuth(http.HandlerFunc(handler.GetBackupStatus)))
+	mux.Handle(RestorePath, authMw.RequireAuth(http.HandlerFunc(handler.PostRestore)))
+	mux.Handle(RestorePath+"/", authMw.RequireAuth(http.HandlerFunc(handler.GetRestoreStatus)))
+
 	// ==================== API v2 Endpoints ====================
 	// v2 REST endpoints reuse v1 handlers (backward compatible)
 	// v2 WebSocket endpoints provide real-time multiplexed updates
@@ -323,8 +330,9 @@ startServer:
 	}
 }
 
-// Shutdown gracefully shuts down the API server
+// Shutdown gracefully shuts down the API server and cancels in-flight background jobs.
 func (s *Server) Shutdown() error {
+	s.handler.Shutdown()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	return s.server.Shutdown(ctx)

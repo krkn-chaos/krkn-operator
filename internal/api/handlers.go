@@ -118,17 +118,30 @@ type Handler struct {
 	namespace      string
 	grpcServerAddr string
 	secretManager  *auth.SecretManager
+	jobTracker     *JobTracker
+	baseCtx        context.Context
+	baseCancel     context.CancelFunc
 }
 
-// NewHandler creates a new Handler
+// NewHandler creates a new Handler.
+// Call Shutdown() during server teardown to cancel in-flight background jobs.
 func NewHandler(client client.Client, clientset kubernetes.Interface, namespace string, grpcServerAddr string, secretManager *auth.SecretManager) *Handler {
+	bgCtx, bgCancel := context.WithCancel(context.Background())
 	return &Handler{
 		client:         client,
 		clientset:      clientset,
 		namespace:      namespace,
 		grpcServerAddr: grpcServerAddr,
 		secretManager:  secretManager,
+		jobTracker:     NewJobTracker(),
+		baseCtx:        bgCtx,
+		baseCancel:     bgCancel,
 	}
+}
+
+// Shutdown cancels all in-flight background jobs.
+func (h *Handler) Shutdown() {
+	h.baseCancel()
 }
 
 // getTokenGenerator creates a TokenGenerator for JWT validation (used for WebSocket auth)

@@ -113,3 +113,13 @@ const (
 const (
 	ElasticsearchConfigsPath = APIBasePath + "/elasticsearch-configs"
 )
+
+// Backup and restore endpoints
+const (
+	// BackupsPath is the endpoint for listing available backup archives.
+	BackupsPath = APIBasePath + "/backups"
+	// BackupPath is the endpoint for creating backups and querying backup job status.
+	BackupPath = APIBasePath + "/backup"
+	// RestorePath is the endpoint for restoring from backups and querying restore job status.
+	RestorePath = APIBasePath + "/restore"
+)

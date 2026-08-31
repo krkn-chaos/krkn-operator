@@ -42,10 +42,8 @@ spec:
       #             values:
       #               - linux
       securityContext:
-        # Projects are configured by default to adhere to the "restricted" Pod Security Standards.
-        # This ensures that deployments meet the highest security requirements for Kubernetes.
-        # For more details, see: https://kubernetes.io/docs/concepts/security/pod-security-standards/#restricted
         runAsNonRoot: true
+        fsGroup: 1000
         seccompProfile:
           type: RuntimeDefault
       containers:
@@ -97,7 +95,9 @@ spec:
           requests:
             cpu: 10m
             memory: 64Mi
-        volumeMounts: []
+        volumeMounts:
+        - name: backups
+          mountPath: /backups
       - name: data-provider
         image: krkn-chaos.docker.scarf.sh/krkn-chaos/krkn-operator-data-provider:latest
         imagePullPolicy: Always
@@ -110,6 +110,9 @@ spec:
           capabilities:
             drop:
             - "ALL"
-      volumes: []
+      volumes:
+      - name: backups
+        persistentVolumeClaim:
+          claimName: krkn-operator-backups
       serviceAccountName: controller-manager
       terminationGracePeriodSeconds: 10
