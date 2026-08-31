@@ -16,4 +16,20 @@ subjects:
 - kind: ServiceAccount
   name: {{ include "krkn-operator.fullname" . }}-krkn-scenario-runner
   namespace: {{ include "krkn-operator.namespace" . }}
+---
+# Grants OpenShift's built-in anyuid SCC to the krkn-ai orchestrator ServiceAccount.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "krkn-operator.fullname" . }}-ai-orchestrator-anyuid
+  labels:
+    {{- include "krkn-operator.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:openshift:scc:anyuid
+subjects:
+- kind: ServiceAccount
+  name: {{ include "krkn-operator.fullname" . }}-krkn-ai-orchestrator
+  namespace: {{ include "krkn-operator.namespace" . }}
 {{- end }}

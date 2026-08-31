@@ -118,6 +118,11 @@ func getOwnerLabel(scenarioRun *krknv1alpha1.KrknScenarioRun) string {
 // 2. If RegistryURL and ScenarioRepository are set: uses inline private registry with same format
 // 3. Otherwise: uses public Quay registry defaults from krknctl config (quay.io/krkn-chaos/krkn-hub:scenarioImage)
 func buildContainerImage(spec *krknv1alpha1.KrknScenarioRunSpec, config *krknctlconfig.Config) (string, error) {
+	// A fully qualified image is already resolved by the caller.
+	if spec.RegistryURL == "" && strings.Contains(spec.ScenarioImage, "/") {
+		return spec.ScenarioImage, nil
+	}
+
 	// Case 1 & 2: Private registry (either saved or inline)
 	if spec.RegistryURL != "" && spec.ScenarioRepository != "" {
 		return fmt.Sprintf("%s/%s:%s",
@@ -1307,47 +1312,9 @@ func (r *KrknScenarioRunReconciler) calculateOverallStatus(scenarioRun *krknv1al
 	}
 }
 
-// getKubeconfigFromProvider retrieves kubeconfig from a provider-specific Secret
+// getKubeconfigFromProvider retrieves kubeconfig from a provider-specific Secret.
 func (r *KrknScenarioRunReconciler) getKubeconfigFromProvider(ctx context.Context, targetID string, providerName string, clusterName string) (string, error) {
-	// Fetch the secret with the same name as the KrknTargetRequest ID
-	var secret corev1.Secret
-	err := r.Get(ctx, types.NamespacedName{
-		Name:      targetID,
-		Namespace: r.Namespace,
-	}, &secret)
-
-	if err != nil {
-		return "", fmt.Errorf("failed to fetch secret: %w", err)
-	}
-
-	// Retrieve the managed-clusters JSON from the secret data
-	managedClustersBytes, exists := secret.Data["managed-clusters"]
-	if !exists {
-		return "", fmt.Errorf("managed-clusters not found in secret")
-	}
-
-	// Parse the JSON to extract cluster configurations
-	var managedClusters map[string]map[string]struct {
-		Kubeconfig string `json:"kubeconfig"`
-	}
-	if err := json.Unmarshal(managedClustersBytes, &managedClusters); err != nil {
-		return "", fmt.Errorf("failed to parse managed-clusters JSON: %w", err)
-	}
-
-	// Get the provider's clusters
-	providerClusters, exists := managedClusters[providerName]
-	if !exists {
-		return "", fmt.Errorf("provider '%s' not found in managed-clusters", providerName)
-	}
-
-	// Check if the requested cluster exists
-	clusterConfig, exists := providerClusters[clusterName]
-	if !exists {
-		return "", fmt.Errorf("cluster '%s' not found in %s", clusterName, providerName)
-	}
-
-	// Return the base64-encoded kubeconfig
-	return clusterConfig.Kubeconfig, nil
+	return resolveManagedClusterKubeconfig(ctx, r.Client, r.Namespace, targetID, providerName, clusterName)
 }
 
 // statusEqual compares two KrknScenarioRunStatus to determine if they are equal

@@ -8,6 +8,7 @@ rules:
   - ""
   resources:
   - configmaps
+  - persistentvolumeclaims
   - pods
   - secrets
   verbs:
@@ -30,6 +31,7 @@ rules:
   - krkngraphruns
   - krknoperatortargets
   - krknscenarioruns
+  - krknairuns
   - krkntargetrequests
   - krknusergroups
   - krknusers
@@ -46,6 +48,7 @@ rules:
   resources:
   - krkngraphruns/finalizers
   - krknscenarioruns/finalizers
+  - krknairuns/finalizers
   verbs:
   - update
 - apiGroups:
@@ -56,6 +59,7 @@ rules:
   - krknoperatortargetproviders/status
   - krknoperatortargets/status
   - krknscenarioruns/status
+  - krknairuns/status
   - krkntargetrequests/status
   - krknusergroups/status
   - krknusers/status

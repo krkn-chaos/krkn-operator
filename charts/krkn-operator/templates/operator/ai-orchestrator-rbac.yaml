@@ -1,0 +1,70 @@
+{{- if .Values.rbac.create }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "krkn-operator.fullname" . }}-krkn-ai-orchestrator
+  namespace: {{ include "krkn-operator.namespace" . }}
+  labels:
+    {{- include "krkn-operator.labels" . | nindent 4 }}
+    app.kubernetes.io/component: ai-orchestrator
+rules:
+- apiGroups:
+  - krkn.krkn-chaos.dev
+  resources:
+  - krknscenarioruns
+  verbs:
+  - create
+  - get
+  - list
+  - watch
+  - delete
+- apiGroups:
+  - krkn.krkn-chaos.dev
+  resources:
+  - krknscenarioruns/status
+  verbs:
+  - get
+- apiGroups:
+  - krkn.krkn-chaos.dev
+  resources:
+  - krknscenarioruns/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - krkn.krkn-chaos.dev
+  resources:
+  - krknairuns/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - ""
+  resources:
+  - pods
+  verbs:
+  - get
+  - list
+- apiGroups:
+  - ""
+  resources:
+  - pods/log
+  verbs:
+  - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "krkn-operator.fullname" . }}-krkn-ai-orchestrator
+  namespace: {{ include "krkn-operator.namespace" . }}
+  labels:
+    {{- include "krkn-operator.labels" . | nindent 4 }}
+    app.kubernetes.io/component: ai-orchestrator
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "krkn-operator.fullname" . }}-krkn-ai-orchestrator
+subjects:
+- kind: ServiceAccount
+  name: {{ include "krkn-operator.fullname" . }}-krkn-ai-orchestrator
+  namespace: {{ include "krkn-operator.namespace" . }}
+{{- end }}
