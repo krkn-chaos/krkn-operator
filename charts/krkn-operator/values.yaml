@@ -31,12 +31,6 @@ images:
   pullSecrets: []
   # - name: my-registry-secret
 
-## krknctl configuration
-# Optional namespace-local ConfigMap containing a krknctl Config JSON document.
-# The embedded krknctl defaults are used when configMapName is empty.
-krknctl:
-  configMapName: ""
-  configMapKey: config.json
 
 ## Authentication & Security
 auth:

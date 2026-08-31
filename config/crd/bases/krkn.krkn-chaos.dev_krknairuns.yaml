@@ -51,8 +51,13 @@ spec:
                 default: 21600
                 format: int64
                 type: integer
-              configYamlBase64:
-                description: ConfigYAMLBase64 is the base64-encoded full krkn-ai.yaml.
+              configMapKey:
+                default: krkn-ai.yaml
+                description: ConfigMapKey is the data key containing the krkn-ai YAML.
+                type: string
+              configMapName:
+                description: ConfigMapName identifies the ConfigMap containing the
+                  krkn-ai YAML.
                 type: string
               orchestratorImage:
                 type: string
@@ -86,7 +91,7 @@ spec:
               targetRequestId:
                 type: string
             required:
-            - configYamlBase64
+            - configMapName
             - targetClusters
             - targetRequestId
             type: object

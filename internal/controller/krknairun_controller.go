@@ -110,9 +110,27 @@ func (r *KrknAIRunReconciler) ensureProvisioned(ctx context.Context, aiRun *krkn
 	if err != nil {
 		return fmt.Errorf("failed to decode kubeconfig: %w", err)
 	}
-	configYAML, err := base64.StdEncoding.DecodeString(aiRun.Spec.ConfigYAMLBase64)
-	if err != nil {
-		return fmt.Errorf("failed to decode config YAML: %w", err)
+
+	configName := aiResourceName("ai", aiRun.Name, "config")
+	configKey := aiRun.Spec.ConfigMapKey
+	if configKey == "" {
+		configKey = "krkn-ai.yaml"
+	}
+	if aiRun.Spec.ConfigMapName == "" {
+		return fmt.Errorf("configMapName is required")
+	}
+	var sourceConfigMap corev1.ConfigMap
+	if err := r.Get(ctx, types.NamespacedName{
+		Name: aiRun.Spec.ConfigMapName, Namespace: aiRun.Namespace,
+	}, &sourceConfigMap); err != nil {
+		return fmt.Errorf("failed to read config ConfigMap %q: %w", aiRun.Spec.ConfigMapName, err)
+	}
+	configYAML, ok := sourceConfigMap.Data[configKey]
+	if !ok || strings.TrimSpace(configYAML) == "" {
+		return fmt.Errorf(
+			"config ConfigMap %q does not contain non-empty key %q",
+			aiRun.Spec.ConfigMapName, configKey,
+		)
 	}
 
 	image := aiRun.Spec.OrchestratorImage
@@ -123,7 +141,6 @@ func (r *KrknAIRunReconciler) ensureProvisioned(ctx context.Context, aiRun *krkn
 		return fmt.Errorf("orchestrator image not configured")
 	}
 
-	configName := aiResourceName("ai", aiRun.Name, "config")
 	kubeconfigName := aiResourceName("ai", aiRun.Name, "kubeconfig")
 	pvcName := aiResourceName("ai", aiRun.Name, "results")
 	podName := aiResourceName("ai-run", aiRun.Name, "")

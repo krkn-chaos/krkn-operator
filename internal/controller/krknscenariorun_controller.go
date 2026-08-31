@@ -51,57 +51,9 @@ import (
 // KrknScenarioRunReconciler reconciles a KrknScenarioRun object
 type KrknScenarioRunReconciler struct {
 	client.Client
-	Scheme               *runtime.Scheme
-	Clientset            kubernetes.Interface
-	Namespace            string
-	KrknctlConfigMapName string
-	KrknctlConfigMapKey  string
-}
-
-// loadKrknctlConfig returns the embedded krknctl defaults unless a ConfigMap
-// has been configured for this controller. The ConfigMap data value must be
-// JSON matching krknctl/pkg/config.Config.
-func (r *KrknScenarioRunReconciler) loadKrknctlConfig(ctx context.Context) (krknctlconfig.Config, error) {
-	if r.KrknctlConfigMapName == "" {
-		return krknctlconfig.LoadConfig()
-	}
-
-	key := r.KrknctlConfigMapKey
-	if key == "" {
-		key = "config.json"
-	}
-
-	var configMap corev1.ConfigMap
-	if err := r.Get(ctx, types.NamespacedName{
-		Name:      r.KrknctlConfigMapName,
-		Namespace: r.Namespace,
-	}, &configMap); err != nil {
-		return krknctlconfig.Config{}, fmt.Errorf(
-			"failed to read krknctl config ConfigMap %q: %w",
-			r.KrknctlConfigMapName,
-			err,
-		)
-	}
-
-	rawConfig, ok := configMap.Data[key]
-	if !ok || strings.TrimSpace(rawConfig) == "" {
-		return krknctlconfig.Config{}, fmt.Errorf(
-			"krknctl config ConfigMap %q does not contain non-empty key %q",
-			r.KrknctlConfigMapName,
-			key,
-		)
-	}
-
-	var config krknctlconfig.Config
-	if err := json.Unmarshal([]byte(rawConfig), &config); err != nil {
-		return krknctlconfig.Config{}, fmt.Errorf(
-			"failed to decode krknctl config ConfigMap %q key %q: %w",
-			r.KrknctlConfigMapName,
-			key,
-			err,
-		)
-	}
-	return config, nil
+	Scheme    *runtime.Scheme
+	Clientset kubernetes.Interface
+	Namespace string
 }
 
 // +kubebuilder:rbac:groups=krkn.krkn-chaos.dev,resources=krknscenarioruns,verbs=get;list;watch;create;update;patch;delete
@@ -467,8 +419,8 @@ func (r *KrknScenarioRunReconciler) prepareJobResources(
 	// Generate unique job ID
 	jobID := uuid.New().String()
 
-	// Load krknctl config for defaults, optionally from a configured ConfigMap.
-	krknctlCfg, err := r.loadKrknctlConfig(ctx)
+	// Load the embedded krknctl defaults for the scenario pod.
+	krknctlCfg, err := krknctlconfig.LoadConfig()
 	if err != nil {
 		return nil, fmt.Errorf("failed to load krknctl config: %w", err)
 	}

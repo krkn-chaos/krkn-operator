@@ -28,8 +28,13 @@ type KrknAIRunSpec struct {
 	// +kubebuilder:validation:MinProperties=1
 	TargetClusters map[string][]string `json:"targetClusters"`
 
-	// ConfigYAMLBase64 is the base64-encoded full krkn-ai.yaml.
-	ConfigYAMLBase64 string `json:"configYamlBase64"`
+	// ConfigMapName identifies the ConfigMap containing the krkn-ai YAML.
+	ConfigMapName string `json:"configMapName"`
+
+	// ConfigMapKey is the data key containing the krkn-ai YAML.
+	// +optional
+	// +kubebuilder:default=krkn-ai.yaml
+	ConfigMapKey string `json:"configMapKey,omitempty"`
 
 	// +optional
 	OrchestratorImage string `json:"orchestratorImage,omitempty"`
