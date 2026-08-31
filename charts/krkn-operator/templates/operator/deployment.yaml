@@ -60,6 +60,10 @@ spec:
               fieldPath: metadata.namespace
         - name: KRKNAI_ORCHESTRATOR_IMAGE
           value: {{ .Values.images.aiOrchestrator.image | quote }}
+        - name: KRKNCTL_CONFIG_MAP_NAME
+          value: {{ .Values.krknctl.configMapName | quote }}
+        - name: KRKNCTL_CONFIG_MAP_KEY
+          value: {{ .Values.krknctl.configMapKey | quote }}
         - name: JWT_SECRET
           valueFrom:
             secretKeyRef:

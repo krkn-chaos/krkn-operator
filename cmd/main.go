@@ -254,10 +254,12 @@ func main() {
 	}
 
 	if err = (&controller.KrknScenarioRunReconciler{
-		Client:    mgr.GetClient(),
-		Scheme:    mgr.GetScheme(),
-		Clientset: clientset,
-		Namespace: krknNamespace,
+		Client:               mgr.GetClient(),
+		Scheme:               mgr.GetScheme(),
+		Clientset:            clientset,
+		Namespace:            krknNamespace,
+		KrknctlConfigMapName: os.Getenv("KRKNCTL_CONFIG_MAP_NAME"),
+		KrknctlConfigMapKey:  os.Getenv("KRKNCTL_CONFIG_MAP_KEY"),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "KrknScenarioRun")
 		os.Exit(1)

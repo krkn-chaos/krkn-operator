@@ -17,7 +17,7 @@ images:
     image: krkn-chaos.docker.scarf.sh/krkn-chaos/krkn-operator:latest
     pullPolicy: Always
   aiOrchestrator:
-    image: quay.io/krkn-chaos/krkn-ai:latest
+    image: quay.io/krkn-chaos/krkn-ai-operator:latest
     pullPolicy: Always
   dataProvider:
     image: krkn-chaos.docker.scarf.sh/krkn-chaos/krkn-operator-data-provider:latest
@@ -30,6 +30,13 @@ images:
     pullPolicy: Always
   pullSecrets: []
   # - name: my-registry-secret
+
+## krknctl configuration
+# Optional namespace-local ConfigMap containing a krknctl Config JSON document.
+# The embedded krknctl defaults are used when configMapName is empty.
+krknctl:
+  configMapName: ""
+  configMapKey: config.json
 
 ## Authentication & Security
 auth:
