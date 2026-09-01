@@ -178,7 +178,9 @@ func (h *Handler) checkScenarioRunAccessWithAction(
 		log.FromContext(ctx).Error(err, "Failed to check scenario run access",
 			"userID", claims.UserID,
 			"action", requiredAction)
-		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+		// Error already logged above with full context; use writeJSON to avoid a
+		// duplicate, less-informative log entry from writeJSONError.
+		writeJSON(w, http.StatusInternalServerError, ErrorResponse{
 			Error:   "internal_error",
 			Message: "Failed to validate access",
 		})
@@ -418,7 +420,9 @@ func (h *Handler) checkJobAccess(
 			"userID", claims.UserID,
 			"jobID", job.JobID,
 			"action", requiredAction)
-		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+		// Error already logged above with full context; use writeJSON to avoid a
+		// duplicate, less-informative log entry from writeJSONError.
+		writeJSON(w, http.StatusInternalServerError, ErrorResponse{
 			Error:   "internal_error",
 			Message: "Failed to validate access",
 		})

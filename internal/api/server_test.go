@@ -44,7 +44,9 @@ func TestMaxBodySizeMiddleware(t *testing.T) {
 			return
 		}
 		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write(body)
+		if _, err := w.Write(body); err != nil {
+			t.Errorf("failed to write response body: %v", err)
+		}
 	})
 
 	handler := maxBodySizeMiddleware(maxBytes)(echoHandler)
@@ -130,6 +132,23 @@ func TestMaxBodySizeMiddleware(t *testing.T) {
 			}
 		})
 	}
+
+	// Chunked / unknown-length requests do not advertise a Content-Length, so
+	// the fast-path short-circuit cannot apply. The MaxBytesReader fallback must
+	// still cap the body: reading past the limit fails, and echoHandler maps
+	// that to 413.
+	t.Run("POST chunked exceeds limit", func(t *testing.T) {
+		body := strings.NewReader(strings.Repeat("x", 2048))
+		req := httptest.NewRequest(http.MethodPost, "/test", body)
+		req.ContentLength = -1 // simulate chunked transfer encoding
+		w := httptest.NewRecorder()
+
+		handler.ServeHTTP(w, req)
+
+		if w.Code != http.StatusRequestEntityTooLarge {
+			t.Errorf("expected status %d, got %d", http.StatusRequestEntityTooLarge, w.Code)
+		}
+	})
 }
 
 // TestWorkflowsAvailableMethodGuard is a compile-time check that ensures

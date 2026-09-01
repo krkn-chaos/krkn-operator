@@ -697,7 +697,12 @@ func writeJSON(w http.ResponseWriter, status int, data interface{}) {
 	}
 }
 
-// writeJSONError writes a JSON error response with the given status code
+// writeJSONError writes a JSON error response with the given status code.
+//
+// For 5xx statuses it emits a generic server-error log so failures are never
+// silently swallowed. Callers that have already logged the underlying error
+// (with the real error value and request context) must use writeJSON instead of
+// writeJSONError to avoid duplicate log entries for the same failure.
 func writeJSONError(w http.ResponseWriter, status int, err ErrorResponse) {
 	// Log internal server errors for debugging
 	if status >= 500 {

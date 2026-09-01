@@ -428,18 +428,35 @@ func (s *Server) Shutdown() error {
 }
 
 // maxBodySizeMiddleware returns middleware that limits request body size for
-// POST, PUT, and PATCH methods using http.MaxBytesReader. This prevents
-// clients from sending excessively large payloads that could exhaust memory.
-// GET, DELETE, and other methods are passed through without modification.
+// POST, PUT, and PATCH methods. This prevents clients from sending excessively
+// large payloads that could exhaust memory. GET, DELETE, and other methods are
+// passed through without modification.
 //
-// When the limit is exceeded, http.MaxBytesReader causes subsequent body reads
-// to fail with *http.MaxBytesError. Handlers decode the request body via
-// decodeJSONBody, which maps that error to a 413 Request Entity Too Large JSON
-// response so payload-too-large is not misreported as a generic 400.
+// Enforcement happens in two layers so that a payload-too-large is reported
+// consistently as 413 Request Entity Too Large (with a JSON body) rather than
+// being misclassified downstream as a generic 400 "invalid request body":
+//
+//  1. When the client advertises a Content-Length larger than the limit, the
+//     request is rejected immediately with a 413 before the body is read. This
+//     covers virtually all real clients, which send Content-Length for JSON
+//     payloads.
+//  2. For chunked / unknown-length requests (Content-Length <= 0) the body is
+//     wrapped with http.MaxBytesReader, which caps memory usage. Reads past the
+//     limit fail with *http.MaxBytesError; handlers surface that as a decode
+//     error. Memory is always protected in this case.
 func maxBodySizeMiddleware(maxBytes int64) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.Method == http.MethodPost || r.Method == http.MethodPut || r.Method == http.MethodPatch {
+				// Fast path: reject when the declared size already exceeds the
+				// limit, returning a precise 413 without reading the body.
+				if r.ContentLength > maxBytes {
+					writeJSONError(w, http.StatusRequestEntityTooLarge, ErrorResponse{
+						Error:   "request_entity_too_large",
+						Message: "Request body too large",
+					})
+					return
+				}
 				r.Body = http.MaxBytesReader(w, r.Body, maxBytes)
 			}
 			next.ServeHTTP(w, r)

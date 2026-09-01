@@ -43,7 +43,8 @@ func (h *Handler) ListProviders(w http.ResponseWriter, r *http.Request) {
 	var providerList krknv1alpha1.KrknOperatorTargetProviderList
 	if err := h.client.List(ctx, &providerList, client.InNamespace(h.namespace)); err != nil {
 		logger.Error(err, "Failed to list KrknOperatorTargetProvider CRs")
-		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+		// Error already logged above; use writeJSON to avoid a duplicate log.
+		writeJSON(w, http.StatusInternalServerError, ErrorResponse{
 			Error:   "internal_error",
 			Message: "Failed to list providers",
 		})
@@ -99,7 +100,8 @@ func (h *Handler) UpdateProviderStatus(w http.ResponseWriter, r *http.Request) {
 	var providerList krknv1alpha1.KrknOperatorTargetProviderList
 	if err := h.client.List(ctx, &providerList, client.InNamespace(h.namespace)); err != nil {
 		logger.Error(err, "Failed to list providers")
-		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+		// Error already logged above; use writeJSON to avoid a duplicate log.
+		writeJSON(w, http.StatusInternalServerError, ErrorResponse{
 			Error:   "internal_error",
 			Message: "Failed to query providers",
 		})
@@ -129,7 +131,8 @@ func (h *Handler) UpdateProviderStatus(w http.ResponseWriter, r *http.Request) {
 		logger.Error(err, "Failed to update provider",
 			"provider", providerName,
 			"active", req.Active)
-		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+		// Error already logged above; use writeJSON to avoid a duplicate log.
+		writeJSON(w, http.StatusInternalServerError, ErrorResponse{
 			Error:   "internal_error",
 			Message: "Failed to update provider status",
 		})
