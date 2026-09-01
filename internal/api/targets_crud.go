@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	corev1 "k8s.io/api/core/v1"
@@ -39,6 +40,31 @@ import (
 
 // +kubebuilder:rbac:groups=krkn.krkn-chaos.dev,resources=krknoperatortargets,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=krkn.krkn-chaos.dev,resources=krknoperatortargets/status,verbs=get;update;patch
+
+// cleanupTimeout bounds best-effort cleanup deletes. It is intentionally short
+// so a stuck API server cannot block the handler goroutine indefinitely.
+const cleanupTimeout = 10 * time.Second
+
+// deleteQuietly performs a best-effort delete of obj as part of error recovery.
+//
+// It deliberately derives its context from context.WithoutCancel(ctx) so the
+// delete still runs even when the originating request context has already been
+// canceled (client disconnect, proxy timeout, or server deadline). Reusing the
+// canceled request context here would make the delete fail immediately, leaving
+// orphaned Secrets/Targets behind. A NotFound result is treated as success;
+// any other failure is logged (not returned) because the caller is already on
+// an error path and cleanup is opportunistic.
+func (h *Handler) deleteQuietly(ctx context.Context, obj client.Object) {
+	logger := log.FromContext(ctx)
+
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), cleanupTimeout)
+	defer cancel()
+
+	if err := h.client.Delete(cleanupCtx, obj); client.IgnoreNotFound(err) != nil {
+		logger.Error(err, "Failed to clean up resource during error handling",
+			"kind", fmt.Sprintf("%T", obj), "name", obj.GetName())
+	}
+}
 
 // fetchTarget retrieves a KrknOperatorTarget by UUID.
 // Returns the target and any error encountered.
@@ -272,8 +298,9 @@ func (h *Handler) CreateTarget(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.client.Create(ctx, target); err != nil {
-		// Cleanup secret on error
-		_ = h.client.Delete(ctx, secret) // Best-effort cleanup
+		// Cleanup secret on error (detached context so it runs even if the
+		// request was canceled)
+		h.deleteQuietly(ctx, secret)
 
 		logger.Error(err, "Failed to create target")
 		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
@@ -289,9 +316,10 @@ func (h *Handler) CreateTarget(w http.ResponseWriter, r *http.Request) {
 		LastUpdated: metav1.Now(),
 	}
 	if err := h.client.Status().Update(ctx, target); err != nil {
-		// Cleanup on error
-		_ = h.client.Delete(ctx, target) // Best-effort cleanup
-		_ = h.client.Delete(ctx, secret) // Best-effort cleanup
+		// Cleanup on error (detached context so it runs even if the request
+		// was canceled)
+		h.deleteQuietly(ctx, target)
+		h.deleteQuietly(ctx, secret)
 
 		logger.Error(err, "Failed to update target status")
 		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
@@ -494,8 +522,9 @@ func (h *Handler) DeleteTarget(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 
-	// Best-effort cleanup of secret (ignore if not found)
-	_ = h.client.Delete(ctx, secret)
+	// Best-effort cleanup of secret (ignore if not found); detached context so
+	// the secret is not orphaned if the request is canceled after this point
+	h.deleteQuietly(ctx, secret)
 
 	if err := h.client.Delete(ctx, target); err != nil {
 		logger.Error(err, "Failed to delete target", "targetUUID", targetUUID)

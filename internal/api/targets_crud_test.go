@@ -535,6 +535,60 @@ func TestGetTarget_NotFound(t *testing.T) {
 	}
 }
 
+// TestDeleteQuietly_RunsWithCanceledContext verifies the fix for the best-effort
+// cleanup bug: deleteQuietly must still delete the resource even when the
+// originating request context has already been canceled (client disconnect,
+// proxy timeout, server deadline). Before the fix the cleanup reused the
+// canceled request context and failed immediately, orphaning Secrets/Targets.
+func TestDeleteQuietly_RunsWithCanceledContext(t *testing.T) {
+	handler := setupTestHandler()
+
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "orphan-secret",
+			Namespace: handler.namespace,
+		},
+	}
+	if err := handler.client.Create(context.Background(), secret); err != nil {
+		t.Fatalf("failed to seed secret: %v", err)
+	}
+
+	// Cancel the context before invoking cleanup to simulate a request that was
+	// aborted mid-handler.
+	canceledCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	handler.deleteQuietly(canceledCtx, secret)
+
+	// The secret must be gone despite the canceled parent context.
+	err := handler.client.Get(context.Background(), client.ObjectKey{
+		Name:      "orphan-secret",
+		Namespace: handler.namespace,
+	}, &corev1.Secret{})
+	if err == nil {
+		t.Fatal("expected secret to be deleted by deleteQuietly, but it still exists")
+	}
+	if client.IgnoreNotFound(err) != nil {
+		t.Fatalf("expected NotFound after cleanup, got: %v", err)
+	}
+}
+
+// TestDeleteQuietly_MissingObjectIsNoOp verifies that cleaning up an object that
+// no longer exists is silently treated as success (NotFound is ignored).
+func TestDeleteQuietly_MissingObjectIsNoOp(t *testing.T) {
+	handler := setupTestHandler()
+
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "already-gone",
+			Namespace: handler.namespace,
+		},
+	}
+
+	// Should not panic or block; NotFound is swallowed.
+	handler.deleteQuietly(context.Background(), secret)
+}
+
 func TestDeleteTarget(t *testing.T) {
 	handler := setupTestHandler()
 

@@ -31,6 +31,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/go-logr/logr"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	"github.com/krkn-chaos/krknctl/pkg/config"
@@ -1759,6 +1760,21 @@ func isWebSocketDisconnectError(err error) bool {
 	return false
 }
 
+// writeWSError sends a best-effort error notification to a WebSocket client.
+//
+// WebSocket error reporting is best-effort: the peer may already be gone, so a
+// write failure is expected and non-fatal. We still capture the returned error
+// (rather than discarding it with `_ =`) and log anything that is not a normal
+// client disconnect, so genuine notification failures remain visible in the
+// server logs instead of being silently swallowed.
+func writeWSError(conn *websocket.Conn, logger logr.Logger, message string) {
+	if err := conn.WriteMessage(websocket.TextMessage, []byte(message)); err != nil {
+		if !isWebSocketDisconnectError(err) {
+			logger.Error(err, "Failed to write WebSocket error message", "message", message)
+		}
+	}
+}
+
 // GetScenarioRunLogs handles GET /api/v1/scenarios/run/{scenarioRunName}/jobs/{jobID}/logs endpoint
 // It streams the stdout/stderr logs of a running or completed job via WebSocket
 func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
@@ -1900,7 +1916,7 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 		remainder = path[len(v1Prefix):]
 	} else {
 		logger.Error(nil, "Invalid logs endpoint path", "path", path, "expected_v1", v1Prefix, "expected_v2", v2Prefix)
-		_ = conn.WriteMessage(websocket.TextMessage, []byte("ERROR: Invalid logs endpoint path")) // Best-effort error reporting
+		writeWSError(conn, logger, "ERROR: Invalid logs endpoint path")
 		return
 	}
 
@@ -1908,7 +1924,7 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 	parts := strings.Split(remainder, "/jobs/")
 	if len(parts) != 2 {
 		logger.Error(nil, "Invalid logs endpoint path format", "path", path)
-		_ = conn.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("ERROR: Invalid path format. Expected: %s/{scenarioRunName}/jobs/{jobID}/logs", ScenariosRunPath))) // Best-effort error reporting
+		writeWSError(conn, logger, fmt.Sprintf("ERROR: Invalid path format. Expected: %s/{scenarioRunName}/jobs/{jobID}/logs", ScenariosRunPath))
 		return
 	}
 
@@ -1918,7 +1934,7 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 	// Extract jobID (remove "/logs" suffix)
 	if !strings.HasSuffix(jobIDAndLogs, "/logs") {
 		logger.Error(nil, "Invalid logs endpoint path format", "path", path)
-		_ = conn.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("ERROR: Invalid path format. Expected: %s/{scenarioRunName}/jobs/{jobID}/logs", ScenariosRunPath))) // Best-effort error reporting
+		writeWSError(conn, logger, fmt.Sprintf("ERROR: Invalid path format. Expected: %s/{scenarioRunName}/jobs/{jobID}/logs", ScenariosRunPath))
 		return
 	}
 
@@ -1926,7 +1942,7 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 
 	if scenarioRunName == "" || jobID == "" {
 		logger.Error(nil, "Empty scenarioRunName or jobID in request path", "path", path)
-		_ = conn.WriteMessage(websocket.TextMessage, []byte("ERROR: scenarioRunName and jobID cannot be empty")) // Best-effort error reporting
+		writeWSError(conn, logger, "ERROR: scenarioRunName and jobID cannot be empty")
 		return
 	}
 
@@ -1942,7 +1958,7 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 		Namespace: h.namespace,
 	}, &scenarioRun); err != nil {
 		logger.Error(err, "Failed to fetch scenario run", "scenarioRunName", scenarioRunName)
-		_ = conn.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("ERROR: Scenario run '%s' not found", scenarioRunName)))
+		writeWSError(conn, logger, fmt.Sprintf("ERROR: Scenario run '%s' not found", scenarioRunName))
 		return
 	}
 
@@ -1959,7 +1975,7 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 		logger.Error(nil, "Job not found in scenario run",
 			"scenarioRunName", scenarioRunName,
 			"jobID", jobID)
-		_ = conn.WriteMessage(websocket.TextMessage, []byte("ERROR: Job not found in scenario run"))
+		writeWSError(conn, logger, "ERROR: Job not found in scenario run")
 		return
 	}
 
@@ -1970,7 +1986,7 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 				"scenarioRunName", scenarioRunName,
 				"jobID", jobID,
 				"userID", claims.UserID)
-			_ = conn.WriteMessage(websocket.TextMessage, []byte("ERROR: Access denied. Job has no cluster API URL"))
+			writeWSError(conn, logger, "ERROR: Access denied. Job has no cluster API URL")
 			return
 		}
 
@@ -1988,7 +2004,7 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 				"scenarioRunName", scenarioRunName,
 				"jobID", jobID,
 				"userID", claims.UserID)
-			_ = conn.WriteMessage(websocket.TextMessage, []byte("ERROR: Failed to validate access permissions"))
+			writeWSError(conn, logger, "ERROR: Failed to validate access permissions")
 			return
 		}
 
@@ -1998,7 +2014,7 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 				"jobID", jobID,
 				"userID", claims.UserID,
 				"clusterAPIURL", targetJob.ClusterAPIURL)
-			_ = conn.WriteMessage(websocket.TextMessage, []byte("ERROR: Access denied. You do not have permission to view logs for this job"))
+			writeWSError(conn, logger, "ERROR: Access denied. You do not have permission to view logs for this job")
 			return
 		}
 	}
@@ -2046,7 +2062,7 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 	// Use PodName directly from CR status (already fetched above for permissions)
 	if targetJob.PodName == "" {
 		logger.Error(nil, "Job has no associated pod", "jobID", jobID)
-		_ = conn.WriteMessage(websocket.TextMessage, []byte("ERROR: Job has no associated pod — it may have failed before a pod was created")) // Best-effort error reporting
+		writeWSError(conn, logger, "ERROR: Job has no associated pod — it may have failed before a pod was created")
 		return
 	}
 
@@ -2054,10 +2070,10 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 	if err := h.client.Get(ctx, client.ObjectKey{Name: targetJob.PodName, Namespace: h.namespace}, &pod); err != nil {
 		if client.IgnoreNotFound(err) == nil {
 			logger.Error(nil, "Pod no longer exists", "jobID", jobID, "podName", targetJob.PodName)
-			_ = conn.WriteMessage(websocket.TextMessage, []byte("ERROR: Pod no longer exists — logs may have been cleaned up")) // Best-effort error reporting
+			writeWSError(conn, logger, "ERROR: Pod no longer exists — logs may have been cleaned up")
 		} else {
 			logger.Error(err, "Failed to get pod", "jobID", jobID, "podName", targetJob.PodName)
-			_ = conn.WriteMessage(websocket.TextMessage, []byte("ERROR: Failed to get pod")) // Best-effort error reporting
+			writeWSError(conn, logger, "ERROR: Failed to get pod")
 		}
 		return
 	}
@@ -2100,7 +2116,7 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 			"jobID", jobID,
 			"podName", pod.Name,
 			"namespace", h.namespace)
-		_ = conn.WriteMessage(websocket.TextMessage, []byte("ERROR: Failed to open log stream")) // Best-effort error reporting
+		writeWSError(conn, logger, "ERROR: Failed to open log stream")
 		return
 	}
 	defer stream.Close()
@@ -2140,7 +2156,7 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 			"jobID", jobID,
 			"podName", pod.Name,
 			"linesStreamed", lineCount)
-		_ = conn.WriteMessage(websocket.TextMessage, []byte("ERROR: Log stream error")) // Best-effort error reporting
+		writeWSError(conn, logger, "ERROR: Log stream error")
 		return
 	}
 
