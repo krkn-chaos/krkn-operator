@@ -112,4 +112,6 @@ const (
 // Elasticsearch config endpoints
 const (
 	ElasticsearchConfigsPath = APIBasePath + "/elasticsearch-configs"
+	// ElasticsearchQueryPath runs a telemetry search against a saved config
+	ElasticsearchQueryPath = APIBasePath + "/elasticsearch-query"
 )
