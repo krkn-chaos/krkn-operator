@@ -679,3 +679,129 @@ func TestElasticsearchConfigsRouter_NotFound(t *testing.T) {
 		t.Errorf("expected 404, got %d", w.Code)
 	}
 }
+
+// ── QueryElasticsearchTelemetry ──────────────────────────────────────────────
+
+// newEsTestSecretWithHost builds a config Secret whose host annotation points at
+// the given URL (including scheme) and whose telemetry index is set, so the
+// query handler can be driven against an httptest server.
+func newEsTestSecretWithHost(name, namespace, host, telemetryIndex string) *corev1.Secret {
+	return &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: namespace,
+			Labels:    elasticsearch.BuildLabels(),
+			Annotations: elasticsearch.BuildAnnotations(
+				host, 9200, telemetryIndex, "", "", "", "admin@test.local",
+			),
+		},
+		Type: corev1.SecretTypeOpaque,
+		Data: map[string][]byte{
+			elasticsearch.SecretKeyUsername: []byte("elastic"),
+			elasticsearch.SecretKeyPassword: []byte("secret-pass"),
+		},
+	}
+}
+
+func TestQueryElasticsearchTelemetry_Success(t *testing.T) {
+	esServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"hits":{"hits":[{"_source":{"run_uuid":"abc","job_status":true,"scenarios":[{"scenario_type":"pod","start_timestamp":100,"end_timestamp":200,"exit_status":0,"parameters":[{"config":{"namespace":"ns1"}}]}]}}]}}`))
+	}))
+	defer esServer.Close()
+
+	secret := newEsTestSecretWithHost("prod-es", "default", esServer.URL, "krkn-telemetry")
+	fakeClient := fakeclient.NewClientBuilder().WithScheme(newEsScheme()).WithObjects(secret).Build()
+	handler := NewTestHandler(fakeClient, fake.NewSimpleClientset(), "default", "localhost:50051")
+
+	body, _ := json.Marshal(elasticsearch.QueryTelemetryRequest{ConfigName: "prod-es"})
+	req := httptest.NewRequest(http.MethodPost, ElasticsearchQueryPath, bytes.NewReader(body))
+	req = req.WithContext(createUserContext("user@example.com"))
+	w := httptest.NewRecorder()
+
+	handler.QueryElasticsearchTelemetry(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp elasticsearch.QueryTelemetryResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if resp.Total != 1 || len(resp.Documents) != 1 {
+		t.Fatalf("expected 1 document, got %d", resp.Total)
+	}
+	if resp.Documents[0].RunUUID != "abc" || resp.Documents[0].ScenarioType != "pod" || resp.Documents[0].Namespace != "ns1" {
+		t.Errorf("unexpected document: %+v", resp.Documents[0])
+	}
+}
+
+func TestQueryElasticsearchTelemetry_ConfigNotFound(t *testing.T) {
+	fakeClient := fakeclient.NewClientBuilder().WithScheme(newEsScheme()).Build()
+	handler := NewTestHandler(fakeClient, fake.NewSimpleClientset(), "default", "localhost:50051")
+
+	body, _ := json.Marshal(elasticsearch.QueryTelemetryRequest{ConfigName: "missing"})
+	req := httptest.NewRequest(http.MethodPost, ElasticsearchQueryPath, bytes.NewReader(body))
+	req = req.WithContext(createUserContext("user@example.com"))
+	w := httptest.NewRecorder()
+
+	handler.QueryElasticsearchTelemetry(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("expected 404, got %d", w.Code)
+	}
+}
+
+func TestQueryElasticsearchTelemetry_MissingConfigName(t *testing.T) {
+	fakeClient := fakeclient.NewClientBuilder().WithScheme(newEsScheme()).Build()
+	handler := NewTestHandler(fakeClient, fake.NewSimpleClientset(), "default", "localhost:50051")
+
+	body, _ := json.Marshal(elasticsearch.QueryTelemetryRequest{})
+	req := httptest.NewRequest(http.MethodPost, ElasticsearchQueryPath, bytes.NewReader(body))
+	req = req.WithContext(createUserContext("user@example.com"))
+	w := httptest.NewRecorder()
+
+	handler.QueryElasticsearchTelemetry(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d", w.Code)
+	}
+}
+
+func TestQueryElasticsearchTelemetry_MethodNotAllowed(t *testing.T) {
+	fakeClient := fakeclient.NewClientBuilder().WithScheme(newEsScheme()).Build()
+	handler := NewTestHandler(fakeClient, fake.NewSimpleClientset(), "default", "localhost:50051")
+
+	req := httptest.NewRequest(http.MethodGet, ElasticsearchQueryPath, nil)
+	req = req.WithContext(createUserContext("user@example.com"))
+	w := httptest.NewRecorder()
+
+	handler.QueryElasticsearchTelemetry(w, req)
+
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected 405, got %d", w.Code)
+	}
+}
+
+func TestQueryElasticsearchTelemetry_UpstreamError(t *testing.T) {
+	esServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"error":"unauthorized"}`))
+	}))
+	defer esServer.Close()
+
+	secret := newEsTestSecretWithHost("prod-es", "default", esServer.URL, "krkn-telemetry")
+	fakeClient := fakeclient.NewClientBuilder().WithScheme(newEsScheme()).WithObjects(secret).Build()
+	handler := NewTestHandler(fakeClient, fake.NewSimpleClientset(), "default", "localhost:50051")
+
+	body, _ := json.Marshal(elasticsearch.QueryTelemetryRequest{ConfigName: "prod-es"})
+	req := httptest.NewRequest(http.MethodPost, ElasticsearchQueryPath, bytes.NewReader(body))
+	req = req.WithContext(createUserContext("user@example.com"))
+	w := httptest.NewRecorder()
+
+	handler.QueryElasticsearchTelemetry(w, req)
+
+	if w.Code != http.StatusBadGateway {
+		t.Errorf("expected 502, got %d", w.Code)
+	}
+}

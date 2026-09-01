@@ -429,6 +429,106 @@ func (h *Handler) ElasticsearchConfigsRouter(w http.ResponseWriter, r *http.Requ
 	})
 }
 
+// QueryElasticsearchTelemetry handles POST /api/v1/elasticsearch-query
+// It resolves the named Elasticsearch config Secret server-side (credentials
+// never leave the backend), connects to the cluster, and returns the most recent
+// telemetry documents. Available to any authenticated user, mirroring
+// ListElasticsearchConfigs.
+func (h *Handler) QueryElasticsearchTelemetry(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	logger := log.FromContext(ctx).WithName("query-elasticsearch-telemetry")
+
+	if r.Method != http.MethodPost {
+		writeJSONError(w, http.StatusMethodNotAllowed, ErrorResponse{
+			Error:   "method_not_allowed",
+			Message: "Only POST is allowed on " + ElasticsearchQueryPath,
+		})
+		return
+	}
+
+	var req elasticsearch.QueryTelemetryRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+			Error:   "bad_request",
+			Message: "Invalid request body: " + err.Error(),
+		})
+		return
+	}
+
+	if err := elasticsearch.ValidateQueryRequest(&req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+			Error:   "bad_request",
+			Message: err.Error(),
+		})
+		return
+	}
+
+	secret, err := h.loadElasticsearchConfigSecret(ctx, req.ConfigName)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			writeJSONError(w, http.StatusNotFound, ErrorResponse{
+				Error:   "not_found",
+				Message: fmt.Sprintf("Elasticsearch config '%s' not found", req.ConfigName),
+			})
+		} else {
+			logger.Error(err, "Failed to load elasticsearch config", "name", req.ConfigName)
+			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+				Error:   "internal_error",
+				Message: "Failed to load Elasticsearch config",
+			})
+		}
+		return
+	}
+
+	conn := buildConnectionParams(secret)
+
+	docs, err := elasticsearch.QueryTelemetry(ctx, conn, req.Size, req.StartDate, req.EndDate)
+	if err != nil {
+		logger.Error(err, "Failed to query elasticsearch telemetry", "name", req.ConfigName)
+		writeJSONError(w, http.StatusBadGateway, ErrorResponse{
+			Error:   "upstream_error",
+			Message: "Failed to query Elasticsearch: " + err.Error(),
+		})
+		return
+	}
+
+	logger.Info("Queried Elasticsearch telemetry", "name", req.ConfigName, "results", len(docs))
+
+	writeJSON(w, http.StatusOK, elasticsearch.QueryTelemetryResponse{
+		Documents: docs,
+		Total:     len(docs),
+	})
+}
+
+// buildConnectionParams assembles the connection parameters for a query from a
+// config Secret, reading the host/port/index from annotations and the
+// credentials from the Secret data.
+func buildConnectionParams(secret *corev1.Secret) elasticsearch.ConnectionParams {
+	port := elasticsearch.DefaultPort
+	if portStr := secret.Annotations[elasticsearch.PortAnnotation]; portStr != "" {
+		if p, err := strconv.Atoi(portStr); err == nil {
+			port = p
+		}
+	}
+
+	username := ""
+	if u, ok := secret.Data[elasticsearch.SecretKeyUsername]; ok {
+		username = string(u)
+	}
+	password := ""
+	if p, ok := secret.Data[elasticsearch.SecretKeyPassword]; ok {
+		password = string(p)
+	}
+
+	return elasticsearch.ConnectionParams{
+		Host:     secret.Annotations[elasticsearch.HostAnnotation],
+		Port:     port,
+		Username: username,
+		Password: password,
+		Index:    secret.Annotations[elasticsearch.TelemetryIndexAnnotation],
+	}
+}
+
 // elasticsearchConfigExists reports whether an Elasticsearch config Secret with the given name
 // exists. It returns (false, nil) when the secret is absent, (true, nil) when it is present, and
 // (false, err) for any API or permission error so callers can surface a 500 rather than silently

@@ -20,6 +20,11 @@ limitations under the License.
 // scenario global parameters for chaos experiment runs.
 package elasticsearch
 
+import (
+	"fmt"
+	"time"
+)
+
 // CreateElasticsearchConfigRequest represents the request to create an ES config
 type CreateElasticsearchConfigRequest struct {
 	Name           string `json:"name"`
@@ -83,4 +88,91 @@ type UpdateElasticsearchConfigResponse struct {
 // DeleteElasticsearchConfigResponse represents the response after deleting an ES config
 type DeleteElasticsearchConfigResponse struct {
 	Message string `json:"message"`
+}
+
+// Query size bounds for telemetry searches. DefaultQuerySize is used when the
+// request omits a size; MaxQuerySize caps how many documents a single request
+// may return to protect the API server and browser.
+const (
+	DefaultQuerySize = 50
+	MaxQuerySize     = 500
+)
+
+// QueryTelemetryRequest represents a request to query telemetry documents from
+// the telemetry index of a saved Elasticsearch config. Credentials are resolved
+// server-side from the named config; the client only references it by name.
+type QueryTelemetryRequest struct {
+	ConfigName string `json:"configName"`
+	Size       int    `json:"size,omitempty"`
+	// StartDate and EndDate bound the search by the document timestamp. They are
+	// "yyyy-MM-dd" date strings (as produced by the UI date pickers). Empty
+	// values fall back to a default trailing window in the query client.
+	StartDate string `json:"startDate,omitempty"`
+	EndDate   string `json:"endDate,omitempty"`
+}
+
+// TelemetryDocument is the flattened set of telemetry fields surfaced to the UI
+// table. Each document corresponds to one telemetry run; the scenario-level
+// fields (type, start/end, namespace) are taken from the run's first scenario.
+// Additional run detail (cluster config, node info, etc.) is intentionally not
+// included here — it will be fetched for an expanded row in a later change.
+type TelemetryDocument struct {
+	RunUUID        string `json:"run_uuid"`
+	ScenarioType   string `json:"scenario_type"`
+	StartTimestamp int64  `json:"start_timestamp"`
+	EndTimestamp   int64  `json:"end_timestamp"`
+	Namespace      string `json:"namespace"`
+	Status         bool   `json:"status"`
+}
+
+// QueryTelemetryResponse wraps the telemetry documents returned to the client.
+type QueryTelemetryResponse struct {
+	Documents []TelemetryDocument `json:"documents"`
+	Total     int                 `json:"total"`
+}
+
+// ValidateQueryRequest validates a QueryTelemetryRequest and normalizes the
+// requested size into the supported bounds.
+func ValidateQueryRequest(req *QueryTelemetryRequest) error {
+	if req.ConfigName == "" {
+		return fmt.Errorf("configName is required")
+	}
+	if req.Size < 0 {
+		return fmt.Errorf("size must not be negative")
+	}
+	if req.Size == 0 {
+		req.Size = DefaultQuerySize
+	}
+	if req.Size > MaxQuerySize {
+		req.Size = MaxQuerySize
+	}
+	if err := validateDate("startDate", req.StartDate); err != nil {
+		return err
+	}
+	if err := validateDate("endDate", req.EndDate); err != nil {
+		return err
+	}
+	if req.StartDate != "" && req.EndDate != "" && req.StartDate > req.EndDate {
+		return fmt.Errorf("startDate must not be after endDate")
+	}
+	if req.EndDate != "" && req.EndDate > time.Now().UTC().Format(dateLayout) {
+		return fmt.Errorf("endDate must not be in the future")
+	}
+	return nil
+}
+
+// dateLayout is the date-only layout accepted for query bounds and understood by
+// the Elasticsearch range filter's "yyyy-MM-dd" format.
+const dateLayout = "2006-01-02"
+
+// validateDate ensures an optional date string is empty or a valid yyyy-MM-dd
+// date. field is used in the error message to identify the offending parameter.
+func validateDate(field, value string) error {
+	if value == "" {
+		return nil
+	}
+	if _, err := time.Parse(dateLayout, value); err != nil {
+		return fmt.Errorf("%s must be a valid yyyy-MM-dd date", field)
+	}
+	return nil
 }

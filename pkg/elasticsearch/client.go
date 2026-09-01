@@ -1,0 +1,250 @@
+/*
+Copyright 2025.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+package elasticsearch
+
+import (
+	"bytes"
+	"context"
+	"crypto/tls"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"strings"
+	"time"
+)
+
+// queryTimeout bounds a single Elasticsearch search request so a slow or
+// unreachable cluster cannot block an API handler indefinitely.
+const queryTimeout = 15 * time.Second
+
+// ConnectionParams holds the resolved connection details needed to query an
+// Elasticsearch/OpenSearch cluster. It is assembled server-side from a stored
+// config Secret; credentials never cross the API boundary to the client.
+type ConnectionParams struct {
+	Host     string
+	Port     int
+	Username string
+	Password string
+	Index    string
+}
+
+// esSearchResponse mirrors the subset of the Elasticsearch _search response we
+// consume. Each hit's _source is kept raw so it can be decoded into the raw
+// telemetry shape and then flattened into a TelemetryDocument.
+type esSearchResponse struct {
+	Hits struct {
+		Hits []struct {
+			Source json.RawMessage `json:"_source"`
+		} `json:"hits"`
+	} `json:"hits"`
+}
+
+// rawTelemetrySource mirrors the subset of a krkn telemetry document _source we
+// need to populate the table columns. Scenario-level fields (type, start/end,
+// namespace) live inside the scenarios array; we surface the run's first
+// scenario for the flattened row.
+type rawTelemetrySource struct {
+	RunUUID   string `json:"run_uuid"`
+	JobStatus bool   `json:"job_status"`
+	Scenarios []struct {
+		ScenarioType   string `json:"scenario_type"`
+		StartTimestamp int64  `json:"start_timestamp"`
+		EndTimestamp   int64  `json:"end_timestamp"`
+		ExitStatus     int    `json:"exit_status"`
+		// Parameters shape varies by scenario type (object keyed by scenario
+		// name, whose value may be an object or an array), so it is kept raw and
+		// searched for a namespace rather than decoded into a fixed struct.
+		Parameters json.RawMessage `json:"parameters"`
+	} `json:"scenarios"`
+}
+
+// flatten converts a raw telemetry source into the fixed TelemetryDocument
+// surfaced to the UI, deriving scenario-level columns from the first scenario.
+func (s rawTelemetrySource) flatten() TelemetryDocument {
+	doc := TelemetryDocument{
+		RunUUID: s.RunUUID,
+		Status:  s.JobStatus,
+	}
+	if len(s.Scenarios) > 0 {
+		sc := s.Scenarios[0]
+		doc.ScenarioType = sc.ScenarioType
+		doc.StartTimestamp = sc.StartTimestamp
+		doc.EndTimestamp = sc.EndTimestamp
+		// A non-zero exit status marks a failed scenario even if the overall
+		// job reported success.
+		if sc.ExitStatus != 0 {
+			doc.Status = false
+		}
+		doc.Namespace = namespaceFromParameters(sc.Parameters)
+	}
+	return doc
+}
+
+// namespaceFromParameters extracts the target namespace from a scenario's raw
+// parameters JSON. The parameters shape varies by scenario type, so the value
+// tree is walked recursively for the first "namespace"/"namespace_pattern" key.
+func namespaceFromParameters(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var v any
+	if err := json.Unmarshal(raw, &v); err != nil {
+		return ""
+	}
+	return findNamespace(v)
+}
+
+// findNamespace recursively searches a decoded JSON value for the first non-empty
+// "namespace" (or "namespace_pattern") string, checking those keys before
+// descending into nested objects and arrays.
+func findNamespace(v any) string {
+	switch t := v.(type) {
+	case map[string]any:
+		for _, key := range []string{"namespace", "namespace_pattern"} {
+			if s, ok := t[key].(string); ok && s != "" {
+				return s
+			}
+		}
+		for _, val := range t {
+			if s := findNamespace(val); s != "" {
+				return s
+			}
+		}
+	case []any:
+		for _, val := range t {
+			if s := findNamespace(val); s != "" {
+				return s
+			}
+		}
+	}
+	return ""
+}
+
+// baseURL builds the cluster base URL. If the host already carries a scheme it
+// is used verbatim (and the port is assumed to be part of the host); otherwise
+// https is assumed and the port is appended.
+func (c ConnectionParams) baseURL() string {
+	host := strings.TrimSuffix(c.Host, "/")
+	if strings.HasPrefix(host, "http://") || strings.HasPrefix(host, "https://") {
+		return host
+	}
+	return fmt.Sprintf("https://%s:%d", host, c.Port)
+}
+
+// QueryTelemetry connects to the Elasticsearch/OpenSearch cluster described by
+// conn and returns telemetry documents from conn.Index. size is clamped to the
+// supported bounds by the caller. startDate and endDate ("yyyy-MM-dd") bound the
+// search by document timestamp; empty values default to a trailing 30-day
+// window. No sort is applied so the request succeeds regardless of the index
+// field mappings.
+func QueryTelemetry(ctx context.Context, conn ConnectionParams, size int, startDate, endDate string) ([]TelemetryDocument, error) {
+	if conn.Index == "" {
+		return nil, fmt.Errorf("telemetry index is not configured for this Elasticsearch config")
+	}
+
+	// Default to a trailing 30-day window when a bound is not supplied. The
+	// endDate is made inclusive of the whole selected day via date-math rounding.
+	gte := "now-30d/d"
+	if startDate != "" {
+		gte = startDate
+	}
+	lte := "now/d"
+	if endDate != "" {
+		lte = endDate + "||+1d/d"
+	}
+
+	body := map[string]any{
+		"size": size,
+		"from": 0,
+		"query": map[string]any{
+			"bool": map[string]any{
+				"filter": []any{
+					map[string]any{
+						"range": map[string]any{
+							"timestamp": map[string]any{
+								"format": "yyyy-MM-dd",
+								"gte":    gte,
+								"lte":    lte,
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	payload, err := json.Marshal(body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to encode search query: %w", err)
+	}
+
+	url := fmt.Sprintf("%s/%s/_search", conn.baseURL(), conn.Index)
+
+	ctx, cancel := context.WithTimeout(ctx, queryTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
+	if err != nil {
+		return nil, fmt.Errorf("failed to build search request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if conn.Username != "" {
+		req.SetBasicAuth(conn.Username, conn.Password)
+	}
+
+	client := &http.Client{
+		Timeout: queryTimeout,
+		Transport: &http.Transport{
+			// Telemetry clusters are frequently self-signed; skip verification
+			// to match how krkn scenarios connect to the same cluster.
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec // self-signed telemetry clusters are expected
+		},
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to reach Elasticsearch: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read Elasticsearch response: %w", err)
+	}
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("Elasticsearch returned status %d: %s", resp.StatusCode, strings.TrimSpace(string(respBody)))
+	}
+
+	var parsed esSearchResponse
+	if err := json.Unmarshal(respBody, &parsed); err != nil {
+		return nil, fmt.Errorf("failed to decode Elasticsearch response: %w", err)
+	}
+
+	docs := make([]TelemetryDocument, 0, len(parsed.Hits.Hits))
+	for _, hit := range parsed.Hits.Hits {
+		var src rawTelemetrySource
+		if err := json.Unmarshal(hit.Source, &src); err != nil {
+			// Skip documents that don't match the expected telemetry shape
+			// rather than failing the whole query.
+			continue
+		}
+		docs = append(docs, src.flatten())
+	}
+
+	return docs, nil
+}
