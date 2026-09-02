@@ -2,7 +2,7 @@
 # start_operator.sh
 # Script to build and run the krkn-operator locally
 
-set -e
+set -eo pipefail
 
 # Colors for output
 RED='\033[0;31m'
@@ -41,6 +41,12 @@ check_prerequisites() {
         exit 1
     fi
 
+    # Check if helm is installed (needed for RBAC resource rendering)
+    if ! command -v helm &> /dev/null; then
+        print_error "helm not found. Please install helm first."
+        exit 1
+    fi
+
     # Check if kubectl can connect to a cluster
     if ! kubectl cluster-info &> /dev/null; then
         print_error "Cannot connect to Kubernetes cluster. Please check your kubeconfig."
@@ -60,6 +66,54 @@ install_crds() {
     else
         print_warning "Skipping CRD installation (INSTALL_CRDS=false)"
     fi
+}
+
+# Function to create service account and RBAC
+create_service_account() {
+    print_info "Creating service account and RBAC..."
+
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    CHART_DIR="${SCRIPT_DIR}/charts/krkn-operator"
+
+    # Ensure namespace exists
+    if ! kubectl get namespace "${KRKN_NAMESPACE}" &> /dev/null; then
+        print_info "Creating namespace ${KRKN_NAMESPACE}..."
+        kubectl create namespace "${KRKN_NAMESPACE}" || {
+            print_error "Failed to create namespace ${KRKN_NAMESPACE}"
+            return 1
+        }
+    fi
+
+    # Render and apply ServiceAccount + ClusterRole + ClusterRoleBinding
+    # from the existing Helm chart (single source of truth).
+    helm template krkn-operator "${CHART_DIR}" \
+        --namespace "${KRKN_NAMESPACE}" \
+        --show-only templates/operator/scenario-runner-sa.yaml \
+        --show-only templates/operator/scenario-runner-rbac.yaml \
+        | kubectl apply -f - || {
+        print_error "Failed to create service account and RBAC"
+        return 1
+    }
+
+    # Handle OpenShift: grant anyuid SCC if available.
+    # Check explicitly so transient API errors don't silently skip SCC setup.
+    # Use --api-group filter instead of listing all resources (much faster on large clusters).
+    if ! api_output=$(kubectl api-resources --api-group=security.openshift.io 2>&1); then
+        print_warning "Could not query security.openshift.io API group, skipping OpenShift SCC check"
+        print_warning "If running on OpenShift, manually grant anyuid SCC to the scenario-runner service account"
+    elif echo "${api_output}" | grep -q "securitycontextconstraints"; then
+        print_info "OpenShift detected, granting anyuid SCC..."
+        helm template krkn-operator "${CHART_DIR}" \
+            --namespace "${KRKN_NAMESPACE}" \
+            --api-versions "security.openshift.io/v1/SecurityContextConstraints" \
+            --show-only templates/openshift/scc-anyuid-binding.yaml \
+            | kubectl apply -f - || {
+            print_error "Failed to apply anyuid SCC binding"
+            return 1
+        }
+    fi
+
+    print_info "Service account and RBAC created successfully"
 }
 
 # Function to build the operator
@@ -115,6 +169,7 @@ main() {
 
     check_prerequisites
     install_crds
+    create_service_account
     build_operator
     run_operator
 }
