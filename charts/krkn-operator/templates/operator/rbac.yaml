@@ -13,6 +13,7 @@ rules:
   - ""
   resources:
   - configmaps
+  - persistentvolumeclaims
   - secrets
   verbs:
   - create
@@ -76,6 +77,26 @@ rules:
 - apiGroups:
   - krkn.krkn-chaos.dev
   resources:
+  - krknairuns
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - krkn.krkn-chaos.dev
+  resources:
+  - krknairuns/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - krkn.krkn-chaos.dev
+  resources:
   - krknfiletypes/status
   - krkngraphruns/status
   - krknoperatortargetproviderconfigs/status
@@ -88,6 +109,12 @@ rules:
   verbs:
   - get
   - patch
+  - update
+- apiGroups:
+  - krkn.krkn-chaos.dev
+  resources:
+  - krknairuns/finalizers
+  verbs:
   - update
 ---
 apiVersion: rbac.authorization.k8s.io/v1

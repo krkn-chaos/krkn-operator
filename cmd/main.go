@@ -292,6 +292,17 @@ func main() {
 		setupLog.Error(err, "unable to create controller", "controller", "KrknOperatorTargetProviderConfig")
 		os.Exit(1)
 	}
+	if err = (&controller.KrknAIRunReconciler{
+		Client:            mgr.GetClient(),
+		Scheme:            mgr.GetScheme(),
+		Clientset:         clientset,
+		Namespace:         krknNamespace,
+		OrchestratorImage: os.Getenv("KRKNAI_ORCHESTRATOR_IMAGE"),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "KrknAIRun")
+		os.Exit(1)
+	}
+
 	// +kubebuilder:scaffold:builder
 
 	// Setup JWT SecretManager (must start BEFORE API server)
