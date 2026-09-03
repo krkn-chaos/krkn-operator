@@ -40,6 +40,10 @@ const (
 	AlertsIndexAnnotation = "elasticsearch.krkn.krkn-chaos.dev/alerts-index"
 	// GrafanaURLAnnotation stores the optional Grafana dashboard URL
 	GrafanaURLAnnotation = "elasticsearch.krkn.krkn-chaos.dev/grafana-url"
+	// InsecureSkipTLSVerifyAnnotation, when set to "true", disables TLS
+	// certificate verification for the cluster connection. This is opt-in for
+	// self-signed telemetry clusters; verification is enabled by default.
+	InsecureSkipTLSVerifyAnnotation = "elasticsearch.krkn.krkn-chaos.dev/insecure-skip-tls-verify"
 	// CreatedByAnnotation stores the user ID who created the config
 	CreatedByAnnotation = "elasticsearch.krkn.krkn-chaos.dev/created-by"
 	// CreatedAtAnnotation stores the creation timestamp
@@ -58,6 +62,9 @@ const (
 	SecretKeyUsername = "username"
 	// SecretKeyPassword is the key in Secret.Data for the password
 	SecretKeyPassword = "password"
+	// SecretKeyCACert is the key in Secret.Data for the optional PEM-encoded CA
+	// certificate used to verify a self-signed cluster.
+	SecretKeyCACert = "caCert"
 
 	// DefaultPort is the default Elasticsearch port
 	DefaultPort = 9200

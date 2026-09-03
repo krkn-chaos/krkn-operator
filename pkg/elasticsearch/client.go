@@ -20,10 +20,12 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -36,11 +38,28 @@ const queryTimeout = 15 * time.Second
 // Elasticsearch/OpenSearch cluster. It is assembled server-side from a stored
 // config Secret; credentials never cross the API boundary to the client.
 type ConnectionParams struct {
-	Host     string
-	Port     int
+	// Host is the cluster host. It may be a bare hostname or a full URL
+	// including scheme (e.g. "https://es.example.com"); see baseURL for how the
+	// scheme and Port are applied.
+	Host string
+	// Port is the cluster port, appended to Host when Host does not already
+	// specify one.
+	Port int
+	// Username is the basic-auth username. When empty, no credentials are sent.
 	Username string
+	// Password is the basic-auth password used together with Username.
 	Password string
-	Index    string
+	// Index is the name of the index to search (e.g. the telemetry index).
+	Index string
+	// CACert is an optional PEM-encoded certificate (or bundle) to trust in
+	// addition to the system roots. It is the preferred way to connect to a
+	// self-signed cluster: verification stays on, but the custom CA is honored.
+	CACert string
+	// InsecureSkipVerify disables TLS certificate verification entirely when
+	// true. It is a last-resort, explicit opt-in for self-signed telemetry
+	// clusters where no CA material is available; the default (false) verifies
+	// the server certificate. Prefer CACert over this.
+	InsecureSkipVerify bool
 }
 
 // esSearchResponse mirrors the subset of the Elasticsearch _search response we
@@ -136,25 +155,67 @@ func findNamespace(v any) string {
 }
 
 // baseURL builds the cluster base URL. If the host already carries a scheme it
-// is used verbatim (and the port is assumed to be part of the host); otherwise
-// https is assumed and the port is appended.
+// is parsed as a URL and the separately configured port is appended only when
+// the host does not already specify one; otherwise https is assumed and the
+// port is appended.
 func (c ConnectionParams) baseURL() string {
 	host := strings.TrimSuffix(c.Host, "/")
 	if strings.HasPrefix(host, "http://") || strings.HasPrefix(host, "https://") {
+		// If the host already includes a port, or it cannot be parsed, or no
+		// port is configured, use it as-is. Otherwise append the configured port.
+		if u, err := url.Parse(host); err == nil && u.Port() == "" && c.Port != 0 {
+			u.Host = fmt.Sprintf("%s:%d", u.Host, c.Port)
+			return strings.TrimSuffix(u.String(), "/")
+		}
 		return host
 	}
 	return fmt.Sprintf("https://%s:%d", host, c.Port)
+}
+
+// tlsConfig builds the TLS configuration for the cluster connection. By default
+// the server certificate is verified against the system roots. A PEM-encoded
+// CACert, when provided, is trusted in addition to the system roots so
+// self-signed clusters can be reached without disabling verification.
+// InsecureSkipVerify is honored only as an explicit last resort and takes
+// precedence, in which case no CA material is needed.
+func (c ConnectionParams) tlsConfig() (*tls.Config, error) {
+	if c.InsecureSkipVerify {
+		return &tls.Config{InsecureSkipVerify: true}, nil //nolint:gosec // explicit, restricted opt-in for self-signed telemetry clusters
+	}
+
+	cfg := &tls.Config{MinVersion: tls.VersionTLS12}
+	if c.CACert != "" {
+		pool := x509.NewCertPool()
+		if !pool.AppendCertsFromPEM([]byte(c.CACert)) {
+			return nil, fmt.Errorf("failed to parse CA certificate: no valid PEM certificates found")
+		}
+		cfg.RootCAs = pool
+	}
+	return cfg, nil
 }
 
 // QueryTelemetry connects to the Elasticsearch/OpenSearch cluster described by
 // conn and returns telemetry documents from conn.Index. size is clamped to the
 // supported bounds by the caller. startDate and endDate ("yyyy-MM-dd") bound the
 // search by document timestamp; empty values default to a trailing 30-day
-// window. No sort is applied so the request succeeds regardless of the index
-// field mappings.
-func QueryTelemetry(ctx context.Context, conn ConnectionParams, size int, startDate, endDate string) ([]TelemetryDocument, error) {
+// window. Results are sorted newest-first by timestamp (with a deterministic
+// _doc tie-breaker) before the size limit is applied, so the most recent
+// documents are the ones returned.
+func QueryTelemetry(ctx context.Context, conn ConnectionParams, size int, startDate, endDate string) (docs []TelemetryDocument, err error) {
 	if conn.Index == "" {
 		return nil, fmt.Errorf("telemetry index is not configured for this Elasticsearch config")
+	}
+
+	base := conn.baseURL()
+	// Never send credentials over plaintext HTTP where they could be observed on
+	// the wire. Require TLS whenever a username/password is configured.
+	if conn.Username != "" && strings.HasPrefix(base, "http://") {
+		return nil, fmt.Errorf("refusing to send credentials over plaintext HTTP; use https")
+	}
+
+	tlsConfig, err := conn.tlsConfig()
+	if err != nil {
+		return nil, err
 	}
 
 	// Default to a trailing 30-day window when a bound is not supplied. The
@@ -171,6 +232,19 @@ func QueryTelemetry(ctx context.Context, conn ConnectionParams, size int, startD
 	body := map[string]any{
 		"size": size,
 		"from": 0,
+		// Sort newest-first by the same timestamp field the range filter uses so
+		// the size limit keeps the most recent documents. unmapped_type keeps the
+		// request from failing on indices where timestamp is not mapped, and the
+		// _doc tie-breaker makes ordering deterministic across equal timestamps.
+		"sort": []any{
+			map[string]any{
+				"timestamp": map[string]any{
+					"order":         "desc",
+					"unmapped_type": "date",
+				},
+			},
+			map[string]any{"_doc": map[string]any{"order": "asc"}},
+		},
 		"query": map[string]any{
 			"bool": map[string]any{
 				"filter": []any{
@@ -193,7 +267,7 @@ func QueryTelemetry(ctx context.Context, conn ConnectionParams, size int, startD
 		return nil, fmt.Errorf("failed to encode search query: %w", err)
 	}
 
-	url := fmt.Sprintf("%s/%s/_search", conn.baseURL(), conn.Index)
+	url := fmt.Sprintf("%s/%s/_search", base, conn.Index)
 
 	ctx, cancel := context.WithTimeout(ctx, queryTimeout)
 	defer cancel()
@@ -209,9 +283,7 @@ func QueryTelemetry(ctx context.Context, conn ConnectionParams, size int, startD
 	client := &http.Client{
 		Timeout: queryTimeout,
 		Transport: &http.Transport{
-			// Telemetry clusters are frequently self-signed; skip verification
-			// to match how krkn scenarios connect to the same cluster.
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec // self-signed telemetry clusters are expected
+			TLSClientConfig: tlsConfig,
 		},
 	}
 
@@ -219,7 +291,14 @@ func QueryTelemetry(ctx context.Context, conn ConnectionParams, size int, startD
 	if err != nil {
 		return nil, fmt.Errorf("failed to reach Elasticsearch: %w", err)
 	}
-	defer func() { _ = resp.Body.Close() }()
+	// Propagate a body-close failure, but never let it mask an error from the
+	// query itself: only surface the close error when the function is otherwise
+	// returning successfully.
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil && err == nil {
+			err = fmt.Errorf("failed to close Elasticsearch response body: %w", closeErr)
+		}
+	}()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -235,7 +314,7 @@ func QueryTelemetry(ctx context.Context, conn ConnectionParams, size int, startD
 		return nil, fmt.Errorf("failed to decode Elasticsearch response: %w", err)
 	}
 
-	docs := make([]TelemetryDocument, 0, len(parsed.Hits.Hits))
+	docs = make([]TelemetryDocument, 0, len(parsed.Hits.Hits))
 	for _, hit := range parsed.Hits.Hits {
 		var src rawTelemetrySource
 		if err := json.Unmarshal(hit.Source, &src); err != nil {

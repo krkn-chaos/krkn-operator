@@ -36,6 +36,13 @@ type CreateElasticsearchConfigRequest struct {
 	MetricsIndex   string `json:"metricsIndex,omitempty"`
 	AlertsIndex    string `json:"alertsIndex,omitempty"`
 	GrafanaURL     string `json:"grafanaUrl,omitempty"`
+	// CACert is an optional PEM-encoded CA certificate (or bundle) used to trust
+	// a self-signed cluster while keeping TLS verification enabled.
+	CACert string `json:"caCert,omitempty"`
+	// InsecureSkipTLSVerify disables TLS certificate verification entirely. It is
+	// a restricted last resort for self-signed clusters without CA material;
+	// prefer CACert.
+	InsecureSkipTLSVerify bool `json:"insecureSkipTlsVerify,omitempty"`
 }
 
 // UpdateElasticsearchConfigRequest represents the request to update an ES config
@@ -48,6 +55,13 @@ type UpdateElasticsearchConfigRequest struct {
 	MetricsIndex   string `json:"metricsIndex,omitempty"`
 	AlertsIndex    string `json:"alertsIndex,omitempty"`
 	GrafanaURL     string `json:"grafanaUrl,omitempty"`
+	// CACert is an optional PEM-encoded CA certificate (or bundle) used to trust
+	// a self-signed cluster while keeping TLS verification enabled.
+	CACert string `json:"caCert,omitempty"`
+	// InsecureSkipTLSVerify disables TLS certificate verification entirely. It is
+	// a restricted last resort for self-signed clusters without CA material;
+	// prefer CACert.
+	InsecureSkipTLSVerify bool `json:"insecureSkipTlsVerify,omitempty"`
 }
 
 // ElasticsearchConfigResponse represents an ES config in API responses.

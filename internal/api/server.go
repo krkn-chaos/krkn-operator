@@ -489,3 +489,11 @@ func (s *Server) NeedLeaderElection() bool {
 func (s *Server) GetV2Handler() *v2.Handler {
 	return s.v2Handler
 }
+
+// HTTPHandler returns the server's fully configured HTTP handler (mux plus
+// middleware). It exposes the same request pipeline the listener serves so
+// tests can exercise route registration and authentication through the real
+// server wiring instead of calling handlers directly.
+func (s *Server) HTTPHandler() http.Handler {
+	return s.server.Handler
+}
