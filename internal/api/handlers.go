@@ -127,6 +127,10 @@ type Handler struct {
 	// scenarioProviderFactory is injectable for API tests; production handlers
 	// use the krknctl-backed factory assigned by NewHandler.
 	scenarioProviderFactory func(provider.Mode) (provider.ScenarioDataProvider, error)
+	// esClient is a long-lived, connection-pooling client shared across all
+	// telemetry queries so transports are reused rather than allocated per
+	// request.
+	esClient *elasticsearch.Client
 }
 
 // NewHandler creates a new Handler
@@ -138,6 +142,7 @@ func NewHandler(client client.Client, clientset kubernetes.Interface, namespace 
 		grpcServerAddr:          grpcServerAddr,
 		secretManager:           secretManager,
 		scenarioProviderFactory: createScenarioProvider,
+		esClient:                elasticsearch.NewClient(),
 	}
 }
 

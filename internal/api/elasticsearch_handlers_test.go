@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -786,9 +787,12 @@ func TestQueryElasticsearchTelemetry_MethodNotAllowed(t *testing.T) {
 }
 
 func TestQueryElasticsearchTelemetry_UpstreamError(t *testing.T) {
+	// The upstream body contains a secret-looking marker; the sanitized response
+	// must not leak it back to the caller.
+	const upstreamSecret = "SENSITIVE-UPSTREAM-DETAIL"
 	esServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
-		_, _ = w.Write([]byte(`{"error":"unauthorized"}`))
+		_, _ = w.Write([]byte(`{"error":"unauthorized","reason":"` + upstreamSecret + `"}`))
 	}))
 	defer esServer.Close()
 
@@ -805,6 +809,19 @@ func TestQueryElasticsearchTelemetry_UpstreamError(t *testing.T) {
 
 	if w.Code != http.StatusBadGateway {
 		t.Errorf("expected 502, got %d", w.Code)
+	}
+
+	respBody := w.Body.String()
+	// The caller must receive a stable, sanitized message with no upstream body
+	// content or status details leaked.
+	if strings.Contains(respBody, upstreamSecret) {
+		t.Errorf("response leaked upstream body content: %s", respBody)
+	}
+	if strings.Contains(respBody, "401") || strings.Contains(respBody, "unauthorized") {
+		t.Errorf("response leaked upstream status detail: %s", respBody)
+	}
+	if !strings.Contains(respBody, "Failed to query Elasticsearch") {
+		t.Errorf("expected stable sanitized message, got: %s", respBody)
 	}
 }
 
