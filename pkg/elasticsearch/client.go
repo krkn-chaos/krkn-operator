@@ -180,7 +180,10 @@ func (c ConnectionParams) baseURL() string {
 // precedence, in which case no CA material is needed.
 func (c ConnectionParams) tlsConfig() (*tls.Config, error) {
 	if c.InsecureSkipVerify {
-		return &tls.Config{InsecureSkipVerify: true}, nil //nolint:gosec // explicit, restricted opt-in for self-signed telemetry clusters
+		// Verification is on by default; this path is only reached when an
+		// operator explicitly opts into InsecureSkipVerify for a self-signed
+		// telemetry cluster with no CA material available.
+		return &tls.Config{InsecureSkipVerify: true}, nil // #nosec G402 -- explicit, restricted opt-in
 	}
 
 	cfg := &tls.Config{MinVersion: tls.VersionTLS12}
