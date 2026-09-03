@@ -19,6 +19,7 @@ package elasticsearch
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -108,7 +109,7 @@ func TestQueryTelemetry(t *testing.T) {
 				Index: tt.index,
 			}
 
-			docs, err := QueryTelemetry(context.Background(), conn, 50, "", "")
+			docs, err := NewClient().QueryTelemetry(context.Background(), conn, 50, "", "")
 			if tt.wantErr {
 				if err == nil {
 					t.Fatal("expected error, got nil")
@@ -136,7 +137,7 @@ func TestQueryTelemetryRejectsCredentialsOverHTTP(t *testing.T) {
 	defer srv.Close()
 
 	conn := ConnectionParams{Host: srv.URL, Index: "telemetry", Username: "elastic", Password: "secret"}
-	_, err := QueryTelemetry(context.Background(), conn, 50, "", "")
+	_, err := NewClient().QueryTelemetry(context.Background(), conn, 50, "", "")
 	if err == nil {
 		t.Fatal("expected error for credentials over plaintext HTTP, got nil")
 	}
@@ -202,6 +203,134 @@ Wf86aX6PepsntZv2GYlA5UpabfT2EZICICpJ5h/iI+i341gBmLiAFQOyTDT+/wQc
 	})
 }
 
+// doerFunc adapts a function to the Doer interface for injection in tests.
+type doerFunc func(*http.Request) (*http.Response, error)
+
+func (f doerFunc) Do(r *http.Request) (*http.Response, error) { return f(r) }
+
+func TestQueryTelemetryUsesInjectedDoer(t *testing.T) {
+	var gotURL string
+	stub := doerFunc(func(r *http.Request) (*http.Response, error) {
+		gotURL = r.URL.String()
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader(`{"hits":{"hits":[{"_source":{"run_uuid":"abc"}}]}}`)),
+			Header:     make(http.Header),
+		}, nil
+	})
+
+	c := NewClient(WithHTTPClient(stub))
+	// A host that would never resolve proves the injected Doer is used instead
+	// of a real network client.
+	conn := ConnectionParams{Host: "https://unreachable.invalid", Port: 9200, Index: "telemetry"}
+	docs, err := c.QueryTelemetry(context.Background(), conn, 10, "", "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(docs) != 1 || docs[0].RunUUID != "abc" {
+		t.Fatalf("unexpected docs: %+v", docs)
+	}
+	if !strings.HasPrefix(gotURL, "https://unreachable.invalid:9200/telemetry/_search") {
+		t.Errorf("injected Doer received unexpected URL: %s", gotURL)
+	}
+}
+
+func TestQueryTelemetryRejectsOversizedResponse(t *testing.T) {
+	// Serve a valid-JSON body larger than the cap so the size check, not the
+	// decoder, is what rejects it.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"padding":"`))
+		chunk := strings.Repeat("a", 1<<20) // 1 MiB
+		for written := 0; written <= maxResponseBytes; written += len(chunk) {
+			if _, err := w.Write([]byte(chunk)); err != nil {
+				return
+			}
+		}
+		_, _ = w.Write([]byte(`"}`))
+	}))
+	defer srv.Close()
+
+	conn := ConnectionParams{Host: srv.URL, Index: "telemetry"}
+	_, err := NewClient().QueryTelemetry(context.Background(), conn, 50, "", "")
+	if err == nil {
+		t.Fatal("expected an error for an oversized response, got nil")
+	}
+	if !strings.Contains(err.Error(), "maximum supported size") {
+		t.Errorf("expected a size-limit error, got: %v", err)
+	}
+}
+
+func TestClientTransportPooling(t *testing.T) {
+	c := NewClient()
+
+	// Two connections sharing the same TLS posture must reuse one transport so
+	// their connections are pooled together, even across different hosts.
+	tA, err := c.transport(ConnectionParams{Host: "https://a.example.com"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	tB, err := c.transport(ConnectionParams{Host: "https://b.example.com"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if tA != tB {
+		t.Error("expected the same pooled transport for identical TLS configs")
+	}
+
+	// A differing TLS configuration must be isolated to its own transport.
+	tInsecure, err := c.transport(ConnectionParams{Host: "https://a.example.com", InsecureSkipVerify: true})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if tInsecure == tA {
+		t.Error("expected a distinct transport for an insecure TLS config")
+	}
+	if !tInsecure.TLSClientConfig.InsecureSkipVerify {
+		t.Error("insecure transport should carry InsecureSkipVerify=true")
+	}
+}
+
+func TestTransportKey(t *testing.T) {
+	tests := []struct {
+		name string
+		a, b ConnectionParams
+		same bool
+	}{
+		{
+			name: "default configs share a key regardless of host",
+			a:    ConnectionParams{Host: "https://a"},
+			b:    ConnectionParams{Host: "https://b"},
+			same: true,
+		},
+		{
+			name: "insecure differs from default",
+			a:    ConnectionParams{},
+			b:    ConnectionParams{InsecureSkipVerify: true},
+			same: false,
+		},
+		{
+			name: "same CA shares a key",
+			a:    ConnectionParams{CACert: "cert-A"},
+			b:    ConnectionParams{CACert: "cert-A"},
+			same: true,
+		},
+		{
+			name: "different CA differs",
+			a:    ConnectionParams{CACert: "cert-A"},
+			b:    ConnectionParams{CACert: "cert-B"},
+			same: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := transportKey(tt.a) == transportKey(tt.b); got != tt.same {
+				t.Errorf("transportKey equality = %v, want %v", got, tt.same)
+			}
+		})
+	}
+}
+
 func TestQueryTelemetrySortsNewestFirst(t *testing.T) {
 	var captured map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -211,7 +340,7 @@ func TestQueryTelemetrySortsNewestFirst(t *testing.T) {
 	defer srv.Close()
 
 	conn := ConnectionParams{Host: srv.URL, Index: "telemetry"}
-	if _, err := QueryTelemetry(context.Background(), conn, 50, "", ""); err != nil {
+	if _, err := NewClient().QueryTelemetry(context.Background(), conn, 50, "", ""); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -245,11 +374,19 @@ func TestQueryTelemetryDateRange(t *testing.T) {
 		startDate string
 		endDate   string
 		wantGTE   string
-		wantLTE   string
+		// upperKey is the expected bound key: "lte" (inclusive, for the default
+		// upper bound) or "lt" (exclusive, for an explicit end date). The other
+		// key must be absent.
+		upperKey  string
+		wantUpper string
 	}{
-		{"defaults trailing window", "", "", "now-30d/d", "now/d"},
-		{"explicit bounds", "2026-08-01", "2026-08-26", "2026-08-01", "2026-08-26||+1d/d"},
-		{"only start provided", "2026-08-01", "", "2026-08-01", "now/d"},
+		// Default upper bound is inclusive "now" so telemetry through the current
+		// instant is included (not "now/d", which drops everything logged today).
+		{"defaults trailing window", "", "", "now-30d/d", "lte", "now"},
+		// An explicit end date uses an exclusive "lt" next-day bound so only the
+		// selected calendar day is included.
+		{"explicit bounds", "2026-08-01", "2026-08-26", "2026-08-01", "lt", "2026-08-26||+1d/d"},
+		{"only start provided", "2026-08-01", "", "2026-08-01", "lte", "now"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -261,7 +398,7 @@ func TestQueryTelemetryDateRange(t *testing.T) {
 			defer srv.Close()
 
 			conn := ConnectionParams{Host: srv.URL, Index: "telemetry"}
-			if _, err := QueryTelemetry(context.Background(), conn, 50, tt.startDate, tt.endDate); err != nil {
+			if _, err := NewClient().QueryTelemetry(context.Background(), conn, 50, tt.startDate, tt.endDate); err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
 
@@ -269,8 +406,17 @@ func TestQueryTelemetryDateRange(t *testing.T) {
 			if rng["gte"] != tt.wantGTE {
 				t.Errorf("gte = %v, want %v", rng["gte"], tt.wantGTE)
 			}
-			if rng["lte"] != tt.wantLTE {
-				t.Errorf("lte = %v, want %v", rng["lte"], tt.wantLTE)
+			if got := rng[tt.upperKey]; got != tt.wantUpper {
+				t.Errorf("%s = %v, want %v", tt.upperKey, got, tt.wantUpper)
+			}
+			// The unused upper-bound key must not be present, so the bound has the
+			// intended inclusivity.
+			otherKey := "lt"
+			if tt.upperKey == "lt" {
+				otherKey = "lte"
+			}
+			if _, present := rng[otherKey]; present {
+				t.Errorf("unexpected %q bound present: %v", otherKey, rng[otherKey])
 			}
 		})
 	}

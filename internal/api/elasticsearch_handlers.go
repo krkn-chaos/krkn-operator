@@ -23,6 +23,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -498,12 +499,21 @@ func (h *Handler) QueryElasticsearchTelemetry(w http.ResponseWriter, r *http.Req
 
 	conn := buildConnectionParams(secret)
 
-	docs, err := elasticsearch.QueryTelemetry(ctx, conn, req.Size, req.StartDate, req.EndDate)
+	docs, err := h.esClient.QueryTelemetry(ctx, conn, req.Size, req.StartDate, req.EndDate)
 	if err != nil {
-		logger.Error(err, "Failed to query elasticsearch telemetry", "name", req.ConfigName)
+		// Log bounded upstream diagnostics server-side for troubleshooting, but
+		// never return raw upstream bodies or internal client errors to the
+		// caller: respond with a stable, sanitized 502 message instead.
+		var statusErr *elasticsearch.StatusError
+		if errors.As(err, &statusErr) {
+			logger.Error(err, "Elasticsearch returned a non-success status",
+				"name", req.ConfigName, "status", statusErr.StatusCode)
+		} else {
+			logger.Error(err, "Failed to query elasticsearch telemetry", "name", req.ConfigName)
+		}
 		writeJSONError(w, http.StatusBadGateway, ErrorResponse{
 			Error:   "upstream_error",
-			Message: "Failed to query Elasticsearch: " + err.Error(),
+			Message: "Failed to query Elasticsearch",
 		})
 		return
 	}

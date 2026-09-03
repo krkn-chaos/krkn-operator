@@ -19,20 +19,144 @@ package elasticsearch
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 )
 
 // queryTimeout bounds a single Elasticsearch search request so a slow or
 // unreachable cluster cannot block an API handler indefinitely.
 const queryTimeout = 15 * time.Second
+
+// maxResponseBytes caps how much of an Elasticsearch response we will buffer in
+// memory. The requested hit count does not bound the size of individual _source
+// documents (or of an error body), so a misbehaving or malicious cluster could
+// otherwise stream an unbounded response and exhaust memory. Applied to both
+// success and error bodies before they are retained or decoded.
+const maxResponseBytes = 50 << 20 // 50 MiB
+
+// maxErrorBodySnippet bounds how much of a non-2xx response body is retained for
+// server-side diagnostics. Upstream error bodies can contain arbitrary and
+// potentially sensitive content, so only a short, log-only snippet is kept.
+const maxErrorBodySnippet = 512
+
+// StatusError describes a non-2xx response from the Elasticsearch cluster. It
+// carries the HTTP status and a bounded snippet of the response body for
+// server-side diagnostics only. Callers should log it to investigate upstream
+// failures but MUST NOT forward its contents to API clients, since the body may
+// contain sensitive or unstable upstream detail.
+type StatusError struct {
+	// StatusCode is the HTTP status returned by the cluster.
+	StatusCode int
+	// Body is a bounded, log-only snippet of the upstream response body.
+	Body string
+}
+
+// Error implements error. The message is intended for server-side logs, not for
+// return to API clients.
+func (e *StatusError) Error() string {
+	if e.Body == "" {
+		return fmt.Sprintf("elasticsearch returned status %d", e.StatusCode)
+	}
+	return fmt.Sprintf("elasticsearch returned status %d: %s", e.StatusCode, e.Body)
+}
+
+// Client executes telemetry queries against Elasticsearch/OpenSearch clusters.
+// It is safe for concurrent use and should be long-lived (package- or
+// handler-scoped): it caches one *http.Transport per distinct TLS configuration
+// so that TCP/TLS connections are pooled and reused across requests instead of
+// being torn down and re-established for every query.
+//
+// Transports are cached lazily, keyed by the TLS configuration they carry, so
+// clusters that share the same TLS posture (default verification, a given CA
+// bundle, or the insecure opt-in) share a connection pool while differing
+// configurations remain isolated.
+type Client struct {
+	mu         sync.Mutex
+	transports map[string]*http.Transport
+	// doer, when non-nil, executes every request in place of the pooled
+	// per-TLS-configuration http.Client. It exists so tests can inject a stub
+	// transport; production callers leave it nil to get the secure, connection
+	// pooling default.
+	doer Doer
+}
+
+// Doer executes HTTP requests. *http.Client satisfies it. It is the single
+// external collaborator of Client and is exposed so callers (chiefly tests) can
+// substitute a stub without reaching real network endpoints.
+type Doer interface {
+	Do(*http.Request) (*http.Response, error)
+}
+
+// Option configures a Client at construction time.
+type Option func(*Client)
+
+// WithHTTPClient injects a custom Doer used for every request, bypassing the
+// pooled per-TLS-configuration transport. Intended for tests; production callers
+// should omit it to retain secure TLS defaults and connection pooling.
+func WithHTTPClient(d Doer) Option {
+	return func(c *Client) { c.doer = d }
+}
+
+// NewClient returns a ready-to-use Client. A single instance should be created
+// once and shared for the lifetime of the process to benefit from connection
+// pooling. By default it uses a pooled http.Client per TLS configuration with
+// secure production defaults; pass WithHTTPClient to inject a custom Doer.
+func NewClient(opts ...Option) *Client {
+	c := &Client{transports: make(map[string]*http.Transport)}
+	for _, opt := range opts {
+		opt(c)
+	}
+	return c
+}
+
+// transportKey derives a stable cache key from the TLS-affecting fields of
+// conn. Connections only differ in behavior by their TLS configuration, so
+// host/port/credentials are deliberately excluded: a single pooled transport
+// can safely serve many hosts that share the same TLS posture.
+func transportKey(conn ConnectionParams) string {
+	if conn.InsecureSkipVerify {
+		return "insecure"
+	}
+	if conn.CACert != "" {
+		sum := sha256.Sum256([]byte(conn.CACert))
+		return "ca:" + hex.EncodeToString(sum[:])
+	}
+	return "default"
+}
+
+// transport returns a cached transport for conn's TLS configuration, creating
+// and caching one on first use. It is safe for concurrent callers.
+func (c *Client) transport(conn ConnectionParams) (*http.Transport, error) {
+	key := transportKey(conn)
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if t, ok := c.transports[key]; ok {
+		return t, nil
+	}
+
+	tlsConfig, err := conn.tlsConfig()
+	if err != nil {
+		return nil, err
+	}
+	// Clone the stdlib default transport so we inherit its connection-pool and
+	// timeout defaults, then attach the per-configuration TLS settings.
+	t, _ := http.DefaultTransport.(*http.Transport)
+	transport := t.Clone()
+	transport.TLSClientConfig = tlsConfig
+	c.transports[key] = transport
+	return transport, nil
+}
 
 // ConnectionParams holds the resolved connection details needed to query an
 // Elasticsearch/OpenSearch cluster. It is assembled server-side from a stored
@@ -204,7 +328,29 @@ func (c ConnectionParams) tlsConfig() (*tls.Config, error) {
 // window. Results are sorted newest-first by timestamp (with a deterministic
 // _doc tie-breaker) before the size limit is applied, so the most recent
 // documents are the ones returned.
-func QueryTelemetry(ctx context.Context, conn ConnectionParams, size int, startDate, endDate string) (docs []TelemetryDocument, err error) {
+//
+// The call is bounded by both ctx and an internal queryTimeout (whichever fires
+// first); on timeout or cancellation it returns a non-nil error wrapping the
+// context cause and no documents.
+//
+// It returns a non-nil error, and no documents, when:
+//   - conn.Index is empty (the config has no telemetry index);
+//   - conn carries credentials but resolves to a plaintext http:// URL
+//     (credentials are refused rather than sent in the clear);
+//   - the configured CACert cannot be parsed into a usable TLS config;
+//   - the cluster is unreachable or the request otherwise fails in transit
+//     (including ctx timeout/cancellation);
+//   - the response body exceeds maxResponseBytes;
+//   - the cluster responds with a non-2xx status: the error is a *StatusError
+//     carrying the status and a bounded, log-only body snippet (use errors.As);
+//   - the top-level response body is not valid JSON in the expected shape.
+//
+// Partial results are tolerated on success: individual hits whose _source does
+// not unmarshal into the expected telemetry shape are skipped rather than
+// failing the whole query, so the returned slice may contain fewer documents
+// than the cluster reported hits. On success with no matching hits it returns a
+// non-nil, empty (len 0) slice and a nil error.
+func (c *Client) QueryTelemetry(ctx context.Context, conn ConnectionParams, size int, startDate, endDate string) (docs []TelemetryDocument, err error) {
 	if conn.Index == "" {
 		return nil, fmt.Errorf("telemetry index is not configured for this Elasticsearch config")
 	}
@@ -216,20 +362,43 @@ func QueryTelemetry(ctx context.Context, conn ConnectionParams, size int, startD
 		return nil, fmt.Errorf("refusing to send credentials over plaintext HTTP; use https")
 	}
 
-	tlsConfig, err := conn.tlsConfig()
-	if err != nil {
-		return nil, err
+	// Resolve the request executor: an injected Doer (tests) takes precedence;
+	// otherwise use the pooled http.Client for conn's TLS configuration.
+	doer := c.doer
+	if doer == nil {
+		transport, terr := c.transport(conn)
+		if terr != nil {
+			return nil, terr
+		}
+		// The http.Client is cheap; the pooled transport it wraps is what carries
+		// (and reuses) the underlying connections across queries.
+		doer = &http.Client{
+			Timeout:   queryTimeout,
+			Transport: transport,
+		}
 	}
 
-	// Default to a trailing 30-day window when a bound is not supplied. The
-	// endDate is made inclusive of the whole selected day via date-math rounding.
+	// Lower bound: default to the start of the day 30 days ago; an explicit
+	// startDate is parsed via the "yyyy-MM-dd" format below.
 	gte := "now-30d/d"
 	if startDate != "" {
 		gte = startDate
 	}
-	lte := "now/d"
+
+	// Upper bound: the default window must include telemetry through the current
+	// instant, so use an inclusive "now" rather than "now/d" (which is midnight
+	// at the start of today and would drop everything logged so far today). An
+	// explicit endDate must include only that calendar day, so use an exclusive
+	// "lt" at the following midnight ("+1d/d"); an inclusive "lte" there would
+	// also match documents timestamped exactly at the next day's boundary.
+	timestampRange := map[string]any{
+		"format": "yyyy-MM-dd",
+		"gte":    gte,
+	}
 	if endDate != "" {
-		lte = endDate + "||+1d/d"
+		timestampRange["lt"] = endDate + "||+1d/d"
+	} else {
+		timestampRange["lte"] = "now"
 	}
 
 	body := map[string]any{
@@ -253,11 +422,7 @@ func QueryTelemetry(ctx context.Context, conn ConnectionParams, size int, startD
 				"filter": []any{
 					map[string]any{
 						"range": map[string]any{
-							"timestamp": map[string]any{
-								"format": "yyyy-MM-dd",
-								"gte":    gte,
-								"lte":    lte,
-							},
+							"timestamp": timestampRange,
 						},
 					},
 				},
@@ -283,14 +448,7 @@ func QueryTelemetry(ctx context.Context, conn ConnectionParams, size int, startD
 		req.SetBasicAuth(conn.Username, conn.Password)
 	}
 
-	client := &http.Client{
-		Timeout: queryTimeout,
-		Transport: &http.Transport{
-			TLSClientConfig: tlsConfig,
-		},
-	}
-
-	resp, err := client.Do(req)
+	resp, err := doer.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to reach Elasticsearch: %w", err)
 	}
@@ -303,13 +461,24 @@ func QueryTelemetry(ctx context.Context, conn ConnectionParams, size int, startD
 		}
 	}()
 
-	respBody, err := io.ReadAll(resp.Body)
+	// Read at most maxResponseBytes+1 so an oversized body is detected without
+	// buffering the whole thing: the extra byte tips len() over the limit.
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
 	if err != nil {
 		return nil, fmt.Errorf("failed to read Elasticsearch response: %w", err)
 	}
+	if int64(len(respBody)) > maxResponseBytes {
+		return nil, fmt.Errorf("elasticsearch response exceeds the maximum supported size of %d bytes", maxResponseBytes)
+	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("Elasticsearch returned status %d: %s", resp.StatusCode, strings.TrimSpace(string(respBody)))
+		// Keep only a bounded snippet of the upstream body for diagnostics; the
+		// full body is neither logged nor returned to the caller.
+		snippet := strings.TrimSpace(string(respBody))
+		if len(snippet) > maxErrorBodySnippet {
+			snippet = snippet[:maxErrorBodySnippet] + "…(truncated)"
+		}
+		return nil, &StatusError{StatusCode: resp.StatusCode, Body: snippet}
 	}
 
 	var parsed esSearchResponse
