@@ -24,6 +24,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -32,6 +33,8 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 	fakeclient "sigs.k8s.io/controller-runtime/pkg/client/fake"
 
+	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
+	"github.com/krkn-chaos/krkn-operator/pkg/auth"
 	"github.com/krkn-chaos/krkn-operator/pkg/elasticsearch"
 )
 
@@ -696,10 +699,9 @@ func newEsTestSecretWithHost(name, namespace, host, telemetryIndex string) *core
 			),
 		},
 		Type: corev1.SecretTypeOpaque,
-		Data: map[string][]byte{
-			elasticsearch.SecretKeyUsername: []byte("elastic"),
-			elasticsearch.SecretKeyPassword: []byte("secret-pass"),
-		},
+		// No credentials: the httptest server speaks plaintext HTTP, and the
+		// client refuses to send credentials over an unencrypted connection.
+		Data: map[string][]byte{},
 	}
 }
 
@@ -804,4 +806,100 @@ func TestQueryElasticsearchTelemetry_UpstreamError(t *testing.T) {
 	if w.Code != http.StatusBadGateway {
 		t.Errorf("expected 502, got %d", w.Code)
 	}
+}
+
+// TestQueryElasticsearchTelemetry_RouteAndAuth exercises the telemetry query
+// endpoint through the real server mux and authentication middleware, rather
+// than calling the handler directly. This verifies the route is registered at
+// ElasticsearchQueryPath and that RequireAuth gates it: unauthenticated
+// requests are rejected, and an authenticated request reaches the handler.
+func TestQueryElasticsearchTelemetry_RouteAndAuth(t *testing.T) {
+	const namespace = "krkn-operator-system"
+	const userID = "user@example.com"
+
+	esServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"hits":{"hits":[{"_source":{"run_uuid":"abc","job_status":true,"scenarios":[{"scenario_type":"pod","start_timestamp":100,"end_timestamp":200,"exit_status":0,"parameters":[{"config":{"namespace":"ns1"}}]}]}}]}}`))
+	}))
+	defer esServer.Close()
+
+	scheme := runtime.NewScheme()
+	_ = corev1.AddToScheme(scheme)
+	_ = krknv1alpha1.AddToScheme(scheme)
+
+	esConfig := newEsTestSecretWithHost("prod-es", namespace, esServer.URL, "krkn-telemetry")
+	activeUser := &krknv1alpha1.KrknUser{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      sanitizeUsername(userID),
+			Namespace: namespace,
+		},
+		Spec:   krknv1alpha1.KrknUserSpec{UserID: userID, Role: "user"},
+		Status: krknv1alpha1.KrknUserStatus{Active: true},
+	}
+
+	k8sClient := fakeclient.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(esConfig, activeUser).
+		Build()
+
+	// Start a real SecretManager so the middleware can validate tokens against
+	// the same JWT secret the server uses.
+	secretManager := auth.NewSecretManager(k8sClient, namespace, TokenDuration, "krkn-operator")
+	smCtx, smCancel := context.WithCancel(context.Background())
+	defer smCancel()
+	go func() { _ = secretManager.Start(smCtx) }()
+
+	deadline := time.Now().Add(5 * time.Second)
+	for !secretManager.IsReady() {
+		if time.Now().After(deadline) {
+			t.Fatal("secret manager did not become ready in time")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	server := NewServer(0, k8sClient, fake.NewSimpleClientset(), namespace, "localhost:50051", secretManager)
+	defer func() { _ = server.Shutdown() }()
+	mux := server.HTTPHandler()
+
+	newRequest := func() *http.Request {
+		body, _ := json.Marshal(elasticsearch.QueryTelemetryRequest{ConfigName: "prod-es"})
+		req := httptest.NewRequest(http.MethodPost, ElasticsearchQueryPath, bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		return req
+	}
+
+	t.Run("unauthenticated request is rejected", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, newRequest())
+		if w.Code != http.StatusUnauthorized {
+			t.Fatalf("expected 401 without a token, got %d: %s", w.Code, w.Body.String())
+		}
+	})
+
+	t.Run("authenticated request reaches the handler", func(t *testing.T) {
+		tokenGen, err := secretManager.GetTokenGenerator()
+		if err != nil {
+			t.Fatalf("failed to get token generator: %v", err)
+		}
+		token, err := tokenGen.GenerateToken(userID, "user", "Regular", "User", "Org")
+		if err != nil {
+			t.Fatalf("failed to generate token: %v", err)
+		}
+
+		req := newRequest()
+		req.Header.Set("Authorization", "Bearer "+token)
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("expected 200 with a valid token, got %d: %s", w.Code, w.Body.String())
+		}
+		var resp elasticsearch.QueryTelemetryResponse
+		if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("failed to decode response: %v", err)
+		}
+		if resp.Total != 1 || len(resp.Documents) != 1 || resp.Documents[0].RunUUID != "abc" {
+			t.Fatalf("unexpected telemetry response: %+v", resp)
+		}
+	})
 }

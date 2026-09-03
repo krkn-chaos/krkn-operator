@@ -69,6 +69,23 @@ func TestValidateCreateRequest(t *testing.T) {
 			req:     CreateElasticsearchConfigRequest{Name: "my-es", Host: "https://es.example.com", Port: 65535},
 			wantErr: false,
 		},
+		{
+			name:    "credentials over plaintext http rejected",
+			req:     CreateElasticsearchConfigRequest{Name: "my-es", Host: "http://es.example.com", Username: "elastic", Password: "secret"},
+			wantErr: true,
+			errMsg:  "credentials require a TLS connection; use an https host",
+		},
+		{
+			name:    "no credentials over http allowed",
+			req:     CreateElasticsearchConfigRequest{Name: "my-es", Host: "http://es.example.com"},
+			wantErr: false,
+		},
+		{
+			name:    "invalid ca cert rejected",
+			req:     CreateElasticsearchConfigRequest{Name: "my-es", Host: "https://es.example.com", CACert: "not-a-pem"},
+			wantErr: true,
+			errMsg:  "caCert must be a valid PEM-encoded certificate",
+		},
 	}
 
 	for _, tt := range tests {

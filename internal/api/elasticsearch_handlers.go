@@ -107,6 +107,17 @@ func (h *Handler) CreateElasticsearchConfig(w http.ResponseWriter, r *http.Reque
 		req.GrafanaURL,
 		createdBy,
 	)
+	if req.InsecureSkipTLSVerify {
+		annotations[elasticsearch.InsecureSkipTLSVerifyAnnotation] = "true"
+	}
+
+	data := map[string][]byte{
+		elasticsearch.SecretKeyUsername: []byte(req.Username),
+		elasticsearch.SecretKeyPassword: []byte(req.Password),
+	}
+	if req.CACert != "" {
+		data[elasticsearch.SecretKeyCACert] = []byte(req.CACert)
+	}
 
 	secret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
@@ -116,10 +127,7 @@ func (h *Handler) CreateElasticsearchConfig(w http.ResponseWriter, r *http.Reque
 			Annotations: annotations,
 		},
 		Type: corev1.SecretTypeOpaque,
-		Data: map[string][]byte{
-			elasticsearch.SecretKeyUsername: []byte(req.Username),
-			elasticsearch.SecretKeyPassword: []byte(req.Password),
-		},
+		Data: data,
 	}
 
 	if err := h.client.Create(ctx, secret); err != nil {
@@ -309,6 +317,14 @@ func (h *Handler) UpdateElasticsearchConfig(w http.ResponseWriter, r *http.Reque
 	}
 	if req.Password != "" {
 		secret.Data[elasticsearch.SecretKeyPassword] = []byte(req.Password)
+	}
+	if req.CACert != "" {
+		secret.Data[elasticsearch.SecretKeyCACert] = []byte(req.CACert)
+	}
+	if req.InsecureSkipTLSVerify {
+		secret.Annotations[elasticsearch.InsecureSkipTLSVerifyAnnotation] = "true"
+	} else {
+		delete(secret.Annotations, elasticsearch.InsecureSkipTLSVerifyAnnotation)
 	}
 
 	if err := h.client.Update(ctx, secret); err != nil {
@@ -519,13 +535,19 @@ func buildConnectionParams(secret *corev1.Secret) elasticsearch.ConnectionParams
 	if p, ok := secret.Data[elasticsearch.SecretKeyPassword]; ok {
 		password = string(p)
 	}
+	caCert := ""
+	if c, ok := secret.Data[elasticsearch.SecretKeyCACert]; ok {
+		caCert = string(c)
+	}
 
 	return elasticsearch.ConnectionParams{
-		Host:     secret.Annotations[elasticsearch.HostAnnotation],
-		Port:     port,
-		Username: username,
-		Password: password,
-		Index:    secret.Annotations[elasticsearch.TelemetryIndexAnnotation],
+		Host:               secret.Annotations[elasticsearch.HostAnnotation],
+		Port:               port,
+		Username:           username,
+		Password:           password,
+		Index:              secret.Annotations[elasticsearch.TelemetryIndexAnnotation],
+		CACert:             caCert,
+		InsecureSkipVerify: secret.Annotations[elasticsearch.InsecureSkipTLSVerifyAnnotation] == "true",
 	}
 }
 

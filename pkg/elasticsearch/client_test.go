@@ -128,6 +128,117 @@ func TestQueryTelemetry(t *testing.T) {
 	}
 }
 
+func TestQueryTelemetryRejectsCredentialsOverHTTP(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("request should not reach the server over plaintext HTTP with credentials")
+		_, _ = w.Write([]byte(`{"hits":{"hits":[]}}`))
+	}))
+	defer srv.Close()
+
+	conn := ConnectionParams{Host: srv.URL, Index: "telemetry", Username: "elastic", Password: "secret"}
+	_, err := QueryTelemetry(context.Background(), conn, 50, "", "")
+	if err == nil {
+		t.Fatal("expected error for credentials over plaintext HTTP, got nil")
+	}
+	if !strings.Contains(err.Error(), "plaintext HTTP") {
+		t.Errorf("error = %q, want it to mention plaintext HTTP", err.Error())
+	}
+}
+
+func TestConnectionParamsTLSConfig(t *testing.T) {
+	// A syntactically valid self-signed certificate in PEM form.
+	const caPEM = `-----BEGIN CERTIFICATE-----
+MIIBhTCCASugAwIBAgIQIRi6zePL6mKjOipn+dNuaTAKBggqhkjOPQQDAjASMRAw
+DgYDVQQKEwdBY21lIENvMB4XDTE3MTAyMDE5NDMwNloXDTE4MTAyMDE5NDMwNlow
+EjEQMA4GA1UEChMHQWNtZSBDbzBZMBMGByqGSM49AgEGCCqGSM49AwEHA0IABD0d
+7VNhbWvZLWPuj/RtHFjvtJBEwOkhbN/BnnE8rnZR8+sbwnc/KhCk3FhnpHZnQz7B
+5aETbbIgmuvewdjvSBSjYzBhMA4GA1UdDwEB/wQEAwICpDATBgNVHSUEDDAKBggr
+BgEFBQcDATAPBgNVHRMBAf8EBTADAQH/MCkGA1UdEQQiMCCCDmxvY2FsaG9zdDo1
+NDUzgg4xMjcuMC4wLjE6NTQ1MzAKBggqhkjOPQQDAgNIADBFAiEA2zpJEPQyz6/l
+Wf86aX6PepsntZv2GYlA5UpabfT2EZICICpJ5h/iI+i341gBmLiAFQOyTDT+/wQc
+6MF9+Yw1Yy0t
+-----END CERTIFICATE-----`
+
+	t.Run("default verifies with system roots", func(t *testing.T) {
+		cfg, err := ConnectionParams{}.tlsConfig()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if cfg.InsecureSkipVerify {
+			t.Error("InsecureSkipVerify should be false by default")
+		}
+		if cfg.RootCAs != nil {
+			t.Error("RootCAs should be nil (system roots) when no CACert is set")
+		}
+	})
+
+	t.Run("custom CA is trusted without disabling verification", func(t *testing.T) {
+		cfg, err := ConnectionParams{CACert: caPEM}.tlsConfig()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if cfg.InsecureSkipVerify {
+			t.Error("InsecureSkipVerify should remain false when a CACert is provided")
+		}
+		if cfg.RootCAs == nil {
+			t.Error("RootCAs should be populated from the provided CACert")
+		}
+	})
+
+	t.Run("invalid CA errors", func(t *testing.T) {
+		if _, err := (ConnectionParams{CACert: "garbage"}).tlsConfig(); err == nil {
+			t.Error("expected error for invalid CACert, got nil")
+		}
+	})
+
+	t.Run("insecure skip verify is an explicit opt-in", func(t *testing.T) {
+		cfg, err := ConnectionParams{InsecureSkipVerify: true}.tlsConfig()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !cfg.InsecureSkipVerify {
+			t.Error("InsecureSkipVerify should be true when explicitly opted in")
+		}
+	})
+}
+
+func TestQueryTelemetrySortsNewestFirst(t *testing.T) {
+	var captured map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&captured)
+		_, _ = w.Write([]byte(`{"hits":{"hits":[]}}`))
+	}))
+	defer srv.Close()
+
+	conn := ConnectionParams{Host: srv.URL, Index: "telemetry"}
+	if _, err := QueryTelemetry(context.Background(), conn, 50, "", ""); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	sort, ok := captured["sort"].([]any)
+	if !ok || len(sort) == 0 {
+		t.Fatalf("expected a non-empty sort clause, got %v", captured["sort"])
+	}
+
+	ts, ok := sort[0].(map[string]any)["timestamp"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected first sort key on timestamp, got %v", sort[0])
+	}
+	if ts["order"] != "desc" {
+		t.Errorf("timestamp sort order = %v, want desc", ts["order"])
+	}
+	if ts["unmapped_type"] != "date" {
+		t.Errorf("timestamp unmapped_type = %v, want date", ts["unmapped_type"])
+	}
+
+	if len(sort) < 2 {
+		t.Fatalf("expected a deterministic tie-breaker sort key, got %v", sort)
+	}
+	if _, ok := sort[1].(map[string]any)["_doc"]; !ok {
+		t.Errorf("expected _doc tie-breaker as second sort key, got %v", sort[1])
+	}
+}
+
 func TestQueryTelemetryDateRange(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -171,9 +282,13 @@ func TestBaseURL(t *testing.T) {
 		conn ConnectionParams
 		want string
 	}{
-		{"host with scheme used verbatim", ConnectionParams{Host: "http://es.local:9200", Port: 9200}, "http://es.local:9200"},
+		{"host with scheme and port used verbatim", ConnectionParams{Host: "http://es.local:9200", Port: 9200}, "http://es.local:9200"},
 		{"trailing slash trimmed", ConnectionParams{Host: "https://es.local:9200/", Port: 9200}, "https://es.local:9200"},
 		{"bare host gets https and port", ConnectionParams{Host: "es.local", Port: 9200}, "https://es.local:9200"},
+		{"scheme host without port gets configured port", ConnectionParams{Host: "https://es.local", Port: 9200}, "https://es.local:9200"},
+		{"scheme host trailing slash without port gets configured port", ConnectionParams{Host: "https://es.local/", Port: 9200}, "https://es.local:9200"},
+		{"scheme host without port and no configured port used verbatim", ConnectionParams{Host: "https://es.local", Port: 0}, "https://es.local"},
+		{"scheme host port differs from configured keeps host port", ConnectionParams{Host: "https://es.local:9201", Port: 9200}, "https://es.local:9201"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
