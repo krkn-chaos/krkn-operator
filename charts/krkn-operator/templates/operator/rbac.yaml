@@ -13,7 +13,6 @@ rules:
   - ""
   resources:
   - configmaps
-  - persistentvolumeclaims
   - secrets
   verbs:
   - create
@@ -23,6 +22,14 @@ rules:
   - patch
   - update
   - watch
+- apiGroups:
+  - ""
+  resources:
+  - persistentvolumeclaims
+  verbs:
+  - create
+  - delete
+  - get
 - apiGroups:
   - coordination.k8s.io
   resources:

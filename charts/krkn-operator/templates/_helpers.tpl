@@ -93,3 +93,14 @@ Namespace to use
 {{- .Release.Namespace }}
 {{- end }}
 {{- end }}
+
+{{/*
+Resolve the shared AI results PVC name.
+*/}}
+{{- define "krkn-operator.aiResultsPVCName" -}}
+{{- if .Values.aiOrchestrator.storage.existingClaim -}}
+{{- .Values.aiOrchestrator.storage.existingClaim -}}
+{{- else -}}
+{{- printf "%s-krkn-ai-results" (include "krkn-operator.fullname" .) | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
+{{- end }}

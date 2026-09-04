@@ -39,20 +39,27 @@ import (
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
 )
 
+type KrknAIRunReconciler struct {
+	client.Client
+	APIReader                client.Reader
+	Scheme                   *runtime.Scheme
+	Clientset                kubernetes.Interface
+	Namespace                string
+	OrchestratorImage        string
+	ResultsPVCName           string
+	ResultsStorageMode       string
+	ResultsStorageClassName  string
+	ResultsStorageAccessMode string
+	ResultsStorageSize       string
+}
+
 // +kubebuilder:rbac:groups=krkn.krkn-chaos.dev,resources=krknairuns,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=krkn.krkn-chaos.dev,resources=krknairuns/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=krkn.krkn-chaos.dev,resources=krknairuns/finalizers,verbs=update
 // +kubebuilder:rbac:groups=krkn.krkn-chaos.dev,resources=krknscenarioruns,verbs=get;list;watch
-// +kubebuilder:rbac:groups="",resources=persistentvolumeclaims,verbs=get;list;watch;create;delete
+// +kubebuilder:rbac:groups="",resources=persistentvolumeclaims,verbs=get;create;delete
 // +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch;create;update;patch;delete
-type KrknAIRunReconciler struct {
-	client.Client
-	Scheme            *runtime.Scheme
-	Clientset         kubernetes.Interface
-	Namespace         string
-	OrchestratorImage string
-}
 
 func (r *KrknAIRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
@@ -142,9 +149,13 @@ func (r *KrknAIRunReconciler) ensureProvisioned(ctx context.Context, aiRun *krkn
 	}
 
 	kubeconfigName := aiResourceName("ai", aiRun.Name, "kubeconfig")
-	pvcName := aiResourceName("ai", aiRun.Name, "results")
 	podName := aiResourceName("ai-run", aiRun.Name, "")
 	labels := map[string]string{"krkn.dev/ai-run": aiRun.Name}
+
+	resultsPVCName, err := r.resolveResultsPVC(ctx, aiRun)
+	if err != nil {
+		return err
+	}
 
 	configMap := &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{Name: configName, Namespace: aiRun.Namespace, Labels: labels},
@@ -162,40 +173,183 @@ func (r *KrknAIRunReconciler) ensureProvisioned(ctx context.Context, aiRun *krkn
 		return fmt.Errorf("failed to create kubeconfig ConfigMap: %w", err)
 	}
 
-	size := aiRun.Spec.Storage.Size
-	if size == "" {
-		size = "5Gi"
-	}
-	storage, err := resource.ParseQuantity(size)
-	if err != nil {
-		return fmt.Errorf("invalid results storage size %q: %w", size, err)
-	}
-	pvc := &corev1.PersistentVolumeClaim{
-		ObjectMeta: metav1.ObjectMeta{Name: pvcName, Namespace: aiRun.Namespace, Labels: labels},
-		Spec: corev1.PersistentVolumeClaimSpec{
-			AccessModes:      []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
-			Resources:        corev1.VolumeResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceStorage: storage}},
-			StorageClassName: optionalString(aiRun.Spec.Storage.StorageClassName),
-		},
-	}
-	if err := r.setOwnerAndCreate(ctx, aiRun, pvc); err != nil {
-		return fmt.Errorf("failed to create results PVC: %w", err)
-	}
-
-	pod := buildOrchestratorPod(aiRun, podName, image, provider, cluster, configName, kubeconfigName, pvcName, r.Namespace)
+	pod := buildOrchestratorPod(aiRun, podName, image, provider, cluster, configName, kubeconfigName, resultsPVCName, r.Namespace)
 	if err := r.setOwnerAndCreate(ctx, aiRun, pod); err != nil {
 		return fmt.Errorf("failed to create orchestrator Pod: %w", err)
 	}
 
 	changed := aiRun.Status.Phase != "Provisioning" ||
-		aiRun.Status.PVCName != pvcName || aiRun.Status.OrchestratorPodName != podName
+		aiRun.Status.PVCName != resultsPVCName || aiRun.Status.OrchestratorPodName != podName
 	aiRun.Status.Phase = "Provisioning"
-	aiRun.Status.PVCName = pvcName
+	aiRun.Status.PVCName = resultsPVCName
 	aiRun.Status.OrchestratorPodName = podName
 	if changed {
 		return r.Status().Update(ctx, aiRun)
 	}
 	return nil
+}
+
+func (r *KrknAIRunReconciler) validateExistingResultsPVC(
+	ctx context.Context, namespace, name, expectedAccessMode string,
+) error {
+	var pvc corev1.PersistentVolumeClaim
+	reader := r.APIReader
+	if reader == nil {
+		reader = r.Client
+	}
+	if err := reader.Get(ctx, types.NamespacedName{Name: name, Namespace: namespace}, &pvc); err != nil {
+		if apierrors.IsNotFound(err) {
+			return fmt.Errorf(`results PVC "%s" not found in namespace "%s"`, name, namespace)
+		}
+		return fmt.Errorf(`failed to get results PVC "%s": %w`, name, err)
+	}
+	if pvc.DeletionTimestamp != nil {
+		return fmt.Errorf(`results PVC "%s" is being deleted`, name)
+	}
+	if expectedAccessMode != "" && !hasAccessMode(pvc.Spec.AccessModes, expectedAccessMode) {
+		return fmt.Errorf(`results PVC "%s" must declare %s access mode`, name, expectedAccessMode)
+	}
+	return nil
+}
+
+func hasAccessMode(modes []corev1.PersistentVolumeAccessMode, expected string) bool {
+	for _, mode := range modes {
+		if string(mode) == expected {
+			return true
+		}
+	}
+	return false
+}
+
+const (
+	storageModeShared    = "shared"
+	storageModeDedicated = "dedicated"
+)
+
+func (r *KrknAIRunReconciler) resolveResultsPVC(ctx context.Context, aiRun *krknv1alpha1.KrknAIRun) (string, error) {
+	spec := aiRun.Spec.Storage
+	if spec != nil && spec.PVCName != "" {
+		if spec.StorageClassName != "" || spec.Size != "" {
+			return "", fmt.Errorf("storage pvcName cannot be combined with storageClassName or size")
+		}
+		return spec.PVCName, r.validateExistingResultsPVC(ctx, aiRun.Namespace, spec.PVCName, spec.AccessMode)
+	}
+
+	mode := r.ResultsStorageMode
+	if mode == "" {
+		mode = storageModeShared
+	}
+	if spec != nil && (spec.StorageClassName != "" || spec.AccessMode != "" || spec.Size != "") {
+		mode = storageModeDedicated
+	}
+
+	switch mode {
+	case storageModeShared:
+		name := r.ResultsPVCName
+		if name == "" {
+			name = "krkn-ai-results"
+		}
+		expectedAccessMode := r.installationAccessMode()
+		if !validAccessMode(expectedAccessMode) {
+			return "", fmt.Errorf(`invalid results storage access mode "%s": must be %q or %q`, expectedAccessMode, corev1.ReadWriteOnce, corev1.ReadWriteMany)
+		}
+		return name, r.validateExistingResultsPVC(ctx, aiRun.Namespace, name, expectedAccessMode)
+	case storageModeDedicated:
+		return r.ensureDedicatedResultsPVC(ctx, aiRun)
+	default:
+		return "", fmt.Errorf(`unsupported results storage mode "%s": must be %q or %q`, mode, storageModeShared, storageModeDedicated)
+	}
+}
+
+func (r *KrknAIRunReconciler) ensureDedicatedResultsPVC(
+	ctx context.Context, aiRun *krknv1alpha1.KrknAIRun,
+) (string, error) {
+	spec := aiRun.Spec.Storage
+	storageClassName := r.ResultsStorageClassName
+	accessMode := r.installationAccessMode()
+	size := r.ResultsStorageSize
+	if spec != nil {
+		if spec.StorageClassName != "" {
+			storageClassName = spec.StorageClassName
+		}
+		if spec.AccessMode != "" {
+			accessMode = spec.AccessMode
+		}
+		if spec.Size != "" {
+			size = spec.Size
+		}
+	}
+	if size == "" {
+		size = "1Gi"
+	}
+	if !validAccessMode(accessMode) {
+		return "", fmt.Errorf(`invalid results storage access mode "%s": must be %q or %q`, accessMode, corev1.ReadWriteOnce, corev1.ReadWriteMany)
+	}
+	storage, err := resource.ParseQuantity(size)
+	if err != nil {
+		return "", fmt.Errorf("invalid results storage size %q: %w", size, err)
+	}
+
+	name := aiResourceName("ai", aiRun.Name, "results")
+	var pvc corev1.PersistentVolumeClaim
+	reader := r.APIReader
+	if reader == nil {
+		reader = r.Client
+	}
+	err = reader.Get(ctx, types.NamespacedName{Name: name, Namespace: aiRun.Namespace}, &pvc)
+	if apierrors.IsNotFound(err) {
+		pvc = corev1.PersistentVolumeClaim{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: aiRun.Namespace, Labels: map[string]string{
+				"krkn.dev/ai-run": aiRun.Name,
+			}},
+			Spec: corev1.PersistentVolumeClaimSpec{
+				AccessModes: []corev1.PersistentVolumeAccessMode{corev1.PersistentVolumeAccessMode(accessMode)},
+				Resources: corev1.VolumeResourceRequirements{
+					Requests: corev1.ResourceList{corev1.ResourceStorage: storage},
+				},
+			},
+		}
+		if storageClassName != "" {
+			pvc.Spec.StorageClassName = &storageClassName
+		}
+		if err := controllerutil.SetControllerReference(aiRun, &pvc, r.Scheme); err != nil {
+			return "", err
+		}
+		if err := r.Create(ctx, &pvc); err != nil && !apierrors.IsAlreadyExists(err) {
+			return "", fmt.Errorf("failed to create results PVC %q: %w", name, err)
+		}
+	} else if err != nil {
+		return "", fmt.Errorf(`failed to get results PVC "%s": %w`, name, err)
+	} else if !metav1.IsControlledBy(&pvc, aiRun) {
+		return "", fmt.Errorf(`dedicated results PVC "%s" already exists and is not owned by KrknAIRun "%s"`, name, aiRun.Name)
+	}
+
+	if err := r.validateExistingResultsPVC(ctx, aiRun.Namespace, name, accessMode); err != nil {
+		return "", err
+	}
+	return name, nil
+}
+
+func (r *KrknAIRunReconciler) installationAccessMode() string {
+	mode := r.ResultsStorageMode
+	if mode == "" {
+		mode = storageModeShared
+	}
+	return r.effectiveAccessMode(mode, r.ResultsStorageAccessMode)
+}
+
+func (r *KrknAIRunReconciler) effectiveAccessMode(mode, configured string) string {
+	if configured != "" {
+		return configured
+	}
+	if mode == storageModeDedicated {
+		return string(corev1.ReadWriteOnce)
+	}
+	return string(corev1.ReadWriteMany)
+}
+
+func validAccessMode(mode string) bool {
+	return mode == string(corev1.ReadWriteOnce) || mode == string(corev1.ReadWriteMany)
 }
 
 func (r *KrknAIRunReconciler) observeRun(ctx context.Context, aiRun *krknv1alpha1.KrknAIRun) (ctrl.Result, error) {
@@ -288,13 +442,6 @@ func aiResourceName(prefix, runName, suffix string) string {
 	return name
 }
 
-func optionalString(value string) *string {
-	if value == "" {
-		return nil
-	}
-	return &value
-}
-
 func completionTime(existing *metav1.Time) *metav1.Time {
 	if existing != nil {
 		return existing
@@ -348,7 +495,6 @@ func buildOrchestratorPod(
 		{Name: "KRKNAI_TARGET_REQUEST_ID", Value: aiRun.Spec.TargetRequestID},
 		{Name: "KRKNAI_PROVIDER", Value: provider},
 		{Name: "KRKNAI_CLUSTER", Value: cluster},
-		{Name: "KRKNAI_SCENARIO_MAX_RETRIES", Value: fmt.Sprint(aiRun.Spec.ScenarioMaxRetries)},
 	}
 	if aiRun.Spec.PrometheusURL != "" {
 		envs = append(envs, corev1.EnvVar{Name: "PROMETHEUS_URL", Value: aiRun.Spec.PrometheusURL})

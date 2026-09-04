@@ -8,7 +8,6 @@ rules:
   - ""
   resources:
   - configmaps
-  - persistentvolumeclaims
   - pods
   - secrets
   verbs:
@@ -22,16 +21,24 @@ rules:
 - apiGroups:
   - ""
   resources:
+  - persistentvolumeclaims
+  verbs:
+  - create
+  - delete
+  - get
+- apiGroups:
+  - ""
+  resources:
   - pods/log
   verbs:
   - get
 - apiGroups:
   - krkn.krkn-chaos.dev
   resources:
+  - krknairuns
   - krkngraphruns
   - krknoperatortargets
   - krknscenarioruns
-  - krknairuns
   - krkntargetrequests
   - krknusergroups
   - krknusers
@@ -46,20 +53,20 @@ rules:
 - apiGroups:
   - krkn.krkn-chaos.dev
   resources:
+  - krknairuns/finalizers
   - krkngraphruns/finalizers
   - krknscenarioruns/finalizers
-  - krknairuns/finalizers
   verbs:
   - update
 - apiGroups:
   - krkn.krkn-chaos.dev
   resources:
+  - krknairuns/status
   - krkngraphruns/status
   - krknoperatortargetproviderconfigs/status
   - krknoperatortargetproviders/status
   - krknoperatortargets/status
   - krknscenarioruns/status
-  - krknairuns/status
   - krkntargetrequests/status
   - krknusergroups/status
   - krknusers/status

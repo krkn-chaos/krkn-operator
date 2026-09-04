@@ -1,0 +1,21 @@
+{{- if and (eq .Values.aiOrchestrator.storage.mode "shared") (not .Values.aiOrchestrator.storage.existingClaim) }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "krkn-operator.aiResultsPVCName" . }}
+  namespace: {{ include "krkn-operator.namespace" . }}
+  labels:
+    {{- include "krkn-operator.labels" . | nindent 4 }}
+    app.kubernetes.io/component: operator
+  annotations:
+    helm.sh/resource-policy: keep
+spec:
+  accessModes:
+    - {{ default "ReadWriteMany" .Values.aiOrchestrator.storage.accessMode }}
+  resources:
+    requests:
+      storage: {{ .Values.aiOrchestrator.storage.size }}
+  {{- with .Values.aiOrchestrator.storage.storageClassName }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+{{- end }}

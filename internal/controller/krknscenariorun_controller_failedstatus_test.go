@@ -264,3 +264,26 @@ func TestReconcile_FailedJobStatus_IncludesClusterAPIURL(t *testing.T) {
 		t.Error("job.CompletionTime should be set on creation failure")
 	}
 }
+
+func TestCalculateOverallStatus_CreatingReservationIsRunning(t *testing.T) {
+	reconciler := &KrknScenarioRunReconciler{}
+	run := &krknv1alpha1.KrknScenarioRun{
+		Status: krknv1alpha1.KrknScenarioRunStatus{
+			ClusterJobs: []krknv1alpha1.ClusterJobStatus{
+				{ClusterName: "self", JobID: "job-1", Phase: "Creating"},
+			},
+		},
+	}
+
+	reconciler.calculateOverallStatus(run)
+
+	if run.Status.Phase != "Running" {
+		t.Fatalf("run.Status.Phase = %q, want %q", run.Status.Phase, "Running")
+	}
+	if run.Status.RunningJobs != 0 {
+		t.Errorf("run.Status.RunningJobs = %d, want 0", run.Status.RunningJobs)
+	}
+	if run.Status.FailedJobs != 0 {
+		t.Errorf("run.Status.FailedJobs = %d, want 0", run.Status.FailedJobs)
+	}
+}

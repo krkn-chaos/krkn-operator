@@ -36,15 +36,16 @@ type KrknAIRunSpec struct {
 	// +kubebuilder:default=krkn-ai.yaml
 	ConfigMapKey string `json:"configMapKey,omitempty"`
 
+	// Storage configures the results volume for this run. When omitted, the
+	// operator's installation-level storage configuration is used.
+	// +optional
+	Storage *KrknAIRunStorageSpec `json:"storage,omitempty"`
+
 	// +optional
 	OrchestratorImage string `json:"orchestratorImage,omitempty"`
 
 	// +optional
 	OwnerUserID string `json:"ownerUserId,omitempty"`
-
-	// +optional
-	// +kubebuilder:default=0
-	ScenarioMaxRetries int `json:"scenarioMaxRetries,omitempty"`
 
 	// +optional
 	PrometheusURL string `json:"prometheusUrl,omitempty"`
@@ -54,20 +55,29 @@ type KrknAIRunSpec struct {
 	PrometheusTokenSecretRef string `json:"prometheusTokenSecretRef,omitempty"`
 
 	// +optional
-	Storage KrknAIRunStorageSpec `json:"storage,omitempty"`
-
-	// +optional
 	// +kubebuilder:default=21600
 	ActiveDeadlineSeconds int64 `json:"activeDeadlineSeconds,omitempty"`
 }
 
-// KrknAIRunStorageSpec configures the results PVC.
+// KrknAIRunStorageSpec selects an existing claim or a dynamically-created
+// per-run claim. Any field set here overrides the installation defaults.
 type KrknAIRunStorageSpec struct {
+	// PVCName mounts this pre-existing claim and never gives it an owner reference.
+	// +optional
+	PVCName string `json:"pvcName,omitempty"`
+
+	// StorageClassName creates a dedicated claim using this storage class.
+	// If set without PVCName, the claim is owned by this KrknAIRun.
 	// +optional
 	StorageClassName string `json:"storageClassName,omitempty"`
 
+	// AccessMode selects the access mode for a dynamically-created claim.
+	// +kubebuilder:validation:Enum=ReadWriteOnce;ReadWriteMany
 	// +optional
-	// +kubebuilder:default="5Gi"
+	AccessMode string `json:"accessMode,omitempty"`
+
+	// Size is the requested size for a dynamically-created claim.
+	// +optional
 	Size string `json:"size,omitempty"`
 }
 

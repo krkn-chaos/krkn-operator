@@ -156,6 +156,16 @@ To enable monitoring:
 {{- end }}
 
 =============================================================================
+CRD UPGRADES
+=============================================================================
+
+Helm does not upgrade existing CRDs stored in the chart's crds/ directory.
+Before creating KrknAIRun resources after a chart upgrade, apply the latest
+CRD definitions explicitly:
+
+  helm show crds <chart-reference> | kubectl apply -f -
+
+=============================================================================
 🚀 NEXT STEPS
 =============================================================================
 

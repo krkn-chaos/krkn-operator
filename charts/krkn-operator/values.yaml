@@ -27,9 +27,23 @@ images:
     pullPolicy: Always
   console:
     image: krkn-chaos.docker.scarf.sh/krkn-chaos/krkn-operator-console:latest
-    pullPolicy: Always
+  pullPolicy: Always
   pullSecrets: []
   # - name: my-registry-secret
+
+## AI orchestrator results storage
+aiOrchestrator:
+  storage:
+    # shared creates one retained installation-scoped claim; dedicated creates
+    # one controller-owned claim per KrknAIRun.
+    mode: shared
+    # Use a pre-created claim for shared mode or an explicit run claim.
+    existingClaim: ""
+    # Empty uses the cluster default storage class.
+    storageClassName: ""
+    # Empty defaults to ReadWriteMany for shared and ReadWriteOnce for dedicated.
+    accessMode: ""
+    size: 1Gi
 
 
 ## Authentication & Security

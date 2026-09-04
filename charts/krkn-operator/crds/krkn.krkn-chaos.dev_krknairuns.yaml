@@ -69,16 +69,30 @@ spec:
                 type: string
               prometheusUrl:
                 type: string
-              scenarioMaxRetries:
-                default: 0
-                type: integer
               storage:
-                description: KrknAIRunStorageSpec configures the results PVC.
+                description: |-
+                  Storage configures the results volume for this run. When omitted, the
+                  operator's installation-level storage configuration is used.
                 properties:
+                  accessMode:
+                    description: AccessMode selects the access mode for a dynamically-created
+                      claim.
+                    enum:
+                    - ReadWriteOnce
+                    - ReadWriteMany
+                    type: string
+                  pvcName:
+                    description: PVCName mounts this pre-existing claim and never
+                      gives it an owner reference.
+                    type: string
                   size:
-                    default: 5Gi
+                    description: Size is the requested size for a dynamically-created
+                      claim.
                     type: string
                   storageClassName:
+                    description: |-
+                      StorageClassName creates a dedicated claim using this storage class.
+                      If set without PVCName, the claim is owned by this KrknAIRun.
                     type: string
                 type: object
               targetClusters:
