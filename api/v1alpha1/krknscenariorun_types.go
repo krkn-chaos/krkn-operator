@@ -60,8 +60,8 @@ type ClusterJobStatus struct {
 	// ContainerImage is the full container image path (registry/repository:tag) being run
 	// +optional
 	ContainerImage string `json:"containerImage,omitempty"`
-	// Phase is the current phase of the job (Pending, Running, Succeeded, Failed, Retrying, Cancelled, MaxRetriesExceeded)
-	// +kubebuilder:validation:Enum=Pending;Running;Succeeded;Failed;Retrying;Cancelled;MaxRetriesExceeded
+	// Phase is the current phase of the job (Pending, Creating, Running, Succeeded, Failed, Retrying, Cancelled, MaxRetriesExceeded)
+	// +kubebuilder:validation:Enum=Pending;Creating;Running;Succeeded;Failed;Retrying;Cancelled;MaxRetriesExceeded
 	Phase string `json:"phase"`
 	// StartTime is when the job started
 	StartTime *metav1.Time `json:"startTime,omitempty"`

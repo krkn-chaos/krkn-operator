@@ -214,9 +214,11 @@ spec:
                       type: string
                     phase:
                       description: Phase is the current phase of the job (Pending,
-                        Running, Succeeded, Failed, Retrying, Cancelled, MaxRetriesExceeded)
+                        Creating, Running, Succeeded, Failed, Retrying, Cancelled,
+                        MaxRetriesExceeded)
                       enum:
                       - Pending
+                      - Creating
                       - Running
                       - Succeeded
                       - Failed
