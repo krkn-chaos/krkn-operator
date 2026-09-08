@@ -113,3 +113,9 @@ const (
 const (
 	ElasticsearchConfigsPath = APIBasePath + "/elasticsearch-configs"
 )
+
+// Cloud credential endpoints
+const (
+	CloudCredentialsPath          = APIBasePath + "/cloud-credentials"
+	CloudCredentialsAvailablePath = CloudCredentialsPath + "/available"
+)

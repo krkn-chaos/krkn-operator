@@ -525,6 +525,11 @@ func (r *KrknGraphRunReconciler) createScenarioRun(
 			"fileCount", len(fileMounts))
 	}
 
+	// Propagate cloud credential ref: per-node override takes precedence over graph-level
+	if ref := overrideRef(node.CloudCredentialRef, graphRun.Spec.CloudCredentialRef); ref != "" {
+		spec.CloudCredentialRef = ref
+	}
+
 	// Handle resiliency score environment variables (controller-reserved)
 	// These env vars are exclusively managed by the controller and should never
 	// come from user-defined node.Env. Strip them first to prevent leakage.

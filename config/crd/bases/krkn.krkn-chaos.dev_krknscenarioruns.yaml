@@ -57,6 +57,10 @@ spec:
           spec:
             description: KrknScenarioRunSpec defines the desired state of KrknScenarioRun
             properties:
+              cloudCredentialRef:
+                description: CloudCredentialRef is the name of the cloud credential
+                  Secret to inject into the scenario pod
+                type: string
               customRunName:
                 description: CustomRunName is a user-provided label for the run, displayed
                   in the console

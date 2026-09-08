@@ -45,6 +45,7 @@ import (
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
 
 	"github.com/google/uuid"
+	"github.com/krkn-chaos/krkn-operator/pkg/cloudcreds"
 	krknctlconfig "github.com/krkn-chaos/krknctl/pkg/config"
 )
 
@@ -711,6 +712,27 @@ func (r *KrknScenarioRunReconciler) prepareJobResources(
 			Name:  key,
 			Value: value,
 		})
+	}
+
+	// Inject cloud credentials via SecretKeyRef if specified
+	if scenarioRun.Spec.CloudCredentialRef != "" {
+		var credSecret corev1.Secret
+		if err := r.Get(ctx, types.NamespacedName{
+			Name:      scenarioRun.Spec.CloudCredentialRef,
+			Namespace: r.Namespace,
+		}, &credSecret); err != nil {
+			return nil, fmt.Errorf("failed to load cloud credential '%s': %w",
+				scenarioRun.Spec.CloudCredentialRef, err)
+		}
+
+		credEnvVars, credVolumes, credMounts, err := cloudcreds.InjectCredentials(&credSecret)
+		if err != nil {
+			return nil, fmt.Errorf("failed to inject cloud credentials: %w", err)
+		}
+
+		envVars = append(envVars, credEnvVars...)
+		volumes = append(volumes, credVolumes...)
+		volumeMounts = append(volumeMounts, credMounts...)
 	}
 
 	return &preparedJobResources{

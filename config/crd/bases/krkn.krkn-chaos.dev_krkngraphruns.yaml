@@ -57,6 +57,10 @@ spec:
           spec:
             description: KrknGraphRunSpec defines the desired state of KrknGraphRun
             properties:
+              cloudCredentialRef:
+                description: CloudCredentialRef is the default cloud credential for
+                  all nodes in this graph run
+                type: string
               graph:
                 additionalProperties:
                   description: |-
@@ -65,6 +69,10 @@ spec:
                   properties:
                     _comment:
                       description: Comment is an optional comment describing the scenario
+                      type: string
+                    cloudCredentialRef:
+                      description: CloudCredentialRef overrides the graph-level cloud
+                        credential for this specific node
                       type: string
                     depends_on:
                       description: DependsOn is the node ID that this scenario depends

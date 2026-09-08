@@ -62,6 +62,15 @@ func checkProviderActive(ctx context.Context, c client.Client, operatorName stri
 	return true, providerList, nil
 }
 
+// overrideRef returns the node-level ref if set, otherwise the parent-level ref.
+// Used for graph-level ref propagation (cloud credentials, future registry refs, etc.).
+func overrideRef(nodeRef, parentRef string) string {
+	if nodeRef != "" {
+		return nodeRef
+	}
+	return parentRef
+}
+
 // countActiveProviders counts the number of active providers in the given list.
 // Returns the count and a slice of active provider names.
 func countActiveProviders(providerList *krknv1alpha1.KrknOperatorTargetProviderList) (int, []string) {

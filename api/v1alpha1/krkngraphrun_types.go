@@ -73,6 +73,10 @@ type GraphScenarioNode struct {
 	// DependsOn is the node ID that this scenario depends on (parent in the graph)
 	// +optional
 	DependsOn *string `json:"depends_on,omitempty"`
+
+	// CloudCredentialRef overrides the graph-level cloud credential for this specific node
+	// +optional
+	CloudCredentialRef string `json:"cloudCredentialRef,omitempty"`
 }
 
 // NodeStatus represents the status of a single node in the dependency graph
@@ -197,6 +201,10 @@ type KrknGraphRunSpec struct {
 	// OwnerUserID is the email address of the user who created this graph run
 	// +optional
 	OwnerUserID string `json:"ownerUserId,omitempty"`
+
+	// CloudCredentialRef is the default cloud credential for all nodes in this graph run
+	// +optional
+	CloudCredentialRef string `json:"cloudCredentialRef,omitempty"`
 
 	// ResiliencyScoreEnabled enables resiliency score calculation for this graph run.
 	// When enabled:
