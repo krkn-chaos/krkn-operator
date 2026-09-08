@@ -21,12 +21,39 @@ package groupauth
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
+)
+
+const (
+	// resourceNamePrefix is prepended to sanitized user IDs when building
+	// KrknUser resource names, keeping them in a dedicated namespace and
+	// guaranteeing the name starts with an alphanumeric character.
+	resourceNamePrefix = "krknuser-"
+
+	// maxLabelValueLength is the maximum length of a Kubernetes label value
+	// (RFC 1123). See k8s.io/apimachinery/pkg/util/validation.
+	maxLabelValueLength = 63
+
+	// maxResourceNameLength is the maximum length of a Kubernetes resource name
+	// (RFC 1123 subdomain). See k8s.io/apimachinery/pkg/util/validation.
+	maxResourceNameLength = 253
+)
+
+var (
+	// labelValueRegexp matches a valid Kubernetes label value: an alphanumeric
+	// character optionally followed by alphanumerics, '-', '_' or '.', and
+	// ending with an alphanumeric.
+	labelValueRegexp = regexp.MustCompile(`^[a-z0-9]([-a-z0-9_.]*[a-z0-9])?$`)
+
+	// resourceNameRegexp matches a valid Kubernetes resource name
+	// (RFC 1123 subdomain): lowercase alphanumerics separated by '-' or '.'.
+	resourceNameRegexp = regexp.MustCompile(`^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$`)
 )
 
 // GetUserGroups fetches all KrknUserGroup CRs that the user belongs to.
@@ -43,7 +70,10 @@ func GetUserGroups(ctx context.Context, k8sClient client.Client, userID, namespa
 	logger := log.FromContext(ctx).WithName("groupauth.GetUserGroups")
 
 	// Fetch KrknUser by email
-	userName := sanitizeUserID(userID)
+	userName, err := SanitizeUserIDForResourceName(userID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid user ID %q: %w", userID, err)
+	}
 	user := &krknv1alpha1.KrknUser{}
 	if err := k8sClient.Get(ctx, client.ObjectKey{Name: userName, Namespace: namespace}, user); err != nil {
 		return nil, fmt.Errorf("failed to get user %s: %w", userID, err)
@@ -195,13 +225,48 @@ func CountGroupMembers(ctx context.Context, k8sClient client.Client, groupName, 
 	return len(userList.Items), nil
 }
 
-// sanitizeUserID converts an email address to a valid Kubernetes resource name.
-// Replaces @ and . with -, converts to lowercase, and adds prefix.
+// SanitizeUserIDForResourceName converts an email address to a valid Kubernetes resource name.
+// It replaces @ and . with -, converts to lowercase, and adds the "krknuser-" prefix.
+// Use this when constructing a KrknUser resource name for Kubernetes API lookups.
+//
+// It returns an error if the input is empty or would produce an identifier that
+// is not a valid Kubernetes resource name (RFC 1123 subdomain). Failing fast here
+// prevents identity confusion in authorization lookups caused by silently
+// generating invalid or ambiguous resource names.
 //
 // Example: "user@example.com" -> "krknuser-user-example-com"
-func sanitizeUserID(email string) string {
-	name := strings.ReplaceAll(email, "@", "-")
-	name = strings.ReplaceAll(name, ".", "-")
-	name = strings.ToLower(name)
-	return fmt.Sprintf("krknuser-%s", name)
+func SanitizeUserIDForResourceName(email string) (string, error) {
+	label, err := SanitizeUserIDForLabel(email)
+	if err != nil {
+		return "", err
+	}
+	name := resourceNamePrefix + label
+	if len(name) > maxResourceNameLength || !resourceNameRegexp.MatchString(name) {
+		return "", fmt.Errorf("user ID %q does not produce a valid Kubernetes resource name", email)
+	}
+	return name, nil
+}
+
+// SanitizeUserIDForLabel converts an email address to a valid Kubernetes label value.
+// It replaces @ and . with -, then converts to lowercase to comply with
+// Kubernetes label value requirements (RFC 1123). No prefix is added.
+// Use this when setting or comparing owner-user labels on Kubernetes resources.
+//
+// It returns an error if the input is empty or would produce a value that is not
+// a valid Kubernetes label value. Failing fast prevents invalid owner labels that
+// would otherwise be rejected by the API server or, worse, silently break
+// ownership comparisons that authorization relies on.
+//
+// Example: "user@example.com" -> "user-example-com"
+func SanitizeUserIDForLabel(email string) (string, error) {
+	if strings.TrimSpace(email) == "" {
+		return "", fmt.Errorf("cannot sanitize an empty user ID")
+	}
+	sanitized := strings.ReplaceAll(email, "@", "-")
+	sanitized = strings.ReplaceAll(sanitized, ".", "-")
+	sanitized = strings.ToLower(sanitized)
+	if len(sanitized) > maxLabelValueLength || !labelValueRegexp.MatchString(sanitized) {
+		return "", fmt.Errorf("user ID %q does not produce a valid Kubernetes label value", email)
+	}
+	return sanitized, nil
 }

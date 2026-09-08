@@ -59,10 +59,12 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
 	httpSwagger "github.com/swaggo/http-swagger"
+	"golang.org/x/time/rate"
 	"k8s.io/client-go/kubernetes"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -70,6 +72,7 @@ import (
 	_ "github.com/krkn-chaos/krkn-operator/internal/api/docs" // Import generated docs
 	v2 "github.com/krkn-chaos/krkn-operator/internal/api/v2"
 	"github.com/krkn-chaos/krkn-operator/pkg/auth"
+	"github.com/krkn-chaos/krkn-operator/pkg/wsorigin"
 )
 
 // Server represents the REST API server
@@ -79,7 +82,30 @@ type Server struct {
 	v2Handler      *v2.Handler
 	authMiddleware *auth.Middleware
 	secretManager  *auth.SecretManager
+	// cancelCleanup stops background goroutines (e.g., rate limiter cleanup).
+	// context.CancelFunc is idempotent, so Shutdown can be called multiple times
+	// safely without panicking.
+	cancelCleanup context.CancelFunc
 }
+
+// TrustedProxyCIDRsEnv is the environment variable used to configure the
+// comma-separated CIDR ranges (or bare IPs) whose forwarding headers
+// (X-Forwarded-For / X-Real-IP) are trusted when deriving the client IP for
+// rate limiting. When unset, forwarding headers are ignored and RemoteAddr is
+// always used, preventing clients from spoofing rate-limit keys.
+const TrustedProxyCIDRsEnv = "TRUSTED_PROXY_CIDRS"
+
+// WebSocketAllowedOriginsEnv is the environment variable used to enable and
+// configure WebSocket Origin enforcement. It takes a comma-separated list of
+// origins (e.g. "https://console.example.com") that are accepted in addition to
+// same-origin requests.
+//
+// Enforcement is opt-in: when unset (the default), all origins are accepted.
+// This is safe because WebSocket auth uses a JWT in the Sec-WebSocket-Protocol
+// subprotocol (not ambient cookies), so cross-site WebSocket hijacking does not
+// apply. Set this only to add same-origin + allow-list enforcement as optional
+// defense-in-depth.
+const WebSocketAllowedOriginsEnv = "WEBSOCKET_ALLOWED_ORIGINS"
 
 // NewServer creates a new API server
 //
@@ -110,18 +136,75 @@ func NewServer(port int, client client.Client, clientset kubernetes.Interface, n
 	}
 	authMw := auth.NewLazyMiddleware(getTokenGen)
 
+	// Set up user active status check: after JWT validation, verify the user account
+	// is still active by looking up the KrknUser CR. Uses a 1-minute TTL cache to
+	// avoid hitting the API server on every request.
+	userChecker := newK8sUserStatusChecker(client, namespace)
+	cachedChecker := auth.NewCachedUserStatusChecker(userChecker, 1*time.Minute)
+	authMw.SetUserStatusChecker(cachedChecker)
+
 	// Create v2 handler (WebSocket support only, REST reuses v1 handlers)
 	getTokenGenCtx := func(ctx context.Context) (*auth.TokenGenerator, error) {
 		return secretManager.GetTokenGenerator()
 	}
 	v2Handler := v2.NewHandler(client, namespace, handler, getTokenGenCtx) // handler implements AuthorizationChecker
 
+	// Strict per-IP rate limiter for the login endpoint only: 5 requests per
+	// minute, burst of 10. Login is the password brute-force surface, so it is
+	// the one endpoint that warrants aggressive limiting.
+	loginRateLimiter := newIPRateLimiter(rate.Every(12*time.Second), 10) // 5 per minute = 1 every 12s
+
+	// Permissive per-IP rate limiter for the other public auth endpoints
+	// (is-registered, register). These carry no password-guessing surface
+	// (is-registered is a global boolean the console polls repeatedly; register
+	// is gated elsewhere), so the limiter here only guards against outright abuse
+	// without interfering with normal frontend use.
+	publicAuthRateLimiter := newIPRateLimiter(rate.Every(time.Second), 30) // 60 per minute, burst 30
+
+	// Trust forwarding headers only from explicitly configured proxies so
+	// clients cannot spoof the rate-limit key. Unset means RemoteAddr is used.
+	if raw := os.Getenv(TrustedProxyCIDRsEnv); raw != "" {
+		cidrs, invalid := parseTrustedProxyCIDRs(raw)
+		loginRateLimiter.setTrustedProxies(cidrs)
+		publicAuthRateLimiter.setTrustedProxies(cidrs)
+		if len(invalid) > 0 {
+			log.Log.WithName("rate-limiter").Info("Ignoring invalid trusted proxy CIDRs",
+				"invalid", invalid, "env", TrustedProxyCIDRsEnv)
+		}
+	}
+
+	// WebSocket Origin enforcement is opt-in. When configured, only same-origin
+	// requests and the listed origins may open WebSocket connections; when unset
+	// (default) all origins are accepted (auth is via a JWT subprotocol, not
+	// ambient cookies, so CSWSH does not apply).
+	if raw := os.Getenv(WebSocketAllowedOriginsEnv); raw != "" {
+		origins := strings.Split(raw, ",")
+		invalid := wsorigin.SetAllowedOrigins(origins)
+		log.Log.WithName("websocket-origin").Info("WebSocket origin enforcement enabled",
+			"allowedOrigins", origins, "env", WebSocketAllowedOriginsEnv)
+		if len(invalid) > 0 {
+			log.Log.WithName("websocket-origin").Info("Ignoring invalid allowed origins",
+				"invalid", invalid, "env", WebSocketAllowedOriginsEnv)
+		}
+	} else {
+		log.Log.WithName("websocket-origin").Info(
+			"WebSocket origin enforcement disabled; all origins allowed (auth is via JWT subprotocol)",
+			"env", WebSocketAllowedOriginsEnv)
+	}
+
+	cleanupCtx, cancelCleanup := context.WithCancel(context.Background())
+	loginRateLimiter.startCleanup(cleanupCtx, 10*time.Minute, 10*time.Minute)
+	publicAuthRateLimiter.startCleanup(cleanupCtx, 10*time.Minute, 10*time.Minute)
+	loginRateLimit := rateLimitMiddleware(loginRateLimiter)
+	publicAuthRateLimit := rateLimitMiddleware(publicAuthRateLimiter)
+
 	mux := http.NewServeMux()
 
-	// Public authentication endpoints (no auth required)
-	mux.HandleFunc(AuthIsRegistered, handler.IsRegistered)
-	mux.HandleFunc(AuthRegister, handler.Register)
-	mux.HandleFunc(AuthLogin, handler.Login)
+	// Public authentication endpoints (no auth required). Only login is strictly
+	// limited (brute-force protection); the rest are loosely limited.
+	mux.Handle(AuthIsRegistered, publicAuthRateLimit(http.HandlerFunc(handler.IsRegistered)))
+	mux.Handle(AuthRegister, publicAuthRateLimit(http.HandlerFunc(handler.Register)))
+	mux.Handle(AuthLogin, loginRateLimit(http.HandlerFunc(handler.Login)))
 
 	// Authenticated endpoints - user and admin access
 	mux.Handle(HealthPath, authMw.RequireAuth(http.HandlerFunc(handler.HealthCheck)))
@@ -260,10 +343,12 @@ func NewServer(port int, client client.Client, clientset kubernetes.Interface, n
 		http.NotFound(w, r)
 	})
 
-	// Wrap mux with logging middleware
+	// Wrap mux with middleware chain: logging -> body size limit -> routes
+	// maxBodySize is 10MB, applied only to POST/PUT/PATCH requests
+	const maxBodySize int64 = 10 << 20 // 10 MB
 	server := &http.Server{
 		Addr:              fmt.Sprintf(":%d", port),
-		Handler:           loggingMiddleware(mux),
+		Handler:           loggingMiddleware(maxBodySizeMiddleware(maxBodySize)(mux)),
 		ReadHeaderTimeout: 30 * time.Second,  // Prevent Slowloris attacks
 		ReadTimeout:       60 * time.Second,  // Total request read timeout
 		WriteTimeout:      60 * time.Second,  // Response write timeout
@@ -276,6 +361,7 @@ func NewServer(port int, client client.Client, clientset kubernetes.Interface, n
 		v2Handler:      v2Handler,
 		authMiddleware: authMw,
 		secretManager:  secretManager,
+		cancelCleanup:  cancelCleanup,
 	}
 }
 
@@ -283,7 +369,7 @@ func NewServer(port int, client client.Client, clientset kubernetes.Interface, n
 // It waits for the JWT SecretManager to be ready before accepting traffic
 func (s *Server) Start(ctx context.Context) error {
 	logger := log.FromContext(ctx)
-	logger.Info("🌐 Starting REST API server (waiting for JWT secret to be ready)", "addr", s.server.Addr)
+	logger.Info("Starting REST API server (waiting for JWT secret to be ready)", "addr", s.server.Addr)
 
 	// Wait for JWT SecretManager to be ready before starting HTTP server
 	// This prevents the server from accepting requests before authentication is configured
@@ -298,12 +384,13 @@ func (s *Server) Start(ctx context.Context) error {
 			return ctx.Err()
 
 		case <-timeout:
-			logger.Error(nil, "❌ Timeout waiting for JWT secret to be ready")
-			return fmt.Errorf("timeout waiting for JWT secret to be ready after 2 minutes")
+			err := fmt.Errorf("timeout waiting for JWT secret to be ready after 2 minutes")
+			logger.Error(err, "Timeout waiting for JWT secret to be ready")
+			return err
 
 		case <-ticker.C:
 			if s.secretManager.IsReady() {
-				logger.Info("✅ JWT secret ready, starting HTTP server", "addr", s.server.Addr)
+				logger.Info("JWT secret ready, starting HTTP server", "addr", s.server.Addr)
 				goto startServer
 			}
 			logger.V(1).Info("Waiting for JWT secret to be ready...")
@@ -313,12 +400,15 @@ func (s *Server) Start(ctx context.Context) error {
 startServer:
 	errChan := make(chan error, 1)
 	go func() {
+		// NOTE: The server listens on plain HTTP. TLS termination is expected to be
+		// handled externally by the Kubernetes Ingress controller, service mesh
+		// (e.g. Istio), or a reverse proxy in front of this service.
 		if err := s.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			errChan <- err
 		}
 	}()
 
-	logger.Info("🚀 REST API server started and accepting connections", "addr", s.server.Addr)
+	logger.Info("REST API server started and accepting connections", "addr", s.server.Addr)
 
 	select {
 	case err := <-errChan:
@@ -328,14 +418,64 @@ startServer:
 	}
 }
 
-// Shutdown gracefully shuts down the API server
+// Shutdown gracefully shuts down the API server and stops background goroutines.
+// It is safe to call multiple times: context.CancelFunc is idempotent, so
+// repeated or concurrent invocations do not panic.
 func (s *Server) Shutdown() error {
+	// Stop background goroutines (rate limiter cleanup, etc.)
+	if s.cancelCleanup != nil {
+		s.cancelCleanup()
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	return s.server.Shutdown(ctx)
 }
 
-// loggingMiddleware is a logging middleware for HTTP requests
+// maxBodySizeMiddleware returns middleware that limits request body size for
+// POST, PUT, and PATCH methods. This prevents clients from sending excessively
+// large payloads that could exhaust memory. GET, DELETE, and other methods are
+// passed through without modification.
+//
+// Enforcement happens in two layers so that a payload-too-large is reported
+// consistently as 413 Request Entity Too Large (with a JSON body) rather than
+// being misclassified downstream as a generic 400 "invalid request body":
+//
+//  1. When the client advertises a Content-Length larger than the limit, the
+//     request is rejected immediately with a 413 before the body is read. This
+//     covers virtually all real clients, which send Content-Length for JSON
+//     payloads.
+//  2. For chunked / unknown-length requests (Content-Length <= 0) the body is
+//     wrapped with http.MaxBytesReader, which caps memory usage. Reads past the
+//     limit fail with *http.MaxBytesError; handlers surface that as a decode
+//     error. Memory is always protected in this case.
+func maxBodySizeMiddleware(maxBytes int64) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == http.MethodPost || r.Method == http.MethodPut || r.Method == http.MethodPatch {
+				// Fast path: reject when the declared size already exceeds the
+				// limit, returning a precise 413 without reading the body.
+				if r.ContentLength > maxBytes {
+					writeJSONError(w, http.StatusRequestEntityTooLarge, ErrorResponse{
+						Error:   "request_entity_too_large",
+						Message: "Request body too large",
+					})
+					return
+				}
+				r.Body = http.MaxBytesReader(w, r.Body, maxBytes)
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// loggingMiddleware is a logging middleware for HTTP requests.
+//
+// PII notice: This middleware logs client IP addresses (RemoteAddr) and raw query
+// parameters, which may contain personally identifiable information. Operators
+// should ensure log retention and access policies comply with applicable data
+// protection regulations (e.g. GDPR). Consider configuring log scrubbing in the
+// log aggregation pipeline if query parameters may carry sensitive values.
 func loggingMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()

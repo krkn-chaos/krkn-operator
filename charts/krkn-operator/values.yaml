@@ -39,6 +39,46 @@ auth:
   # Passed to operator as JWT_EXPIRY_HOURS environment variable
   jwtExpiryHours: 24
 
+  # Trusted reverse-proxy / load-balancer networks (comma-separated CIDRs).
+  # Passed to the operator as the TRUSTED_PROXY_CIDRS environment variable.
+  #
+  # The auth endpoints (/api/v1/auth/register, /login, /is-registered) are
+  # rate-limited per client IP. When the operator sits behind an ingress,
+  # reverse proxy, or load balancer, the direct connection address is the
+  # proxy's, so every client would share a single rate-limit bucket. Setting
+  # this to the proxy network(s) makes the operator read the real client IP
+  # from the X-Forwarded-For / X-Real-IP headers — but ONLY when the request
+  # actually arrives from one of these CIDRs.
+  #
+  # Leave empty (default) when the operator is reached directly: forwarding
+  # headers are then ignored and the connection address is used, so clients
+  # cannot spoof the rate-limit key. Only set this if you trust the listed
+  # networks to set the forwarding headers correctly.
+  #
+  # Example: "10.0.0.0/8,192.168.0.0/16"
+  trustedProxyCIDRs: ""
+
+  # WebSocket Origin enforcement (comma-separated list of allowed origins).
+  # Passed to the operator as the WEBSOCKET_ALLOWED_ORIGINS environment variable.
+  #
+  # There IS an optional Origin-based access control for WebSocket upgrades
+  # (cluster terminal, live log streaming), but it is OPT-IN and OFF by default:
+  #
+  #   - Empty (default): all origins are accepted. This is safe because
+  #     WebSocket connections authenticate with a JWT sent in the
+  #     Sec-WebSocket-Protocol subprotocol (not browser cookies), so cross-site
+  #     WebSocket hijacking (CSWSH) is not exploitable — a malicious page cannot
+  #     read the origin-scoped token and therefore cannot connect.
+  #   - Non-empty: enables enforcement. Only same-origin requests and the listed
+  #     origins may open WebSocket connections. Use this as optional
+  #     defense-in-depth when you want to pin the allowed browser origins.
+  #
+  # Note: enabling enforcement can reject legitimate traffic behind proxies that
+  # rewrite the Host header, so only turn it on if you understand your ingress.
+  #
+  # Example: "https://console.example.com,http://localhost:3000"
+  websocketAllowedOrigins: ""
+
 ## Core Operator
 operator:
   enabled: true

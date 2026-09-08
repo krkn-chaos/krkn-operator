@@ -68,6 +68,15 @@ const (
 	FilePurposeWorkflow = "workflow-template"
 	// FilePurposeResiliency is the filePurpose value for resiliency scoring metric definitions
 	FilePurposeResiliency = "resiliency-score"
+
+	// WorkflowFileName is the well-known ConfigMap Data key under which workflow
+	// template graph content is stored. Unlike regular files (whose content key is
+	// the user-facing file name), workflow templates always use this fixed key while
+	// the user-facing name lives in WorkflowNameAnnotation.
+	WorkflowFileName = "workflow.json"
+	// StudioLayoutFileName is the well-known ConfigMap Data key under which the
+	// optional studio visual layout for a workflow template is stored.
+	StudioLayoutFileName = "studioLayout.json"
 )
 
 // HashLogicalName returns a truncated SHA256 hex digest of the logical name,

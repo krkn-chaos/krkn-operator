@@ -218,6 +218,9 @@ func (h *Handler) ExecuteTerminal(w http.ResponseWriter, r *http.Request) {
 // executeKubectlViaGRPC executes a kubectl command via the gRPC data provider
 func (h *Handler) executeKubectlViaGRPC(ctx context.Context, kubeconfigBase64 string, cmd *terminal.ParsedCommand) (*TerminalResponse, error) {
 	// Connect to gRPC server
+	// NOTE: insecure.NewCredentials() is acceptable here because the gRPC data provider
+	// runs as a sidecar container within the same pod, communicating over localhost.
+	// For cross-node or external gRPC communication, TLS credentials must be used instead.
 	conn, err := grpc.NewClient(h.grpcServerAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to gRPC server: %w", err)

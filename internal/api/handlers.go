@@ -26,10 +26,12 @@ import (
 	"net/http"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/go-logr/logr"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	"github.com/krkn-chaos/krknctl/pkg/config"
@@ -57,6 +59,12 @@ import (
 	pb "github.com/krkn-chaos/krkn-operator/proto/dataprovider"
 )
 
+// Package-level compiled regexes for sanitization functions.
+var (
+	resourceNameRegex = regexp.MustCompile(`[^a-z0-9-]`)
+	runNameLabelRegex = regexp.MustCompile(`[^a-zA-Z0-9._-]`)
+)
+
 // sanitizeResourceName converts an email or identifier into a valid Kubernetes resource name.
 // Kubernetes resource names must follow RFC 1123 subdomain rules:
 // - Contain only lowercase alphanumeric characters, '-' or '.'
@@ -79,8 +87,7 @@ func sanitizeResourceName(name string) string {
 	sanitized = strings.ReplaceAll(sanitized, ".", "-")
 
 	// Replace any other invalid characters with -
-	reg := regexp.MustCompile(`[^a-z0-9-]`)
-	sanitized = reg.ReplaceAllString(sanitized, "-")
+	sanitized = resourceNameRegex.ReplaceAllString(sanitized, "-")
 
 	// Remove leading/trailing dashes
 	sanitized = strings.Trim(sanitized, "-")
@@ -97,8 +104,7 @@ func sanitizeResourceName(name string) string {
 // sanitizeRunNameLabel converts a customRunName into a valid Kubernetes label value
 // (max 63 chars, alphanumeric + dash/dot/underscore, must start and end with alphanumeric).
 func sanitizeRunNameLabel(name string) string {
-	reg := regexp.MustCompile(`[^a-zA-Z0-9._-]`)
-	sanitized := reg.ReplaceAllString(name, "-")
+	sanitized := runNameLabelRegex.ReplaceAllString(name, "-")
 	sanitized = strings.Trim(sanitized, "-_.")
 	if len(sanitized) > 63 {
 		sanitized = sanitized[:63]
@@ -132,7 +138,7 @@ func NewHandler(client client.Client, clientset kubernetes.Interface, namespace 
 
 // getTokenGenerator creates a TokenGenerator for JWT validation (used for WebSocket auth)
 // It uses the same JWT secret as the HTTP middleware via SecretManager
-func (h *Handler) getTokenGenerator(ctx context.Context) (*auth.TokenGenerator, error) {
+func (h *Handler) getTokenGenerator() (*auth.TokenGenerator, error) {
 	tokenGen, err := h.secretManager.GetTokenGenerator()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get token generator from SecretManager: %w", err)
@@ -397,7 +403,10 @@ func (h *Handler) GetTargetByUUID(w http.ResponseWriter, r *http.Request) {
 		Namespace: h.namespace,
 	}, &targetRequest); err != nil {
 		if client.IgnoreNotFound(err) == nil {
-			w.WriteHeader(http.StatusNotFound)
+			writeJSONError(w, http.StatusNotFound, ErrorResponse{
+				Error:   "not_found",
+				Message: "Target not found",
+			})
 		} else {
 			log.FromContext(ctx).Error(err, "Failed to fetch KrknTargetRequest", "uuid", uuid)
 			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
@@ -438,7 +447,16 @@ func (h *Handler) PostTarget(w http.ResponseWriter, r *http.Request) {
 	// Build labels with owner tracking
 	labels := make(map[string]string)
 	if claims != nil {
-		labels["krkn.krkn-chaos.dev/owner-user"] = sanitizeUserID(claims.UserID)
+		ownerLabel, err := groupauth.SanitizeUserIDForLabel(claims.UserID)
+		if err != nil {
+			log.FromContext(ctx).Error(err, "Failed to sanitize user ID for owner label", "userID", claims.UserID)
+			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+				Error:   "internal_error",
+				Message: "Failed to process user identity",
+			})
+			return
+		}
+		labels["krkn.krkn-chaos.dev/owner-user"] = ownerLabel
 	}
 
 	// Create a new KrknTargetRequest CR
@@ -464,7 +482,7 @@ func (h *Handler) PostTarget(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Return 102 Processing with the UUID
+	// Return 202 Accepted with the UUID
 	response := map[string]string{
 		"uuid": newUUID,
 	}
@@ -552,7 +570,15 @@ func (h *Handler) DeleteTargetByUUID(w http.ResponseWriter, r *http.Request) {
 
 	// Extract owner from label
 	ownerLabel := targetRequest.Labels["krkn.krkn-chaos.dev/owner-user"]
-	currentUserSanitized := sanitizeUserID(claims.UserID)
+	currentUserSanitized, err := groupauth.SanitizeUserIDForLabel(claims.UserID)
+	if err != nil {
+		logger.Error(err, "Failed to sanitize user ID for owner comparison", "userID", claims.UserID)
+		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+			Error:   "internal_error",
+			Message: "Failed to process user identity",
+		})
+		return
+	}
 
 	if ownerLabel != currentUserSanitized {
 		logger.Info("Denying delete - user is not the owner",
@@ -623,14 +649,60 @@ func convertInputFields(fields []typing.InputField) []InputFieldResponse {
 	return result
 }
 
+// maskToken redacts the middle of a sensitive token string for safe logging.
+// It preserves the first 10 and last 10 characters, replacing the rest with "...".
+// Tokens 20 characters or shorter are fully masked as "***".
+func maskToken(token string) string {
+	if len(token) <= 20 {
+		return "***"
+	}
+	return token[:10] + "..." + token[len(token)-10:]
+}
+
+// sensitiveHeaders lists request headers that carry credentials and must never
+// be logged in full. Values are redacted via maskToken by sanitizeHeaders.
+var sensitiveHeaders = map[string]struct{}{
+	"Sec-Websocket-Protocol": {}, // carries "access_token.<jwt>" for WebSocket auth
+	"Authorization":          {}, // bearer/basic credentials
+	"Cookie":                 {}, // session cookies
+}
+
+// sanitizeHeaders returns a copy of the given headers safe for logging, with the
+// values of any credential-bearing headers (see sensitiveHeaders) masked. The
+// original header map is never mutated. Header name matching is case-insensitive
+// because http.Header canonicalizes keys (e.g. "Sec-WebSocket-Protocol").
+func sanitizeHeaders(h http.Header) http.Header {
+	sanitized := make(http.Header, len(h))
+	for name, values := range h {
+		if _, sensitive := sensitiveHeaders[http.CanonicalHeaderKey(name)]; sensitive {
+			masked := make([]string, len(values))
+			for i, v := range values {
+				masked[i] = maskToken(v)
+			}
+			sanitized[name] = masked
+			continue
+		}
+		sanitized[name] = values
+	}
+	return sanitized
+}
+
 // writeJSON writes a JSON response with the given status code
 func writeJSON(w http.ResponseWriter, status int, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(data) // If encoding fails, client gets partial response
+	if err := json.NewEncoder(w).Encode(data); err != nil {
+		logger := log.Log.WithName("api")
+		logger.Error(err, "Failed to encode JSON response")
+	}
 }
 
-// writeJSONError writes a JSON error response with the given status code
+// writeJSONError writes a JSON error response with the given status code.
+//
+// For 5xx statuses it emits a generic server-error log so failures are never
+// silently swallowed. Callers that have already logged the underlying error
+// (with the real error value and request context) must use writeJSON instead of
+// writeJSONError to avoid duplicate log entries for the same failure.
 func writeJSONError(w http.ResponseWriter, status int, err ErrorResponse) {
 	// Log internal server errors for debugging
 	if status >= 500 {
@@ -643,6 +715,9 @@ func writeJSONError(w http.ResponseWriter, status int, err ErrorResponse) {
 // callGetNodesGRPC calls the data provider gRPC service to get nodes
 func (h *Handler) callGetNodesGRPC(kubeconfigBase64 string) ([]string, error) {
 	// Create gRPC connection
+	// NOTE: insecure.NewCredentials() is acceptable here because the gRPC data provider
+	// runs as a sidecar container within the same pod, communicating over localhost.
+	// For cross-node or external gRPC communication, TLS credentials must be used instead.
 	conn, err := grpc.NewClient(
 		h.grpcServerAddr,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
@@ -855,7 +930,9 @@ func filterScenariosByIsAScenario(ctx context.Context, scenarioProvider provider
 			return nil
 		})
 	}
-	_ = g.Wait()
+	if err := g.Wait(); err != nil {
+		log.FromContext(ctx).Error(err, "error during scenario filtering")
+	}
 
 	scenarios := make([]ScenarioTag, 0, len(tags))
 	for _, r := range results {
@@ -1093,9 +1170,10 @@ func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
 	// Parse request body
 	var req ScenarioRunRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		logger.Error(err, "Failed to decode scenario run request body")
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
 			Error:   "bad_request",
-			Message: "Invalid request body: " + err.Error(),
+			Message: "Invalid request body",
 		})
 		return
 	}
@@ -1205,14 +1283,7 @@ func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
 			req.TargetClusters,
 			targetRequest,
 		); err != nil {
-			logger.Info("User lacks permission to run scenarios on requested clusters",
-				"userID", userClaims.UserID,
-				"error", err.Error(),
-			)
-			writeJSONError(w, http.StatusForbidden, ErrorResponse{
-				Error:   "forbidden",
-				Message: err.Error(),
-			})
+			writeScenarioRunAccessError(ctx, w, userClaims.UserID, err)
 			return
 		}
 
@@ -1418,7 +1489,16 @@ func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
 	labels := make(map[string]string)
 	ownerUserID := ""
 	if claims != nil {
-		labels["krkn.krkn-chaos.dev/owner-user"] = sanitizeUserID(claims.UserID)
+		ownerLabel, err := groupauth.SanitizeUserIDForLabel(claims.UserID)
+		if err != nil {
+			logger.Error(err, "Failed to sanitize user ID for owner label", "userID", claims.UserID)
+			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+				Error:   "internal_error",
+				Message: "Failed to process user identity",
+			})
+			return
+		}
+		labels["krkn.krkn-chaos.dev/owner-user"] = ownerLabel
 		ownerUserID = claims.UserID
 	}
 	if req.CustomRunName != "" {
@@ -1690,10 +1770,7 @@ func (h *Handler) GetScenarioRunStatus(w http.ResponseWriter, r *http.Request) {
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
-	CheckOrigin: func(r *http.Request) bool {
-		// Allow all origins for now - in production you should validate the origin
-		return true
-	},
+	CheckOrigin:     checkWebSocketOrigin,
 	// Support "access_token" subprotocol for JWT authentication
 	Subprotocols: []string{"access_token"},
 }
@@ -1729,12 +1806,27 @@ func isWebSocketDisconnectError(err error) bool {
 	return false
 }
 
+// writeWSError sends a best-effort error notification to a WebSocket client.
+//
+// WebSocket error reporting is best-effort: the peer may already be gone, so a
+// write failure is expected and non-fatal. We still capture the returned error
+// (rather than discarding it with `_ =`) and log anything that is not a normal
+// client disconnect, so genuine notification failures remain visible in the
+// server logs instead of being silently swallowed.
+func writeWSError(conn *websocket.Conn, logger logr.Logger, message string) {
+	if err := conn.WriteMessage(websocket.TextMessage, []byte(message)); err != nil {
+		if !isWebSocketDisconnectError(err) {
+			logger.Error(err, "Failed to write WebSocket error message", "message", message)
+		}
+	}
+}
+
 // GetScenarioRunLogs handles GET /api/v1/scenarios/run/{scenarioRunName}/jobs/{jobID}/logs endpoint
 // It streams the stdout/stderr logs of a running or completed job via WebSocket
 func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 	logger := log.Log.WithName("websocket-logs")
 
-	logger.Info("🔌 WebSocket connection request received",
+	logger.Info("WebSocket connection request received",
 		"path", r.URL.Path,
 		"client_ip", r.RemoteAddr,
 		"user_agent", r.Header.Get("User-Agent"))
@@ -1743,28 +1835,28 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 	// Frontend sends: new WebSocket(url, `access_token.${jwt_token}`)
 	// Format: "access_token.<jwt_token>"
 	protocols := r.Header.Get("Sec-WebSocket-Protocol")
-	logger.V(1).Info("📋 Received WebSocket headers",
-		"Sec-WebSocket-Protocol", protocols,
+	logger.V(1).Info("Received WebSocket headers",
+		"Sec-WebSocket-Protocol", maskToken(protocols),
 		"Sec-WebSocket-Version", r.Header.Get("Sec-WebSocket-Version"),
 		"Sec-WebSocket-Key", r.Header.Get("Sec-WebSocket-Key"))
 
 	if protocols == "" {
-		logger.Info("❌ WebSocket authentication failed: missing Sec-WebSocket-Protocol header",
+		logger.Error(errors.New("missing Sec-WebSocket-Protocol header"), "WebSocket authentication failed",
 			"path", r.URL.Path,
 			"client_ip", r.RemoteAddr,
-			"headers", r.Header)
+			"headers", sanitizeHeaders(r.Header))
 		http.Error(w, "Unauthorized: Missing Sec-WebSocket-Protocol header", http.StatusUnauthorized)
 		return
 	}
 
 	// Parse protocol: split on first '.' to separate prefix from token
 	// Example: "access_token.eyJhbGc..." → ["access_token", "eyJhbGc..."]
-	logger.V(1).Info("🔍 Parsing Sec-WebSocket-Protocol",
-		"raw_protocol", protocols,
+	logger.V(1).Info("Parsing Sec-WebSocket-Protocol",
+		"raw_protocol", maskToken(protocols),
 		"protocol_length", len(protocols))
 
 	protocolParts := strings.SplitN(protocols, ".", 2)
-	logger.V(1).Info("🔍 Protocol parts after split",
+	logger.V(1).Info("Protocol parts after split",
 		"parts_count", len(protocolParts),
 		"part_0", func() string {
 			if len(protocolParts) > 0 {
@@ -1780,9 +1872,9 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 		}())
 
 	if len(protocolParts) != 2 || protocolParts[0] != "access_token" {
-		logger.Info("❌ WebSocket authentication failed: invalid protocol format",
+		logger.Error(errors.New("invalid Sec-WebSocket-Protocol format"), "WebSocket authentication failed",
 			"path", r.URL.Path,
-			"protocol", protocols,
+			"protocol", maskToken(protocols),
 			"parts_count", len(protocolParts),
 			"expected_format", "access_token.<jwt>",
 			"client_ip", r.RemoteAddr)
@@ -1792,47 +1884,40 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 
 	token := protocolParts[1]
 	if token == "" {
-		logger.Info("❌ WebSocket authentication failed: empty token in subprotocol",
+		logger.Error(errors.New("empty token in subprotocol"), "WebSocket authentication failed",
 			"path", r.URL.Path,
 			"client_ip", r.RemoteAddr)
 		http.Error(w, "Unauthorized: Missing authentication token", http.StatusUnauthorized)
 		return
 	}
 
-	// Mask token for logging (show first/last 10 chars)
-	maskedToken := func() string {
-		if len(token) <= 20 {
-			return "***"
-		}
-		return token[:10] + "..." + token[len(token)-10:]
-	}()
+	maskedToken := maskToken(token)
 
-	logger.Info("🔑 JWT token extracted from subprotocol",
+	logger.Info("JWT token extracted from subprotocol",
 		"token_length", len(token),
 		"token_preview", maskedToken)
 
 	// Get TokenGenerator and validate token
-	logger.V(1).Info("🔐 Getting TokenGenerator for validation")
-	tokenGen, err := h.getTokenGenerator(r.Context())
+	logger.V(1).Info("Getting TokenGenerator for validation")
+	tokenGen, err := h.getTokenGenerator()
 	if err != nil {
-		logger.Error(err, "❌ Failed to get TokenGenerator for WebSocket auth")
+		logger.Error(err, "Failed to get TokenGenerator for WebSocket auth")
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
 
-	logger.Info("🔐 Validating JWT token")
+	logger.Info("Validating JWT token")
 	claims, err := tokenGen.ValidateToken(token)
 	if err != nil {
-		logger.Info("❌ WebSocket authentication failed: invalid token",
+		logger.Error(err, "WebSocket authentication failed: invalid token",
 			"path", r.URL.Path,
-			"error", err.Error(),
 			"token_preview", maskedToken,
 			"client_ip", r.RemoteAddr)
 		http.Error(w, "Unauthorized: Invalid or expired token", http.StatusUnauthorized)
 		return
 	}
 
-	logger.Info("✅ WebSocket authentication successful",
+	logger.Info("WebSocket authentication successful",
 		"userId", claims.UserID,
 		"role", claims.Role,
 		"path", r.URL.Path,
@@ -1842,22 +1927,22 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 	// WebSocket spec requires server to respond with one of the client's requested subprotocols
 	// Client sent: "access_token.<jwt_token>"
 	// Server must respond with the SAME value (not just "access_token")
-	logger.Info("⬆️ Upgrading connection to WebSocket",
-		"response_protocol", protocols)
+	logger.Info("Upgrading connection to WebSocket",
+		"response_protocol", maskToken(protocols))
 
 	conn, err := upgrader.Upgrade(w, r, http.Header{
 		"Sec-WebSocket-Protocol": []string{protocols}, // Echo back the full protocol
 	})
 	if err != nil {
-		logger.Error(err, "❌ WebSocket upgrade failed",
+		logger.Error(err, "WebSocket upgrade failed",
 			"url", r.URL.String(),
-			"headers", r.Header,
+			"headers", sanitizeHeaders(r.Header),
 			"client_ip", r.RemoteAddr)
 		return
 	}
 	defer conn.Close()
 
-	logger.Info("✅ WebSocket connection established",
+	logger.Info("WebSocket connection established",
 		"userId", claims.UserID,
 		"client_ip", r.RemoteAddr)
 
@@ -1877,7 +1962,7 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 		remainder = path[len(v1Prefix):]
 	} else {
 		logger.Error(nil, "Invalid logs endpoint path", "path", path, "expected_v1", v1Prefix, "expected_v2", v2Prefix)
-		_ = conn.WriteMessage(websocket.TextMessage, []byte("ERROR: Invalid logs endpoint path")) // Best-effort error reporting
+		writeWSError(conn, logger, "ERROR: Invalid logs endpoint path")
 		return
 	}
 
@@ -1885,7 +1970,7 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 	parts := strings.Split(remainder, "/jobs/")
 	if len(parts) != 2 {
 		logger.Error(nil, "Invalid logs endpoint path format", "path", path)
-		_ = conn.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("ERROR: Invalid path format. Expected: %s/{scenarioRunName}/jobs/{jobID}/logs", ScenariosRunPath))) // Best-effort error reporting
+		writeWSError(conn, logger, fmt.Sprintf("ERROR: Invalid path format. Expected: %s/{scenarioRunName}/jobs/{jobID}/logs", ScenariosRunPath))
 		return
 	}
 
@@ -1895,7 +1980,7 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 	// Extract jobID (remove "/logs" suffix)
 	if !strings.HasSuffix(jobIDAndLogs, "/logs") {
 		logger.Error(nil, "Invalid logs endpoint path format", "path", path)
-		_ = conn.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("ERROR: Invalid path format. Expected: %s/{scenarioRunName}/jobs/{jobID}/logs", ScenariosRunPath))) // Best-effort error reporting
+		writeWSError(conn, logger, fmt.Sprintf("ERROR: Invalid path format. Expected: %s/{scenarioRunName}/jobs/{jobID}/logs", ScenariosRunPath))
 		return
 	}
 
@@ -1903,7 +1988,7 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 
 	if scenarioRunName == "" || jobID == "" {
 		logger.Error(nil, "Empty scenarioRunName or jobID in request path", "path", path)
-		_ = conn.WriteMessage(websocket.TextMessage, []byte("ERROR: scenarioRunName and jobID cannot be empty")) // Best-effort error reporting
+		writeWSError(conn, logger, "ERROR: scenarioRunName and jobID cannot be empty")
 		return
 	}
 
@@ -1919,7 +2004,7 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 		Namespace: h.namespace,
 	}, &scenarioRun); err != nil {
 		logger.Error(err, "Failed to fetch scenario run", "scenarioRunName", scenarioRunName)
-		_ = conn.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("ERROR: Scenario run '%s' not found", scenarioRunName)))
+		writeWSError(conn, logger, fmt.Sprintf("ERROR: Scenario run '%s' not found", scenarioRunName))
 		return
 	}
 
@@ -1936,7 +2021,7 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 		logger.Error(nil, "Job not found in scenario run",
 			"scenarioRunName", scenarioRunName,
 			"jobID", jobID)
-		_ = conn.WriteMessage(websocket.TextMessage, []byte("ERROR: Job not found in scenario run"))
+		writeWSError(conn, logger, "ERROR: Job not found in scenario run")
 		return
 	}
 
@@ -1947,7 +2032,7 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 				"scenarioRunName", scenarioRunName,
 				"jobID", jobID,
 				"userID", claims.UserID)
-			_ = conn.WriteMessage(websocket.TextMessage, []byte("ERROR: Access denied. Job has no cluster API URL"))
+			writeWSError(conn, logger, "ERROR: Access denied. Job has no cluster API URL")
 			return
 		}
 
@@ -1965,7 +2050,7 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 				"scenarioRunName", scenarioRunName,
 				"jobID", jobID,
 				"userID", claims.UserID)
-			_ = conn.WriteMessage(websocket.TextMessage, []byte("ERROR: Failed to validate access permissions"))
+			writeWSError(conn, logger, "ERROR: Failed to validate access permissions")
 			return
 		}
 
@@ -1975,7 +2060,7 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 				"jobID", jobID,
 				"userID", claims.UserID,
 				"clusterAPIURL", targetJob.ClusterAPIURL)
-			_ = conn.WriteMessage(websocket.TextMessage, []byte("ERROR: Access denied. You do not have permission to view logs for this job"))
+			writeWSError(conn, logger, "ERROR: Access denied. You do not have permission to view logs for this job")
 			return
 		}
 	}
@@ -2023,7 +2108,7 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 	// Use PodName directly from CR status (already fetched above for permissions)
 	if targetJob.PodName == "" {
 		logger.Error(nil, "Job has no associated pod", "jobID", jobID)
-		_ = conn.WriteMessage(websocket.TextMessage, []byte("ERROR: Job has no associated pod — it may have failed before a pod was created")) // Best-effort error reporting
+		writeWSError(conn, logger, "ERROR: Job has no associated pod — it may have failed before a pod was created")
 		return
 	}
 
@@ -2031,10 +2116,10 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 	if err := h.client.Get(ctx, client.ObjectKey{Name: targetJob.PodName, Namespace: h.namespace}, &pod); err != nil {
 		if client.IgnoreNotFound(err) == nil {
 			logger.Error(nil, "Pod no longer exists", "jobID", jobID, "podName", targetJob.PodName)
-			_ = conn.WriteMessage(websocket.TextMessage, []byte("ERROR: Pod no longer exists — logs may have been cleaned up")) // Best-effort error reporting
+			writeWSError(conn, logger, "ERROR: Pod no longer exists — logs may have been cleaned up")
 		} else {
 			logger.Error(err, "Failed to get pod", "jobID", jobID, "podName", targetJob.PodName)
-			_ = conn.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("ERROR: Failed to get pod: %s", err.Error()))) // Best-effort error reporting
+			writeWSError(conn, logger, "ERROR: Failed to get pod")
 		}
 		return
 	}
@@ -2077,7 +2162,7 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 			"jobID", jobID,
 			"podName", pod.Name,
 			"namespace", h.namespace)
-		_ = conn.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("ERROR: Failed to open log stream: %s", err.Error()))) // Best-effort error reporting
+		writeWSError(conn, logger, "ERROR: Failed to open log stream")
 		return
 	}
 	defer stream.Close()
@@ -2117,7 +2202,7 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 			"jobID", jobID,
 			"podName", pod.Name,
 			"linesStreamed", lineCount)
-		_ = conn.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("ERROR: Log stream error: %s", err.Error()))) // Best-effort error reporting
+		writeWSError(conn, logger, "ERROR: Log stream error")
 		return
 	}
 
@@ -2147,7 +2232,9 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 // @Produce json
 // @Param phase query string false "Filter by phase (Running, Succeeded, Failed)"
 // @Param scenarioName query string false "Filter by scenario name"
-// @Success 200 {array} object "List of scenario runs"
+// @Param page query int false "Page number (1-based). Omit for all results."
+// @Param limit query int false "Items per page (defaults to jobs.defaultPageSize config, fallback 20; max 500). Only used when page is set."
+// @Success 200 {object} ScenarioRunListResponse "List of scenario runs with pagination"
 // @Failure 500 {object} ErrorResponse "Internal server error"
 // @Security BearerAuth
 // @Router /scenarios/run [get]
@@ -2203,8 +2290,27 @@ func (h *Handler) ListScenarioRuns(w http.ResponseWriter, r *http.Request) {
 		runs = append(runs, run)
 	}
 
-	response := ScenarioRunListResponse{
-		ScenarioRuns: runs,
+	sort.Slice(runs, func(i, j int) bool {
+		if runs[i].CreatedAt.Equal(runs[j].CreatedAt) {
+			return runs[i].ScenarioRunName < runs[j].ScenarioRunName
+		}
+		return runs[i].CreatedAt.After(runs[j].CreatedAt)
+	})
+
+	page, limit := ParsePaginationParams(r, getDefaultPageSize())
+
+	var response ScenarioRunListResponse
+	if page == 0 {
+		response = ScenarioRunListResponse{
+			ScenarioRuns: runs,
+			Pagination:   PaginationMeta{Total: len(runs)},
+		}
+	} else {
+		paginated, meta := PaginateSlice(runs, page, limit)
+		response = ScenarioRunListResponse{
+			ScenarioRuns: paginated,
+			Pagination:   meta,
+		}
 	}
 
 	writeJSON(w, http.StatusOK, response)
@@ -2640,11 +2746,12 @@ func (h *Handler) GetSingleJob(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) ScenariosRunRouter(w http.ResponseWriter, r *http.Request) {
-	path := r.URL.Path
+	path := strings.Replace(r.URL.Path, "/api/v2/", "/api/v1/", 1)
 
-	// Normalize v2 paths to v1 for backward-compatible routing
-	// v2 REST endpoints reuse v1 handler logic (same behavior, different path prefix)
-	path = strings.Replace(path, "/api/v2/", "/api/v1/", 1)
+	// Normalize v2 paths to v1 so downstream handlers can parse with v1 prefixes
+	if path != r.URL.Path {
+		r.URL.Path = path
+	}
 
 	// Root endpoint: /api/v1/scenarios/run (or /api/v2/scenarios/run normalized)
 	if path == ScenariosRunPath {
@@ -2654,7 +2761,10 @@ func (h *Handler) ScenariosRunRouter(w http.ResponseWriter, r *http.Request) {
 		case http.MethodGet:
 			h.ListScenarioRuns(w, r)
 		default:
-			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			writeJSONError(w, http.StatusMethodNotAllowed, ErrorResponse{
+				Error:   "method_not_allowed",
+				Message: "Method not allowed",
+			})
 		}
 		return
 	}
@@ -2669,6 +2779,19 @@ func (h *Handler) ScenariosRunRouter(w http.ResponseWriter, r *http.Request) {
 			if r.Method == http.MethodGet {
 				h.GetScenarioReplay(w, r)
 			} else {
+				writeJSONError(w, http.StatusMethodNotAllowed, ErrorResponse{
+					Error:   "method_not_allowed",
+					Message: "Method not allowed",
+				})
+			}
+			return
+		}
+
+		// Check for /{scenarioRunName}/config pattern (GET only - scenario run config)
+		if strings.HasSuffix(path, "/config") {
+			if r.Method == http.MethodGet {
+				h.GetScenarioRunConfig(w, r)
+			} else {
 				http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			}
 			return
@@ -2682,7 +2805,10 @@ func (h *Handler) ScenariosRunRouter(w http.ResponseWriter, r *http.Request) {
 			case http.MethodDelete:
 				h.DeleteSingleJob(w, r)
 			default:
-				http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+				writeJSONError(w, http.StatusMethodNotAllowed, ErrorResponse{
+					Error:   "method_not_allowed",
+					Message: "Method not allowed",
+				})
 			}
 			return
 		}
@@ -2694,12 +2820,18 @@ func (h *Handler) ScenariosRunRouter(w http.ResponseWriter, r *http.Request) {
 		case http.MethodDelete:
 			h.DeleteScenarioRunComplete(w, r)
 		default:
-			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			writeJSONError(w, http.StatusMethodNotAllowed, ErrorResponse{
+				Error:   "method_not_allowed",
+				Message: "Method not allowed",
+			})
 		}
 		return
 	}
 
-	http.Error(w, "Not found", http.StatusNotFound)
+	writeJSONError(w, http.StatusNotFound, ErrorResponse{
+		Error:   "not_found",
+		Message: "Not found",
+	})
 }
 
 // convertMetaTime converts metav1.Time to *time.Time

@@ -367,15 +367,19 @@ func (b *Broadcaster) BroadcastJobsPageUpdate(ctx context.Context) {
 			return
 		}
 
+		// Compute stats from the full list before pagination
+		stats := computeWSJobStats(allJobs)
+
 		// Paginate
 		pageItems, meta := paginateJobItems(allJobs, ps.Page, ps.Limit)
 
-		snapshot := WSUnifiedJobsSnapshot{Jobs: pageItems}
+		snapshot := WSUnifiedJobsSnapshot{Jobs: pageItems, Stats: stats}
 		msg := ServerMessage{
 			Resource:   "jobs",
 			Event:      "snapshot",
 			Data:       snapshot,
 			Pagination: &meta,
+			Stats:      &stats,
 		}
 
 		data, err := json.Marshal(msg)

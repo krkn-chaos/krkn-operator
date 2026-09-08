@@ -24,6 +24,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -33,11 +34,13 @@ import (
 
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
 	"github.com/krkn-chaos/krkn-operator/pkg/auth"
+	"github.com/krkn-chaos/krkn-operator/pkg/groupauth"
 	"k8s.io/client-go/kubernetes/fake"
 )
 
-// TestSanitizeUserID tests the email sanitization for Kubernetes labels
-func TestSanitizeUserID(t *testing.T) {
+// TestSanitizeUserIDForLabel tests the email sanitization for Kubernetes labels
+// via the consolidated groupauth.SanitizeUserIDForLabel function.
+func TestSanitizeUserIDForLabel(t *testing.T) {
 	tests := []struct {
 		name     string
 		email    string
@@ -67,9 +70,12 @@ func TestSanitizeUserID(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := sanitizeUserID(tt.email)
+			result, err := groupauth.SanitizeUserIDForLabel(tt.email)
+			if err != nil {
+				t.Fatalf("SanitizeUserIDForLabel(%s) unexpected error: %v", tt.email, err)
+			}
 			if result != tt.expected {
-				t.Errorf("sanitizeUserID(%s) = %s, want %s", tt.email, result, tt.expected)
+				t.Errorf("SanitizeUserIDForLabel(%s) = %s, want %s", tt.email, result, tt.expected)
 			}
 		})
 	}
@@ -513,4 +519,246 @@ func TestPostScenarioRunSetsOwner(t *testing.T) {
 
 	// Note: ClusterAPIURL is now populated by the controller in job status,
 	// not by the API handler in spec, so we don't verify it here
+}
+
+// TestPostScenarioRun_ClusterNameCollision_Returns500 verifies the end-to-end HTTP
+// mapping of a cluster name collision: when two providers register the same cluster
+// name with different API URLs in the target request status, PostScenarioRun must
+// return 500 (a server-side data-integrity condition), NOT 403, and the client-facing
+// body must not leak the internal cluster API URLs.
+func TestPostScenarioRun_ClusterNameCollision_Returns500(t *testing.T) {
+	scheme := runtime.NewScheme()
+	krknv1alpha1.AddToScheme(scheme)
+	corev1.AddToScheme(scheme)
+
+	const (
+		collidingCluster = "shared-cluster"
+		urlA             = "https://cluster-a.internal.example.com:6443"
+		urlB             = "https://cluster-b.internal.example.com:6443"
+	)
+
+	// Target request whose status registers the SAME cluster name under two
+	// different providers with DIFFERENT API URLs -> collision.
+	targetRequest := &krknv1alpha1.KrknTargetRequest{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "collision-target-request",
+			Namespace: "krkn-operator-system",
+		},
+		Spec: krknv1alpha1.KrknTargetRequestSpec{
+			UUID: "collision-uuid",
+		},
+		Status: krknv1alpha1.KrknTargetRequestStatus{
+			Status: "Completed",
+			TargetData: map[string][]krknv1alpha1.ClusterTarget{
+				"krkn-operator": {
+					{ClusterName: collidingCluster, ClusterAPIURL: urlA},
+				},
+				"acm-provider": {
+					{ClusterName: collidingCluster, ClusterAPIURL: urlB},
+				},
+			},
+		},
+	}
+
+	// A non-admin user that belongs to a group. The group grants 'run' so that the
+	// collision (detected before the per-cluster permission check) is unambiguously
+	// what produces the failure rather than a missing permission.
+	testGroup := &krknv1alpha1.KrknUserGroup{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-group",
+			Namespace: "krkn-operator-system",
+		},
+		Spec: krknv1alpha1.KrknUserGroupSpec{
+			Name:        "test-group",
+			Description: "Test group",
+			ClusterPermissions: map[string]krknv1alpha1.ClusterPermissionSet{
+				urlA: {Actions: []string{"view", "run", "cancel"}},
+				urlB: {Actions: []string{"view", "run", "cancel"}},
+			},
+		},
+	}
+
+	testUser := &krknv1alpha1.KrknUser{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "krknuser-user-test-com",
+			Namespace: "krkn-operator-system",
+			Labels: map[string]string{
+				"group.krkn.krkn-chaos.dev/test-group": "true",
+			},
+		},
+		Spec: krknv1alpha1.KrknUserSpec{
+			UserID:            "user@test.com",
+			Name:              "Test",
+			Surname:           "User",
+			Role:              "user",
+			PasswordSecretRef: "user-password",
+		},
+	}
+
+	fakeClient := fakeclient.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(targetRequest, testGroup, testUser).
+		Build()
+
+	handler := &Handler{
+		client:    fakeClient,
+		clientset: fake.NewSimpleClientset(),
+		namespace: "krkn-operator-system",
+	}
+
+	tg := auth.NewTokenGenerator(
+		[]byte("test-secret-key-at-least-32-bytes-long"),
+		TokenDuration,
+		"krkn-operator",
+	)
+	token, _ := tg.GenerateToken("user@test.com", "user", "Test", "User", "Org")
+	claims, _ := tg.ValidateToken(token)
+
+	// The request references the cluster under a single provider, so it passes the
+	// handler's request-level duplicate check; the collision lives in the stored
+	// target request status.
+	reqBody := `{
+		"targetRequestId": "collision-target-request",
+		"scenarioImage": "quay.io/krkn/pod-scenarios:latest",
+		"scenarioName": "pod-scenario",
+		"targetClusters": {
+			"krkn-operator": ["shared-cluster"]
+		}
+	}`
+
+	req := httptest.NewRequest("POST", "/api/v1/scenarios/run", bytes.NewBufferString(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+	ctx := context.WithValue(req.Context(), auth.UserClaimsKey, claims)
+	req = req.WithContext(ctx)
+
+	w := httptest.NewRecorder()
+	handler.PostScenarioRun(w, req)
+
+	// A cluster name collision is a server-side data-integrity condition: expect 500,
+	// not 403.
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("Expected status 500 for cluster name collision, got %d. Body: %s", w.Code, w.Body.String())
+	}
+
+	var errResp ErrorResponse
+	if err := json.NewDecoder(w.Body).Decode(&errResp); err != nil {
+		t.Fatalf("Failed to decode error response: %v", err)
+	}
+
+	if errResp.Error != "internal_error" {
+		t.Errorf("Expected error code 'internal_error', got %q", errResp.Error)
+	}
+
+	// The client-facing body must NOT leak the internal cluster API URLs.
+	body := w.Body.String()
+	for _, leaked := range []string{urlA, urlB, "https://"} {
+		if strings.Contains(body, leaked) {
+			t.Errorf("Response body must not leak internal cluster details (%q), got: %s", leaked, body)
+		}
+	}
+}
+
+// TestPostScenarioRun_SameClusterSameURL_NoCollision is the counter-proof to the
+// collision test: when two providers register the same cluster name with the SAME
+// API URL there is no collision, so the request is not rejected with a 500.
+func TestPostScenarioRun_SameClusterSameURL_NoCollision(t *testing.T) {
+	scheme := runtime.NewScheme()
+	krknv1alpha1.AddToScheme(scheme)
+	corev1.AddToScheme(scheme)
+
+	const (
+		sharedCluster = "shared-cluster"
+		sharedURL     = "https://cluster-shared.example.com:6443"
+	)
+
+	targetRequest := &krknv1alpha1.KrknTargetRequest{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "shared-target-request",
+			Namespace: "krkn-operator-system",
+		},
+		Spec: krknv1alpha1.KrknTargetRequestSpec{UUID: "shared-uuid"},
+		Status: krknv1alpha1.KrknTargetRequestStatus{
+			Status: "Completed",
+			TargetData: map[string][]krknv1alpha1.ClusterTarget{
+				"krkn-operator": {
+					{ClusterName: sharedCluster, ClusterAPIURL: sharedURL},
+				},
+				"acm-provider": {
+					{ClusterName: sharedCluster, ClusterAPIURL: sharedURL},
+				},
+			},
+		},
+	}
+
+	testGroup := &krknv1alpha1.KrknUserGroup{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-group",
+			Namespace: "krkn-operator-system",
+		},
+		Spec: krknv1alpha1.KrknUserGroupSpec{
+			Name: "test-group",
+			ClusterPermissions: map[string]krknv1alpha1.ClusterPermissionSet{
+				sharedURL: {Actions: []string{"view", "run", "cancel"}},
+			},
+		},
+	}
+
+	testUser := &krknv1alpha1.KrknUser{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "krknuser-user-test-com",
+			Namespace: "krkn-operator-system",
+			Labels: map[string]string{
+				"group.krkn.krkn-chaos.dev/test-group": "true",
+			},
+		},
+		Spec: krknv1alpha1.KrknUserSpec{
+			UserID: "user@test.com",
+			Role:   "user",
+		},
+	}
+
+	fakeClient := fakeclient.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(targetRequest, testGroup, testUser).
+		Build()
+
+	handler := &Handler{
+		client:    fakeClient,
+		clientset: fake.NewSimpleClientset(),
+		namespace: "krkn-operator-system",
+	}
+
+	tg := auth.NewTokenGenerator(
+		[]byte("test-secret-key-at-least-32-bytes-long"),
+		TokenDuration,
+		"krkn-operator",
+	)
+	token, _ := tg.GenerateToken("user@test.com", "user", "Test", "User", "Org")
+	claims, _ := tg.ValidateToken(token)
+
+	reqBody := `{
+		"targetRequestId": "shared-target-request",
+		"scenarioImage": "quay.io/krkn/pod-scenarios:latest",
+		"scenarioName": "pod-scenario",
+		"targetClusters": {
+			"krkn-operator": ["shared-cluster"]
+		}
+	}`
+
+	req := httptest.NewRequest("POST", "/api/v1/scenarios/run", bytes.NewBufferString(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+	ctx := context.WithValue(req.Context(), auth.UserClaimsKey, claims)
+	req = req.WithContext(ctx)
+
+	w := httptest.NewRecorder()
+	handler.PostScenarioRun(w, req)
+
+	// No collision: the request must NOT be rejected as a server-side data-integrity
+	// error. (It is created successfully since the group grants 'run'.)
+	if w.Code == http.StatusInternalServerError {
+		t.Fatalf("Did not expect 500 when the same cluster name maps to the same URL. Body: %s", w.Body.String())
+	}
+	if w.Code != http.StatusCreated {
+		t.Fatalf("Expected status 201, got %d. Body: %s", w.Code, w.Body.String())
+	}
 }

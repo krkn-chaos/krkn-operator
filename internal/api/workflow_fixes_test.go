@@ -153,6 +153,85 @@ func TestBuildFileResponse_WorkflowNameFallback(t *testing.T) {
 	}
 }
 
+// TestBuildFileResponse_ContentByPurpose verifies that Content is resolved from the
+// correct ConfigMap Data key. Workflow templates store content under the fixed
+// WorkflowFileName key while the annotation holds the user-facing name, so a naive
+// lookup by the annotation would miss and force a non-deterministic fallback scan.
+func TestBuildFileResponse_ContentByPurpose(t *testing.T) {
+	tests := []struct {
+		name        string
+		configMap   *corev1.ConfigMap
+		wantContent string
+	}{
+		{
+			name: "workflow template resolves content via workflow.json key, not annotation",
+			configMap: &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-workflow",
+					Labels: map[string]string{
+						files.FileIDLabel:      "test-123",
+						files.FilePurposeLabel: files.FilePurposeWorkflow,
+					},
+					Annotations: map[string]string{
+						// Logical name differs from the Data key on purpose.
+						files.WorkflowNameAnnotation: "My Custom Workflow",
+					},
+				},
+				Data: map[string]string{
+					files.WorkflowFileName:     `{"node1": {}}`,
+					files.StudioLayoutFileName: `{"positions": {}}`,
+				},
+			},
+			wantContent: `{"node1": {}}`,
+		},
+		{
+			name: "regular file resolves content via logical name key",
+			configMap: &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-file",
+					Labels: map[string]string{
+						files.FileIDLabel: "test-456",
+					},
+					Annotations: map[string]string{
+						files.WorkflowNameAnnotation: "config.yaml",
+					},
+				},
+				Data: map[string]string{
+					"config.yaml": `key: value`,
+				},
+			},
+			wantContent: `key: value`,
+		},
+		{
+			name: "legacy configmap with mismatched key falls back to first non-layout key",
+			configMap: &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-legacy",
+					Labels: map[string]string{
+						files.FileIDLabel: "test-789",
+					},
+					Annotations: map[string]string{
+						files.WorkflowNameAnnotation: "renamed.yaml",
+					},
+				},
+				Data: map[string]string{
+					"original.yaml": `legacy: content`,
+				},
+			},
+			wantContent: `legacy: content`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fileResp := buildFileResponse(tt.configMap)
+			if fileResp.Content != tt.wantContent {
+				t.Errorf("buildFileResponse() Content = %v, want %v", fileResp.Content, tt.wantContent)
+			}
+		})
+	}
+}
+
 // Test for Bug Fix #3: UpdateFileAnnotations pointer semantics
 func TestUpdateFileAnnotations_PointerSemantics(t *testing.T) {
 	existingAnnotations := map[string]string{

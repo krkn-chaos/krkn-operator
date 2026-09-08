@@ -64,6 +64,20 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: metadata.namespace
+        # Trusted reverse-proxy / load-balancer networks (comma-separated CIDRs).
+        # The auth endpoints are rate-limited per client IP. When the operator
+        # runs behind an ingress or load balancer, uncomment and set this so the
+        # real client IP is read from X-Forwarded-For / X-Real-IP — but only for
+        # requests arriving from these networks. Leave unset for direct access:
+        # forwarding headers are then ignored so clients cannot spoof the key.
+        # - name: TRUSTED_PROXY_CIDRS
+        #   value: "10.0.0.0/8,192.168.0.0/16"
+        # Optional WebSocket Origin enforcement (comma-separated allowed origins).
+        # OFF by default: all origins are accepted because WebSocket auth uses a
+        # JWT subprotocol (not cookies), so CSWSH does not apply. Uncomment to
+        # opt in to same-origin + allow-list enforcement as defense-in-depth.
+        # - name: WEBSOCKET_ALLOWED_ORIGINS
+        #   value: "https://console.example.com,http://localhost:3000"
         ports:
         - containerPort: 8080
           name: http

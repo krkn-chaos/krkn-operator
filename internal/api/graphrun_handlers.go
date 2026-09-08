@@ -393,14 +393,7 @@ func (h *Handler) CreateGraphRun(w http.ResponseWriter, r *http.Request) {
 			req.TargetClusters,
 			targetRequest,
 		); err != nil {
-			logger.Info("User lacks permission to run graph on requested clusters",
-				"userID", userClaims.UserID,
-				"error", err.Error(),
-			)
-			writeJSONError(w, http.StatusForbidden, ErrorResponse{
-				Error:   "forbidden",
-				Message: err.Error(),
-			})
+			writeScenarioRunAccessError(ctx, w, userClaims.UserID, err)
 			return
 		}
 	}
@@ -746,11 +739,12 @@ func convertNodeStatusesWithScores(nodeStatuses []krknv1alpha1.NodeStatus, graph
 
 // GraphRunsRouter routes GraphRun HTTP requests to appropriate handlers
 func (h *Handler) GraphRunsRouter(w http.ResponseWriter, r *http.Request) {
-	path := r.URL.Path
+	path := strings.Replace(r.URL.Path, "/api/v2/", "/api/v1/", 1)
 
-	// Normalize v2 paths to v1 for backward-compatible routing
-	// v2 REST endpoints reuse v1 handler logic (same behavior, different path prefix)
-	path = strings.Replace(path, "/api/v2/", "/api/v1/", 1)
+	// Normalize v2 paths to v1 so downstream handlers can parse with v1 prefixes
+	if path != r.URL.Path {
+		r.URL.Path = path
+	}
 
 	// Root endpoint: /api/v1/graphruns (or /api/v2/graphruns normalized)
 	if path == GraphRunsPath {
@@ -760,25 +754,44 @@ func (h *Handler) GraphRunsRouter(w http.ResponseWriter, r *http.Request) {
 		case http.MethodPost:
 			h.CreateGraphRun(w, r)
 		default:
-			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			writeJSONError(w, http.StatusMethodNotAllowed, ErrorResponse{
+				Error:   "method_not_allowed",
+				Message: "Method not allowed",
+			})
 		}
 		return
 	}
 
 	// Nested endpoints: /api/v1/graphruns/:name
 	if strings.HasPrefix(path, GraphRunsPath+"/") {
+		// Check for /{graphRunName}/config pattern (GET only - graph run config)
+		if strings.HasSuffix(path, "/config") {
+			if r.Method == http.MethodGet {
+				h.GetGraphRunConfig(w, r)
+			} else {
+				http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			}
+			return
+		}
+
 		switch r.Method {
 		case http.MethodGet:
 			h.GetGraphRun(w, r)
 		case http.MethodDelete:
 			h.DeleteGraphRun(w, r)
 		default:
-			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			writeJSONError(w, http.StatusMethodNotAllowed, ErrorResponse{
+				Error:   "method_not_allowed",
+				Message: "Method not allowed",
+			})
 		}
 		return
 	}
 
-	http.Error(w, "Not found", http.StatusNotFound)
+	writeJSONError(w, http.StatusNotFound, ErrorResponse{
+		Error:   "not_found",
+		Message: "Not found",
+	})
 }
 
 // parseBoolHeader parses a header value as a boolean, accepting common representations.

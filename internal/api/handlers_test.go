@@ -1588,3 +1588,90 @@ func TestConvertInputFields(t *testing.T) {
 		})
 	}
 }
+
+func TestMaskToken(t *testing.T) {
+	tests := []struct {
+		name     string
+		token    string
+		expected string
+	}{
+		{
+			name:     "empty string",
+			token:    "",
+			expected: "***",
+		},
+		{
+			name:     "short token under 20 chars",
+			token:    "abcdef",
+			expected: "***",
+		},
+		{
+			name:     "exactly 20 chars",
+			token:    "12345678901234567890",
+			expected: "***",
+		},
+		{
+			name:     "21 chars shows first 10 and last 10",
+			token:    "123456789012345678901",
+			expected: "1234567890...2345678901",
+		},
+		{
+			name:     "long JWT-like token",
+			token:    "access_token.eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.payload.signature",
+			expected: "access_tok....signature",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := maskToken(tt.token)
+			if result != tt.expected {
+				t.Errorf("maskToken(%q) = %q, want %q", tt.token, result, tt.expected)
+			}
+		})
+	}
+}
+
+// TestSanitizeHeaders verifies that credential-bearing headers are masked while
+// non-sensitive headers pass through unchanged, and that the original header map
+// is never mutated. Header key matching must be case-insensitive/canonicalized.
+func TestSanitizeHeaders(t *testing.T) {
+	jwt := "access_token.eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.payload.signature"
+
+	original := http.Header{}
+	original.Set("Sec-WebSocket-Protocol", jwt)
+	original.Set("Authorization", "Bearer "+jwt)
+	original.Set("Cookie", "session="+jwt)
+	original.Set("User-Agent", "test-agent/1.0")
+	original.Set("Sec-WebSocket-Version", "13")
+
+	sanitized := sanitizeHeaders(original)
+
+	// Sensitive headers must be masked (never contain the raw secret).
+	sensitive := []string{"Sec-WebSocket-Protocol", "Authorization", "Cookie"}
+	for _, name := range sensitive {
+		got := sanitized.Get(name)
+		if got == "" {
+			t.Errorf("expected header %q to be present (masked), got empty", name)
+		}
+		if strings.Contains(got, jwt) {
+			t.Errorf("header %q leaked raw secret: %q", name, got)
+		}
+	}
+
+	// Non-sensitive headers must pass through unchanged.
+	if got := sanitized.Get("User-Agent"); got != "test-agent/1.0" {
+		t.Errorf("User-Agent = %q, want unchanged", got)
+	}
+	if got := sanitized.Get("Sec-WebSocket-Version"); got != "13" {
+		t.Errorf("Sec-WebSocket-Version = %q, want unchanged", got)
+	}
+
+	// The original map must not be mutated by sanitization.
+	if got := original.Get("Authorization"); got != "Bearer "+jwt {
+		t.Errorf("original Authorization header was mutated: %q", got)
+	}
+	if got := original.Get("Sec-WebSocket-Protocol"); got != jwt {
+		t.Errorf("original Sec-WebSocket-Protocol header was mutated: %q", got)
+	}
+}

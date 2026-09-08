@@ -356,6 +356,114 @@ func TestListJobs_TypeDiscriminator(t *testing.T) {
 	}
 }
 
+func TestComputeJobStats(t *testing.T) {
+	tests := []struct {
+		name     string
+		jobs     []UnifiedJobItem
+		expected JobStatsSummary
+	}{
+		{
+			name:     "empty list",
+			jobs:     nil,
+			expected: JobStatsSummary{},
+		},
+		{
+			name: "scenario runs only",
+			jobs: []UnifiedJobItem{
+				{Type: "scenarioRun", ScenarioRun: &ScenarioRunListItem{SuccessfulJobs: 3, FailedJobs: 1, RunningJobs: 2}},
+				{Type: "scenarioRun", ScenarioRun: &ScenarioRunListItem{SuccessfulJobs: 1, FailedJobs: 0, RunningJobs: 0}},
+			},
+			expected: JobStatsSummary{TotalJobs: 7, SucceededJobs: 4, FailedJobs: 1},
+		},
+		{
+			name: "graph runs only",
+			jobs: []UnifiedJobItem{
+				{Type: "graphRun", GraphRun: &GraphRunListItem{Summary: GraphRunSummaryResponse{TotalNodes: 5, CompletedNodes: 3, FailedNodes: 2}}},
+			},
+			expected: JobStatsSummary{TotalJobs: 5, SucceededJobs: 3, FailedJobs: 2},
+		},
+		{
+			name: "mixed scenario and graph runs",
+			jobs: []UnifiedJobItem{
+				{Type: "scenarioRun", ScenarioRun: &ScenarioRunListItem{SuccessfulJobs: 2, FailedJobs: 1, RunningJobs: 0}},
+				{Type: "graphRun", GraphRun: &GraphRunListItem{Summary: GraphRunSummaryResponse{TotalNodes: 4, CompletedNodes: 3, FailedNodes: 1}}},
+			},
+			expected: JobStatsSummary{TotalJobs: 7, SucceededJobs: 5, FailedJobs: 2},
+		},
+		{
+			name: "nil inner structs are safe",
+			jobs: []UnifiedJobItem{
+				{Type: "scenarioRun", ScenarioRun: nil},
+				{Type: "graphRun", GraphRun: nil},
+			},
+			expected: JobStatsSummary{},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := ComputeJobStats(tc.jobs)
+			if got != tc.expected {
+				t.Errorf("ComputeJobStats() = %+v, want %+v", got, tc.expected)
+			}
+		})
+	}
+}
+
+func TestListJobs_IncludesStats(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = krknv1alpha1.AddToScheme(scheme)
+
+	now := time.Now()
+	sr1 := makeScenarioRun("sr-1", now.Add(-2*time.Hour))
+	sr1.Status.SuccessfulJobs = 2
+	sr1.Status.FailedJobs = 1
+	sr1.Status.RunningJobs = 0
+
+	gr1 := makeGraphRun("gr-1", now)
+	gr1.Status.Summary.TotalNodes = 3
+	gr1.Status.Summary.CompletedNodes = 2
+	gr1.Status.Summary.FailedNodes = 1
+
+	fakeClient := fakeclient.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(sr1, gr1).
+		Build()
+	fakeClientset := fake.NewSimpleClientset()
+	handler := NewTestHandler(fakeClient, fakeClientset, "default", "localhost:50051")
+
+	req := httptest.NewRequest("GET", "/api/v2/jobs?page=1&limit=1", nil)
+	ctx := context.WithValue(req.Context(), auth.UserClaimsKey, &auth.Claims{
+		UserID: "admin@example.com",
+		Role:   "admin",
+	})
+	req = req.WithContext(ctx)
+	w := httptest.NewRecorder()
+
+	handler.ListJobs(w, req)
+
+	var response UnifiedJobsResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("failed to unmarshal response: %v", err)
+	}
+
+	// Stats should reflect ALL items, not just the 1 item on this page
+	if response.Stats.TotalJobs != 6 {
+		t.Errorf("expected totalJobs=6 (3+3), got %d", response.Stats.TotalJobs)
+	}
+	if response.Stats.SucceededJobs != 4 {
+		t.Errorf("expected succeededJobs=4 (2+2), got %d", response.Stats.SucceededJobs)
+	}
+	if response.Stats.FailedJobs != 2 {
+		t.Errorf("expected failedJobs=2 (1+1), got %d", response.Stats.FailedJobs)
+	}
+
+	// Only 1 item on this page due to pagination
+	if len(response.Jobs) != 1 {
+		t.Errorf("expected 1 job on page, got %d", len(response.Jobs))
+	}
+}
+
 func TestBuildUnifiedJobList_SortOrder(t *testing.T) {
 	now := time.Now()
 

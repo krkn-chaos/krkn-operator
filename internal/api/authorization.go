@@ -20,9 +20,9 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
-	"strings"
 
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
 	"github.com/krkn-chaos/krkn-operator/pkg/auth"
@@ -30,6 +30,37 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
+
+// writeScenarioRunAccessError maps an error returned by
+// groupauth.ValidateScenarioRunAccess to an appropriate HTTP error response.
+//
+// A cluster name collision (groupauth.ClusterNameCollisionError) is a server-side
+// data-integrity/misconfiguration condition, not a caller permission problem, so it
+// is reported as a generic 500 without exposing internal cluster details. All other
+// errors represent a permission denial for the caller and are returned as 403 with
+// the (already client-safe) error message.
+func writeScenarioRunAccessError(ctx context.Context, w http.ResponseWriter, userID string, err error) {
+	logger := log.FromContext(ctx)
+
+	var collisionErr *groupauth.ClusterNameCollisionError
+	if errors.As(err, &collisionErr) {
+		logger.Error(err, "cluster name collision while validating scenario run access", "userID", userID)
+		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+			Error:   "internal_error",
+			Message: "internal error validating cluster access",
+		})
+		return
+	}
+
+	logger.Info("User lacks permission to run scenarios on requested clusters",
+		"userID", userID,
+		"error", err.Error(),
+	)
+	writeJSONError(w, http.StatusForbidden, ErrorResponse{
+		Error:   "forbidden",
+		Message: err.Error(),
+	})
+}
 
 // requireAdminForMethods checks if the user is admin for specific HTTP methods
 // If the method requires admin and user is not admin, returns false and writes error response
@@ -57,17 +88,6 @@ func (h *Handler) requireAdminForMethods(w http.ResponseWriter, r *http.Request,
 	}
 
 	return true
-}
-
-// sanitizeUserID converts an email address to a valid Kubernetes label value.
-// Replaces @ and . with -, then converts to lowercase to comply with
-// Kubernetes label value requirements (RFC 1123).
-//
-// Example: "user@example.com" -> "user-example-com"
-func sanitizeUserID(email string) string {
-	sanitized := strings.ReplaceAll(email, "@", "-")
-	sanitized = strings.ReplaceAll(sanitized, ".", "-")
-	return strings.ToLower(sanitized)
 }
 
 // checkScenarioRunAccess verifies if the authenticated user has permission to access
@@ -125,7 +145,10 @@ func (h *Handler) checkScenarioRunAccessWithAction(
 
 	// Defensive check - should never happen with RequireAuth middleware
 	if claims == nil {
-		http.Error(w, `{"error":"unauthorized","message":"No authentication claims found"}`, http.StatusUnauthorized)
+		writeJSONError(w, http.StatusUnauthorized, ErrorResponse{
+			Error:   "unauthorized",
+			Message: "No authentication claims found",
+		})
 		return false
 	}
 
@@ -136,7 +159,10 @@ func (h *Handler) checkScenarioRunAccessWithAction(
 
 	// Reject runs without jobs (defensive - should not happen for new runs)
 	if len(scenarioRun.Status.ClusterJobs) == 0 {
-		http.Error(w, `{"error":"forbidden","message":"Access denied. This scenario run has no jobs"}`, http.StatusForbidden)
+		writeJSONError(w, http.StatusForbidden, ErrorResponse{
+			Error:   "forbidden",
+			Message: "Access denied. This scenario run has no jobs",
+		})
 		return false
 	}
 
@@ -152,13 +178,20 @@ func (h *Handler) checkScenarioRunAccessWithAction(
 		log.FromContext(ctx).Error(err, "Failed to check scenario run access",
 			"userID", claims.UserID,
 			"action", requiredAction)
-		http.Error(w, `{"error":"internal_error","message":"Failed to validate access"}`, http.StatusInternalServerError)
+		// Error already logged above with full context; use writeJSON to avoid a
+		// duplicate, less-informative log entry from writeJSONError.
+		writeJSON(w, http.StatusInternalServerError, ErrorResponse{
+			Error:   "internal_error",
+			Message: "Failed to validate access",
+		})
 		return false
 	}
 
 	if !hasAccess {
-		errorMsg := fmt.Sprintf(`{"error":"forbidden","message":"Access denied. You do not have permission to %s this scenario run"}`, actionName)
-		http.Error(w, errorMsg, http.StatusForbidden)
+		writeJSONError(w, http.StatusForbidden, ErrorResponse{
+			Error:   "forbidden",
+			Message: fmt.Sprintf("Access denied. You do not have permission to %s this scenario run", actionName),
+		})
 		return false
 	}
 
@@ -351,7 +384,10 @@ func (h *Handler) checkJobAccess(
 
 	// Defensive check
 	if claims == nil {
-		http.Error(w, `{"error":"unauthorized","message":"No authentication claims found"}`, http.StatusUnauthorized)
+		writeJSONError(w, http.StatusUnauthorized, ErrorResponse{
+			Error:   "unauthorized",
+			Message: "No authentication claims found",
+		})
 		return false
 	}
 
@@ -362,7 +398,10 @@ func (h *Handler) checkJobAccess(
 
 	// Check if job has ClusterAPIURL
 	if job.ClusterAPIURL == "" {
-		http.Error(w, `{"error":"forbidden","message":"Access denied. Job has no cluster API URL"}`, http.StatusForbidden)
+		writeJSONError(w, http.StatusForbidden, ErrorResponse{
+			Error:   "forbidden",
+			Message: "Access denied. Job has no cluster API URL",
+		})
 		return false
 	}
 
@@ -381,13 +420,20 @@ func (h *Handler) checkJobAccess(
 			"userID", claims.UserID,
 			"jobID", job.JobID,
 			"action", requiredAction)
-		http.Error(w, `{"error":"internal_error","message":"Failed to validate access"}`, http.StatusInternalServerError)
+		// Error already logged above with full context; use writeJSON to avoid a
+		// duplicate, less-informative log entry from writeJSONError.
+		writeJSON(w, http.StatusInternalServerError, ErrorResponse{
+			Error:   "internal_error",
+			Message: "Failed to validate access",
+		})
 		return false
 	}
 
 	if !hasAccess {
-		errorMsg := fmt.Sprintf(`{"error":"forbidden","message":"Access denied. You do not have permission to %s this job"}`, actionName)
-		http.Error(w, errorMsg, http.StatusForbidden)
+		writeJSONError(w, http.StatusForbidden, ErrorResponse{
+			Error:   "forbidden",
+			Message: fmt.Sprintf("Access denied. You do not have permission to %s this job", actionName),
+		})
 		return false
 	}
 

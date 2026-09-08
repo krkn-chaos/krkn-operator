@@ -20,6 +20,7 @@ package groupauth
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -497,11 +498,12 @@ func TestCountGroupMembers(t *testing.T) {
 	}
 }
 
-func TestSanitizeUserID(t *testing.T) {
+func TestSanitizeUserIDForResourceName(t *testing.T) {
 	tests := []struct {
-		name  string
-		email string
-		want  string
+		name    string
+		email   string
+		want    string
+		wantErr bool
 	}{
 		{
 			name:  "standard email",
@@ -518,14 +520,141 @@ func TestSanitizeUserID(t *testing.T) {
 			email: "User@Example.Com",
 			want:  "krknuser-user-example-com",
 		},
+		{
+			name:  "email with dots in username",
+			email: "john.doe@company.org",
+			want:  "krknuser-john-doe-company-org",
+		},
+		{
+			name:    "empty input",
+			email:   "",
+			wantErr: true,
+		},
+		{
+			name:    "whitespace only input",
+			email:   "   ",
+			wantErr: true,
+		},
+		{
+			name:    "input with invalid characters",
+			email:   "user+tag@example.com",
+			wantErr: true,
+		},
+		{
+			name:    "input exceeding max resource name length",
+			email:   strings.Repeat("a", 260) + "@example.com",
+			wantErr: true,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := sanitizeUserID(tt.email)
+			got, err := SanitizeUserIDForResourceName(tt.email)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("SanitizeUserIDForResourceName() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.wantErr {
+				return
+			}
 			if got != tt.want {
-				t.Errorf("sanitizeUserID() = %q, want %q", got, tt.want)
+				t.Errorf("SanitizeUserIDForResourceName() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestSanitizeUserIDForLabel(t *testing.T) {
+	tests := []struct {
+		name    string
+		email   string
+		want    string
+		wantErr bool
+	}{
+		{
+			name:  "standard email",
+			email: "user@example.com",
+			want:  "user-example-com",
+		},
+		{
+			name:  "email with subdomain",
+			email: "user@mail.example.com",
+			want:  "user-mail-example-com",
+		},
+		{
+			name:  "uppercase email",
+			email: "User@Example.Com",
+			want:  "user-example-com",
+		},
+		{
+			name:  "email with dots in username",
+			email: "john.doe@company.org",
+			want:  "john-doe-company-org",
+		},
+		{
+			name:  "complex email",
+			email: "test.user.dev@example.co.uk",
+			want:  "test-user-dev-example-co-uk",
+		},
+		{
+			name:    "empty input",
+			email:   "",
+			wantErr: true,
+		},
+		{
+			name:    "whitespace only input",
+			email:   "  ",
+			wantErr: true,
+		},
+		{
+			name:    "input with invalid characters",
+			email:   "user name@example.com",
+			wantErr: true,
+		},
+		{
+			name:    "input exceeding max label length",
+			email:   strings.Repeat("a", 70) + "@x.co",
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := SanitizeUserIDForLabel(tt.email)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("SanitizeUserIDForLabel() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.wantErr {
+				return
+			}
+			if got != tt.want {
+				t.Errorf("SanitizeUserIDForLabel() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSanitizeUserIDConsistency(t *testing.T) {
+	// Verify that SanitizeUserIDForResourceName is composed of
+	// "krknuser-" + SanitizeUserIDForLabel for any valid input
+	emails := []string{
+		"user@example.com",
+		"Admin@Test.COM",
+		"john.doe@mail.example.co.uk",
+	}
+
+	for _, email := range emails {
+		resourceName, err := SanitizeUserIDForResourceName(email)
+		if err != nil {
+			t.Fatalf("SanitizeUserIDForResourceName(%q) unexpected error: %v", email, err)
+		}
+		labelValue, err := SanitizeUserIDForLabel(email)
+		if err != nil {
+			t.Fatalf("SanitizeUserIDForLabel(%q) unexpected error: %v", email, err)
+		}
+		expected := "krknuser-" + labelValue
+		if resourceName != expected {
+			t.Errorf("SanitizeUserIDForResourceName(%q) = %q, but expected krknuser- + SanitizeUserIDForLabel = %q",
+				email, resourceName, expected)
+		}
 	}
 }

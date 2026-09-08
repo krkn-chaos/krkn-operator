@@ -254,7 +254,7 @@ func TestCreateFile(t *testing.T) {
 					userLabels[labelKey] = "true"
 				}
 
-				userName := "krknuser-" + sanitizeUserID(tt.userID)
+				userName := mustSanitizeUserIDForResourceName(t, tt.userID)
 				role := "user"
 				if tt.isAdmin {
 					role = "admin"
@@ -694,7 +694,7 @@ func TestUpdateFile(t *testing.T) {
 					userLabels[labelKey] = "true"
 				}
 
-				userName := "krknuser-" + sanitizeUserID(tt.userID)
+				userName := mustSanitizeUserIDForResourceName(t, tt.userID)
 				role := "user"
 				if tt.isAdmin {
 					role = "admin"
@@ -912,7 +912,7 @@ func TestDeleteFile(t *testing.T) {
 					userLabels[labelKey] = "true"
 				}
 
-				userName := "krknuser-" + sanitizeUserID(tt.userID)
+				userName := mustSanitizeUserIDForResourceName(t, tt.userID)
 				role := "user"
 				if tt.isAdmin {
 					role = "admin"
@@ -1239,10 +1239,10 @@ func TestCanAccessFile(t *testing.T) {
 }
 
 // createTestAdminUser creates an admin KrknUser in the fake client for validation
-func createTestAdminUser(handler *Handler) {
+func createTestAdminUser(t *testing.T, handler *Handler) {
 	user := &krknv1alpha1.KrknUser{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "krknuser-" + sanitizeUserID("admin@test.example"),
+			Name:      mustSanitizeUserIDForResourceName(t, "admin@test.example"),
 			Namespace: handler.namespace,
 		},
 		Spec: krknv1alpha1.KrknUserSpec{
@@ -1255,7 +1255,7 @@ func createTestAdminUser(handler *Handler) {
 
 func TestCreateFile_DuplicateName(t *testing.T) {
 	handler := setupFilesTestHandler()
-	createTestAdminUser(handler)
+	createTestAdminUser(t, handler)
 
 	createReq := files.CreateFileRequest{
 		FileName:       "unique-config.yaml",
@@ -1286,7 +1286,7 @@ func TestCreateFile_DuplicateName(t *testing.T) {
 
 func TestCreateFile_DuplicateName_CrossPurpose(t *testing.T) {
 	handler := setupFilesTestHandler()
-	createTestAdminUser(handler)
+	createTestAdminUser(t, handler)
 
 	// Create a generic file
 	createReq := files.CreateFileRequest{
@@ -1325,7 +1325,7 @@ func TestCreateFile_DuplicateName_CrossPurpose(t *testing.T) {
 
 func TestUpdateFile_RenameConflict(t *testing.T) {
 	handler := setupFilesTestHandler()
-	createTestAdminUser(handler)
+	createTestAdminUser(t, handler)
 
 	// Create file A
 	reqA := files.CreateFileRequest{
@@ -1378,7 +1378,7 @@ func TestUpdateFile_RenameConflict(t *testing.T) {
 
 func TestUpdateFile_SameName(t *testing.T) {
 	handler := setupFilesTestHandler()
-	createTestAdminUser(handler)
+	createTestAdminUser(t, handler)
 
 	// Create file
 	createReq := files.CreateFileRequest{
@@ -1416,7 +1416,7 @@ func TestUpdateFile_SameName(t *testing.T) {
 
 func TestCreateFile_DefaultFilePurpose(t *testing.T) {
 	handler := setupFilesTestHandler()
-	createTestAdminUser(handler)
+	createTestAdminUser(t, handler)
 
 	createReq := files.CreateFileRequest{
 		FileName:       "no-purpose.yaml",
@@ -1453,7 +1453,7 @@ func TestCreateFile_DefaultFilePurpose(t *testing.T) {
 
 func TestCreateFile_ResiliencyPurpose(t *testing.T) {
 	handler := setupFilesTestHandler()
-	createTestAdminUser(handler)
+	createTestAdminUser(t, handler)
 
 	createReq := files.CreateFileRequest{
 		FileName:       "resiliency-metrics.yaml",
@@ -1491,7 +1491,7 @@ func TestCreateFile_ResiliencyPurpose(t *testing.T) {
 
 func TestCreateFile_InvalidFilePurpose(t *testing.T) {
 	handler := setupFilesTestHandler()
-	createTestAdminUser(handler)
+	createTestAdminUser(t, handler)
 
 	createReq := files.CreateFileRequest{
 		FileName:       "invalid-purpose.yaml",
@@ -1515,7 +1515,7 @@ func TestCreateFile_InvalidFilePurpose(t *testing.T) {
 
 func TestCreateFile_WorkflowPurposeBlocked(t *testing.T) {
 	handler := setupFilesTestHandler()
-	createTestAdminUser(handler)
+	createTestAdminUser(t, handler)
 
 	createReq := files.CreateFileRequest{
 		FileName:       "sneaky-workflow.json",

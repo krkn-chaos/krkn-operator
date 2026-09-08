@@ -357,6 +357,8 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 		// The user is created, just the status needs manual fix
 	}
 
+	// PII notice: userId may be an email address. This audit log entry is necessary
+	// for security monitoring but is subject to data protection requirements (e.g. GDPR).
 	logger.Info("User registered successfully", "userId", req.UserID, "role", req.Role)
 
 	writeJSON(w, http.StatusCreated, RegisterResponse{
@@ -486,7 +488,7 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get token generator from SecretManager
-	tokenGen, err := h.getTokenGenerator(ctx)
+	tokenGen, err := h.getTokenGenerator()
 	if err != nil {
 		logger.Error(err, "Failed to get token generator")
 		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
@@ -514,6 +516,8 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		// Non-critical error, continue
 	}
 
+	// PII notice: userId may be an email address. This audit log entry is necessary
+	// for security monitoring but is subject to data protection requirements (e.g. GDPR).
 	logger.Info("User logged in successfully", "userId", user.Spec.UserID)
 
 	expiresAt := time.Now().Add(TokenDuration).Format(time.RFC3339)

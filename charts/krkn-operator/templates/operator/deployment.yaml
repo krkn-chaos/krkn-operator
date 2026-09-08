@@ -65,6 +65,14 @@ spec:
               key: jwt-secret
         - name: JWT_EXPIRY_HOURS
           value: {{ .Values.auth.jwtExpiryHours | quote }}
+        {{- with .Values.auth.trustedProxyCIDRs }}
+        - name: TRUSTED_PROXY_CIDRS
+          value: {{ . | quote }}
+        {{- end }}
+        {{- with .Values.auth.websocketAllowedOrigins }}
+        - name: WEBSOCKET_ALLOWED_ORIGINS
+          value: {{ . | quote }}
+        {{- end }}
         {{- with .Values.operator.extraEnv }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
