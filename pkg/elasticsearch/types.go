@@ -139,10 +139,23 @@ type TelemetryDocument struct {
 	Status         bool   `json:"status"`
 }
 
+// TelemetryStats summarizes run-level pass/fail counts across the entire matched
+// time window (not just the size-capped documents page). Counts come from a terms
+// aggregation on the run-level job_status boolean, so they intentionally do not
+// apply the per-scenario exit_status downgrade that a document's status field uses.
+type TelemetryStats struct {
+	Pass        int     `json:"pass"`
+	Fail        int     `json:"fail"`
+	PassPercent float64 `json:"pass_percent"` // 0-100, rounded to 2 decimals; 0 when no runs
+}
+
 // QueryTelemetryResponse wraps the telemetry documents returned to the client.
 type QueryTelemetryResponse struct {
 	Documents []TelemetryDocument `json:"documents"`
 	Total     int                 `json:"total"`
+	// Stats summarizes pass/fail across the whole matched window, so Stats.Pass +
+	// Stats.Fail can exceed Total (which counts only the returned documents page).
+	Stats TelemetryStats `json:"stats"`
 }
 
 // ValidateQueryRequest validates a QueryTelemetryRequest and normalizes the

@@ -709,7 +709,7 @@ func newEsTestSecretWithHost(name, namespace, host, telemetryIndex string) *core
 func TestQueryElasticsearchTelemetry_Success(t *testing.T) {
 	esServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"hits":{"hits":[{"_source":{"run_uuid":"abc","job_status":true,"scenarios":[{"scenario_type":"pod","start_timestamp":100,"end_timestamp":200,"exit_status":0,"parameters":[{"config":{"namespace":"ns1"}}]}]}}]}}`))
+		_, _ = w.Write([]byte(`{"hits":{"hits":[{"_source":{"run_uuid":"abc","job_status":true,"scenarios":[{"scenario_type":"pod","start_timestamp":100,"end_timestamp":200,"exit_status":0,"parameters":[{"config":{"namespace":"ns1"}}]}]}}]},"aggregations":{"by_job_status":{"buckets":[{"key":1,"key_as_string":"true","doc_count":1}]}}}`))
 	}))
 	defer esServer.Close()
 
@@ -736,6 +736,10 @@ func TestQueryElasticsearchTelemetry_Success(t *testing.T) {
 	}
 	if resp.Documents[0].RunUUID != "abc" || resp.Documents[0].ScenarioType != "pod" || resp.Documents[0].Namespace != "ns1" {
 		t.Errorf("unexpected document: %+v", resp.Documents[0])
+	}
+	wantStats := elasticsearch.TelemetryStats{Pass: 1, Fail: 0, PassPercent: 100}
+	if resp.Stats != wantStats {
+		t.Errorf("got stats %+v, want %+v", resp.Stats, wantStats)
 	}
 }
 
@@ -836,7 +840,7 @@ func TestQueryElasticsearchTelemetry_RouteAndAuth(t *testing.T) {
 
 	esServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"hits":{"hits":[{"_source":{"run_uuid":"abc","job_status":true,"scenarios":[{"scenario_type":"pod","start_timestamp":100,"end_timestamp":200,"exit_status":0,"parameters":[{"config":{"namespace":"ns1"}}]}]}}]}}`))
+		_, _ = w.Write([]byte(`{"hits":{"hits":[{"_source":{"run_uuid":"abc","job_status":true,"scenarios":[{"scenario_type":"pod","start_timestamp":100,"end_timestamp":200,"exit_status":0,"parameters":[{"config":{"namespace":"ns1"}}]}]}}]},"aggregations":{"by_job_status":{"buckets":[{"key":1,"key_as_string":"true","doc_count":1}]}}}`))
 	}))
 	defer esServer.Close()
 
