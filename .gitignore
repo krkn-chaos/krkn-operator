@@ -27,6 +27,7 @@ vendor/
 # editor and IDE paraphernalia
 .idea
 .vscode
+.run
 *.swp
 *.swo
 *~
