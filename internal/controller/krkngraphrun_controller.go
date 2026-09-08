@@ -312,6 +312,14 @@ func (r *KrknGraphRunReconciler) resolveGraph(ctx context.Context, graphRun *krk
 	logger := log.FromContext(ctx)
 
 	logger.Info("resolving dependency graph", "graphRun", graphRun.Name)
+	for nodeID, node := range graphRun.Spec.Graph {
+		if strings.HasPrefix(nodeID, "_") {
+			continue
+		}
+		if err := node.Scenario.Validate(); err != nil {
+			return fmt.Errorf("node '%s' has invalid scenario reference: %w", nodeID, err)
+		}
+	}
 
 	levels, err := graph.ResolveGraph(graphRun.Spec.Graph)
 	if err != nil {
@@ -335,7 +343,7 @@ func (r *KrknGraphRunReconciler) resolveGraph(ctx context.Context, graphRun *krk
 
 		nodeStatuses = append(nodeStatuses, krknv1alpha1.NodeStatus{
 			NodeID:    nodeID,
-			NodeName:  node.Name,
+			NodeName:  node.Scenario.Name,
 			Phase:     "Pending",
 			DependsOn: dependsOn,
 		})
@@ -508,7 +516,7 @@ func (r *KrknGraphRunReconciler) createScenarioRun(
 	// Map node to scenario run spec
 	spec, err := graph.MapScenarioNodeToScenarioRunSpec(
 		node,
-		node.Name,
+		node.Scenario.Name,
 		graphRun.Spec.TargetRequestID,
 		graphRun.Spec.TargetClusters,
 		graphRun.Spec.OwnerUserID,

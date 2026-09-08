@@ -134,7 +134,7 @@ func BuildUnifiedJobList(scenarioRuns []krknv1alpha1.KrknScenarioRun, graphRuns 
 
 		item := ScenarioRunListItem{
 			ScenarioRunName:  sr.Name,
-			ScenarioName:     sr.Spec.ScenarioName,
+			ScenarioName:     sr.Spec.Scenario.Name,
 			Phase:            sr.Status.Phase,
 			TotalTargets:     sr.Status.TotalTargets,
 			SuccessfulJobs:   sr.Status.SuccessfulJobs,

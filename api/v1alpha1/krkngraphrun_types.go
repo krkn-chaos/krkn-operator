@@ -30,9 +30,12 @@ type GraphScenario struct {
 	// +optional
 	Comment string `json:"_comment,omitempty"`
 
-	// Image is the container image for the scenario
-	// +optional
-	Image string `json:"image,omitempty"`
+	// Scenario identifies the scenario and registry to resolve.
+	Scenario ScenarioReference `json:"scenario"`
+
+	// Image is retained only for in-memory compatibility with the old krknctl
+	// model. It is not part of the Kubernetes/API contract.
+	Image string `json:"-"`
 
 	// Name is the name of the scenario
 	// +optional
@@ -54,13 +57,15 @@ type GraphScenarioNode struct {
 	// +optional
 	Comment string `json:"_comment,omitempty"`
 
-	// Image is the container image for the scenario
-	// +optional
-	Image string `json:"image,omitempty"`
+	// Scenario identifies the scenario and registry to resolve for this node.
+	Scenario ScenarioReference `json:"scenario"`
+
+	// Legacy fields are not serialized and are never used to select a pod image.
+	Image string `json:"-"`
 
 	// Name is the name of the scenario
 	// +optional
-	Name string `json:"name,omitempty"`
+	Name string `json:"-"`
 
 	// Env is a map of environment variables for the scenario
 	// +optional

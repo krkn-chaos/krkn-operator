@@ -229,8 +229,7 @@ func (h *Handler) reconstructScenarioRunPayload(ctx context.Context, scenarioRun
 		// Mandatory fields
 		TargetRequestID: scenarioRun.Spec.TargetRequestID,
 		TargetClusters:  scenarioRun.Spec.TargetClusters,
-		ScenarioName:    scenarioRun.Spec.ScenarioName,
-		ScenarioImage:   scenarioRun.Spec.ScenarioImage,
+		Scenario:        scenarioRun.Spec.Scenario,
 
 		// Optional fields
 		Environment:    scenarioRun.Spec.Environment,
@@ -274,12 +273,9 @@ func (h *Handler) reconstructScenarioRunPayload(ctx context.Context, scenarioRun
 	}
 
 	// Reconstruct registry configuration
-	// ScenarioRunRequest only has RegistryName (embedded from ScenariosRequest)
-	// Explicit credentials (RegistryURL, Token, etc.) are NOT in the wizard payload
-	// They are loaded by the controller from the RegistryName Secret
-	if scenarioRun.Spec.RegistryName != "" {
-		payload.RegistryName = &scenarioRun.Spec.RegistryName
-	}
+	// ScenarioRunRequest carries only the registry-independent scenario
+	// reference. Explicit credentials and registry coordinates are loaded from
+	// the operator-managed Secret during reconciliation.
 	// Note: Even if the original run used explicit registry credentials,
 	// we cannot reconstruct them in the payload because:
 	// 1. ScenarioRunRequest doesn't have those fields

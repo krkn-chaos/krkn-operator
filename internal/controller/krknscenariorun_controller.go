@@ -45,7 +45,10 @@ import (
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
 
 	"github.com/google/uuid"
+	registryutil "github.com/krkn-chaos/krkn-operator/pkg/registry"
 	krknctlconfig "github.com/krkn-chaos/krknctl/pkg/config"
+	krknctlprovider "github.com/krkn-chaos/krknctl/pkg/provider"
+	krknctlmodels "github.com/krkn-chaos/krknctl/pkg/provider/models"
 )
 
 // KrknScenarioRunReconciler reconciles a KrknScenarioRun object
@@ -110,36 +113,42 @@ func getOwnerLabel(scenarioRun *krknv1alpha1.KrknScenarioRun) string {
 	return strings.ToLower(sanitized)
 }
 
-// buildContainerImage constructs the full container image path based on registry configuration.
-// Returns the container image path and any error encountered.
-//
-// Logic:
-// 1. If RegistryName is set: uses saved private registry (registryURL/scenarioRepository:scenarioImage)
-// 2. If RegistryURL and ScenarioRepository are set: uses inline private registry with same format
-// 3. Otherwise: uses public Quay registry defaults from krknctl config (quay.io/krkn-chaos/krkn-hub:scenarioImage)
+// buildContainerImage resolves a public scenario reference through krknctl.
+// Private references must be resolved with buildContainerImageFromReference
+// after loading the operator-managed registry Secret.
 func buildContainerImage(spec *krknv1alpha1.KrknScenarioRunSpec, config *krknctlconfig.Config) (string, error) {
-	// Case 1 & 2: Private registry (either saved or inline)
-	if spec.RegistryURL != "" && spec.ScenarioRepository != "" {
-		return fmt.Sprintf("%s/%s:%s",
-			spec.RegistryURL,
-			spec.ScenarioRepository,
-			spec.ScenarioImage,
-		), nil
+	if err := spec.Scenario.Validate(); err != nil {
+		return "", fmt.Errorf("invalid scenario reference: %w", err)
+	}
+	if *spec.Scenario.Private {
+		return "", fmt.Errorf("private registry configuration is required")
+	}
+	return buildContainerImageFromReference(spec.Scenario, config, nil)
+}
+
+// buildContainerImageFromReference resolves a scenario through krknctl. A
+// private registry configuration is required for private references.
+func buildContainerImageFromReference(
+	reference krknv1alpha1.ScenarioReference,
+	config *krknctlconfig.Config,
+	privateRegistry *krknctlmodels.RegistryV2,
+) (string, error) {
+	if err := reference.Validate(); err != nil {
+		return "", fmt.Errorf("invalid scenario reference: %w", err)
+	}
+	scenarioTag := krknctlmodels.ScenarioTag{Name: reference.Name}
+	if *reference.Private {
+		if privateRegistry == nil {
+			return "", fmt.Errorf("private registry configuration is required")
+		}
+		return krknctlprovider.ImageReference(privateRegistry.GetPrivateRegistryURI(), scenarioTag), nil
 	}
 
-	// Case 3: Public Quay registry
-	// Strip 'krkn-hub:' prefix if present (legacy frontend compatibility)
-	scenarioTag := spec.ScenarioImage
-	if strings.HasPrefix(scenarioTag, config.QuayScenarioRegistry+":") {
-		scenarioTag = strings.TrimPrefix(scenarioTag, config.QuayScenarioRegistry+":")
+	imageURI, err := config.GetQuayImageURI()
+	if err != nil {
+		return "", fmt.Errorf("failed to build public scenario image URI: %w", err)
 	}
-
-	return fmt.Sprintf("%s/%s/%s:%s",
-		config.QuayHost,
-		config.QuayOrg,
-		config.QuayScenarioRegistry,
-		scenarioTag,
-	), nil
+	return krknctlprovider.ImageReference(imageURI, scenarioTag), nil
 }
 
 // Reconcile handles the reconciliation loop for KrknScenarioRun
@@ -459,7 +468,7 @@ func (r *KrknScenarioRunReconciler) prepareJobResources(
 	kubeconfigLabels := map[string]string{
 		"krkn-job-id":         jobID,
 		"krkn-scenario-run":   scenarioRun.Name,
-		"krkn-scenario-name":  scenarioRun.Spec.ScenarioName,
+		"krkn-scenario-name":  scenarioRun.Spec.Scenario.Name,
 		"krkn-cluster-name":   clusterName,
 		"krkn-target-request": scenarioRun.Spec.TargetRequestID,
 	}
@@ -527,7 +536,7 @@ func (r *KrknScenarioRunReconciler) prepareJobResources(
 		fileLabels := map[string]string{
 			"krkn-job-id":         jobID,
 			"krkn-scenario-run":   scenarioRun.Name,
-			"krkn-scenario-name":  scenarioRun.Spec.ScenarioName,
+			"krkn-scenario-name":  scenarioRun.Spec.Scenario.Name,
 			"krkn-cluster-name":   clusterName,
 			"krkn-target-request": scenarioRun.Spec.TargetRequestID,
 		}
@@ -559,89 +568,42 @@ func (r *KrknScenarioRunReconciler) prepareJobResources(
 		createdConfigMaps = append(createdConfigMaps, configMapName)
 	}
 
-	// Determine container image to use
-	// If this ScenarioRun was created by a GraphRun, use the image as-is (it's already complete)
-	// Otherwise, build the image using registry configuration
-	var containerImage string
-	if _, isGraphRun := scenarioRun.Labels["krkn.dev/graph-run"]; isGraphRun {
-		// Graph run: image is already complete (e.g., quay.io/krkn-chaos/krkn-hub:dummy-scenario)
-		containerImage = scenarioRun.Spec.ScenarioImage
-		logger.V(1).Info("using complete image from graph run", "image", containerImage)
-	} else {
-		// Normal run: build image from registry configuration
-		containerImage, err = buildContainerImage(&scenarioRun.Spec, &krknctlCfg)
+	// Resolve the image exclusively from the scenario reference. Graph runs use
+	// this same path; no caller-provided image is trusted.
+	var privateRegistry *krknctlmodels.RegistryV2
+	if scenarioRun.Spec.Scenario.Private == nil {
+		cleanup()
+		return nil, fmt.Errorf("scenario.private is required")
+	}
+	if *scenarioRun.Spec.Scenario.Private {
+		var registrySecret corev1.Secret
+		if err := r.Get(ctx, types.NamespacedName{
+			Name:      scenarioRun.Spec.Scenario.RegistryName,
+			Namespace: scenarioRun.Namespace,
+		}, &registrySecret); err != nil {
+			cleanup()
+			return nil, fmt.Errorf("failed to load private registry '%s': %w", scenarioRun.Spec.Scenario.RegistryName, err)
+		}
+		privateRegistry, err = registryutil.ExtractRegistryV2FromSecret(&registrySecret)
 		if err != nil {
 			cleanup()
-			return nil, fmt.Errorf("failed to build container image path: %w", err)
+			return nil, fmt.Errorf("failed to load private registry configuration: %w", err)
 		}
-		logger.V(1).Info("built image from registry config", "image", containerImage)
 	}
+	containerImage, err := buildContainerImageFromReference(scenarioRun.Spec.Scenario, &krknctlCfg, privateRegistry)
+	if err != nil {
+		cleanup()
+		return nil, fmt.Errorf("failed to resolve scenario image: %w", err)
+	}
+	logger.V(1).Info("resolved scenario image through krknctl", "image", containerImage)
 
 	// Handle private registry authentication
 	var imagePullSecrets []corev1.LocalObjectReference
 
-	if scenarioRun.Spec.RegistryName != "" {
+	if scenarioRun.Spec.Scenario.Private != nil && *scenarioRun.Spec.Scenario.Private {
 		// Use saved private registry
 		imagePullSecrets = append(imagePullSecrets, corev1.LocalObjectReference{
-			Name: scenarioRun.Spec.RegistryName,
-		})
-	} else if scenarioRun.Spec.RegistryURL != "" && scenarioRun.Spec.ScenarioRepository != "" {
-		imagePullSecretName := fmt.Sprintf("krkn-job-%s-registry", jobID)
-
-		// Build docker config JSON
-		authStr := ""
-		if scenarioRun.Spec.Token != "" {
-			authStr = base64.StdEncoding.EncodeToString([]byte(scenarioRun.Spec.Token))
-		} else if scenarioRun.Spec.Username != "" && scenarioRun.Spec.Password != "" {
-			authStr = base64.StdEncoding.EncodeToString([]byte(scenarioRun.Spec.Username + ":" + scenarioRun.Spec.Password))
-		}
-
-		dockerConfig := map[string]interface{}{
-			"auths": map[string]interface{}{
-				scenarioRun.Spec.RegistryURL: map[string]string{
-					"auth": authStr,
-				},
-			},
-		}
-
-		dockerConfigJSON, _ := json.Marshal(dockerConfig)
-
-		secretLabels := map[string]string{
-			"krkn-job-id":         jobID,
-			"krkn-scenario-run":   scenarioRun.Name,
-			"krkn-scenario-name":  scenarioRun.Spec.ScenarioName,
-			"krkn-cluster-name":   clusterName,
-			"krkn-target-request": scenarioRun.Spec.TargetRequestID,
-		}
-		if ownerLabel := getOwnerLabel(scenarioRun); ownerLabel != "" {
-			secretLabels["krkn.krkn-chaos.dev/owner-user"] = ownerLabel
-		}
-		imagePullSecret := &corev1.Secret{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      imagePullSecretName,
-				Namespace: r.Namespace,
-				Labels:    secretLabels,
-			},
-			Type: corev1.SecretTypeDockerConfigJson,
-			Data: map[string][]byte{
-				".dockerconfigjson": dockerConfigJSON,
-			},
-		}
-
-		// Set owner reference
-		if err := controllerutil.SetControllerReference(scenarioRun, imagePullSecret, r.Scheme); err != nil {
-			cleanup()
-			return nil, fmt.Errorf("failed to set owner reference on imagePullSecret: %w", err)
-		}
-
-		if err := r.Create(ctx, imagePullSecret); err != nil {
-			cleanup()
-			return nil, fmt.Errorf("failed to create ImagePullSecret: %w", err)
-		}
-
-		createdSecrets = append(createdSecrets, imagePullSecretName)
-		imagePullSecrets = append(imagePullSecrets, corev1.LocalObjectReference{
-			Name: imagePullSecretName,
+			Name: scenarioRun.Spec.Scenario.RegistryName,
 		})
 	}
 
@@ -779,7 +741,7 @@ func (r *KrknScenarioRunReconciler) submitScenarioPod(
 		"app":                 "krkn-scenario",
 		"krkn-job-id":         resources.jobID,
 		"krkn-scenario-run":   scenarioRun.Name,
-		"krkn-scenario-name":  scenarioRun.Spec.ScenarioName,
+		"krkn-scenario-name":  scenarioRun.Spec.Scenario.Name,
 		"krkn-cluster-name":   resources.clusterName,
 		"krkn-target-request": scenarioRun.Spec.TargetRequestID,
 	}

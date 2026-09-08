@@ -22,6 +22,11 @@ import (
 	krknctlmodels "github.com/krkn-chaos/krknctl/pkg/scenarioorchestrator/models"
 )
 
+func publicScenarioReference(name string) ScenarioReference {
+	private := false
+	return ScenarioReference{Name: name, Private: &private}
+}
+
 // ToKrknctlScenarioSet converts a GraphScenarioNode map to a krknctl ScenarioSet
 // This enables seamless integration with krknctl's dependency graph resolution
 func ToKrknctlScenarioSet(graph map[string]GraphScenarioNode) krknctlmodels.ScenarioSet {
@@ -30,8 +35,8 @@ func ToKrknctlScenarioSet(graph map[string]GraphScenarioNode) krknctlmodels.Scen
 		result[nodeID] = krknctlmodels.ScenarioNode{
 			Scenario: krknctlmodels.Scenario{
 				Comment: node.Comment,
-				Image:   node.Image,
-				Name:    node.Name,
+				Image:   "",
+				Name:    node.Scenario.Name,
 				Env:     node.Env,
 				Volumes: node.Volumes,
 			},
@@ -48,7 +53,7 @@ func FromKrknctlScenarioSet(scenarioSet krknctlmodels.ScenarioSet) map[string]Gr
 	for nodeID, node := range scenarioSet {
 		result[nodeID] = GraphScenarioNode{
 			Comment:   node.Comment,
-			Image:     node.Image,
+			Scenario:  publicScenarioReference(node.Name),
 			Name:      node.Name,
 			Env:       node.Env,
 			Volumes:   node.Volumes,

@@ -489,8 +489,7 @@ func TestPostScenarioRunSetsOwner(t *testing.T) {
 
 	reqBody := `{
 		"targetRequestId": "test-target-request",
-		"scenarioImage": "quay.io/krkn/pod-scenarios:latest",
-		"scenarioName": "pod-scenario",
+		"scenario": {"name": "pod-scenario", "private": false},
 		"targetClusters": {
 			"krkn-operator": ["cluster-1"]
 		}
@@ -619,8 +618,7 @@ func TestPostScenarioRun_ClusterNameCollision_Returns500(t *testing.T) {
 	// target request status.
 	reqBody := `{
 		"targetRequestId": "collision-target-request",
-		"scenarioImage": "quay.io/krkn/pod-scenarios:latest",
-		"scenarioName": "pod-scenario",
+		"scenario": {"name": "pod-scenario", "private": false},
 		"targetClusters": {
 			"krkn-operator": ["shared-cluster"]
 		}
@@ -738,8 +736,7 @@ func TestPostScenarioRun_SameClusterSameURL_NoCollision(t *testing.T) {
 
 	reqBody := `{
 		"targetRequestId": "shared-target-request",
-		"scenarioImage": "quay.io/krkn/pod-scenarios:latest",
-		"scenarioName": "pod-scenario",
+		"scenario": {"name": "pod-scenario", "private": false},
 		"targetClusters": {
 			"krkn-operator": ["shared-cluster"]
 		}

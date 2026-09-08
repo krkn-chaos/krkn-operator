@@ -37,6 +37,11 @@ import (
 	"github.com/krkn-chaos/krkn-operator/pkg/files"
 )
 
+func publicScenarioReference(name string) krknv1alpha1.ScenarioReference {
+	private := false
+	return krknv1alpha1.ScenarioReference{Name: name, Private: &private}
+}
+
 func TestCreateGraphRun_WithFileReferences(t *testing.T) {
 	scheme := runtime.NewScheme()
 	_ = krknv1alpha1.AddToScheme(scheme)
@@ -57,8 +62,7 @@ func TestCreateGraphRun_WithFileReferences(t *testing.T) {
 			request: GraphRunCreateRequest{
 				Graph: map[string]krknv1alpha1.GraphScenarioNode{
 					"node-1": {
-						Name:  "test-scenario",
-						Image: "quay.io/krkn-chaos/krkn-hub:dummy-scenario",
+						Scenario: publicScenarioReference("test-scenario"),
 						Volumes: map[string]string{
 							"550e8400-e29b-41d4-a716-446655440001": "/config/test.yaml",
 						},
@@ -115,8 +119,7 @@ func TestCreateGraphRun_WithFileReferences(t *testing.T) {
 			request: GraphRunCreateRequest{
 				Graph: map[string]krknv1alpha1.GraphScenarioNode{
 					"node-1": {
-						Name:  "test-scenario",
-						Image: "quay.io/krkn-chaos/krkn-hub:dummy-scenario",
+						Scenario: publicScenarioReference("test-scenario"),
 						Volumes: map[string]string{
 							"non-existent-uuid": "/config/test.yaml",
 						},
@@ -158,15 +161,13 @@ func TestCreateGraphRun_WithFileReferences(t *testing.T) {
 			request: GraphRunCreateRequest{
 				Graph: map[string]krknv1alpha1.GraphScenarioNode{
 					"node-1": {
-						Name:  "test-scenario",
-						Image: "quay.io/krkn-chaos/krkn-hub:dummy-scenario",
+						Scenario: publicScenarioReference("test-scenario"),
 						Volumes: map[string]string{
 							"550e8400-e29b-41d4-a716-446655440005": "/config/test1.yaml",
 						},
 					},
 					"node-2": {
-						Name:  "test-scenario",
-						Image: "quay.io/krkn-chaos/krkn-hub:dummy-scenario",
+						Scenario: publicScenarioReference("test-scenario"),
 						Volumes: map[string]string{
 							"550e8400-e29b-41d4-a716-446655440006": "/config/test2.yaml",
 						},

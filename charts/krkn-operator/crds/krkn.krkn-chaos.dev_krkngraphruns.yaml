@@ -75,17 +75,32 @@ spec:
                         type: string
                       description: Env is a map of environment variables for the scenario
                       type: object
-                    image:
-                      description: Image is the container image for the scenario
-                      type: string
-                    name:
-                      description: Name is the name of the scenario
-                      type: string
+                    scenario:
+                      description: Scenario identifies the scenario and registry to
+                        resolve for this node.
+                      properties:
+                        name:
+                          description: Name is the scenario tag/name to resolve.
+                          type: string
+                        private:
+                          description: Private selects a saved private registry when
+                            true, or krknctl's public Quay provider when false.
+                          type: boolean
+                        registryName:
+                          description: RegistryName identifies the saved private registry
+                            when Private is true.
+                          type: string
+                      required:
+                      - name
+                      - private
+                      type: object
                     volumes:
                       additionalProperties:
                         type: string
                       description: Volumes is a map of volume mounts for the scenario
                       type: object
+                  required:
+                  - scenario
                   type: object
                 description: |-
                   Graph is the dependency graph of scenarios to execute

@@ -1570,13 +1570,8 @@ const docTemplate = `{
                         "type": "string"
                     }
                 },
-                "image": {
-                    "description": "Image is the container image for the scenario\n+optional",
-                    "type": "string"
-                },
-                "name": {
-                    "description": "Name is the name of the scenario\n+optional",
-                    "type": "string"
+                "scenario": {
+                    "$ref": "#/definitions/github_com_krkn-chaos_krkn-operator_api_v1alpha1.ScenarioReference"
                 },
                 "volumes": {
                     "description": "Volumes is a map of volume mounts for the scenario\n+optional",
@@ -1584,6 +1579,24 @@ const docTemplate = `{
                     "additionalProperties": {
                         "type": "string"
                     }
+                }
+            }
+        },
+        "github_com_krkn-chaos_krkn-operator_api_v1alpha1.ScenarioReference": {
+            "type": "object",
+            "required": ["name", "private"],
+            "properties": {
+                "name": {
+                    "description": "Name is the scenario tag/name to resolve.",
+                    "type": "string"
+                },
+                "private": {
+                    "description": "Private selects a saved private registry when true, or krknctl's public Quay provider when false.",
+                    "type": "boolean"
+                },
+                "registryName": {
+                    "description": "RegistryName identifies the saved private registry when Private is true.",
+                    "type": "string"
                 }
             }
         },
@@ -2324,17 +2337,8 @@ const docTemplate = `{
                     "description": "KubeconfigPath is the path where kubeconfig should be mounted (optional, default: /home/krkn/.kube/config)",
                     "type": "string"
                 },
-                "registryName": {
-                    "description": "RegistryName is the name of a saved registry (optional)\nIf omitted, defaults to quay.io public registry",
-                    "type": "string"
-                },
-                "scenarioImage": {
-                    "description": "ScenarioImage is the container image to run",
-                    "type": "string"
-                },
-                "scenarioName": {
-                    "description": "ScenarioName is the name of the scenario being executed",
-                    "type": "string"
+                "scenario": {
+                    "$ref": "#/definitions/github_com_krkn-chaos_krkn-operator_api_v1alpha1.ScenarioReference"
                 },
                 "targetClusters": {
                     "description": "TargetClusters is a map of provider-name to list of cluster names\nExample: {\"krkn-operator\": [\"cluster1\", \"cluster2\"], \"krkn-operator-acm\": [\"cluster3\"]}",

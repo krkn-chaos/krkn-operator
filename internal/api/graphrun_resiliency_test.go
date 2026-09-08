@@ -66,8 +66,7 @@ func TestCreateGraphRun_ResiliencyScore(t *testing.T) {
 	baseRequest := GraphRunCreateRequest{
 		Graph: map[string]krknv1alpha1.GraphScenarioNode{
 			"node-1": {
-				Name:  "test-scenario",
-				Image: "quay.io/krkn-chaos/krkn-hub:dummy-scenario",
+				Scenario: publicScenarioReference("test-scenario"),
 			},
 		},
 		TargetRequestID: "test-target",
