@@ -1641,6 +1641,7 @@ func (h *Handler) GetScenarioRunStatus(w http.ResponseWriter, r *http.Request) {
 				// Allow access and return 201 Created with empty jobs array
 				response := ScenarioRunStatusResponse{
 					ScenarioRunName:  scenarioRunName,
+					ScenarioName:     scenarioRun.Spec.Scenario.Name,
 					Phase:            scenarioRun.Status.Phase,
 					TotalTargets:     scenarioRun.Status.TotalTargets,
 					SuccessfulJobs:   scenarioRun.Status.SuccessfulJobs,
@@ -1689,6 +1690,7 @@ func (h *Handler) GetScenarioRunStatus(w http.ResponseWriter, r *http.Request) {
 
 	response := ScenarioRunStatusResponse{
 		ScenarioRunName:  scenarioRunName,
+		ScenarioName:     scenarioRun.Spec.Scenario.Name,
 		Phase:            scenarioRun.Status.Phase,
 		TotalTargets:     scenarioRun.Status.TotalTargets,
 		SuccessfulJobs:   scenarioRun.Status.SuccessfulJobs,

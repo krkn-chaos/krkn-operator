@@ -1266,7 +1266,7 @@ func TestPostScenarioRun_DuplicateCustomRunName_Conflict(t *testing.T) {
 			Labels:    map[string]string{"krkn.krkn-chaos.dev/custom-run-name": "my-chaos-run"},
 		},
 		Spec: krknv1alpha1.KrknScenarioRunSpec{
-			ScenarioName:  "pod-delete",
+			Scenario:      publicScenarioReference("pod-delete"),
 			CustomRunName: "my-chaos-run",
 			TargetClusters: map[string][]string{
 				"krkn-operator": {"cluster-1"},
@@ -1320,7 +1320,7 @@ func TestListScenarioRuns_IncludesCustomRunName(t *testing.T) {
 			Namespace: "default",
 		},
 		Spec: krknv1alpha1.KrknScenarioRunSpec{
-			ScenarioName:  "pod-delete",
+			Scenario:      publicScenarioReference("pod-delete"),
 			CustomRunName: "my-chaos-run",
 			TargetClusters: map[string][]string{
 				"krkn-operator": {"cluster-1"},
@@ -1372,7 +1372,7 @@ func TestGetScenarioRunStatus_IncludesCustomRunName(t *testing.T) {
 			Namespace: "default",
 		},
 		Spec: krknv1alpha1.KrknScenarioRunSpec{
-			ScenarioName:  "pod-delete",
+			Scenario:      publicScenarioReference("pod-delete"),
 			CustomRunName: "my-chaos-run",
 			TargetClusters: map[string][]string{
 				"krkn-operator": {"cluster-1"},
@@ -1410,6 +1410,10 @@ func TestGetScenarioRunStatus_IncludesCustomRunName(t *testing.T) {
 
 	if response.ScenarioRunName != "pod-delete-abc123" {
 		t.Errorf("Expected ScenarioRunName='pod-delete-abc123', got '%s'", response.ScenarioRunName)
+	}
+
+	if response.ScenarioName != "pod-delete" {
+		t.Errorf("Expected ScenarioName='pod-delete', got '%s'", response.ScenarioName)
 	}
 }
 

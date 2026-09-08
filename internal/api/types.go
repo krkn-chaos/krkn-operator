@@ -315,6 +315,8 @@ type ScenarioRunCreateResponse struct {
 type ScenarioRunStatusResponse struct {
 	// ScenarioRunName is the name of the KrknScenarioRun CR
 	ScenarioRunName string `json:"scenarioRunName"`
+	// ScenarioName is the scenario tag/name being executed
+	ScenarioName string `json:"scenarioName,omitempty"`
 	// Phase is the overall phase of the scenario run
 	Phase string `json:"phase"`
 	// TotalTargets is the total number of target clusters
