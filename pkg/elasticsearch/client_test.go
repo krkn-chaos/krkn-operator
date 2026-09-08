@@ -27,12 +27,22 @@ import (
 )
 
 func TestQueryTelemetry(t *testing.T) {
+	// The aggregation counts span the whole matched window, so they can (and here
+	// do) exceed the two hits returned in the size-capped page.
 	sampleHits := `{
       "hits": {
         "hits": [
           {"_source": {"run_uuid": "abc", "job_status": true, "scenarios": [{"scenario_type": "pod_disruption_scenarios", "start_timestamp": 1735689600, "end_timestamp": 1735689900, "exit_status": 0, "parameters": [{"config": {"namespace_pattern": "openshift-kube-apiserver"}}]}, {"scenario_type": "node"}]}},
           {"_source": {"run_uuid": "def", "job_status": false, "scenarios": [{"scenario_type": "pod", "start_timestamp": 1735776000, "end_timestamp": 1735776300, "exit_status": 1, "parameters": [{"config": {"namespace": "default"}}]}]}}
         ]
+      },
+      "aggregations": {
+        "by_job_status": {
+          "buckets": [
+            {"key": 1, "key_as_string": "true", "doc_count": 10},
+            {"key": 0, "key_as_string": "false", "doc_count": 3}
+          ]
+        }
       }
     }`
 
@@ -43,6 +53,7 @@ func TestQueryTelemetry(t *testing.T) {
 		body       string
 		wantErr    bool
 		wantCount  int
+		wantStats  TelemetryStats
 		checkFirst func(t *testing.T, d TelemetryDocument)
 	}{
 		{
@@ -51,6 +62,7 @@ func TestQueryTelemetry(t *testing.T) {
 			statusCode: http.StatusOK,
 			body:       sampleHits,
 			wantCount:  2,
+			wantStats:  TelemetryStats{Pass: 10, Fail: 3, PassPercent: 76.92},
 			checkFirst: func(t *testing.T, d TelemetryDocument) {
 				if d.RunUUID != "abc" {
 					t.Errorf("got run_uuid %q, want abc", d.RunUUID)
@@ -71,6 +83,14 @@ func TestQueryTelemetry(t *testing.T) {
 					t.Errorf("got status false, want true")
 				}
 			},
+		},
+		{
+			name:       "no hits and no aggregation yields zero stats",
+			index:      "telemetry",
+			statusCode: http.StatusOK,
+			body:       `{"hits":{"hits":[]}}`,
+			wantCount:  0,
+			wantStats:  TelemetryStats{Pass: 0, Fail: 0, PassPercent: 0},
 		},
 		{
 			name:       "missing index errors before request",
@@ -109,7 +129,7 @@ func TestQueryTelemetry(t *testing.T) {
 				Index: tt.index,
 			}
 
-			docs, err := NewClient().QueryTelemetry(context.Background(), conn, 50, "", "")
+			docs, stats, err := NewClient().QueryTelemetry(context.Background(), conn, 50, "", "")
 			if tt.wantErr {
 				if err == nil {
 					t.Fatal("expected error, got nil")
@@ -121,6 +141,9 @@ func TestQueryTelemetry(t *testing.T) {
 			}
 			if len(docs) != tt.wantCount {
 				t.Fatalf("got %d docs, want %d", len(docs), tt.wantCount)
+			}
+			if stats != tt.wantStats {
+				t.Errorf("got stats %+v, want %+v", stats, tt.wantStats)
 			}
 			if tt.checkFirst != nil && len(docs) > 0 {
 				tt.checkFirst(t, docs[0])
@@ -137,7 +160,7 @@ func TestQueryTelemetryRejectsCredentialsOverHTTP(t *testing.T) {
 	defer srv.Close()
 
 	conn := ConnectionParams{Host: srv.URL, Index: "telemetry", Username: "elastic", Password: "secret"}
-	_, err := NewClient().QueryTelemetry(context.Background(), conn, 50, "", "")
+	_, _, err := NewClient().QueryTelemetry(context.Background(), conn, 50, "", "")
 	if err == nil {
 		t.Fatal("expected error for credentials over plaintext HTTP, got nil")
 	}
@@ -223,7 +246,7 @@ func TestQueryTelemetryUsesInjectedDoer(t *testing.T) {
 	// A host that would never resolve proves the injected Doer is used instead
 	// of a real network client.
 	conn := ConnectionParams{Host: "https://unreachable.invalid", Port: 9200, Index: "telemetry"}
-	docs, err := c.QueryTelemetry(context.Background(), conn, 10, "", "")
+	docs, _, err := c.QueryTelemetry(context.Background(), conn, 10, "", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -252,7 +275,7 @@ func TestQueryTelemetryRejectsOversizedResponse(t *testing.T) {
 	defer srv.Close()
 
 	conn := ConnectionParams{Host: srv.URL, Index: "telemetry"}
-	_, err := NewClient().QueryTelemetry(context.Background(), conn, 50, "", "")
+	_, _, err := NewClient().QueryTelemetry(context.Background(), conn, 50, "", "")
 	if err == nil {
 		t.Fatal("expected an error for an oversized response, got nil")
 	}
@@ -340,7 +363,7 @@ func TestQueryTelemetrySortsNewestFirst(t *testing.T) {
 	defer srv.Close()
 
 	conn := ConnectionParams{Host: srv.URL, Index: "telemetry"}
-	if _, err := NewClient().QueryTelemetry(context.Background(), conn, 50, "", ""); err != nil {
+	if _, _, err := NewClient().QueryTelemetry(context.Background(), conn, 50, "", ""); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -398,7 +421,7 @@ func TestQueryTelemetryDateRange(t *testing.T) {
 			defer srv.Close()
 
 			conn := ConnectionParams{Host: srv.URL, Index: "telemetry"}
-			if _, err := NewClient().QueryTelemetry(context.Background(), conn, 50, tt.startDate, tt.endDate); err != nil {
+			if _, _, err := NewClient().QueryTelemetry(context.Background(), conn, 50, tt.startDate, tt.endDate); err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
 

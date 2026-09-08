@@ -26,6 +26,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"strings"
@@ -195,6 +196,17 @@ type esSearchResponse struct {
 			Source json.RawMessage `json:"_source"`
 		} `json:"hits"`
 	} `json:"hits"`
+	// Aggregations carries the by_job_status terms aggregation used to summarize
+	// pass/fail across the whole matched window (independent of the hits size cap).
+	Aggregations struct {
+		ByJobStatus struct {
+			Buckets []struct {
+				// KeyAsString is "true"/"false" for the boolean job_status field.
+				KeyAsString string `json:"key_as_string"`
+				DocCount    int    `json:"doc_count"`
+			} `json:"buckets"`
+		} `json:"by_job_status"`
+	} `json:"aggregations"`
 }
 
 // rawTelemetrySource mirrors the subset of a krkn telemetry document _source we
@@ -350,38 +362,43 @@ func (c ConnectionParams) tlsConfig() (*tls.Config, error) {
 // failing the whole query, so the returned slice may contain fewer documents
 // than the cluster reported hits. On success with no matching hits it returns a
 // non-nil, empty (len 0) slice and a nil error.
-func (c *Client) QueryTelemetry(ctx context.Context, conn ConnectionParams, size int, startDate, endDate string) ([]TelemetryDocument, error) {
+// It also returns a TelemetryStats summary of run-level pass/fail counts derived
+// from a terms aggregation on job_status. The aggregation runs over every document
+// matching the time-range filter, so the summary spans the whole matched window
+// regardless of size (Stats.Pass + Stats.Fail can exceed len(docs)). On any error
+// the returned stats are the zero value.
+func (c *Client) QueryTelemetry(ctx context.Context, conn ConnectionParams, size int, startDate, endDate string) (docs []TelemetryDocument, stats TelemetryStats, err error) {
 	if conn.Index == "" {
-		return nil, fmt.Errorf("telemetry index is not configured for this Elasticsearch config")
+		return nil, TelemetryStats{}, fmt.Errorf("telemetry index is not configured for this Elasticsearch config")
 	}
 
 	base := conn.baseURL()
 	// Never send credentials over plaintext HTTP where they could be observed on
 	// the wire. Require TLS whenever a username/password is configured.
 	if conn.Username != "" && strings.HasPrefix(base, "http://") {
-		return nil, fmt.Errorf("refusing to send credentials over plaintext HTTP; use https")
+		return nil, TelemetryStats{}, fmt.Errorf("refusing to send credentials over plaintext HTTP; use https")
 	}
 
 	doer, err := c.resolveDoer(conn)
 	if err != nil {
-		return nil, err
+		return nil, TelemetryStats{}, err
 	}
 
 	payload, err := buildSearchBody(size, startDate, endDate)
 	if err != nil {
-		return nil, err
+		return nil, TelemetryStats{}, err
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, queryTimeout)
 	defer cancel()
 	req, err := newSearchRequest(ctx, base, conn, payload)
 	if err != nil {
-		return nil, err
+		return nil, TelemetryStats{}, err
 	}
 
 	respBody, err := executeSearch(doer, req)
 	if err != nil {
-		return nil, err
+		return nil, TelemetryStats{}, err
 	}
 
 	return decodeTelemetry(respBody)
@@ -461,6 +478,17 @@ func buildSearchBody(size int, startDate, endDate string) ([]byte, error) {
 				},
 			},
 		},
+		// Aggregate run-level job_status across the whole matched window so the
+		// pass/fail summary is independent of the hits size limit. A boolean field
+		// yields at most two buckets ("true"/"false").
+		"aggs": map[string]any{
+			"by_job_status": map[string]any{
+				"terms": map[string]any{
+					"field": "job_status",
+					"size":  10,
+				},
+			},
+		},
 	}
 
 	payload, err := json.Marshal(body)
@@ -530,13 +558,13 @@ func executeSearch(doer Doer, req *http.Request) (body []byte, err error) {
 // TelemetryDocument. Hits whose _source does not match the expected telemetry
 // shape are skipped rather than failing the whole query, so the returned slice
 // may be shorter than the reported hit count; on no hits it is non-nil and empty.
-func decodeTelemetry(respBody []byte) ([]TelemetryDocument, error) {
+func decodeTelemetry(respBody []byte) (docs []TelemetryDocument, stats TelemetryStats, err error) {
 	var parsed esSearchResponse
 	if err := json.Unmarshal(respBody, &parsed); err != nil {
-		return nil, fmt.Errorf("failed to decode Elasticsearch response: %w", err)
+		return nil, TelemetryStats{}, fmt.Errorf("failed to decode Elasticsearch response: %w", err)
 	}
 
-	docs := make([]TelemetryDocument, 0, len(parsed.Hits.Hits))
+	docs = make([]TelemetryDocument, 0, len(parsed.Hits.Hits))
 	for _, hit := range parsed.Hits.Hits {
 		var src rawTelemetrySource
 		if err := json.Unmarshal(hit.Source, &src); err != nil {
@@ -547,5 +575,27 @@ func decodeTelemetry(respBody []byte) ([]TelemetryDocument, error) {
 		docs = append(docs, src.flatten())
 	}
 
-	return docs, nil
+	stats = statsFromBuckets(parsed)
+
+	return docs, stats, nil
+}
+
+// statsFromBuckets derives the run-level pass/fail summary from the by_job_status
+// terms aggregation. A boolean field yields "true"/"false" buckets; any other key
+// is ignored. PassPercent is the percentage of passing runs (0-100, rounded to two
+// decimals) and is 0 when no runs matched, avoiding a divide-by-zero.
+func statsFromBuckets(parsed esSearchResponse) TelemetryStats {
+	var stats TelemetryStats
+	for _, b := range parsed.Aggregations.ByJobStatus.Buckets {
+		switch b.KeyAsString {
+		case "true":
+			stats.Pass = b.DocCount
+		case "false":
+			stats.Fail = b.DocCount
+		}
+	}
+	if total := stats.Pass + stats.Fail; total > 0 {
+		stats.PassPercent = math.Round(float64(stats.Pass)/float64(total)*10000) / 100
+	}
+	return stats
 }
