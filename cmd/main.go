@@ -292,6 +292,15 @@ func main() {
 		setupLog.Error(err, "unable to create controller", "controller", "KrknOperatorTargetProviderConfig")
 		os.Exit(1)
 	}
+
+	// Setup VisualizeJobController to watch krkn-visualize deployment Jobs
+	if err = (&controller.VisualizeJobController{
+		Client:    mgr.GetClient(),
+		Namespace: krknNamespace,
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "VisualizeJobController")
+		os.Exit(1)
+	}
 	// +kubebuilder:scaffold:builder
 
 	// Setup JWT SecretManager (must start BEFORE API server)

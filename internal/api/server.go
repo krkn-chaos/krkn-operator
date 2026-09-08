@@ -298,6 +298,10 @@ func NewServer(port int, client client.Client, clientset kubernetes.Interface, n
 	mux.Handle(ElasticsearchConfigsPath, authMw.RequireAuth(http.HandlerFunc(handler.ElasticsearchConfigsRouter)))
 	mux.Handle(ElasticsearchConfigsPath+"/", authMw.RequireAuth(http.HandlerFunc(handler.ElasticsearchConfigsRouter)))
 
+	// krkn-visualize endpoints - admin only for POST/DELETE, authenticated for GET
+	mux.Handle(VisualizePath, authMw.RequireAuth(http.HandlerFunc(handler.VisualizeRouter)))
+	mux.Handle(VisualizePath+"/", authMw.RequireAuth(http.HandlerFunc(handler.VisualizeRouter)))
+
 	// ==================== API v2 Endpoints ====================
 	// v2 REST endpoints reuse v1 handlers (backward compatible)
 	// v2 WebSocket endpoints provide real-time multiplexed updates
