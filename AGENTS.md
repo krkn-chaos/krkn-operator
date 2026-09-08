@@ -84,6 +84,13 @@ A short plan in the conversation is fine.
 - Use the installed version's `bd --help` / subcommand help when needed. Preserve
   the configured backend and sync mechanism; do not assume every release uses
   the same export format or hooks.
+- In the supplied ecosystem workspace, `.beads` is an existing symlink to the
+  shared central Beads database. Treat the symlink target as authoritative:
+  inspect it before writes, and never replace the symlink, run `bd init`, or
+  create a repository-local database as incidental setup.
+- The repository's `beads/` directory is only a JSONL export for local reference
+  or the configured synchronization workflow; it is not an independent Beads
+  database. Do not use it as a substitute database or import it automatically.
 
 ### Issue lifecycle
 
@@ -112,6 +119,15 @@ reference the relevant issue.
 
 ## Search and RTK
 
+- RTK is mandatory whenever it provides a wrapper for the command being run.
+  Use `rtk` for all supported search, filesystem, Git, test, lint, build,
+  package-manager, and language-tool commands to minimize human-readable output
+  and token usage. This includes `rtk rg`, `rtk find`, `rtk git`, `rtk test`,
+  `rtk npm`/`rtk npx`, and `rtk go` where applicable.
+- Do not use the native command merely out of habit when an RTK wrapper exists.
+  Use the native command only when no suitable wrapper exists, exact unfiltered
+  output is required, or the command is a file-content/script input operation.
+  For a supported command that needs raw output, use `rtk proxy` and state why.
 - Start with scoped `rg --files` and `rg -n`; avoid dumping entire repositories.
   Read applicable instruction files completely and inspect relevant code bodies.
 - Check RTK availability once when needed. Prefer supported wrappers for noisy
