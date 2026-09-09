@@ -1856,6 +1856,18 @@
                         "type": "string"
                     }
                 },
+                "image": {
+                    "description": "Image is accepted for backwards compatibility but is never used to select\na pod image; the operator resolves images from Scenario.\n+optional",
+                    "type": "string"
+                },
+                "name": {
+                    "description": "Name is the legacy scenario identity field. When Scenario is absent, the\nAPI translates it into a public ScenarioReference.\n+optional",
+                    "type": "string"
+                },
+                "registryName": {
+                    "description": "RegistryName is the legacy private registry identity field. Image remains\nignored even when this field is present.\n+optional",
+                    "type": "string"
+                },
                 "scenario": {
                     "description": "Scenario identifies the scenario and registry to resolve for this node.\nMetadata-only nodes (whose IDs start with _) may omit this field.\n+optional",
                     "allOf": [
@@ -2897,6 +2909,10 @@
                     "description": "KubeconfigPath is the path where kubeconfig should be mounted (optional, default: /home/krkn/.kube/config)",
                     "type": "string"
                 },
+                "registryName": {
+                    "description": "RegistryName is retained for old in-memory callers and legacy JSON\nrequests. New clients select registries through Scenario.",
+                    "type": "string"
+                },
                 "scenario": {
                     "description": "Scenario identifies the scenario and registry to resolve. The operator\nresolves the executable image through krknctl; callers cannot provide one.",
                     "allOf": [
@@ -2904,6 +2920,14 @@
                             "$ref": "#/definitions/github_com_krkn-chaos_krkn-operator_api_v1alpha1.ScenarioReference"
                         }
                     ]
+                },
+                "scenarioImage": {
+                    "description": "ScenarioImage is accepted for backwards compatibility but is ignored.\nImages are always resolved server-side from Scenario.",
+                    "type": "string"
+                },
+                "scenarioName": {
+                    "description": "ScenarioName is the legacy scenario identity field. It is translated to\nScenario when a request does not include the new reference object.",
+                    "type": "string"
                 },
                 "targetClusters": {
                     "description": "TargetClusters is a map of provider-name to list of cluster names\nExample: {\"krkn-operator\": [\"cluster1\", \"cluster2\"], \"krkn-operator-acm\": [\"cluster3\"]}",

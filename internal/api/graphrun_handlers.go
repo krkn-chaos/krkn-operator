@@ -351,6 +351,7 @@ func (h *Handler) CreateGraphRun(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(nodeID, "_") {
 			continue
 		}
+		normalizeLegacyGraphScenarioNode(&node)
 		if err := node.Scenario.Validate(); err != nil {
 			writeJSONError(w, http.StatusBadRequest, ErrorResponse{
 				Error:   "bad_request",
@@ -536,6 +537,20 @@ func (h *Handler) CreateGraphRun(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusCreated, response)
+}
+
+// normalizeLegacyGraphScenarioNode translates legacy graph identity fields.
+// The legacy image is deliberately ignored so callers cannot select content.
+func normalizeLegacyGraphScenarioNode(node *krknv1alpha1.GraphScenarioNode) {
+	if node.Scenario.Name != "" || node.Name == "" {
+		return
+	}
+	private := node.RegistryName != ""
+	node.Scenario = krknv1alpha1.ScenarioReference{
+		Name:         node.Name,
+		Private:      &private,
+		RegistryName: node.RegistryName,
+	}
 }
 
 // DeleteGraphRun handles DELETE /api/v1/graphruns/:name

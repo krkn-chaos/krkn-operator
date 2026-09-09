@@ -62,12 +62,20 @@ type GraphScenarioNode struct {
 	// +optional
 	Scenario ScenarioReference `json:"scenario"`
 
-	// Legacy fields are not serialized and are never used to select a pod image.
-	Image string `json:"-"`
-
-	// Name is the name of the scenario
+	// Image is accepted for backwards compatibility but is never used to select
+	// a pod image; the operator resolves images from Scenario.
 	// +optional
-	Name string `json:"-"`
+	Image string `json:"image,omitempty"`
+
+	// Name is the legacy scenario identity field. When Scenario is absent, the
+	// API translates it into a public ScenarioReference.
+	// +optional
+	Name string `json:"name,omitempty"`
+
+	// RegistryName is the legacy private registry identity field. Image remains
+	// ignored even when this field is present.
+	// +optional
+	RegistryName string `json:"registryName,omitempty"`
 
 	// Env is a map of environment variables for the scenario
 	// +optional

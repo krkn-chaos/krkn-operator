@@ -75,6 +75,21 @@ spec:
                         type: string
                       description: Env is a map of environment variables for the scenario
                       type: object
+                    image:
+                      description: |-
+                        Image is accepted for backwards compatibility but is never used to select
+                        a pod image; the operator resolves images from Scenario.
+                      type: string
+                    name:
+                      description: |-
+                        Name is the legacy scenario identity field. When Scenario is absent, the
+                        API translates it into a public ScenarioReference.
+                      type: string
+                    registryName:
+                      description: |-
+                        RegistryName is the legacy private registry identity field. Image remains
+                        ignored even when this field is present.
+                      type: string
                     scenario:
                       description: |-
                         Scenario identifies the scenario and registry to resolve for this node.

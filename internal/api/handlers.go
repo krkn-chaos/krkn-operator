@@ -1218,6 +1218,7 @@ func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	normalizeLegacyScenarioRunRequest(&req)
 
 	// Validate required fields
 	if req.TargetRequestID == "" {
@@ -1590,6 +1591,24 @@ func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusCreated, response)
+}
+
+// normalizeLegacyScenarioRunRequest translates the pre-scenario-reference
+// identity fields without ever trusting the legacy executable image field.
+func normalizeLegacyScenarioRunRequest(req *ScenarioRunRequest) {
+	if req.Scenario.Name != "" || req.ScenarioName == "" {
+		return
+	}
+	registryName := ""
+	if req.RegistryName != nil {
+		registryName = *req.RegistryName
+	}
+	private := registryName != ""
+	req.Scenario = krknv1alpha1.ScenarioReference{
+		Name:         req.ScenarioName,
+		Private:      &private,
+		RegistryName: registryName,
+	}
 }
 
 // GetScenarioRunStatus handles GET /api/v1/scenarios/run/{scenarioRunName} endpoint

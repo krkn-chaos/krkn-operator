@@ -165,10 +165,12 @@ type ScenarioRunRequest struct {
 	// Scenario identifies the scenario and registry to resolve. The operator
 	// resolves the executable image through krknctl; callers cannot provide one.
 	Scenario krknv1alpha1.ScenarioReference `json:"scenario"`
-	// Legacy fields are retained only so old in-memory tests and response
-	// helpers can compile. They are not accepted from JSON requests.
-	ScenarioImage string `json:"-"`
-	ScenarioName  string `json:"-"`
+	// ScenarioImage is accepted for backwards compatibility but is ignored.
+	// Images are always resolved server-side from Scenario.
+	ScenarioImage string `json:"scenarioImage,omitempty"`
+	// ScenarioName is the legacy scenario identity field. It is translated to
+	// Scenario when a request does not include the new reference object.
+	ScenarioName string `json:"scenarioName,omitempty"`
 	// KubeconfigPath is the path where kubeconfig should be mounted (optional, default: /home/krkn/.kube/config)
 	KubeconfigPath string `json:"kubeconfigPath,omitempty"`
 	// Environment is a map of environment variables to pass to the container (optional)
@@ -183,9 +185,9 @@ type ScenarioRunRequest struct {
 	// credentials (ES_PASSWORD, and any ES_* vars not already in Environment) are
 	// injected server-side so the password is never transmitted by the client.
 	ElasticsearchConfigName string `json:"elasticsearchConfigName,omitempty"`
-	// RegistryName is retained only for old in-memory callers. Registry
-	// selection for this endpoint is part of Scenario.
-	RegistryName *string `json:"-"`
+	// RegistryName is retained for old in-memory callers and legacy JSON
+	// requests. New clients select registries through Scenario.
+	RegistryName *string `json:"registryName,omitempty"`
 }
 
 // TargetJobResult represents the result of creating a job for a specific target
