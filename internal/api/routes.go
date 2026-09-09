@@ -116,3 +116,11 @@ const (
 	// ElasticsearchQueryPath runs a telemetry search against a saved config
 	ElasticsearchQueryPath = APIBasePath + "/elasticsearch-query"
 )
+
+// Backup and restore endpoints
+const (
+	// BackupPath is the endpoint for downloading operator configuration backups.
+	BackupPath = APIBasePath + "/backup"
+	// RestorePath is the endpoint for uploading backups to restore and querying restore job status.
+	RestorePath = APIBasePath + "/restore"
+)

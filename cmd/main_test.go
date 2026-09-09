@@ -25,9 +25,11 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	"github.com/krkn-chaos/krkn-operator/pkg/configstore"
+	"github.com/krkn-chaos/krkn-operator/pkg/provider"
 )
 
 func TestConfigStoreInitializer_Start_Success(t *testing.T) {
@@ -80,6 +82,17 @@ func TestConfigStoreInitializer_Start_Success(t *testing.T) {
 	}
 	if value != "test_value" {
 		t.Errorf("Expected CONFIG_VALUE='test_value', got '%s'", value)
+	}
+
+	var updatedConfigMap corev1.ConfigMap
+	if err := fakeClient.Get(ctx, client.ObjectKey{
+		Name:      "krkn-operator-config",
+		Namespace: "default",
+	}, &updatedConfigMap); err != nil {
+		t.Fatalf("Failed to get migrated ConfigMap: %v", err)
+	}
+	if got := updatedConfigMap.Labels[provider.ProviderConfigLabel]; got != provider.ProviderConfigLabelValue {
+		t.Errorf("Expected provider configuration label %q, got %q", provider.ProviderConfigLabelValue, got)
 	}
 
 	// Clean up

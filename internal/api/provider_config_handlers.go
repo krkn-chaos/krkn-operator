@@ -272,6 +272,9 @@ func (h *Handler) UpdateProviderConfigValues(w http.ResponseWriter, r *http.Requ
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      configMapName,
 					Namespace: configMapNamespace,
+					Labels: map[string]string{
+						provider.ProviderConfigLabel: provider.ProviderConfigLabelValue,
+					},
 				},
 			}
 
@@ -302,6 +305,11 @@ func (h *Handler) UpdateProviderConfigValues(w http.ResponseWriter, r *http.Requ
 			return
 		}
 	} else {
+		if configMap.Labels == nil {
+			configMap.Labels = make(map[string]string)
+		}
+		configMap.Labels[provider.ProviderConfigLabel] = provider.ProviderConfigLabelValue
+
 		// Update existing ConfigMap with native key-value format
 		// Use WriteConfigMapData to merge new values into existing ConfigMap
 		if err := configmap.WriteConfigMapData(&configMap, req.Values); err != nil {

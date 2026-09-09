@@ -38,6 +38,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
+	"github.com/krkn-chaos/krkn-operator/pkg/provider"
 )
 
 // providerConfigTestScheme builds a runtime scheme registered with the types the
@@ -310,6 +311,9 @@ func TestUpdateProviderConfigValues_CreatesNativeKeyValueFormat(t *testing.T) {
 	if value != "test_value" {
 		t.Errorf("Expected value 'test_value', got '%s'", value)
 	}
+	if configMap.Labels[provider.ProviderConfigLabel] != provider.ProviderConfigLabelValue {
+		t.Errorf("Expected provider configuration label %q", provider.ProviderConfigLabel)
+	}
 }
 
 func TestUpdateProviderConfigValues_UpdatesExistingConfigMap(t *testing.T) {
@@ -394,6 +398,9 @@ func TestUpdateProviderConfigValues_UpdatesExistingConfigMap(t *testing.T) {
 	}
 	if newValue != "test_value" {
 		t.Errorf("Expected value 'test_value', got '%s'", newValue)
+	}
+	if configMap.Labels[provider.ProviderConfigLabel] != provider.ProviderConfigLabelValue {
+		t.Errorf("Expected provider configuration label %q", provider.ProviderConfigLabel)
 	}
 
 	// Verify existing key is preserved (WriteConfigMapData does merge)
