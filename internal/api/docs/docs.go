@@ -1834,6 +1834,10 @@ const docTemplate = `{
         "github_com_krkn-chaos_krkn-operator_api_v1alpha1.ClusterTarget": {
             "type": "object",
             "properties": {
+                "checked-at": {
+                    "description": "CheckedAt is the time at which the liveness check was performed.\n+optional",
+                    "type": "string"
+                },
                 "cluster-api-url": {
                     "description": "ClusterAPIURL is the API server URL of the managed cluster",
                     "type": "string"
@@ -1841,6 +1845,10 @@ const docTemplate = `{
                 "cluster-name": {
                     "description": "ClusterName is the name of the managed cluster",
                     "type": "string"
+                },
+                "online": {
+                    "description": "Online indicates whether the cluster API responded to the liveness check\nperformed while building this target request. A nil value means that the\nprovider did not perform a liveness check.\n+optional",
+                    "type": "boolean"
                 }
             }
         },

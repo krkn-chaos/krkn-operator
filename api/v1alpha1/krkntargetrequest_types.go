@@ -32,6 +32,14 @@ type ClusterTarget struct {
 	ClusterName string `json:"cluster-name"`
 	// ClusterAPIURL is the API server URL of the managed cluster
 	ClusterAPIURL string `json:"cluster-api-url"`
+	// Online indicates whether the cluster API responded to the liveness check
+	// performed while building this target request. A nil value means that the
+	// provider did not perform a liveness check.
+	// +optional
+	Online *bool `json:"online,omitempty"`
+	// CheckedAt is the time at which the liveness check was performed.
+	// +optional
+	CheckedAt *metav1.Time `json:"checked-at,omitempty"`
 }
 
 // KrknTargetRequestSpec defines the desired state of KrknTargetRequest.
