@@ -58,6 +58,8 @@ type GraphScenarioNode struct {
 	Comment string `json:"_comment,omitempty"`
 
 	// Scenario identifies the scenario and registry to resolve for this node.
+	// Metadata-only nodes (whose IDs start with _) may omit this field.
+	// +optional
 	Scenario ScenarioReference `json:"scenario"`
 
 	// Legacy fields are not serialized and are never used to select a pod image.
@@ -258,6 +260,10 @@ type KrknGraphRunStatus struct {
 	// Phase is the overall phase of the graph run
 	// +kubebuilder:validation:Enum=Pending;Running;Completed;Failed;PartiallyFailed
 	Phase string `json:"phase,omitempty"`
+
+	// Message contains human-readable context for the current phase.
+	// +optional
+	Message string `json:"message,omitempty"`
 
 	// StartTime is when the graph run started
 	// +optional

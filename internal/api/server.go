@@ -283,6 +283,10 @@ func NewServer(port int, client client.Client, clientset kubernetes.Interface, n
 	mux.Handle(ProvidersPath, authMw.RequireAuth(http.HandlerFunc(handler.ProvidersRouter)))
 	mux.Handle(ProvidersPath+"/", authMw.RequireAuth(http.HandlerFunc(handler.ProvidersRouter)))
 
+	// Image signature verification settings: GET for all authenticated users,
+	// PATCH for administrators only.
+	mux.Handle(SignatureVerificationSettingsPath, authMw.RequireAuth(http.HandlerFunc(handler.SignatureVerificationSettingsHandler)))
+
 	// Target CRUD endpoints - GET: user and admin, POST/PUT/DELETE: admin only
 	// Note: handler.TargetsCRUDRouter internally handles method-based authorization
 	mux.Handle(OperatorTargetsPath, authMw.RequireAuth(http.HandlerFunc(handler.TargetsCRUDRouter)))

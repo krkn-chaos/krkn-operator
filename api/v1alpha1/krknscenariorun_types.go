@@ -20,10 +20,13 @@ package v1alpha1
 
 import (
 	"fmt"
+	"regexp"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 )
+
+var scenarioNamePattern = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$`)
 
 // ClusterResiliencyScore represents the resiliency score for a specific cluster
 type ClusterResiliencyScore struct {
@@ -103,9 +106,18 @@ type ScenarioReference struct {
 }
 
 // Validate checks that a scenario reference is complete and unambiguous.
+// It rejects empty or malformed tag names, missing Private values, private
+// scenarios without RegistryName, and public scenarios with RegistryName.
+// Names must be valid container tags: they may contain letters, digits,
+// underscores, dots, and hyphens, must start with a letter, digit, or
+// underscore, and must be at most 128 characters. Registry paths, digests,
+// whitespace, and additional tag separators are not accepted.
 func (r ScenarioReference) Validate() error {
 	if r.Name == "" {
 		return fmt.Errorf("scenario.name is required")
+	}
+	if !scenarioNamePattern.MatchString(r.Name) {
+		return fmt.Errorf("scenario.name must be a valid container tag")
 	}
 	if r.Private == nil {
 		return fmt.Errorf("scenario.private is required")
@@ -191,6 +203,10 @@ type KrknScenarioRunStatus struct {
 	// Phase is the overall phase of the scenario run
 	// +kubebuilder:validation:Enum=Pending;Running;Succeeded;PartiallyFailed;Failed
 	Phase string `json:"phase,omitempty"`
+
+	// Message contains human-readable context for the current phase.
+	// +optional
+	Message string `json:"message,omitempty"`
 
 	// TotalTargets is the total number of target clusters
 	TotalTargets int `json:"totalTargets,omitempty"`

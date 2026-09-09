@@ -29,7 +29,12 @@ definitions:
           +optional
         type: object
       scenario:
-        $ref: '#/definitions/github_com_krkn-chaos_krkn-operator_api_v1alpha1.ScenarioReference'
+        allOf:
+        - $ref: '#/definitions/github_com_krkn-chaos_krkn-operator_api_v1alpha1.ScenarioReference'
+        description: |-
+          Scenario identifies the scenario and registry to resolve for this node.
+          Metadata-only nodes (whose IDs start with _) may omit this field.
+          +optional
       volumes:
         additionalProperties:
           type: string
@@ -44,16 +49,14 @@ definitions:
         description: Name is the scenario tag/name to resolve.
         type: string
       private:
-        description: Private selects a saved private registry when true, or krknctl's
-          public Quay provider when false.
+        description: |-
+          Private selects a saved private registry when true, or krknctl's public
+          Quay provider when false. A pointer makes the field mandatory on input.
         type: boolean
       registryName:
         description: RegistryName identifies the saved private registry when Private
           is true.
         type: string
-    required:
-    - name
-    - private
     type: object
   github_com_krkn-chaos_krkn-operator_pkg_files.AvailableFilesResponse:
     properties:
@@ -369,6 +372,26 @@ definitions:
         description: Name is the file name
         type: string
     type: object
+  internal_api.GraphClusterScoreResponse:
+    properties:
+      baseline:
+        type: number
+      calculated:
+        type: number
+      clusterName:
+        type: string
+      message:
+        type: string
+      nodeContributions:
+        additionalProperties:
+          format: float64
+          type: number
+        type: object
+      providerName:
+        type: string
+      status:
+        type: string
+    type: object
   internal_api.GraphRunCreateRequest:
     properties:
       graph:
@@ -399,6 +422,35 @@ definitions:
         $ref: '#/definitions/internal_api.GraphRunSpecResponse'
       status:
         $ref: '#/definitions/internal_api.GraphRunStatusResponse'
+    type: object
+  internal_api.GraphRunListItem:
+    properties:
+      completionTime:
+        type: string
+      creationTimestamp:
+        type: string
+      name:
+        type: string
+      namespace:
+        type: string
+      ownerUserId:
+        type: string
+      phase:
+        type: string
+      resiliencyScoreBaseline:
+        type: number
+      resiliencyScoreEnabled:
+        type: boolean
+      resiliencyScores:
+        items:
+          $ref: '#/definitions/internal_api.GraphClusterScoreResponse'
+        type: array
+      startTime:
+        type: string
+      summary:
+        $ref: '#/definitions/internal_api.GraphRunSummaryResponse'
+      targetRequestId:
+        type: string
     type: object
   internal_api.GraphRunSpecResponse:
     properties:
@@ -433,8 +485,10 @@ definitions:
         type: array
       phase:
         type: string
-      resiliencyScore:
-        $ref: '#/definitions/internal_api.ResiliencyScoreResponse'
+      resiliencyScores:
+        items:
+          $ref: '#/definitions/internal_api.GraphClusterScoreResponse'
+        type: array
       resolvedLevels:
         items:
           items:
@@ -459,11 +513,54 @@ definitions:
       totalNodes:
         type: integer
     type: object
+  internal_api.InputFieldResponse:
+    properties:
+      allowed_values:
+        type: string
+      default:
+        type: string
+      description:
+        type: string
+      group:
+        type: string
+      mutually_excludes:
+        type: string
+      name:
+        type: string
+      required:
+        type: boolean
+      requires:
+        type: string
+      secret:
+        type: boolean
+      separator:
+        type: string
+      short_description:
+        type: string
+      type:
+        description: String representation instead of int64 enum
+        type: string
+      validation_message:
+        type: string
+      validator:
+        type: string
+      variable:
+        type: string
+    type: object
   internal_api.IsRegisteredResponse:
     properties:
       registered:
         description: Registered indicates if at least one admin user exists
         type: boolean
+    type: object
+  internal_api.JobStatsSummary:
+    properties:
+      failedJobs:
+        type: integer
+      succeededJobs:
+        type: integer
+      totalJobs:
+        type: integer
     type: object
   internal_api.LoginRequest:
     properties:
@@ -522,6 +619,21 @@ definitions:
       startTime:
         type: string
     type: object
+  internal_api.PaginationMeta:
+    properties:
+      limit:
+        description: Limit is the number of items per page, 0 if unpaginated
+        type: integer
+      page:
+        description: Page is the current page number (1-based), 0 if unpaginated
+        type: integer
+      total:
+        description: Total is the total number of items matching the query
+        type: integer
+      totalPages:
+        description: TotalPages is the total number of pages
+        type: integer
+    type: object
   internal_api.RegisterRequest:
     properties:
       name:
@@ -555,19 +667,101 @@ definitions:
         description: UserID is the registered user's email
         type: string
     type: object
-  internal_api.ResiliencyScoreResponse:
+  internal_api.ScenarioDetailResponse:
     properties:
-      baseline:
-        type: number
-      calculated:
-        type: number
-      message:
+      description:
         type: string
-      status:
+      digest:
         type: string
+      fields:
+        items:
+          $ref: '#/definitions/internal_api.InputFieldResponse'
+        type: array
+      last_modified:
+        type: string
+      name:
+        type: string
+      signature_status:
+        type: string
+      size:
+        type: integer
+      title:
+        type: string
+    type: object
+  internal_api.ScenarioRunListItem:
+    properties:
+      createdAt:
+        description: CreatedAt is the creation timestamp
+        type: string
+      customRunName:
+        description: CustomRunName is the user-provided label for this run
+        type: string
+      failedJobs:
+        description: FailedJobs is the number of failed jobs
+        type: integer
+      graphNodeId:
+        description: GraphNodeID is the node ID in the graph (if this scenario run
+          is part of a graph run)
+        type: string
+      graphRunName:
+        description: GraphRunName is the name of the parent KrknGraphRun (if this
+          scenario run is part of a graph run)
+        type: string
+      ownerUserId:
+        description: OwnerUserID is the email address of the user who created this
+          scenario run
+        type: string
+      phase:
+        description: Phase is the overall phase of the scenario run
+        type: string
+      resiliencyScore:
+        description: ResiliencyScore is the individual resiliency score for this scenario
+          run node
+        type: number
+      resiliencyScores:
+        description: ResiliencyScores contains per-cluster resiliency scores
+        items:
+          $ref: '#/definitions/internal_api.ClusterResiliencyScoreResponse'
+        type: array
+      runningJobs:
+        description: RunningJobs is the number of currently running jobs
+        type: integer
+      scenarioName:
+        description: ScenarioName is the name of the scenario being executed
+        type: string
+      scenarioRunName:
+        description: ScenarioRunName is the name of the KrknScenarioRun CR
+        type: string
+      successfulJobs:
+        description: SuccessfulJobs is the number of successfully completed jobs
+        type: integer
+      totalTargets:
+        description: TotalTargets is the total number of target clusters
+        type: integer
+    type: object
+  internal_api.ScenarioRunListResponse:
+    properties:
+      pagination:
+        allOf:
+        - $ref: '#/definitions/internal_api.PaginationMeta'
+        description: Pagination contains pagination metadata
+      scenarioRuns:
+        description: ScenarioRuns is the list of scenario runs
+        items:
+          $ref: '#/definitions/internal_api.ScenarioRunListItem'
+        type: array
     type: object
   internal_api.ScenarioRunRequest:
     properties:
+      customRunName:
+        description: CustomRunName is a user-provided label for the run (optional)
+        type: string
+      elasticsearchConfigName:
+        description: |-
+          ElasticsearchConfigName, if set, names a saved Elasticsearch config Secret whose
+          credentials (ES_PASSWORD, and any ES_* vars not already in Environment) are
+          injected server-side so the password is never transmitted by the client.
+        type: string
       environment:
         additionalProperties:
           type: string
@@ -591,7 +785,11 @@ definitions:
           (optional, default: /home/krkn/.kube/config)'
         type: string
       scenario:
-        $ref: '#/definitions/github_com_krkn-chaos_krkn-operator_api_v1alpha1.ScenarioReference'
+        allOf:
+        - $ref: '#/definitions/github_com_krkn-chaos_krkn-operator_api_v1alpha1.ScenarioReference'
+        description: |-
+          Scenario identifies the scenario and registry to resolve. The operator
+          resolves the executable image through krknctl; callers cannot provide one.
       targetClusters:
         additionalProperties:
           items:
@@ -605,6 +803,79 @@ definitions:
         description: TargetRequestID is the UUID of the KrknTargetRequest (required)
         type: string
     type: object
+  internal_api.ScenarioTag:
+    properties:
+      digest:
+        description: Digest is the image digest (optional)
+        type: string
+      lastModified:
+        description: LastModified is when the scenario was last updated (optional)
+        type: string
+      name:
+        description: Name is the scenario tag/version name
+        type: string
+      signature_status:
+        description: 'SignatureStatus is the image signature state: signed, unsigned,
+          or unknown.'
+        type: string
+      size:
+        description: Size is the image size in bytes (optional)
+        type: integer
+    type: object
+  internal_api.ScenariosResponse:
+    properties:
+      scenarios:
+        description: Scenarios contains the list of available scenario tags
+        items:
+          $ref: '#/definitions/internal_api.ScenarioTag'
+        type: array
+    type: object
+  internal_api.SignatureVerificationSettingsRequest:
+    properties:
+      enabled:
+        type: boolean
+    type: object
+  internal_api.SignatureVerificationSettingsResponse:
+    properties:
+      enabled:
+        type: boolean
+    type: object
+  internal_api.UnifiedJobItem:
+    properties:
+      createdAt:
+        description: CreatedAt is the creation timestamp (used for sorting)
+        type: string
+      graphRun:
+        allOf:
+        - $ref: '#/definitions/internal_api.GraphRunListItem'
+        description: GraphRun contains the graph run data (when Type == "graphRun")
+      name:
+        description: Name is the resource name
+        type: string
+      scenarioRun:
+        allOf:
+        - $ref: '#/definitions/internal_api.ScenarioRunListItem'
+        description: ScenarioRun contains the scenario run data (when Type == "scenarioRun")
+      type:
+        description: 'Type is the resource type: "scenarioRun" or "graphRun"'
+        type: string
+    type: object
+  internal_api.UnifiedJobsResponse:
+    properties:
+      jobs:
+        description: Jobs is the list of unified job items
+        items:
+          $ref: '#/definitions/internal_api.UnifiedJobItem'
+        type: array
+      pagination:
+        allOf:
+        - $ref: '#/definitions/internal_api.PaginationMeta'
+        description: Pagination contains pagination metadata
+      stats:
+        allOf:
+        - $ref: '#/definitions/internal_api.JobStatsSummary'
+        description: Stats contains aggregate job statistics across all runs
+    type: object
   internal_api_v2_websocket.ErrorMessage:
     properties:
       error:
@@ -614,16 +885,45 @@ definitions:
     type: object
   internal_api_v2_websocket.ServerMessage:
     properties:
-      data: {}
+      data:
+        description: payload
       event:
         description: '"updated", "deleted", "snapshot"'
         type: string
       id:
-        description: resource ID (empty for dashboard)
+        description: resource ID (empty for dashboard/jobs)
         type: string
+      pagination:
+        allOf:
+        - $ref: '#/definitions/internal_api_v2_websocket.WSPaginationMeta'
+        description: pagination metadata (for "jobs" resource)
       resource:
-        description: '"run", "graphrun", "dashboard"'
+        description: '"run", "graphrun", "dashboard", "jobs"'
         type: string
+      stats:
+        allOf:
+        - $ref: '#/definitions/internal_api_v2_websocket.WSJobStatsSummary'
+        description: aggregate job stats (for "jobs" resource)
+    type: object
+  internal_api_v2_websocket.WSJobStatsSummary:
+    properties:
+      failedJobs:
+        type: integer
+      succeededJobs:
+        type: integer
+      totalJobs:
+        type: integer
+    type: object
+  internal_api_v2_websocket.WSPaginationMeta:
+    properties:
+      limit:
+        type: integer
+      page:
+        type: integer
+      total:
+        type: integer
+      totalPages:
+        type: integer
     type: object
 host: localhost:8080
 info:
@@ -943,6 +1243,47 @@ paths:
       summary: Create graph run
       tags:
       - graphruns
+  /graphruns/{graphRunName}/config:
+    get:
+      description: Retrieve graph run configuration directly by KrknGraphRun CR name
+      parameters:
+      - description: KrknGraphRun CR name
+        in: path
+        name: graphRunName
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Graph run configuration
+          schema:
+            $ref: '#/definitions/internal_api.GraphRunCreateRequest'
+        "400":
+          description: Missing graph run name
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "401":
+          description: User authentication required
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "403":
+          description: Insufficient permissions
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "404":
+          description: GraphRun not found
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get graph run configuration
+      tags:
+      - graphruns
   /graphruns/{name}:
     delete:
       description: Delete a graph run and all associated scenario runs (cascade delete
@@ -1076,6 +1417,77 @@ paths:
       summary: Get cluster nodes
       tags:
       - clusters
+  /operator/signature-verification:
+    get:
+      consumes:
+      - application/json
+      description: GET reports whether image signature verification is enabled. PATCH
+        updates the setting and requires an administrator.
+      parameters:
+      - description: Signature verification setting
+        in: body
+        name: request
+        schema:
+          $ref: '#/definitions/internal_api.SignatureVerificationSettingsRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_api.SignatureVerificationSettingsResponse'
+        "400":
+          description: Invalid request
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "403":
+          description: Admin privileges required
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get or update image signature verification
+      tags:
+      - operator
+    patch:
+      consumes:
+      - application/json
+      description: GET reports whether image signature verification is enabled. PATCH
+        updates the setting and requires an administrator.
+      parameters:
+      - description: Signature verification setting
+        in: body
+        name: request
+        schema:
+          $ref: '#/definitions/internal_api.SignatureVerificationSettingsRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_api.SignatureVerificationSettingsResponse'
+        "400":
+          description: Invalid request
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "403":
+          description: Admin privileges required
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get or update image signature verification
+      tags:
+      - operator
   /scenarios:
     post:
       consumes:
@@ -1094,7 +1506,7 @@ paths:
         "200":
           description: List of available scenarios
           schema:
-            type: object
+            $ref: '#/definitions/internal_api.ScenariosResponse'
         "400":
           description: Invalid registry configuration
           schema:
@@ -1131,7 +1543,7 @@ paths:
         "200":
           description: Scenario details with input fields
           schema:
-            type: object
+            $ref: '#/definitions/internal_api.ScenarioDetailResponse'
         "400":
           description: Invalid scenario name or registry
           schema:
@@ -1202,15 +1614,22 @@ paths:
         in: query
         name: scenarioName
         type: string
+      - description: Page number (1-based). Omit for all results.
+        in: query
+        name: page
+        type: integer
+      - description: Items per page (defaults to jobs.defaultPageSize config, fallback
+          20; max 500). Only used when page is set.
+        in: query
+        name: limit
+        type: integer
       produces:
       - application/json
       responses:
         "200":
-          description: List of scenario runs
+          description: List of scenario runs with pagination
           schema:
-            items:
-              type: object
-            type: array
+            $ref: '#/definitions/internal_api.ScenarioRunListResponse'
         "500":
           description: Internal server error
           schema:
@@ -1332,6 +1751,48 @@ paths:
       security:
       - BearerAuth: []
       summary: Get scenario run status
+      tags:
+      - scenarios
+  /scenarios/run/{scenarioRunName}/config:
+    get:
+      description: Retrieve scenario configuration directly by KrknScenarioRun CR
+        name
+      parameters:
+      - description: KrknScenarioRun CR name
+        in: path
+        name: scenarioRunName
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Scenario configuration
+          schema:
+            $ref: '#/definitions/internal_api.ScenarioRunRequest'
+        "400":
+          description: Missing scenario run name
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "401":
+          description: User authentication required
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "403":
+          description: Insufficient permissions
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "404":
+          description: ScenarioRun not found
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get scenario run configuration
       tags:
       - scenarios
   /scenarios/run/replay/{jobId}:
@@ -1465,6 +1926,35 @@ paths:
       summary: Get target by UUID
       tags:
       - targets
+  /v2/jobs:
+    get:
+      description: Returns a merged list of standalone ScenarioRuns and GraphRuns,
+        sorted by creation time descending
+      parameters:
+      - description: Page number (1-based). Omit for all results.
+        in: query
+        name: page
+        type: integer
+      - description: Items per page. Defaults to jobs.defaultPageSize from ConfigMap.
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Paginated list of jobs
+          schema:
+            $ref: '#/definitions/internal_api.UnifiedJobsResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: List all jobs (unified view)
+      tags:
+      - jobs
   /v2/ws/dashboard/active-runs:
     get:
       consumes:

@@ -162,11 +162,6 @@ const docTemplate = `{
         },
         "/clusters": {
             "get": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
                 "description": "Get the list of target clusters from a KrknTargetRequest by ID",
                 "produces": [
                     "application/json"
@@ -209,16 +204,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                }
-            }
-        },
-        "/files": {
-            "get": {
+                },
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ],
+                ]
+            }
+        },
+        "/files": {
+            "get": {
                 "description": "Get list of all file ConfigMaps (admin only). Supports filtering by filePurpose query parameter.",
                 "produces": [
                     "application/json"
@@ -260,14 +255,14 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                }
-            },
-            "post": {
+                },
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ],
+                ]
+            },
+            "post": {
                 "description": "Create a new file ConfigMap. Users can create files for their own groups or public files. Admins can create files for any group. Cannot create workflow-template files (use POST /api/v1/workflows instead).",
                 "consumes": [
                     "application/json"
@@ -321,16 +316,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                }
-            }
-        },
-        "/files/available": {
-            "get": {
+                },
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ],
+                ]
+            }
+        },
+        "/files/available": {
+            "get": {
                 "description": "Get files accessible to current user (own files, group files, public files). Supports filtering by filePurpose query parameter.",
                 "produces": [
                     "application/json"
@@ -366,16 +361,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                }
-            }
-        },
-        "/graphruns": {
-            "get": {
+                },
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ],
+                ]
+            }
+        },
+        "/graphruns": {
+            "get": {
                 "description": "Get list of all graph runs. Regular users see only their own, admins see all.",
                 "produces": [
                     "application/json"
@@ -400,14 +395,14 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                }
-            },
-            "post": {
+                },
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ],
+                ]
+            },
+            "post": {
                 "description": "Create a new graph run to execute a chaos scenario graph",
                 "consumes": [
                     "application/json"
@@ -461,16 +456,80 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                }
-            }
-        },
-        "/graphruns/{name}": {
-            "get": {
+                },
                 "security": [
                     {
                         "BearerAuth": []
                     }
+                ]
+            }
+        },
+        "/graphruns/{graphRunName}/config": {
+            "get": {
+                "description": "Retrieve graph run configuration directly by KrknGraphRun CR name",
+                "produces": [
+                    "application/json"
                 ],
+                "tags": [
+                    "graphruns"
+                ],
+                "summary": "Get graph run configuration",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "KrknGraphRun CR name",
+                        "name": "graphRunName",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Graph run configuration",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.GraphRunCreateRequest"
+                        }
+                    },
+                    "400": {
+                        "description": "Missing graph run name",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "User authentication required",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "GraphRun not found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/graphruns/{name}": {
+            "get": {
                 "description": "Get detailed status and execution information for a specific graph run by name",
                 "produces": [
                     "application/json"
@@ -519,14 +578,14 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                }
-            },
-            "delete": {
+                },
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ],
+                ]
+            },
+            "delete": {
                 "description": "Delete a graph run and all associated scenario runs (cascade delete via owner references)",
                 "produces": [
                     "application/json"
@@ -575,16 +634,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                }
-            }
-        },
-        "/health": {
-            "get": {
+                },
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ],
+                ]
+            }
+        },
+        "/health": {
+            "get": {
                 "description": "Check if the operator API is healthy and responding",
                 "produces": [
                     "application/json"
@@ -603,16 +662,16 @@ const docTemplate = `{
                             }
                         }
                     }
-                }
-            }
-        },
-        "/nodes": {
-            "get": {
+                },
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ],
+                ]
+            }
+        },
+        "/nodes": {
+            "get": {
                 "description": "Get list of nodes from a cluster target (supports both KrknOperatorTarget UUID and legacy KrknTargetRequest ID)",
                 "produces": [
                     "application/json"
@@ -666,16 +725,126 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                }
-            }
-        },
-        "/scenarios": {
-            "post": {
+                },
                 "security": [
                     {
                         "BearerAuth": []
                     }
+                ]
+            }
+        },
+        "/operator/signature-verification": {
+            "get": {
+                "description": "GET reports whether image signature verification is enabled. PATCH updates the setting and requires an administrator.",
+                "consumes": [
+                    "application/json"
                 ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "operator"
+                ],
+                "summary": "Get or update image signature verification",
+                "parameters": [
+                    {
+                        "description": "Signature verification setting",
+                        "name": "request",
+                        "in": "body",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.SignatureVerificationSettingsRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.SignatureVerificationSettingsResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Admin privileges required",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            },
+            "patch": {
+                "description": "GET reports whether image signature verification is enabled. PATCH updates the setting and requires an administrator.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "operator"
+                ],
+                "summary": "Get or update image signature verification",
+                "parameters": [
+                    {
+                        "description": "Signature verification setting",
+                        "name": "request",
+                        "in": "body",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.SignatureVerificationSettingsRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.SignatureVerificationSettingsResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Admin privileges required",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/scenarios": {
+            "post": {
                 "description": "Get list of available chaos scenarios from container registry (Quay.io or private registry)",
                 "consumes": [
                     "application/json"
@@ -701,7 +870,7 @@ const docTemplate = `{
                     "200": {
                         "description": "List of available scenarios",
                         "schema": {
-                            "type": "object"
+                            "$ref": "#/definitions/internal_api.ScenariosResponse"
                         }
                     },
                     "400": {
@@ -716,16 +885,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                }
-            }
-        },
-        "/scenarios/detail/{scenario_name}": {
-            "post": {
+                },
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ],
+                ]
+            }
+        },
+        "/scenarios/detail/{scenario_name}": {
+            "post": {
                 "description": "Get detailed information about a specific chaos scenario including configuration fields",
                 "consumes": [
                     "application/json"
@@ -758,7 +927,7 @@ const docTemplate = `{
                     "200": {
                         "description": "Scenario details with input fields",
                         "schema": {
-                            "type": "object"
+                            "$ref": "#/definitions/internal_api.ScenarioDetailResponse"
                         }
                     },
                     "400": {
@@ -779,16 +948,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                }
-            }
-        },
-        "/scenarios/globals/{scenario_name}": {
-            "post": {
+                },
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ],
+                ]
+            }
+        },
+        "/scenarios/globals/{scenario_name}": {
+            "post": {
                 "description": "Get global environment configuration fields for a specific scenario",
                 "consumes": [
                     "application/json"
@@ -842,16 +1011,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                }
-            }
-        },
-        "/scenarios/run": {
-            "get": {
+                },
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ],
+                ]
+            }
+        },
+        "/scenarios/run": {
+            "get": {
                 "description": "Get list of all scenario runs with optional filtering by phase or scenario name",
                 "produces": [
                     "application/json"
@@ -872,16 +1041,25 @@ const docTemplate = `{
                         "description": "Filter by scenario name",
                         "name": "scenarioName",
                         "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Page number (1-based). Omit for all results.",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Items per page (defaults to jobs.defaultPageSize config, fallback 20; max 500). Only used when page is set.",
+                        "name": "limit",
+                        "in": "query"
                     }
                 ],
                 "responses": {
                     "200": {
-                        "description": "List of scenario runs",
+                        "description": "List of scenario runs with pagination",
                         "schema": {
-                            "type": "array",
-                            "items": {
-                                "type": "object"
-                            }
+                            "$ref": "#/definitions/internal_api.ScenarioRunListResponse"
                         }
                     },
                     "500": {
@@ -890,14 +1068,14 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                }
-            },
-            "post": {
+                },
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ],
+                ]
+            },
+            "post": {
                 "description": "Execute a chaos scenario on target clusters with specified configuration",
                 "consumes": [
                     "application/json"
@@ -951,16 +1129,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                }
-            }
-        },
-        "/scenarios/run/replay/{jobId}": {
-            "get": {
+                },
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ],
+                ]
+            }
+        },
+        "/scenarios/run/replay/{jobId}": {
+            "get": {
                 "description": "Retrieve scenario configuration from a completed job and return payload ready for re-execution via POST /scenarios/run",
                 "produces": [
                     "application/json"
@@ -1009,16 +1187,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                }
-            }
-        },
-        "/scenarios/run/{jobID}": {
-            "delete": {
+                },
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ],
+                ]
+            }
+        },
+        "/scenarios/run/{jobID}": {
+            "delete": {
                 "description": "Stop and delete a running or completed scenario run",
                 "produces": [
                     "application/json"
@@ -1067,16 +1245,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                }
-            }
-        },
-        "/scenarios/run/{scenarioRunName}": {
-            "get": {
+                },
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ],
+                ]
+            }
+        },
+        "/scenarios/run/{scenarioRunName}": {
+            "get": {
                 "description": "Get current execution status and metrics for a running or completed scenario",
                 "produces": [
                     "application/json"
@@ -1125,16 +1303,80 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                }
-            }
-        },
-        "/targets": {
-            "post": {
+                },
                 "security": [
                     {
                         "BearerAuth": []
                     }
+                ]
+            }
+        },
+        "/scenarios/run/{scenarioRunName}/config": {
+            "get": {
+                "description": "Retrieve scenario configuration directly by KrknScenarioRun CR name",
+                "produces": [
+                    "application/json"
                 ],
+                "tags": [
+                    "scenarios"
+                ],
+                "summary": "Get scenario run configuration",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "KrknScenarioRun CR name",
+                        "name": "scenarioRunName",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Scenario configuration",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ScenarioRunRequest"
+                        }
+                    },
+                    "400": {
+                        "description": "Missing scenario run name",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "User authentication required",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "ScenarioRun not found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/targets": {
+            "post": {
                 "description": "Create a KrknTargetRequest to trigger cluster discovery by krkn-operator-acm (legacy API)",
                 "consumes": [
                     "application/json"
@@ -1159,16 +1401,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                }
-            }
-        },
-        "/targets/{uuid}": {
-            "get": {
+                },
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ],
+                ]
+            }
+        },
+        "/targets/{uuid}": {
+            "get": {
                 "description": "Get target request status and cluster information by UUID (legacy KrknTargetRequest API)",
                 "produces": [
                     "application/json"
@@ -1211,14 +1453,14 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                }
-            },
-            "delete": {
+                },
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ],
+                ]
+            },
+            "delete": {
                 "description": "Delete a KrknTargetRequest resource by UUID. Admins can delete any, users can delete their own.",
                 "produces": [
                     "application/json"
@@ -1267,16 +1509,61 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/v2/jobs": {
+            "get": {
+                "description": "Returns a merged list of standalone ScenarioRuns and GraphRuns, sorted by creation time descending",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "jobs"
+                ],
+                "summary": "List all jobs (unified view)",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Page number (1-based). Omit for all results.",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Items per page. Defaults to jobs.defaultPageSize from ConfigMap.",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Paginated list of jobs",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.UnifiedJobsResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
             }
         },
         "/v2/ws/dashboard/active-runs": {
             "get": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
                 "description": "Multiplexed WebSocket for real-time updates across all resources\n\n**Authentication:** JWT token via Sec-WebSocket-Protocol subprotocol\n- JavaScript: ` + "`" + `new WebSocket(url, 'access_token.' + jwtToken)` + "`" + `\n- Header: ` + "`" + `Sec-WebSocket-Protocol: access_token.\u003cjwt_token\u003e` + "`" + `\n\n**Client → Server Messages (subscribe/unsubscribe):**\n` + "`" + `` + "`" + `` + "`" + `json\n{\n\"action\": \"subscribe\",\n\"resource\": \"run\",\n\"ids\": [\"run-abc123\", \"run-xyz789\"]\n}\n` + "`" + `` + "`" + `` + "`" + `\n\n**Resource types:** ` + "`" + `run` + "`" + `, ` + "`" + `graphrun` + "`" + `, ` + "`" + `dashboard` + "`" + `\n\n**Server → Client Messages (updates):**\n` + "`" + `` + "`" + `` + "`" + `json\n{\n\"resource\": \"run\",\n\"id\": \"run-abc123\",\n\"event\": \"updated\",\n\"data\": { ... }\n}\n` + "`" + `` + "`" + `` + "`" + `\n\n**Available endpoints:**\n- ` + "`" + `/api/v2/ws/runs` + "`" + ` - Subscribe to scenario run updates\n- ` + "`" + `/api/v2/ws/graphruns` + "`" + ` - Subscribe to graph run updates\n- ` + "`" + `/api/v2/ws/dashboard/active-runs` + "`" + ` - Subscribe to dashboard updates",
                 "consumes": [
                     "application/json"
@@ -1307,16 +1594,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api_v2_websocket.ErrorMessage"
                         }
                     }
-                }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
             }
         },
         "/v2/ws/graphruns": {
             "get": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
                 "description": "Multiplexed WebSocket for real-time updates across all resources\n\n**Authentication:** JWT token via Sec-WebSocket-Protocol subprotocol\n- JavaScript: ` + "`" + `new WebSocket(url, 'access_token.' + jwtToken)` + "`" + `\n- Header: ` + "`" + `Sec-WebSocket-Protocol: access_token.\u003cjwt_token\u003e` + "`" + `\n\n**Client → Server Messages (subscribe/unsubscribe):**\n` + "`" + `` + "`" + `` + "`" + `json\n{\n\"action\": \"subscribe\",\n\"resource\": \"run\",\n\"ids\": [\"run-abc123\", \"run-xyz789\"]\n}\n` + "`" + `` + "`" + `` + "`" + `\n\n**Resource types:** ` + "`" + `run` + "`" + `, ` + "`" + `graphrun` + "`" + `, ` + "`" + `dashboard` + "`" + `\n\n**Server → Client Messages (updates):**\n` + "`" + `` + "`" + `` + "`" + `json\n{\n\"resource\": \"run\",\n\"id\": \"run-abc123\",\n\"event\": \"updated\",\n\"data\": { ... }\n}\n` + "`" + `` + "`" + `` + "`" + `\n\n**Available endpoints:**\n- ` + "`" + `/api/v2/ws/runs` + "`" + ` - Subscribe to scenario run updates\n- ` + "`" + `/api/v2/ws/graphruns` + "`" + ` - Subscribe to graph run updates\n- ` + "`" + `/api/v2/ws/dashboard/active-runs` + "`" + ` - Subscribe to dashboard updates",
                 "consumes": [
                     "application/json"
@@ -1347,16 +1634,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api_v2_websocket.ErrorMessage"
                         }
                     }
-                }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
             }
         },
         "/v2/ws/runs": {
             "get": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
                 "description": "Multiplexed WebSocket for real-time updates across all resources\n\n**Authentication:** JWT token via Sec-WebSocket-Protocol subprotocol\n- JavaScript: ` + "`" + `new WebSocket(url, 'access_token.' + jwtToken)` + "`" + `\n- Header: ` + "`" + `Sec-WebSocket-Protocol: access_token.\u003cjwt_token\u003e` + "`" + `\n\n**Client → Server Messages (subscribe/unsubscribe):**\n` + "`" + `` + "`" + `` + "`" + `json\n{\n\"action\": \"subscribe\",\n\"resource\": \"run\",\n\"ids\": [\"run-abc123\", \"run-xyz789\"]\n}\n` + "`" + `` + "`" + `` + "`" + `\n\n**Resource types:** ` + "`" + `run` + "`" + `, ` + "`" + `graphrun` + "`" + `, ` + "`" + `dashboard` + "`" + `\n\n**Server → Client Messages (updates):**\n` + "`" + `` + "`" + `` + "`" + `json\n{\n\"resource\": \"run\",\n\"id\": \"run-abc123\",\n\"event\": \"updated\",\n\"data\": { ... }\n}\n` + "`" + `` + "`" + `` + "`" + `\n\n**Available endpoints:**\n- ` + "`" + `/api/v2/ws/runs` + "`" + ` - Subscribe to scenario run updates\n- ` + "`" + `/api/v2/ws/graphruns` + "`" + ` - Subscribe to graph run updates\n- ` + "`" + `/api/v2/ws/dashboard/active-runs` + "`" + ` - Subscribe to dashboard updates",
                 "consumes": [
                     "application/json"
@@ -1387,16 +1674,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api_v2_websocket.ErrorMessage"
                         }
                     }
-                }
-            }
-        },
-        "/workflows": {
-            "get": {
+                },
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ],
+                ]
+            }
+        },
+        "/workflows": {
+            "get": {
                 "description": "Get list of all workflow templates in the system (admin only).",
                 "produces": [
                     "application/json"
@@ -1430,14 +1717,14 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                }
-            },
-            "post": {
+                },
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ],
+                ]
+            },
+            "post": {
                 "description": "Create a new workflow template. Validates graph structure (DAG, no cycles). Users can create templates for their own groups or public. Admins can create for any group.",
                 "consumes": [
                     "application/json"
@@ -1491,16 +1778,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                }
-            }
-        },
-        "/workflows/available": {
-            "get": {
+                },
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ],
+                ]
+            }
+        },
+        "/workflows/available": {
+            "get": {
                 "description": "Get workflows accessible to current user (own workflows, group workflows, public workflows). Includes node count excluding metadata nodes.",
                 "produces": [
                     "application/json"
@@ -1534,7 +1821,12 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
             }
         }
     },
@@ -1571,7 +1863,12 @@ const docTemplate = `{
                     }
                 },
                 "scenario": {
-                    "$ref": "#/definitions/github_com_krkn-chaos_krkn-operator_api_v1alpha1.ScenarioReference"
+                    "description": "Scenario identifies the scenario and registry to resolve for this node.\nMetadata-only nodes (whose IDs start with _) may omit this field.\n+optional",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_krkn-chaos_krkn-operator_api_v1alpha1.ScenarioReference"
+                        }
+                    ]
                 },
                 "volumes": {
                     "description": "Volumes is a map of volume mounts for the scenario\n+optional",
@@ -1584,14 +1881,13 @@ const docTemplate = `{
         },
         "github_com_krkn-chaos_krkn-operator_api_v1alpha1.ScenarioReference": {
             "type": "object",
-            "required": ["name", "private"],
             "properties": {
                 "name": {
                     "description": "Name is the scenario tag/name to resolve.",
                     "type": "string"
                 },
                 "private": {
-                    "description": "Private selects a saved private registry when true, or krknctl's public Quay provider when false.",
+                    "description": "Private selects a saved private registry when true, or krknctl's public\nQuay provider when false. A pointer makes the field mandatory on input.",
                     "type": "boolean"
                 },
                 "registryName": {
@@ -2018,6 +2314,36 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_api.GraphClusterScoreResponse": {
+            "type": "object",
+            "properties": {
+                "baseline": {
+                    "type": "number"
+                },
+                "calculated": {
+                    "type": "number"
+                },
+                "clusterName": {
+                    "type": "string"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "nodeContributions": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "number",
+                        "format": "float64"
+                    }
+                },
+                "providerName": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                }
+            }
+        },
         "internal_api.GraphRunCreateRequest": {
             "type": "object",
             "properties": {
@@ -2061,6 +2387,50 @@ const docTemplate = `{
                 },
                 "status": {
                     "$ref": "#/definitions/internal_api.GraphRunStatusResponse"
+                }
+            }
+        },
+        "internal_api.GraphRunListItem": {
+            "type": "object",
+            "properties": {
+                "completionTime": {
+                    "type": "string"
+                },
+                "creationTimestamp": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "namespace": {
+                    "type": "string"
+                },
+                "ownerUserId": {
+                    "type": "string"
+                },
+                "phase": {
+                    "type": "string"
+                },
+                "resiliencyScoreBaseline": {
+                    "type": "number"
+                },
+                "resiliencyScoreEnabled": {
+                    "type": "boolean"
+                },
+                "resiliencyScores": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_api.GraphClusterScoreResponse"
+                    }
+                },
+                "startTime": {
+                    "type": "string"
+                },
+                "summary": {
+                    "$ref": "#/definitions/internal_api.GraphRunSummaryResponse"
+                },
+                "targetRequestId": {
+                    "type": "string"
                 }
             }
         },
@@ -2114,8 +2484,11 @@ const docTemplate = `{
                 "phase": {
                     "type": "string"
                 },
-                "resiliencyScore": {
-                    "$ref": "#/definitions/internal_api.ResiliencyScoreResponse"
+                "resiliencyScores": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_api.GraphClusterScoreResponse"
+                    }
                 },
                 "resolvedLevels": {
                     "type": "array",
@@ -2154,12 +2527,77 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_api.InputFieldResponse": {
+            "type": "object",
+            "properties": {
+                "allowed_values": {
+                    "type": "string"
+                },
+                "default": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "group": {
+                    "type": "string"
+                },
+                "mutually_excludes": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "required": {
+                    "type": "boolean"
+                },
+                "requires": {
+                    "type": "string"
+                },
+                "secret": {
+                    "type": "boolean"
+                },
+                "separator": {
+                    "type": "string"
+                },
+                "short_description": {
+                    "type": "string"
+                },
+                "type": {
+                    "description": "String representation instead of int64 enum",
+                    "type": "string"
+                },
+                "validation_message": {
+                    "type": "string"
+                },
+                "validator": {
+                    "type": "string"
+                },
+                "variable": {
+                    "type": "string"
+                }
+            }
+        },
         "internal_api.IsRegisteredResponse": {
             "type": "object",
             "properties": {
                 "registered": {
                     "description": "Registered indicates if at least one admin user exists",
                     "type": "boolean"
+                }
+            }
+        },
+        "internal_api.JobStatsSummary": {
+            "type": "object",
+            "properties": {
+                "failedJobs": {
+                    "type": "integer"
+                },
+                "succeededJobs": {
+                    "type": "integer"
+                },
+                "totalJobs": {
+                    "type": "integer"
                 }
             }
         },
@@ -2246,6 +2684,27 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_api.PaginationMeta": {
+            "type": "object",
+            "properties": {
+                "limit": {
+                    "description": "Limit is the number of items per page, 0 if unpaginated",
+                    "type": "integer"
+                },
+                "page": {
+                    "description": "Page is the current page number (1-based), 0 if unpaginated",
+                    "type": "integer"
+                },
+                "total": {
+                    "description": "Total is the total number of items matching the query",
+                    "type": "integer"
+                },
+                "totalPages": {
+                    "description": "TotalPages is the total number of pages",
+                    "type": "integer"
+                }
+            }
+        },
         "internal_api.RegisterRequest": {
             "type": "object",
             "properties": {
@@ -2292,26 +2751,133 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.ResiliencyScoreResponse": {
+        "internal_api.ScenarioDetailResponse": {
             "type": "object",
             "properties": {
-                "baseline": {
-                    "type": "number"
-                },
-                "calculated": {
-                    "type": "number"
-                },
-                "message": {
+                "description": {
                     "type": "string"
                 },
-                "status": {
+                "digest": {
                     "type": "string"
+                },
+                "fields": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_api.InputFieldResponse"
+                    }
+                },
+                "last_modified": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "signature_status": {
+                    "type": "string"
+                },
+                "size": {
+                    "type": "integer"
+                },
+                "title": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_api.ScenarioRunListItem": {
+            "type": "object",
+            "properties": {
+                "createdAt": {
+                    "description": "CreatedAt is the creation timestamp",
+                    "type": "string"
+                },
+                "customRunName": {
+                    "description": "CustomRunName is the user-provided label for this run",
+                    "type": "string"
+                },
+                "failedJobs": {
+                    "description": "FailedJobs is the number of failed jobs",
+                    "type": "integer"
+                },
+                "graphNodeId": {
+                    "description": "GraphNodeID is the node ID in the graph (if this scenario run is part of a graph run)",
+                    "type": "string"
+                },
+                "graphRunName": {
+                    "description": "GraphRunName is the name of the parent KrknGraphRun (if this scenario run is part of a graph run)",
+                    "type": "string"
+                },
+                "ownerUserId": {
+                    "description": "OwnerUserID is the email address of the user who created this scenario run",
+                    "type": "string"
+                },
+                "phase": {
+                    "description": "Phase is the overall phase of the scenario run",
+                    "type": "string"
+                },
+                "resiliencyScore": {
+                    "description": "ResiliencyScore is the individual resiliency score for this scenario run node",
+                    "type": "number"
+                },
+                "resiliencyScores": {
+                    "description": "ResiliencyScores contains per-cluster resiliency scores",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_api.ClusterResiliencyScoreResponse"
+                    }
+                },
+                "runningJobs": {
+                    "description": "RunningJobs is the number of currently running jobs",
+                    "type": "integer"
+                },
+                "scenarioName": {
+                    "description": "ScenarioName is the name of the scenario being executed",
+                    "type": "string"
+                },
+                "scenarioRunName": {
+                    "description": "ScenarioRunName is the name of the KrknScenarioRun CR",
+                    "type": "string"
+                },
+                "successfulJobs": {
+                    "description": "SuccessfulJobs is the number of successfully completed jobs",
+                    "type": "integer"
+                },
+                "totalTargets": {
+                    "description": "TotalTargets is the total number of target clusters",
+                    "type": "integer"
+                }
+            }
+        },
+        "internal_api.ScenarioRunListResponse": {
+            "type": "object",
+            "properties": {
+                "pagination": {
+                    "description": "Pagination contains pagination metadata",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/internal_api.PaginationMeta"
+                        }
+                    ]
+                },
+                "scenarioRuns": {
+                    "description": "ScenarioRuns is the list of scenario runs",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_api.ScenarioRunListItem"
+                    }
                 }
             }
         },
         "internal_api.ScenarioRunRequest": {
             "type": "object",
             "properties": {
+                "customRunName": {
+                    "description": "CustomRunName is a user-provided label for the run (optional)",
+                    "type": "string"
+                },
+                "elasticsearchConfigName": {
+                    "description": "ElasticsearchConfigName, if set, names a saved Elasticsearch config Secret whose\ncredentials (ES_PASSWORD, and any ES_* vars not already in Environment) are\ninjected server-side so the password is never transmitted by the client.",
+                    "type": "string"
+                },
                 "environment": {
                     "description": "Environment is a map of environment variables to pass to the container (optional)",
                     "type": "object",
@@ -2338,7 +2904,12 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "scenario": {
-                    "$ref": "#/definitions/github_com_krkn-chaos_krkn-operator_api_v1alpha1.ScenarioReference"
+                    "description": "Scenario identifies the scenario and registry to resolve. The operator\nresolves the executable image through krknctl; callers cannot provide one.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_krkn-chaos_krkn-operator_api_v1alpha1.ScenarioReference"
+                        }
+                    ]
                 },
                 "targetClusters": {
                     "description": "TargetClusters is a map of provider-name to list of cluster names\nExample: {\"krkn-operator\": [\"cluster1\", \"cluster2\"], \"krkn-operator-acm\": [\"cluster3\"]}",
@@ -2356,6 +2927,120 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_api.ScenarioTag": {
+            "type": "object",
+            "properties": {
+                "digest": {
+                    "description": "Digest is the image digest (optional)",
+                    "type": "string"
+                },
+                "lastModified": {
+                    "description": "LastModified is when the scenario was last updated (optional)",
+                    "type": "string"
+                },
+                "name": {
+                    "description": "Name is the scenario tag/version name",
+                    "type": "string"
+                },
+                "signature_status": {
+                    "description": "SignatureStatus is the image signature state: signed, unsigned, or unknown.",
+                    "type": "string"
+                },
+                "size": {
+                    "description": "Size is the image size in bytes (optional)",
+                    "type": "integer"
+                }
+            }
+        },
+        "internal_api.ScenariosResponse": {
+            "type": "object",
+            "properties": {
+                "scenarios": {
+                    "description": "Scenarios contains the list of available scenario tags",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_api.ScenarioTag"
+                    }
+                }
+            }
+        },
+        "internal_api.SignatureVerificationSettingsRequest": {
+            "type": "object",
+            "properties": {
+                "enabled": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "internal_api.SignatureVerificationSettingsResponse": {
+            "type": "object",
+            "properties": {
+                "enabled": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "internal_api.UnifiedJobItem": {
+            "type": "object",
+            "properties": {
+                "createdAt": {
+                    "description": "CreatedAt is the creation timestamp (used for sorting)",
+                    "type": "string"
+                },
+                "graphRun": {
+                    "description": "GraphRun contains the graph run data (when Type == \"graphRun\")",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/internal_api.GraphRunListItem"
+                        }
+                    ]
+                },
+                "name": {
+                    "description": "Name is the resource name",
+                    "type": "string"
+                },
+                "scenarioRun": {
+                    "description": "ScenarioRun contains the scenario run data (when Type == \"scenarioRun\")",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/internal_api.ScenarioRunListItem"
+                        }
+                    ]
+                },
+                "type": {
+                    "description": "Type is the resource type: \"scenarioRun\" or \"graphRun\"",
+                    "type": "string"
+                }
+            }
+        },
+        "internal_api.UnifiedJobsResponse": {
+            "type": "object",
+            "properties": {
+                "jobs": {
+                    "description": "Jobs is the list of unified job items",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_api.UnifiedJobItem"
+                    }
+                },
+                "pagination": {
+                    "description": "Pagination contains pagination metadata",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/internal_api.PaginationMeta"
+                        }
+                    ]
+                },
+                "stats": {
+                    "description": "Stats contains aggregate job statistics across all runs",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/internal_api.JobStatsSummary"
+                        }
+                    ]
+                }
+            }
+        },
         "internal_api_v2_websocket.ErrorMessage": {
             "type": "object",
             "properties": {
@@ -2370,18 +3055,67 @@ const docTemplate = `{
         "internal_api_v2_websocket.ServerMessage": {
             "type": "object",
             "properties": {
-                "data": {},
+                "data": {
+                    "description": "payload"
+                },
                 "event": {
                     "description": "\"updated\", \"deleted\", \"snapshot\"",
                     "type": "string"
                 },
                 "id": {
-                    "description": "resource ID (empty for dashboard)",
+                    "description": "resource ID (empty for dashboard/jobs)",
                     "type": "string"
                 },
+                "pagination": {
+                    "description": "pagination metadata (for \"jobs\" resource)",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/internal_api_v2_websocket.WSPaginationMeta"
+                        }
+                    ]
+                },
                 "resource": {
-                    "description": "\"run\", \"graphrun\", \"dashboard\"",
+                    "description": "\"run\", \"graphrun\", \"dashboard\", \"jobs\"",
                     "type": "string"
+                },
+                "stats": {
+                    "description": "aggregate job stats (for \"jobs\" resource)",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/internal_api_v2_websocket.WSJobStatsSummary"
+                        }
+                    ]
+                }
+            }
+        },
+        "internal_api_v2_websocket.WSJobStatsSummary": {
+            "type": "object",
+            "properties": {
+                "failedJobs": {
+                    "type": "integer"
+                },
+                "succeededJobs": {
+                    "type": "integer"
+                },
+                "totalJobs": {
+                    "type": "integer"
+                }
+            }
+        },
+        "internal_api_v2_websocket.WSPaginationMeta": {
+            "type": "object",
+            "properties": {
+                "limit": {
+                    "type": "integer"
+                },
+                "page": {
+                    "type": "integer"
+                },
+                "total": {
+                    "type": "integer"
+                },
+                "totalPages": {
+                    "type": "integer"
                 }
             }
         }

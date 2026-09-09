@@ -100,8 +100,9 @@ const (
 
 // Operator configuration endpoints
 const (
-	OperatorPath        = APIBasePath + "/operator"
-	OperatorTargetsPath = OperatorPath + "/targets"
+	OperatorPath                      = APIBasePath + "/operator"
+	OperatorTargetsPath               = OperatorPath + "/targets"
+	SignatureVerificationSettingsPath = OperatorPath + "/signature-verification"
 )
 
 // Graph Run endpoints

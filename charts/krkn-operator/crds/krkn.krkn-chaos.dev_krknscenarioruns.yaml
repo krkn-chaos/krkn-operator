@@ -121,14 +121,17 @@ spec:
                   "10s")
                 type: string
               scenario:
-                description: Scenario identifies the scenario and registry to resolve.
+                description: |-
+                  Scenario identifies the scenario and registry to resolve. It is the only
+                  source of image identity; complete image references are not accepted.
                 properties:
                   name:
                     description: Name is the scenario tag/name to resolve.
                     type: string
                   private:
-                    description: Private selects a saved private registry when true,
-                      or krknctl's public Quay provider when false.
+                    description: |-
+                      Private selects a saved private registry when true, or krknctl's public
+                      Quay provider when false. A pointer makes the field mandatory on input.
                     type: boolean
                   registryName:
                     description: RegistryName identifies the saved private registry
@@ -299,6 +302,9 @@ spec:
               failedJobs:
                 description: FailedJobs is the number of failed jobs
                 type: integer
+              message:
+                description: Message contains human-readable context about the current phase.
+                type: string
               phase:
                 description: Phase is the overall phase of the scenario run
                 enum:

@@ -24,6 +24,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"reflect"
 	"strings"
@@ -45,10 +46,10 @@ import (
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
 
 	"github.com/google/uuid"
-	registryutil "github.com/krkn-chaos/krkn-operator/pkg/registry"
 	krknctlconfig "github.com/krkn-chaos/krknctl/pkg/config"
 	krknctlprovider "github.com/krkn-chaos/krknctl/pkg/provider"
 	krknctlmodels "github.com/krkn-chaos/krknctl/pkg/provider/models"
+	"github.com/krkn-chaos/krknctl/pkg/verify"
 )
 
 // KrknScenarioRunReconciler reconciles a KrknScenarioRun object
@@ -57,6 +58,9 @@ type KrknScenarioRunReconciler struct {
 	Scheme    *runtime.Scheme
 	Clientset kubernetes.Interface
 	Namespace string
+	// signatureVerifier is injectable for controller unit tests; production
+	// reconciliation uses krknctl's verifier when it is nil.
+	signatureVerifier imageSignatureVerifier
 }
 
 // +kubebuilder:rbac:groups=krkn.krkn-chaos.dev,resources=krknscenarioruns,verbs=get;list;watch;create;update;patch;delete
@@ -277,24 +281,41 @@ func (r *KrknScenarioRunReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	// authorize and filter jobs for non-admin users. Without it, non-admins
 	// cannot see the failed job (and the run may appear stuck in "not processed").
 	jobsCreated := 0
+	var signatureFailure error
 	for _, outcome := range outcomes {
 		if outcome.err != nil {
+			message := "Job creation failed"
+			failureReason := "JobCreationFailed"
+			var invalidSignatureErr *InvalidImageSignatureError
+			if errors.As(outcome.err, &invalidSignatureErr) {
+				signatureFailure = outcome.err
+				message = outcome.err.Error()
+				failureReason = "InvalidImageSignature"
+				logger.Error(outcome.err, "scenario run failed because the scenario image has no valid signature",
+					"scenarioRun", scenarioRun.Name,
+					"image", invalidSignatureErr.Image)
+			}
 			logger.Error(outcome.err, "failed to create cluster job",
 				"provider", outcome.target.providerName,
 				"cluster", outcome.target.clusterName,
 				"scenarioRun", scenarioRun.Name)
 			now := metav1.Now()
-			scenarioRun.Status.ClusterJobs = append(scenarioRun.Status.ClusterJobs, krknv1alpha1.ClusterJobStatus{
+			failedJob := krknv1alpha1.ClusterJobStatus{
 				ProviderName:   outcome.target.providerName,
 				ClusterName:    outcome.target.clusterName,
 				ClusterAPIURL:  outcome.target.clusterAPIURL,
 				JobID:          uuid.New().String(),
 				Phase:          "Failed",
-				Message:        "Job creation failed",
-				FailureReason:  "JobCreationFailed",
+				Message:        message,
+				FailureReason:  failureReason,
 				StartTime:      &now,
 				CompletionTime: &now,
-			})
+			}
+			if outcome.target.existingJobIndex >= 0 {
+				scenarioRun.Status.ClusterJobs[outcome.target.existingJobIndex] = failedJob
+			} else {
+				scenarioRun.Status.ClusterJobs = append(scenarioRun.Status.ClusterJobs, failedJob)
+			}
 		} else {
 			now := metav1.Now()
 			if outcome.target.existingJobIndex >= 0 {
@@ -351,6 +372,10 @@ func (r *KrknScenarioRunReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 
 	// Calculate overall status
 	r.calculateOverallStatus(&scenarioRun)
+	if signatureFailure != nil {
+		scenarioRun.Status.Phase = "Failed"
+		scenarioRun.Status.Message = signatureFailure.Error()
+	}
 
 	logger.Info("reconcile loop completed",
 		"scenarioRun", scenarioRun.Name,
@@ -427,6 +452,10 @@ func (r *KrknScenarioRunReconciler) prepareJobResources(
 	krknctlCfg, err := krknctlconfig.LoadConfig()
 	if err != nil {
 		return nil, fmt.Errorf("failed to load krknctl config: %w", err)
+	}
+	verifySignatures, err := imageSignatureVerificationEnabled(ctx, r.Client, r.Namespace)
+	if err != nil {
+		return nil, err
 	}
 
 	// Set default kubeconfig path if not provided
@@ -575,25 +604,42 @@ func (r *KrknScenarioRunReconciler) prepareJobResources(
 		cleanup()
 		return nil, fmt.Errorf("scenario.private is required")
 	}
-	if *scenarioRun.Spec.Scenario.Private {
-		var registrySecret corev1.Secret
-		if err := r.Get(ctx, types.NamespacedName{
-			Name:      scenarioRun.Spec.Scenario.RegistryName,
-			Namespace: scenarioRun.Namespace,
-		}, &registrySecret); err != nil {
-			cleanup()
-			return nil, fmt.Errorf("failed to load private registry '%s': %w", scenarioRun.Spec.Scenario.RegistryName, err)
-		}
-		privateRegistry, err = registryutil.ExtractRegistryV2FromSecret(&registrySecret)
-		if err != nil {
-			cleanup()
-			return nil, fmt.Errorf("failed to load private registry configuration: %w", err)
-		}
+	privateRegistry, err = resolvePrivateRegistry(ctx, r.Client, scenarioRun.Namespace, scenarioRun.Spec.Scenario)
+	if err != nil {
+		cleanup()
+		return nil, err
 	}
 	containerImage, err := buildContainerImageFromReference(scenarioRun.Spec.Scenario, &krknctlCfg, privateRegistry)
 	if err != nil {
 		cleanup()
 		return nil, fmt.Errorf("failed to resolve scenario image: %w", err)
+	}
+	verifier := r.signatureVerifier
+	if verifier == nil {
+		verifier = resolveImageSignature
+	}
+	signatureStatus, signatureErr := verifier(ctx, &krknctlCfg, scenarioRun.Spec.Scenario, privateRegistry, containerImage)
+	if !verifySignatures {
+		if signatureErr != nil || signatureStatus != verify.SignatureSigned {
+			logger.Info("WARNING: image signature verification result skipped; executing unverified image",
+				"scenarioRun", scenarioRun.Name,
+				"image", containerImage,
+				"verificationStatus", signatureStatus,
+				"verificationError", signatureErr)
+		}
+	} else if signatureErr != nil {
+		logger.Error(signatureErr, "failed to verify scenario image signature; refusing to create pod",
+			"scenarioRun", scenarioRun.Name,
+			"image", containerImage)
+		cleanup()
+		return nil, signatureErr
+	} else if signatureStatus != verify.SignatureSigned {
+		err := &InvalidImageSignatureError{Image: containerImage, Status: signatureStatus}
+		logger.Error(err, "scenario image signature is invalid; refusing to create pod",
+			"scenarioRun", scenarioRun.Name,
+			"image", containerImage)
+		cleanup()
+		return nil, err
 	}
 	logger.V(1).Info("resolved scenario image through krknctl", "image", containerImage)
 
@@ -1159,6 +1205,11 @@ func (r *KrknScenarioRunReconciler) shouldRetryJob(job *krknv1alpha1.ClusterJobS
 	if job.CancelRequested {
 		return false
 	}
+	// Signature failures are terminal until the image or verification setting
+	// changes; retrying would only repeat the same trust decision.
+	if job.FailureReason == "InvalidImageSignature" {
+		return false
+	}
 
 	// Don't retry if phase is already terminal
 	if job.Phase == "Succeeded" || job.Phase == "Cancelled" || job.Phase == "MaxRetriesExceeded" {
@@ -1317,6 +1368,9 @@ func (r *KrknScenarioRunReconciler) getKubeconfigFromProvider(ctx context.Contex
 func (r *KrknScenarioRunReconciler) statusEqual(old, new *krknv1alpha1.KrknScenarioRunStatus) bool {
 	// Compare scalar fields
 	if old.Phase != new.Phase {
+		return false
+	}
+	if old.Message != new.Message {
 		return false
 	}
 	if old.TotalTargets != new.TotalTargets {

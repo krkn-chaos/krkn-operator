@@ -176,6 +176,7 @@ func TestFilterScenariosByIsAScenario(t *testing.T) {
 func TestFilterScenariosByIsAScenario_PreservesTagMetadata(t *testing.T) {
 	digest := "sha256:abc123"
 	size := int64(1024)
+	signatureStatus := "signed"
 
 	mock := &mockScenarioProvider{
 		details: map[string]*models.ScenarioDetail{
@@ -186,7 +187,7 @@ func TestFilterScenariosByIsAScenario_PreservesTagMetadata(t *testing.T) {
 		},
 	}
 	tags := &[]models.ScenarioTag{
-		{Name: "cpu-hog", Digest: &digest, Size: &size},
+		{Name: "cpu-hog", Digest: &digest, Size: &size, SignatureStatus: signatureStatus},
 	}
 
 	result := filterScenariosByIsAScenario(context.Background(), mock, tags, nil)
@@ -199,6 +200,9 @@ func TestFilterScenariosByIsAScenario_PreservesTagMetadata(t *testing.T) {
 	}
 	if result[0].Size == nil || *result[0].Size != size {
 		t.Error("expected size to be preserved")
+	}
+	if result[0].SignatureStatus != signatureStatus {
+		t.Errorf("expected signature status %q, got %q", signatureStatus, result[0].SignatureStatus)
 	}
 }
 

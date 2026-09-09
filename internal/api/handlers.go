@@ -39,6 +39,7 @@ import (
 	"github.com/krkn-chaos/krknctl/pkg/provider/factory"
 	"github.com/krkn-chaos/krknctl/pkg/provider/models"
 	"github.com/krkn-chaos/krknctl/pkg/typing"
+	"github.com/krkn-chaos/krknctl/pkg/verify"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -814,7 +815,7 @@ func createScenarioProvider(mode provider.Mode) (provider.ScenarioDataProvider, 
 // @Accept json
 // @Produce json
 // @Param registry body object false "Registry configuration (optional for private registries)"
-// @Success 200 {object} object "List of available scenarios"
+// @Success 200 {object} ScenariosResponse "List of available scenarios"
 // @Failure 400 {object} ErrorResponse "Invalid registry configuration"
 // @Failure 500 {object} ErrorResponse "Internal server error"
 // @Security BearerAuth
@@ -863,6 +864,20 @@ func (h *Handler) PostScenarios(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	if scenarioTags != nil {
+		statuses, err := provider.VerifyImageSignatures(ctx, scenarioProvider, apiRegistry, *scenarioTags)
+		if err != nil {
+			log.FromContext(ctx).Error(err, "Failed to verify scenario image signatures")
+			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+				Error:   "internal_error",
+				Message: "Failed to verify scenario image signatures",
+			})
+			return
+		}
+		for i := range *scenarioTags {
+			(*scenarioTags)[i].SignatureStatus = string(statuses[i])
+		}
+	}
 
 	scenarios := filterScenariosByIsAScenario(ctx, scenarioProvider, scenarioTags, apiRegistry)
 
@@ -877,6 +892,17 @@ func (h *Handler) PostScenarios(w http.ResponseWriter, r *http.Request) {
 // maxConcurrentDetailFetches limits how many GetScenarioDetail calls run in parallel
 // to avoid overwhelming the upstream registry.
 const maxConcurrentDetailFetches = 10
+
+func getScenarioSignatureStatus(ctx context.Context, scenarioProvider provider.ScenarioDataProvider, registry *models.RegistryV2, tag models.ScenarioTag, scenarioName string) string {
+	status, err := scenarioProvider.GetImageSignatureStatus(ctx, registry, tag)
+	if err != nil || status == "" {
+		if err != nil {
+			log.FromContext(ctx).V(1).Info("Failed to verify scenario image signature", "scenarioName", scenarioName, "error", err)
+		}
+		return string(verify.SignatureUnknown)
+	}
+	return string(status)
+}
 
 // filterScenariosByIsAScenario concurrently fetches detail for each tag and returns
 // only those with IsAScenario == true, preserving input order.
@@ -921,10 +947,11 @@ func filterScenariosByIsAScenario(ctx context.Context, scenarioProvider provider
 				}
 
 				results[i] = &ScenarioTag{
-					Name:         t.Name,
-					Digest:       t.Digest,
-					Size:         t.Size,
-					LastModified: t.LastModified,
+					Name:            t.Name,
+					Digest:          t.Digest,
+					Size:            t.Size,
+					SignatureStatus: t.SignatureStatus,
+					LastModified:    t.LastModified,
 				}
 			}
 			return nil
@@ -968,7 +995,7 @@ func extractPathSuffix(path string, prefix string) (string, error) {
 // @Produce json
 // @Param scenario_name path string true "Scenario name"
 // @Param registry body object false "Registry configuration (optional for private registries)"
-// @Success 200 {object} object "Scenario details with input fields"
+// @Success 200 {object} ScenarioDetailResponse "Scenario details with input fields"
 // @Failure 400 {object} ErrorResponse "Invalid scenario name or registry"
 // @Failure 404 {object} ErrorResponse "Scenario not found"
 // @Failure 500 {object} ErrorResponse "Internal server error"
@@ -1035,15 +1062,17 @@ func (h *Handler) PostScenarioDetail(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	signatureStatus := getScenarioSignatureStatus(ctx, scenarioProvider, apiRegistry, scenarioDetail.ScenarioTag, scenarioName)
 
 	response := ScenarioDetailResponse{
-		Name:         scenarioDetail.Name,
-		Digest:       scenarioDetail.Digest,
-		Size:         scenarioDetail.Size,
-		LastModified: scenarioDetail.LastModified,
-		Title:        scenarioDetail.Title,
-		Description:  scenarioDetail.Description,
-		Fields:       convertInputFields(scenarioDetail.Fields),
+		Name:            scenarioDetail.Name,
+		Digest:          scenarioDetail.Digest,
+		Size:            scenarioDetail.Size,
+		SignatureStatus: string(signatureStatus),
+		LastModified:    scenarioDetail.LastModified,
+		Title:           scenarioDetail.Title,
+		Description:     scenarioDetail.Description,
+		Fields:          convertInputFields(scenarioDetail.Fields),
 	}
 
 	writeJSON(w, http.StatusOK, response)
@@ -1134,14 +1163,16 @@ func (h *Handler) PostScenarioGlobals(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	signatureStatus := getScenarioSignatureStatus(ctx, scenarioProvider, apiRegistry, globalDetail.ScenarioTag, scenarioName)
 	response := ScenarioDetailResponse{
-		Name:         globalDetail.Name,
-		Digest:       globalDetail.Digest,
-		Size:         globalDetail.Size,
-		LastModified: globalDetail.LastModified,
-		Title:        globalDetail.Title,
-		Description:  globalDetail.Description,
-		Fields:       convertInputFields(globalDetail.Fields),
+		Name:            globalDetail.Name,
+		Digest:          globalDetail.Digest,
+		Size:            globalDetail.Size,
+		SignatureStatus: signatureStatus,
+		LastModified:    globalDetail.LastModified,
+		Title:           globalDetail.Title,
+		Description:     globalDetail.Description,
+		Fields:          convertInputFields(globalDetail.Fields),
 	}
 
 	writeJSON(w, http.StatusOK, response)

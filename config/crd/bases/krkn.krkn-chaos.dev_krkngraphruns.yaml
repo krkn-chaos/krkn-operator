@@ -76,15 +76,17 @@ spec:
                       description: Env is a map of environment variables for the scenario
                       type: object
                     scenario:
-                      description: Scenario identifies the scenario and registry to
-                        resolve for this node.
+                      description: |-
+                        Scenario identifies the scenario and registry to resolve for this node.
+                        Metadata-only nodes (whose IDs start with _) may omit this field.
                       properties:
                         name:
                           description: Name is the scenario tag/name to resolve.
                           type: string
                         private:
-                          description: Private selects a saved private registry when
-                            true, or krknctl's public Quay provider when false.
+                          description: |-
+                            Private selects a saved private registry when true, or krknctl's public
+                            Quay provider when false. A pointer makes the field mandatory on input.
                           type: boolean
                         registryName:
                           description: RegistryName identifies the saved private registry
@@ -99,8 +101,6 @@ spec:
                         type: string
                       description: Volumes is a map of volume mounts for the scenario
                       type: object
-                  required:
-                  - scenario
                   type: object
                 description: |-
                   Graph is the dependency graph of scenarios to execute
@@ -244,6 +244,10 @@ spec:
                   - type
                   type: object
                 type: array
+              message:
+                description: Message contains human-readable context for the current
+                  phase.
+                type: string
               nodeStatuses:
                 description: NodeStatuses contains the status of each node in the
                   graph

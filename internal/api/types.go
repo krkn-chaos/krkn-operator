@@ -47,6 +47,18 @@ type ErrorResponse struct {
 	Message string `json:"message"`
 }
 
+// SignatureVerificationSettingsResponse reports the operator-wide image
+// signature verification setting.
+type SignatureVerificationSettingsResponse struct {
+	Enabled bool `json:"enabled"`
+}
+
+// SignatureVerificationSettingsRequest updates the operator-wide image
+// signature verification setting.
+type SignatureVerificationSettingsRequest struct {
+	Enabled *bool `json:"enabled"`
+}
+
 // DuplicateFileError is returned when a file with the same logical name already exists
 type DuplicateFileError struct {
 	Name       string
@@ -74,6 +86,8 @@ type ScenarioTag struct {
 	Digest *string `json:"digest,omitempty"`
 	// Size is the image size in bytes (optional)
 	Size *int64 `json:"size,omitempty"`
+	// SignatureStatus is the image signature state: signed, unsigned, or unknown.
+	SignatureStatus string `json:"signature_status,omitempty"`
 	// LastModified is when the scenario was last updated (optional)
 	LastModified *time.Time `json:"lastModified,omitempty"`
 }
@@ -107,13 +121,14 @@ type InputFieldResponse struct {
 // ScenarioDetailResponse represents the response for POST /scenarios/detail/{scenario_name}
 // This wraps krknctl models.ScenarioDetail to ensure Type fields are strings
 type ScenarioDetailResponse struct {
-	Name         string               `json:"name"`
-	Digest       *string              `json:"digest,omitempty"`
-	Size         *int64               `json:"size,omitempty"`
-	LastModified *time.Time           `json:"last_modified,omitempty"`
-	Title        string               `json:"title"`
-	Description  string               `json:"description"`
-	Fields       []InputFieldResponse `json:"fields"`
+	Name            string               `json:"name"`
+	Digest          *string              `json:"digest,omitempty"`
+	Size            *int64               `json:"size,omitempty"`
+	SignatureStatus string               `json:"signature_status,omitempty"`
+	LastModified    *time.Time           `json:"last_modified,omitempty"`
+	Title           string               `json:"title"`
+	Description     string               `json:"description"`
+	Fields          []InputFieldResponse `json:"fields"`
 }
 
 // GlobalsRequest represents the request body for POST /scenarios/globals

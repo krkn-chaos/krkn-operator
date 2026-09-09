@@ -21,6 +21,7 @@ package controller
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -38,6 +39,8 @@ import (
 
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
 	"github.com/krkn-chaos/krkn-operator/pkg/graph"
+	krknctlconfig "github.com/krkn-chaos/krknctl/pkg/config"
+	"github.com/krkn-chaos/krknctl/pkg/verify"
 )
 
 const (
@@ -60,6 +63,9 @@ type KrknGraphRunReconciler struct {
 	Scheme    *runtime.Scheme
 	Clientset kubernetes.Interface
 	Namespace string
+	// signatureVerifier is injectable for controller unit tests; production
+	// reconciliation uses krknctl's verifier when it is nil.
+	signatureVerifier imageSignatureVerifier
 }
 
 // sanitizeNodeID sanitizes a node ID for use in Kubernetes resource names and label values.
@@ -116,6 +122,7 @@ func sanitizeNodeID(nodeID string) string {
 // +kubebuilder:rbac:groups=krkn.krkn-chaos.dev,resources=krkngraphruns/finalizers,verbs=update
 // +kubebuilder:rbac:groups=krkn.krkn-chaos.dev,resources=krknscenarioruns,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=krkn.krkn-chaos.dev,resources=krknscenarioruns/status,verbs=get
+// +kubebuilder:rbac:groups="",resources=configmaps,verbs=get
 
 // Reconcile handles the reconciliation loop for KrknGraphRun
 func (r *KrknGraphRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -503,6 +510,51 @@ func (r *KrknGraphRunReconciler) createScenarioRun(
 		return false, fmt.Errorf("node %s not found in graph", nodeID)
 	}
 
+	verifySignatures, err := imageSignatureVerificationEnabled(ctx, r.Client, graphRun.Namespace)
+	if err != nil {
+		return false, err
+	}
+	krknctlCfg, err := krknctlconfig.LoadConfig()
+	if err != nil {
+		return false, fmt.Errorf("failed to load krknctl config: %w", err)
+	}
+	privateRegistry, err := resolvePrivateRegistry(ctx, r.Client, graphRun.Namespace, node.Scenario)
+	if err != nil {
+		return false, err
+	}
+	image, err := buildContainerImageFromReference(node.Scenario, &krknctlCfg, privateRegistry)
+	if err != nil {
+		return false, fmt.Errorf("failed to resolve scenario image: %w", err)
+	}
+	verifier := r.signatureVerifier
+	if verifier == nil {
+		verifier = resolveImageSignature
+	}
+	status, signatureErr := verifier(ctx, &krknctlCfg, node.Scenario, privateRegistry, image)
+	if !verifySignatures {
+		if signatureErr != nil || status != verify.SignatureSigned {
+			logger.Info("WARNING: image signature verification result skipped; executing unverified image",
+				"graphRun", graphRun.Name,
+				"nodeID", nodeID,
+				"image", image,
+				"verificationStatus", status,
+				"verificationError", signatureErr)
+		}
+	} else if signatureErr != nil {
+		logger.Error(signatureErr, "failed to verify graph scenario image signature; refusing to create scenario run",
+			"graphRun", graphRun.Name,
+			"nodeID", nodeID,
+			"image", image)
+		return false, signatureErr
+	} else if status != verify.SignatureSigned {
+		err := &InvalidImageSignatureError{Image: image, Status: status}
+		logger.Error(err, "graph scenario image signature is invalid; refusing to create scenario run",
+			"graphRun", graphRun.Name,
+			"nodeID", nodeID,
+			"image", image)
+		return false, err
+	}
+
 	// Translate Volumes (file UUID -> mount path) to FileMount objects
 	// Volumes format: {"<file-uuid>": "/mount/path"}
 	fileMounts, err := r.translateVolumesToFileMounts(ctx, node.Volumes)
@@ -782,10 +834,19 @@ func (r *KrknGraphRunReconciler) updateStatusWithError(
 ) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 	graphRun.Status.Phase = "Failed"
+	graphRun.Status.Message = err.Error()
+	graphRun.Status.CompletionTime = &metav1.Time{Time: time.Now()}
 	if updateErr := r.Status().Update(ctx, graphRun); updateErr != nil {
 		logger.Error(updateErr, "failed to update status to Failed",
 			"graphRun", graphRun.Name, "originalError", err)
 		// Return the original error even if status update fails
+	}
+	var invalidSignatureErr *InvalidImageSignatureError
+	if errors.As(err, &invalidSignatureErr) {
+		logger.Error(err, "graph run failed because the scenario image has no valid signature",
+			"graphRun", graphRun.Name,
+			"image", invalidSignatureErr.Image)
+		return ctrl.Result{}, nil
 	}
 	return ctrl.Result{}, err
 }

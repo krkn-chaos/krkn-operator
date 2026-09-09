@@ -29,6 +29,10 @@ import (
 
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
 	"github.com/krkn-chaos/krkn-operator/pkg/files"
+	"github.com/krkn-chaos/krkn-operator/pkg/signatureverification"
+	krknctlconfig "github.com/krkn-chaos/krknctl/pkg/config"
+	krknctlmodels "github.com/krkn-chaos/krknctl/pkg/provider/models"
+	"github.com/krkn-chaos/krknctl/pkg/verify"
 )
 
 func publicScenarioReference(name string) krknv1alpha1.ScenarioReference {
@@ -333,7 +337,10 @@ func TestCreateScenarioRun_ResiliencyScore(t *testing.T) {
 			}
 
 			// Setup fake client
-			objects := []runtime.Object{graphRun}
+			objects := []runtime.Object{graphRun, &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{Name: signatureverification.ConfigMapName, Namespace: "default"},
+				Data:       map[string]string{signatureverification.EnabledKey: "false"},
+			}}
 			for _, file := range tt.setupFiles {
 				objects = append(objects, file)
 			}
@@ -347,6 +354,9 @@ func TestCreateScenarioRun_ResiliencyScore(t *testing.T) {
 				Client:    fakeClient,
 				Scheme:    scheme,
 				Namespace: "default",
+				signatureVerifier: func(context.Context, *krknctlconfig.Config, krknv1alpha1.ScenarioReference, *krknctlmodels.RegistryV2, string) (verify.SignatureStatus, error) {
+					return verify.SignatureSigned, nil
+				},
 			}
 
 			// Call createScenarioRun
