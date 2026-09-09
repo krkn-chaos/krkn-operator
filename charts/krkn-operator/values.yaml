@@ -244,6 +244,21 @@ console:
   affinity: {}
   extraEnv: []
 
+## Scenario Runner (pods that execute chaos scenarios)
+scenarioRunner:
+  # OpenShift Security Context Constraint for scenario pods.
+  # Allowed values: "privileged" (default) or "anyuid".
+  # "privileged" is required for node-level scenarios (node-network, node-cpu-hog,
+  # node-memory-hog, node-io-hog). Use "anyuid" only if running pod-level scenarios exclusively.
+  # Only applies on OpenShift clusters (auto-detected).
+  scc: privileged
+
+  # Override the auto-detection of privileged scenario pods.
+  # By default, the operator auto-detects OpenShift (via SCC API) and enables
+  # privileged containers for scenario pods. Set to "true" or "false" to override.
+  # Leave empty for auto-detection.
+  privilegedOverride: ""
+
 ## RBAC
 rbac:
   create: true

@@ -73,6 +73,10 @@ spec:
         - name: WEBSOCKET_ALLOWED_ORIGINS
           value: {{ . | quote }}
         {{- end }}
+        {{- if .Values.scenarioRunner.privilegedOverride }}
+        - name: SCENARIO_PRIVILEGED
+          value: {{ .Values.scenarioRunner.privilegedOverride | quote }}
+        {{- end }}
         {{- with .Values.operator.extraEnv }}
         {{- toYaml . | nindent 8 }}
         {{- end }}

@@ -54,9 +54,10 @@ import (
 // KrknScenarioRunReconciler reconciles a KrknScenarioRun object
 type KrknScenarioRunReconciler struct {
 	client.Client
-	Scheme    *runtime.Scheme
-	Clientset kubernetes.Interface
-	Namespace string
+	Scheme              *runtime.Scheme
+	Clientset           kubernetes.Interface
+	Namespace           string
+	PrivilegedScenarios bool
 }
 
 // +kubebuilder:rbac:groups=krkn.krkn-chaos.dev,resources=krknscenarioruns,verbs=get;list;watch;create;update;patch;delete
@@ -735,6 +736,7 @@ func (r *KrknScenarioRunReconciler) submitScenarioPod(
 	var runAsUser int64 = 1001
 	var runAsGroup int64 = 1001
 	var fsGroup int64 = 1001
+	privileged := r.PrivilegedScenarios
 
 	podName := fmt.Sprintf("krkn-job-%s", resources.jobID)
 	podLabels := map[string]string{
@@ -771,6 +773,9 @@ func (r *KrknScenarioRunReconciler) submitScenarioPod(
 					Env:             resources.envVars,
 					VolumeMounts:    resources.volumeMounts,
 					ImagePullPolicy: corev1.PullAlways,
+					SecurityContext: &corev1.SecurityContext{
+						Privileged: &privileged,
+					},
 				},
 			},
 			Volumes: resources.volumes,
