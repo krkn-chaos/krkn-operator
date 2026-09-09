@@ -64,6 +64,24 @@ with `PATCH` and a required boolean body, for example
 `{"enabled":false}`. Image verification remains observable when enforcement
 is disabled; only the enforcement result is ignored.
 
+## Backup and Restore
+
+Admin users can back up and restore operator configuration (users, groups, targets, providers, credentials) for disaster recovery and cross-cluster migration using the web console.
+
+**To download a backup:** Click "Download Backup" in the Backup & Restore card.
+
+**To restore from a backup:** Click "Upload & Restore" in the Backup & Restore card, select your backup archive, and confirm. The console will monitor restore progress in real time.
+
+**Important:** After restore completes, restart the operator pod to apply credential changes:
+```bash
+kubectl rollout restart deployment krkn-operator -n krkn-operator-system
+```
+
+**Limits:**
+- Maximum upload size: 100 MB
+- Maximum concurrent restores: 1000
+- Backup history: Not persisted — status is lost on operator restart
+
 ## License
 
 Licensed under the [Apache License 2.0](LICENSE).
