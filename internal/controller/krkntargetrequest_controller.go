@@ -134,7 +134,7 @@ func (r *KrknTargetRequestReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	}
 
 	// 7. Build ClusterTarget list from ready targets
-	clusterTargets := r.buildClusterTargets(targets.Items)
+	clusterTargets := r.buildClusterTargets(ctx, targets.Items)
 	logger.Info("Built cluster targets", "count", len(clusterTargets), "operator", r.OperatorName)
 
 	// 8. Update Status.TargetData[operatorName]
@@ -230,7 +230,7 @@ func (r *KrknTargetRequestReconciler) initializeStatus(ctx context.Context, krkn
 }
 
 // buildClusterTargets builds a list of ClusterTarget from KrknOperatorTarget CRs
-func (r *KrknTargetRequestReconciler) buildClusterTargets(targets []krknv1alpha1.KrknOperatorTarget) []krknv1alpha1.ClusterTarget {
+func (r *KrknTargetRequestReconciler) buildClusterTargets(ctx context.Context, targets []krknv1alpha1.KrknOperatorTarget) []krknv1alpha1.ClusterTarget {
 	logger := log.Log.WithName("buildClusterTargets")
 	clusterTargets := make([]krknv1alpha1.ClusterTarget, 0, len(targets))
 
@@ -244,13 +244,17 @@ func (r *KrknTargetRequestReconciler) buildClusterTargets(targets []krknv1alpha1
 
 		// Only include ready targets
 		if target.Status.Ready {
+			online, checkedAt := r.checkTargetLiveness(ctx, target)
 			clusterTargets = append(clusterTargets, krknv1alpha1.ClusterTarget{
 				ClusterName:   target.Spec.ClusterName,
 				ClusterAPIURL: target.Spec.ClusterAPIURL,
+				Online:        &online,
+				CheckedAt:     checkedAt,
 			})
 			logger.Info("✅ Added ready target",
 				"clusterName", target.Spec.ClusterName,
-				"apiURL", target.Spec.ClusterAPIURL)
+				"apiURL", target.Spec.ClusterAPIURL,
+				"online", online)
 		} else {
 			logger.Info("⏭️  Skipping non-ready target", "clusterName", target.Spec.ClusterName)
 		}
@@ -258,6 +262,46 @@ func (r *KrknTargetRequestReconciler) buildClusterTargets(targets []krknv1alpha1
 
 	logger.Info("Built cluster targets", "readyCount", len(clusterTargets))
 	return clusterTargets
+}
+
+// checkTargetLiveness checks a target using the kubeconfig stored in its Secret.
+// Discovery keeps the target in the result even when the check fails so callers
+// can distinguish an offline cluster from a target that was not checked.
+func (r *KrknTargetRequestReconciler) checkTargetLiveness(ctx context.Context, target krknv1alpha1.KrknOperatorTarget) (bool, *metav1.Time) {
+	checkedAt := metav1.Now()
+	online := false
+
+	var secret corev1.Secret
+	if err := r.Get(ctx, types.NamespacedName{
+		Name:      target.Spec.SecretUUID,
+		Namespace: r.OperatorNamespace,
+	}, &secret); err != nil {
+		log.FromContext(ctx).Info("cluster liveness check skipped: target secret unavailable",
+			"cluster", target.Spec.ClusterName)
+		return online, &checkedAt
+	}
+
+	kubeconfigData, exists := secret.Data["kubeconfig"]
+	if !exists {
+		log.FromContext(ctx).Info("cluster liveness check skipped: kubeconfig missing from target secret",
+			"cluster", target.Spec.ClusterName)
+		return online, &checkedAt
+	}
+
+	kubeconfigBase64, err := kubeconfig.UnmarshalSecretData(kubeconfigData)
+	if err != nil {
+		log.FromContext(ctx).Info("cluster liveness check skipped: invalid target kubeconfig",
+			"cluster", target.Spec.ClusterName)
+		return online, &checkedAt
+	}
+
+	if err := provider.CheckClusterLiveness(ctx, kubeconfigBase64, 0); err != nil {
+		log.FromContext(ctx).Info("cluster liveness check failed",
+			"cluster", target.Spec.ClusterName)
+		return online, &checkedAt
+	}
+
+	return true, &checkedAt
 }
 
 // updateTargetData updates the TargetData map with cluster targets for this operator

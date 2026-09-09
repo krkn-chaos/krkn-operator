@@ -23,6 +23,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/krkn-chaos/krknctl/pkg/typing"
 	corev1 "k8s.io/api/core/v1"
@@ -41,6 +42,8 @@ func TestGetClusters_Success(t *testing.T) {
 	scheme := runtime.NewScheme()
 	krknv1alpha1.AddToScheme(scheme)
 	corev1.AddToScheme(scheme)
+	online := true
+	checkedAt := metav1.NewTime(time.Date(2026, time.January, 1, 12, 0, 0, 0, time.UTC))
 
 	targetRequest := &krknv1alpha1.KrknTargetRequest{
 		ObjectMeta: metav1.ObjectMeta{
@@ -57,6 +60,8 @@ func TestGetClusters_Success(t *testing.T) {
 					{
 						ClusterName:   "cluster-1",
 						ClusterAPIURL: "https://api.cluster1.example.com",
+						Online:        &online,
+						CheckedAt:     &checkedAt,
 					},
 					{
 						ClusterName:   "cluster-2",
@@ -94,6 +99,14 @@ func TestGetClusters_Success(t *testing.T) {
 
 	if len(response.TargetData["operator-1"]) != 2 {
 		t.Errorf("Expected 2 clusters for operator-1, got %d", len(response.TargetData["operator-1"]))
+	}
+
+	cluster := response.TargetData["operator-1"][0]
+	if cluster.Online == nil || !*cluster.Online {
+		t.Errorf("Expected cluster-1 to be online, got %v", cluster.Online)
+	}
+	if cluster.CheckedAt == nil || !cluster.CheckedAt.Equal(&checkedAt) {
+		t.Errorf("Expected checked-at %v, got %v", checkedAt, cluster.CheckedAt)
 	}
 }
 

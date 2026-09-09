@@ -17,6 +17,14 @@ The provider package includes two main components:
    - Contributing configuration data
    - JSON schema validation
 
+It also provides `CheckClusterLiveness`, which verifies a Kubernetes API server
+using a provider-generated, base64-encoded kubeconfig. The helper preserves the
+kubeconfig's authentication and TLS settings, honors context cancellation, and
+uses a bounded default timeout when the supplied timeout is non-positive.
+It returns an error for nil or canceled contexts, invalid kubeconfig input,
+client or transport setup failures, request timeouts or transport failures,
+non-2xx API responses, and response-body close failures.
+
 ## Usage
 
 ### Basic Usage (Default Configuration)

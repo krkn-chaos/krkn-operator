@@ -111,11 +111,18 @@ func IsPrometheusCRDsInstalled() bool {
 // UninstallCertManager uninstalls the cert manager
 func UninstallCertManager() {
 	url := fmt.Sprintf(certmanagerURLTmpl, certmanagerVersion)
-	// #nosec G204 -- URL is from const template with validated version string
-	cmd := exec.Command("kubectl", "delete", "-f", url)
+	cmd := uninstallCertManagerCommand(url)
 	if _, err := Run(cmd); err != nil {
 		warnError(err)
 	}
+}
+
+func uninstallCertManagerCommand(url string) *exec.Cmd {
+	// #nosec G204 -- URL is from const template with validated version string
+	// Do not wait for every Cert-Manager resource to disappear. A finalizer or a
+	// disconnected webhook can otherwise block the Ginkgo AfterSuite until the
+	// package-level test timeout expires.
+	return exec.Command("kubectl", "delete", "-f", url, "--ignore-not-found=true", "--wait=false")
 }
 
 // InstallCertManager installs the cert manager bundle.
