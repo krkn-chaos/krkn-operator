@@ -24,6 +24,7 @@ import (
 	"github.com/krkn-chaos/krknctl/pkg/provider"
 	"github.com/krkn-chaos/krknctl/pkg/provider/models"
 	"github.com/krkn-chaos/krknctl/pkg/typing"
+	"github.com/krkn-chaos/krknctl/pkg/verify"
 )
 
 type mockScenarioProvider struct {
@@ -48,6 +49,10 @@ func (m *mockScenarioProvider) GetScenarioDetail(scenario string, _ *models.Regi
 		return nil, nil
 	}
 	return detail, nil
+}
+
+func (m *mockScenarioProvider) GetImageSignatureStatus(_ context.Context, _ *models.RegistryV2, _ models.ScenarioTag) (verify.SignatureStatus, error) {
+	return verify.SignatureUnknown, nil
 }
 
 func (m *mockScenarioProvider) ScaffoldScenarios(_ []string, _ bool, _ *models.RegistryV2, _ bool, _ *provider.ScaffoldSeed) (*string, error) {

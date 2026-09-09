@@ -214,6 +214,11 @@ func TestResolveGraph(t *testing.T) {
 }
 
 func TestMapScenarioNodeToScenarioRunSpec(t *testing.T) {
+	publicScenario := func(name string) v1alpha1.ScenarioReference {
+		private := false
+		return v1alpha1.ScenarioReference{Name: name, Private: &private}
+	}
+
 	tests := []struct {
 		name            string
 		node            v1alpha1.GraphScenarioNode
@@ -228,8 +233,7 @@ func TestMapScenarioNodeToScenarioRunSpec(t *testing.T) {
 		{
 			name: "complete node with all fields",
 			node: v1alpha1.GraphScenarioNode{
-				Name:  "test-scenario",
-				Image: "quay.io/krkn-chaos/scenario:latest",
+				Scenario: publicScenario("test-scenario"),
 				Env: map[string]string{
 					"KEY1": "value1",
 					"KEY2": "value2",
@@ -249,8 +253,8 @@ func TestMapScenarioNodeToScenarioRunSpec(t *testing.T) {
 				if spec.ScenarioName != "test-scenario" {
 					t.Errorf("ScenarioName = %s, want test-scenario", spec.ScenarioName)
 				}
-				if spec.ScenarioImage != "quay.io/krkn-chaos/scenario:latest" {
-					t.Errorf("ScenarioImage = %s, want quay.io/krkn-chaos/scenario:latest", spec.ScenarioImage)
+				if spec.Scenario.Name != "test-scenario" || spec.Scenario.Private == nil || *spec.Scenario.Private {
+					t.Errorf("Scenario reference = %+v, want explicit public reference", spec.Scenario)
 				}
 				if spec.TargetRequestID != "target-123" {
 					t.Errorf("TargetRequestID = %s, want target-123", spec.TargetRequestID)
@@ -274,8 +278,7 @@ func TestMapScenarioNodeToScenarioRunSpec(t *testing.T) {
 		{
 			name: "minimal node without env and volumes",
 			node: v1alpha1.GraphScenarioNode{
-				Name:  "minimal-scenario",
-				Image: "minimal:latest",
+				Scenario: publicScenario("minimal-scenario"),
 			},
 			scenarioName:    "minimal-scenario",
 			targetRequestID: "target-456",
@@ -299,23 +302,21 @@ func TestMapScenarioNodeToScenarioRunSpec(t *testing.T) {
 		{
 			name: "node with empty image",
 			node: v1alpha1.GraphScenarioNode{
-				Name:  "test-scenario",
-				Image: "",
+				Scenario: publicScenario(""),
 			},
-			scenarioName:    "test-scenario",
+			scenarioName:    "",
 			targetRequestID: "target-123",
 			targetClusters: map[string][]string{
 				"provider1": {"cluster1"},
 			},
 			ownerUserID: "user@example.com",
 			wantErr:     true,
-			errContains: "image is required",
+			errContains: "scenario.name is required",
 		},
 		{
 			name: "node with empty name",
 			node: v1alpha1.GraphScenarioNode{
-				Name:  "",
-				Image: "image:latest",
+				Scenario: publicScenario(""),
 			},
 			scenarioName:    "",
 			targetRequestID: "target-123",
@@ -329,8 +330,7 @@ func TestMapScenarioNodeToScenarioRunSpec(t *testing.T) {
 		{
 			name: "empty target request ID",
 			node: v1alpha1.GraphScenarioNode{
-				Name:  "test-scenario",
-				Image: "image:latest",
+				Scenario: publicScenario("test-scenario"),
 			},
 			scenarioName:    "test-scenario",
 			targetRequestID: "",
@@ -344,8 +344,7 @@ func TestMapScenarioNodeToScenarioRunSpec(t *testing.T) {
 		{
 			name: "empty target clusters",
 			node: v1alpha1.GraphScenarioNode{
-				Name:  "test-scenario",
-				Image: "image:latest",
+				Scenario: publicScenario("test-scenario"),
 			},
 			scenarioName:    "test-scenario",
 			targetRequestID: "target-123",

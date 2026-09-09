@@ -242,7 +242,9 @@ func (h *Handler) CreateGraphRun(w http.ResponseWriter, r *http.Request) {
 
 	// Parse request body
 	var req GraphRunCreateRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&req); err != nil {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
 			Error:   "bad_request",
 			Message: "Invalid request body: " + err.Error(),
@@ -339,6 +341,42 @@ func (h *Handler) CreateGraphRun(w http.ResponseWriter, r *http.Request) {
 			Message: "targetClusters is required and must contain at least one provider with clusters",
 		})
 		return
+	}
+
+	// Every node must carry an explicit registry-independent scenario
+	// reference. The registry is node-local so a graph can mix public and
+	// private scenarios. Normalize the internal name used by graph status and
+	// validation from the reference; callers cannot provide an image field.
+	for nodeID, node := range req.Graph {
+		if strings.HasPrefix(nodeID, "_") {
+			continue
+		}
+		if err := node.Scenario.Validate(); err != nil {
+			writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+				Error:   "bad_request",
+				Message: fmt.Sprintf("Invalid scenario reference for node '%s': %s", nodeID, err),
+			})
+			return
+		}
+		if *node.Scenario.Private {
+			secret, err := h.loadRegistrySecret(ctx, node.Scenario.RegistryName)
+			if err != nil {
+				writeJSONError(w, http.StatusNotFound, ErrorResponse{
+					Error:   "not_found",
+					Message: fmt.Sprintf("Registry '%s' for node '%s' not found", node.Scenario.RegistryName, nodeID),
+				})
+				return
+			}
+			if !h.canAccessRegistry(ctx, secret) {
+				writeJSONError(w, http.StatusForbidden, ErrorResponse{
+					Error:   "forbidden",
+					Message: fmt.Sprintf("Access denied to registry '%s' for node '%s'", node.Scenario.RegistryName, nodeID),
+				})
+				return
+			}
+		}
+		node.Name = node.Scenario.Name
+		req.Graph[nodeID] = node
 	}
 
 	// Get user from JWT claims

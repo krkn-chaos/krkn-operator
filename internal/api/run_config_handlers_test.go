@@ -51,8 +51,7 @@ func TestGetScenarioRunConfig_Success(t *testing.T) {
 			TargetClusters: map[string][]string{
 				"krkn-operator": {"cluster1", "cluster2"},
 			},
-			ScenarioName:  "dummy-scenario",
-			ScenarioImage: "quay.io/krkn-chaos/krkn-hub:dummy-scenario",
+			Scenario: publicScenarioReference("dummy-scenario"),
 			Environment: map[string]string{
 				"EXIT_STATUS": "0",
 			},
@@ -65,7 +64,6 @@ func TestGetScenarioRunConfig_Success(t *testing.T) {
 					FileID:    "file-uuid-001",
 				},
 			},
-			RegistryName: "my-registry",
 		},
 	}
 
@@ -97,8 +95,9 @@ func TestGetScenarioRunConfig_Success(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, "target-123", payload.TargetRequestID)
-	assert.Equal(t, "dummy-scenario", payload.ScenarioName)
-	assert.Equal(t, "quay.io/krkn-chaos/krkn-hub:dummy-scenario", payload.ScenarioImage)
+	assert.Equal(t, "dummy-scenario", payload.Scenario.Name)
+	assert.NotNil(t, payload.Scenario.Private)
+	assert.False(t, *payload.Scenario.Private)
 	assert.Equal(t, map[string][]string{"krkn-operator": {"cluster1", "cluster2"}}, payload.TargetClusters)
 	assert.Equal(t, map[string]string{"EXIT_STATUS": "0"}, payload.Environment)
 	assert.Equal(t, "/home/krkn/.kube/config", payload.KubeconfigPath)
@@ -107,8 +106,6 @@ func TestGetScenarioRunConfig_Success(t *testing.T) {
 	assert.Equal(t, "file-uuid-001", payload.FileReferences[0].FileID)
 	assert.Equal(t, "/etc/krkn/config.yaml", payload.FileReferences[0].MountPath)
 
-	require.NotNil(t, payload.RegistryName)
-	assert.Equal(t, "my-registry", *payload.RegistryName)
 }
 
 func TestGetScenarioRunConfig_NotFound(t *testing.T) {
@@ -153,8 +150,7 @@ func TestGetScenarioRunConfig_Unauthorized(t *testing.T) {
 		Spec: krknv1alpha1.KrknScenarioRunSpec{
 			TargetRequestID: "target-123",
 			TargetClusters:  map[string][]string{"krkn-operator": {"cluster1"}},
-			ScenarioName:    "dummy-scenario",
-			ScenarioImage:   "quay.io/test:latest",
+			Scenario:        publicScenarioReference("dummy-scenario"),
 		},
 	}
 
@@ -193,8 +189,7 @@ func TestGetScenarioRunConfig_WithInlineAndRefFiles(t *testing.T) {
 		Spec: krknv1alpha1.KrknScenarioRunSpec{
 			TargetRequestID: "target-456",
 			TargetClusters:  map[string][]string{"krkn-operator": {"cluster1"}},
-			ScenarioName:    "test-scenario",
-			ScenarioImage:   "quay.io/test:latest",
+			Scenario:        publicScenarioReference("test-scenario"),
 			Files: []krknv1alpha1.FileMount{
 				{
 					Name:      "inline.yaml",
@@ -261,13 +256,11 @@ func TestGetGraphRunConfig_Success(t *testing.T) {
 		Spec: krknv1alpha1.KrknGraphRunSpec{
 			Graph: map[string]krknv1alpha1.GraphScenarioNode{
 				"node-1": {
-					Name:  "scenario-a",
-					Image: "quay.io/krkn-chaos/krkn-hub:scenario-a",
-					Env:   map[string]string{"EXIT_STATUS": "0"},
+					Scenario: publicScenarioReference("scenario-a"),
+					Env:      map[string]string{"EXIT_STATUS": "0"},
 				},
 				"node-2": {
-					Name:      "scenario-b",
-					Image:     "quay.io/krkn-chaos/krkn-hub:scenario-b",
+					Scenario:  publicScenarioReference("scenario-b"),
 					DependsOn: strPtr("node-1"),
 				},
 			},
@@ -310,8 +303,8 @@ func TestGetGraphRunConfig_Success(t *testing.T) {
 	assert.Equal(t, map[string][]string{"krkn-operator": {"cluster1"}}, payload.TargetClusters)
 
 	require.Len(t, payload.Graph, 2)
-	assert.Equal(t, "scenario-a", payload.Graph["node-1"].Name)
-	assert.Equal(t, "scenario-b", payload.Graph["node-2"].Name)
+	assert.Equal(t, "scenario-a", payload.Graph["node-1"].Scenario.Name)
+	assert.Equal(t, "scenario-b", payload.Graph["node-2"].Scenario.Name)
 	assert.Equal(t, "node-1", *payload.Graph["node-2"].DependsOn)
 }
 
@@ -356,7 +349,7 @@ func TestGetGraphRunConfig_Unauthorized(t *testing.T) {
 		},
 		Spec: krknv1alpha1.KrknGraphRunSpec{
 			Graph: map[string]krknv1alpha1.GraphScenarioNode{
-				"node-1": {Name: "s1", Image: "img:1"},
+				"node-1": {Scenario: publicScenarioReference("s1")},
 			},
 			TargetRequestID: "target-123",
 			TargetClusters:  map[string][]string{"krkn-operator": {"cluster1"}},
@@ -400,8 +393,7 @@ func TestScenariosRunRouter_ConfigEndpoint(t *testing.T) {
 		Spec: krknv1alpha1.KrknScenarioRunSpec{
 			TargetRequestID: "target-rt",
 			TargetClusters:  map[string][]string{"krkn-operator": {"c1"}},
-			ScenarioName:    "scenario-rt",
-			ScenarioImage:   "quay.io/test:rt",
+			Scenario:        publicScenarioReference("scenario-rt"),
 		},
 	}
 
@@ -431,7 +423,7 @@ func TestScenariosRunRouter_ConfigEndpoint(t *testing.T) {
 	var payload ScenarioRunRequest
 	err := json.Unmarshal(w.Body.Bytes(), &payload)
 	require.NoError(t, err)
-	assert.Equal(t, "scenario-rt", payload.ScenarioName)
+	assert.Equal(t, "scenario-rt", payload.Scenario.Name)
 }
 
 func TestGraphRunsRouter_ConfigEndpoint(t *testing.T) {
@@ -445,7 +437,7 @@ func TestGraphRunsRouter_ConfigEndpoint(t *testing.T) {
 		},
 		Spec: krknv1alpha1.KrknGraphRunSpec{
 			Graph: map[string]krknv1alpha1.GraphScenarioNode{
-				"n1": {Name: "s1", Image: "img:1"},
+				"n1": {Scenario: publicScenarioReference("s1")},
 			},
 			TargetRequestID: "target-rt",
 			TargetClusters:  map[string][]string{"krkn-operator": {"c1"}},
@@ -495,8 +487,7 @@ func TestScenariosRunRouter_ConfigEndpoint_V2Path(t *testing.T) {
 		Spec: krknv1alpha1.KrknScenarioRunSpec{
 			TargetRequestID: "target-v2",
 			TargetClusters:  map[string][]string{"krkn-operator": {"c1"}},
-			ScenarioName:    "scenario-v2",
-			ScenarioImage:   "quay.io/test:v2",
+			Scenario:        publicScenarioReference("scenario-v2"),
 		},
 	}
 
@@ -526,7 +517,7 @@ func TestScenariosRunRouter_ConfigEndpoint_V2Path(t *testing.T) {
 	var payload ScenarioRunRequest
 	err := json.Unmarshal(w.Body.Bytes(), &payload)
 	require.NoError(t, err)
-	assert.Equal(t, "scenario-v2", payload.ScenarioName)
+	assert.Equal(t, "scenario-v2", payload.Scenario.Name)
 }
 
 func TestGraphRunsRouter_ConfigEndpoint_V2Path(t *testing.T) {
@@ -540,7 +531,7 @@ func TestGraphRunsRouter_ConfigEndpoint_V2Path(t *testing.T) {
 		},
 		Spec: krknv1alpha1.KrknGraphRunSpec{
 			Graph: map[string]krknv1alpha1.GraphScenarioNode{
-				"n1": {Name: "s1", Image: "img:1"},
+				"n1": {Scenario: publicScenarioReference("s1")},
 			},
 			TargetRequestID: "target-v2",
 			TargetClusters:  map[string][]string{"krkn-operator": {"c1"}},

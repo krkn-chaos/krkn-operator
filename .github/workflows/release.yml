@@ -217,19 +217,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # Find previous tag (if any)
-          PREV_TAG=$(git describe --tags --abbrev=0 $VERSION^ 2>/dev/null || echo "")
-
-          # Build gh release command
-          if [ -n "$PREV_TAG" ]; then
-            echo "Generating notes from $PREV_TAG to $VERSION"
-            gh release create $VERSION \
-              --title "Release $VERSION" \
-              --generate-notes \
-              --notes-start-tag "$PREV_TAG"
-          else
-            echo "First release - generating notes from all commits"
-            gh release create $VERSION \
-              --title "Release $VERSION" \
-              --generate-notes
-          fi
+          # Let GitHub select the previous release and generate the notes from
+          # the commits since then, as it does for a manual release.
+          gh release create "$VERSION" \
+            --title "Release $VERSION" \
+            --generate-notes \
+            --verify-tag

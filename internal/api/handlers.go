@@ -1169,7 +1169,9 @@ func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
 
 	// Parse request body
 	var req ScenarioRunRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&req); err != nil {
 		logger.Error(err, "Failed to decode scenario run request body")
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
 			Error:   "bad_request",
@@ -1195,18 +1197,10 @@ func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.ScenarioImage == "" {
+	if err := req.Scenario.Validate(); err != nil {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
 			Error:   "bad_request",
-			Message: "scenarioImage is required",
-		})
-		return
-	}
-
-	if req.ScenarioName == "" {
-		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
-			Error:   "bad_request",
-			Message: "scenarioName is required",
+			Message: err.Error(),
 		})
 		return
 	}
@@ -1383,13 +1377,12 @@ func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
 	allFiles := append(inlineFiles, translatedFiles...)
 
 	// Load registry configuration if specified
-	var registryConfig *models.RegistryV2
-	if req.RegistryName != nil && *req.RegistryName != "" {
-		secret, err := h.loadRegistrySecret(ctx, *req.RegistryName)
+	if req.Scenario.Private != nil && *req.Scenario.Private {
+		secret, err := h.loadRegistrySecret(ctx, req.Scenario.RegistryName)
 		if err != nil {
 			writeJSONError(w, http.StatusNotFound, ErrorResponse{
 				Error:   "not_found",
-				Message: fmt.Sprintf("Registry '%s' not found", *req.RegistryName),
+				Message: fmt.Sprintf("Registry '%s' not found", req.Scenario.RegistryName),
 			})
 			return
 		}
@@ -1398,15 +1391,15 @@ func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
 		if !h.canAccessRegistry(ctx, secret) {
 			writeJSONError(w, http.StatusForbidden, ErrorResponse{
 				Error:   "forbidden",
-				Message: fmt.Sprintf("Access denied to registry '%s'", *req.RegistryName),
+				Message: fmt.Sprintf("Access denied to registry '%s'", req.Scenario.RegistryName),
 			})
 			return
 		}
 
 		// Extract registry configuration
-		registryConfig, err = registry.ExtractRegistryV2FromSecret(secret)
+		_, err = registry.ExtractRegistryV2FromSecret(secret)
 		if err != nil {
-			logger.Error(err, "Failed to extract registry config from secret", "registryName", *req.RegistryName)
+			logger.Error(err, "Failed to extract registry config from secret", "registryName", req.Scenario.RegistryName)
 			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
 				Error:   "internal_error",
 				Message: "Failed to load registry configuration",
@@ -1414,7 +1407,7 @@ func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		logger.V(1).Info("Loaded registry configuration", "registryName", *req.RegistryName)
+		logger.V(1).Info("Loaded registry configuration", "registryName", req.Scenario.RegistryName)
 	}
 
 	// Generate scenario run name.
@@ -1425,7 +1418,7 @@ func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
 	if req.CustomRunName != "" {
 		scenarioRunName = sanitizeResourceName(req.CustomRunName)
 	} else {
-		scenarioRunName = fmt.Sprintf("%s-%s", req.ScenarioName, uuid.New().String()[:8])
+		scenarioRunName = fmt.Sprintf("%s-%s", req.Scenario.Name, uuid.New().String()[:8])
 	}
 	// Inject Elasticsearch credentials server-side so the password is never sent by the client.
 	if req.ElasticsearchConfigName != "" {
@@ -1485,28 +1478,11 @@ func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
 			TargetRequestID: req.TargetRequestID,
 			OwnerUserID:     ownerUserID,
 			TargetClusters:  req.TargetClusters,
-			ScenarioName:    req.ScenarioName,
-			ScenarioImage:   req.ScenarioImage,
+			Scenario:        req.Scenario,
 			KubeconfigPath:  req.KubeconfigPath,
 			Environment:     req.Environment,
 			CustomRunName:   req.CustomRunName,
 		},
-	}
-
-	// Set registry configuration if loaded
-	if registryConfig != nil {
-		scenarioRun.Spec.RegistryName = *req.RegistryName
-		scenarioRun.Spec.RegistryURL = registryConfig.RegistryURL
-		scenarioRun.Spec.ScenarioRepository = registryConfig.ScenarioRepository
-		if registryConfig.Token != nil {
-			scenarioRun.Spec.Token = *registryConfig.Token
-		}
-		if registryConfig.Username != nil {
-			scenarioRun.Spec.Username = *registryConfig.Username
-		}
-		if registryConfig.Password != nil {
-			scenarioRun.Spec.Password = *registryConfig.Password
-		}
 	}
 
 	// Convert FileMount from API type to CRD type (merged from inline Files and translated FileReferences)
@@ -1665,6 +1641,7 @@ func (h *Handler) GetScenarioRunStatus(w http.ResponseWriter, r *http.Request) {
 				// Allow access and return 201 Created with empty jobs array
 				response := ScenarioRunStatusResponse{
 					ScenarioRunName:  scenarioRunName,
+					ScenarioName:     scenarioRun.Spec.Scenario.Name,
 					Phase:            scenarioRun.Status.Phase,
 					TotalTargets:     scenarioRun.Status.TotalTargets,
 					SuccessfulJobs:   scenarioRun.Status.SuccessfulJobs,
@@ -1672,7 +1649,7 @@ func (h *Handler) GetScenarioRunStatus(w http.ResponseWriter, r *http.Request) {
 					RunningJobs:      scenarioRun.Status.RunningJobs,
 					ClusterJobs:      []ClusterJobStatusResponse{},
 					OwnerUserID:      scenarioRun.Spec.OwnerUserID,
-					RegistryName:     scenarioRun.Spec.RegistryName,
+					RegistryName:     scenarioRun.Spec.Scenario.RegistryName,
 					GraphRunName:     scenarioRun.Labels["krkn.dev/graph-run"],
 					GraphNodeID:      scenarioRun.Labels["krkn.dev/graph-node"],
 					ResiliencyScores: convertClusterResiliencyScores(scenarioRun.Status.ResiliencyScores),
@@ -1713,6 +1690,7 @@ func (h *Handler) GetScenarioRunStatus(w http.ResponseWriter, r *http.Request) {
 
 	response := ScenarioRunStatusResponse{
 		ScenarioRunName:  scenarioRunName,
+		ScenarioName:     scenarioRun.Spec.Scenario.Name,
 		Phase:            scenarioRun.Status.Phase,
 		TotalTargets:     scenarioRun.Status.TotalTargets,
 		SuccessfulJobs:   scenarioRun.Status.SuccessfulJobs,
@@ -1720,7 +1698,7 @@ func (h *Handler) GetScenarioRunStatus(w http.ResponseWriter, r *http.Request) {
 		RunningJobs:      scenarioRun.Status.RunningJobs,
 		ClusterJobs:      clusterJobs,
 		OwnerUserID:      scenarioRun.Spec.OwnerUserID,
-		RegistryName:     scenarioRun.Spec.RegistryName,
+		RegistryName:     scenarioRun.Spec.Scenario.RegistryName,
 		GraphRunName:     scenarioRun.Labels["krkn.dev/graph-run"],
 		GraphNodeID:      scenarioRun.Labels["krkn.dev/graph-node"],
 		CustomRunName:    scenarioRun.Spec.CustomRunName,
@@ -2231,13 +2209,13 @@ func (h *Handler) ListScenarioRuns(w http.ResponseWriter, r *http.Request) {
 		if phaseFilter != "" && sr.Status.Phase != phaseFilter {
 			continue
 		}
-		if scenarioNameFilter != "" && sr.Spec.ScenarioName != scenarioNameFilter {
+		if scenarioNameFilter != "" && sr.Spec.Scenario.Name != scenarioNameFilter {
 			continue
 		}
 
 		run := ScenarioRunListItem{
 			ScenarioRunName:  sr.Name,
-			ScenarioName:     sr.Spec.ScenarioName,
+			ScenarioName:     sr.Spec.Scenario.Name,
 			Phase:            sr.Status.Phase,
 			TotalTargets:     sr.Status.TotalTargets,
 			SuccessfulJobs:   sr.Status.SuccessfulJobs,

@@ -149,7 +149,7 @@ func computeWSJobStats(jobs []WSUnifiedJobItem) WSJobStatsSummary {
 func buildScenarioRunResponse(run *krknv1alpha1.KrknScenarioRun) ScenarioRunStatusResponse {
 	return ScenarioRunStatusResponse{
 		ScenarioRunName:   run.Name,
-		ScenarioName:      run.Spec.ScenarioName,
+		ScenarioName:      run.Spec.Scenario.Name,
 		Phase:             run.Status.Phase,
 		TotalTargets:      run.Status.TotalTargets,
 		SuccessfulJobs:    run.Status.SuccessfulJobs,
@@ -157,7 +157,7 @@ func buildScenarioRunResponse(run *krknv1alpha1.KrknScenarioRun) ScenarioRunStat
 		RunningJobs:       run.Status.RunningJobs,
 		ClusterJobs:       sanitizedClusterJobs(run.Status.ClusterJobs),
 		OwnerUserID:       run.Spec.OwnerUserID,
-		RegistryName:      run.Spec.RegistryName,
+		RegistryName:      run.Spec.Scenario.RegistryName,
 		GraphRunName:      run.Labels["krkn.dev/graph-run"],
 		GraphNodeID:       run.Labels["krkn.dev/graph-node"],
 		CustomRunName:     run.Spec.CustomRunName,
@@ -169,7 +169,7 @@ func buildScenarioRunResponse(run *krknv1alpha1.KrknScenarioRun) ScenarioRunStat
 func buildScenarioRunDetailResponse(run *krknv1alpha1.KrknScenarioRun) ScenarioRunStatusResponse {
 	return ScenarioRunStatusResponse{
 		ScenarioRunName:   run.Name,
-		ScenarioName:      run.Spec.ScenarioName,
+		ScenarioName:      run.Spec.Scenario.Name,
 		Phase:             run.Status.Phase,
 		TotalTargets:      run.Status.TotalTargets,
 		SuccessfulJobs:    run.Status.SuccessfulJobs,
@@ -177,7 +177,7 @@ func buildScenarioRunDetailResponse(run *krknv1alpha1.KrknScenarioRun) ScenarioR
 		RunningJobs:       run.Status.RunningJobs,
 		ClusterJobs:       sanitizedClusterJobs(run.Status.ClusterJobs),
 		OwnerUserID:       run.Spec.OwnerUserID,
-		RegistryName:      run.Spec.RegistryName,
+		RegistryName:      run.Spec.Scenario.RegistryName,
 		GraphRunName:      run.Labels["krkn.dev/graph-run"],
 		GraphNodeID:       run.Labels["krkn.dev/graph-node"],
 		CustomRunName:     run.Spec.CustomRunName,

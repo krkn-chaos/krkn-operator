@@ -147,10 +147,13 @@ type ScenarioRunRequest struct {
 	// Example: {"krkn-operator": ["cluster1", "cluster2"], "krkn-operator-acm": ["cluster3"]}
 	TargetClusters map[string][]string `json:"targetClusters"`
 
-	// ScenarioImage is the container image to run
-	ScenarioImage string `json:"scenarioImage"`
-	// ScenarioName is the name of the scenario being executed
-	ScenarioName string `json:"scenarioName"`
+	// Scenario identifies the scenario and registry to resolve. The operator
+	// resolves the executable image through krknctl; callers cannot provide one.
+	Scenario krknv1alpha1.ScenarioReference `json:"scenario"`
+	// Legacy fields are retained only so old in-memory tests and response
+	// helpers can compile. They are not accepted from JSON requests.
+	ScenarioImage string `json:"-"`
+	ScenarioName  string `json:"-"`
 	// KubeconfigPath is the path where kubeconfig should be mounted (optional, default: /home/krkn/.kube/config)
 	KubeconfigPath string `json:"kubeconfigPath,omitempty"`
 	// Environment is a map of environment variables to pass to the container (optional)
@@ -165,8 +168,9 @@ type ScenarioRunRequest struct {
 	// credentials (ES_PASSWORD, and any ES_* vars not already in Environment) are
 	// injected server-side so the password is never transmitted by the client.
 	ElasticsearchConfigName string `json:"elasticsearchConfigName,omitempty"`
-	// Private registry configuration (optional)
-	ScenariosRequest
+	// RegistryName is retained only for old in-memory callers. Registry
+	// selection for this endpoint is part of Scenario.
+	RegistryName *string `json:"-"`
 }
 
 // TargetJobResult represents the result of creating a job for a specific target
@@ -311,6 +315,8 @@ type ScenarioRunCreateResponse struct {
 type ScenarioRunStatusResponse struct {
 	// ScenarioRunName is the name of the KrknScenarioRun CR
 	ScenarioRunName string `json:"scenarioRunName"`
+	// ScenarioName is the scenario tag/name being executed
+	ScenarioName string `json:"scenarioName,omitempty"`
 	// Phase is the overall phase of the scenario run
 	Phase string `json:"phase"`
 	// TotalTargets is the total number of target clusters

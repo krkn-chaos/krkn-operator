@@ -28,16 +28,8 @@ definitions:
           Env is a map of environment variables for the scenario
           +optional
         type: object
-      image:
-        description: |-
-          Image is the container image for the scenario
-          +optional
-        type: string
-      name:
-        description: |-
-          Name is the name of the scenario
-          +optional
-        type: string
+      scenario:
+        $ref: '#/definitions/github_com_krkn-chaos_krkn-operator_api_v1alpha1.ScenarioReference'
       volumes:
         additionalProperties:
           type: string
@@ -45,6 +37,23 @@ definitions:
           Volumes is a map of volume mounts for the scenario
           +optional
         type: object
+    type: object
+  github_com_krkn-chaos_krkn-operator_api_v1alpha1.ScenarioReference:
+    properties:
+      name:
+        description: Name is the scenario tag/name to resolve.
+        type: string
+      private:
+        description: Private selects a saved private registry when true, or krknctl's
+          public Quay provider when false.
+        type: boolean
+      registryName:
+        description: RegistryName identifies the saved private registry when Private
+          is true.
+        type: string
+    required:
+    - name
+    - private
     type: object
   github_com_krkn-chaos_krkn-operator_pkg_files.AvailableFilesResponse:
     properties:
@@ -581,17 +590,8 @@ definitions:
         description: 'KubeconfigPath is the path where kubeconfig should be mounted
           (optional, default: /home/krkn/.kube/config)'
         type: string
-      registryName:
-        description: |-
-          RegistryName is the name of a saved registry (optional)
-          If omitted, defaults to quay.io public registry
-        type: string
-      scenarioImage:
-        description: ScenarioImage is the container image to run
-        type: string
-      scenarioName:
-        description: ScenarioName is the name of the scenario being executed
-        type: string
+      scenario:
+        $ref: '#/definitions/github_com_krkn-chaos_krkn-operator_api_v1alpha1.ScenarioReference'
       targetClusters:
         additionalProperties:
           items:

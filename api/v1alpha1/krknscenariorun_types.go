@@ -19,6 +19,8 @@ Assisted-by: Claude Sonnet 4.5 (claude-sonnet-4-5@20250929)
 package v1alpha1
 
 import (
+	"fmt"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 )
@@ -87,6 +89,39 @@ type ClusterJobStatus struct {
 	FailureReason string `json:"failureReason,omitempty"`
 }
 
+// ScenarioReference identifies a scenario without allowing the caller to
+// provide an executable image reference. The operator resolves the image
+// through krknctl using this identity and the selected registry Secret.
+type ScenarioReference struct {
+	// Name is the scenario tag/name to resolve.
+	Name string `json:"name"`
+	// Private selects a saved private registry when true, or krknctl's public
+	// Quay provider when false. A pointer makes the field mandatory on input.
+	Private *bool `json:"private"`
+	// RegistryName identifies the saved private registry when Private is true.
+	RegistryName string `json:"registryName,omitempty"`
+}
+
+// Validate checks that a scenario reference is complete and unambiguous.
+func (r ScenarioReference) Validate() error {
+	if r.Name == "" {
+		return fmt.Errorf("scenario.name is required")
+	}
+	if r.Private == nil {
+		return fmt.Errorf("scenario.private is required")
+	}
+	if *r.Private {
+		if r.RegistryName == "" {
+			return fmt.Errorf("scenario.registryName is required for private scenarios")
+		}
+		return nil
+	}
+	if r.RegistryName != "" {
+		return fmt.Errorf("scenario.registryName must be omitted for public scenarios")
+	}
+	return nil
+}
+
 // KrknScenarioRunSpec defines the desired state of KrknScenarioRun
 type KrknScenarioRunSpec struct {
 	// TargetRequestID is the reference to the KrknTargetRequest CR
@@ -105,11 +140,21 @@ type KrknScenarioRunSpec struct {
 	// +kubebuilder:validation:MinProperties=1
 	TargetClusters map[string][]string `json:"targetClusters"`
 
-	// ScenarioName is the name of the scenario to run
-	ScenarioName string `json:"scenarioName"`
+	// Scenario identifies the scenario and registry to resolve. It is the only
+	// source of image identity; complete image references are not accepted.
+	Scenario ScenarioReference `json:"scenario"`
 
-	// ScenarioImage is the container image for the scenario
-	ScenarioImage string `json:"scenarioImage"`
+	// Legacy fields remain only as Go compatibility shims for code that builds
+	// old in-memory test objects. They are not serialized into the CRD and are
+	// never used to select a pod image.
+	ScenarioName       string `json:"-"`
+	ScenarioImage      string `json:"-"`
+	RegistryURL        string `json:"-"`
+	ScenarioRepository string `json:"-"`
+	Token              string `json:"-"`
+	Username           string `json:"-"`
+	Password           string `json:"-"`
+	RegistryName       string `json:"-"`
 
 	// KubeconfigPath is the path where kubeconfig will be mounted in the pod
 	// +optional
@@ -123,30 +168,6 @@ type KrknScenarioRunSpec struct {
 	// Environment is a map of environment variables to set in the scenario pod
 	// +optional
 	Environment map[string]string `json:"environment,omitempty"`
-
-	// RegistryURL is the URL of the container registry
-	// +optional
-	RegistryURL string `json:"registryURL,omitempty"`
-
-	// ScenarioRepository is the repository path in the registry
-	// +optional
-	ScenarioRepository string `json:"scenarioRepository,omitempty"`
-
-	// Token is the authentication token for the registry
-	// +optional
-	Token string `json:"token,omitempty"`
-
-	// Username is the username for registry authentication
-	// +optional
-	Username string `json:"username,omitempty"`
-
-	// Password is the password for registry authentication
-	// +optional
-	Password string `json:"password,omitempty"`
-
-	// RegistryName is the name of the saved private registry to use
-	// +optional
-	RegistryName string `json:"registryName,omitempty"`
 
 	// MaxRetries is the maximum number of times to retry failed jobs
 	// +optional

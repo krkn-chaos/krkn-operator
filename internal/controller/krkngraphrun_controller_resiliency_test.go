@@ -31,6 +31,11 @@ import (
 	"github.com/krkn-chaos/krkn-operator/pkg/files"
 )
 
+func publicScenarioReference(name string) krknv1alpha1.ScenarioReference {
+	private := false
+	return krknv1alpha1.ScenarioReference{Name: name, Private: &private}
+}
+
 func TestCreateScenarioRun_ResiliencyScore(t *testing.T) {
 	scheme := runtime.NewScheme()
 	_ = krknv1alpha1.AddToScheme(scheme)
@@ -56,8 +61,7 @@ func TestCreateScenarioRun_ResiliencyScore(t *testing.T) {
 				Spec: krknv1alpha1.KrknGraphRunSpec{
 					Graph: map[string]krknv1alpha1.GraphScenarioNode{
 						"node-1": {
-							Name:  "test-scenario",
-							Image: "quay.io/krkn-chaos/krkn-hub:dummy-scenario",
+							Scenario: publicScenarioReference("test-scenario"),
 						},
 					},
 					TargetRequestID:         "test-target",
@@ -82,8 +86,7 @@ func TestCreateScenarioRun_ResiliencyScore(t *testing.T) {
 				Spec: krknv1alpha1.KrknGraphRunSpec{
 					Graph: map[string]krknv1alpha1.GraphScenarioNode{
 						"node-1": {
-							Name:  "test-scenario",
-							Image: "quay.io/krkn-chaos/krkn-hub:dummy-scenario",
+							Scenario: publicScenarioReference("test-scenario"),
 							Volumes: map[string]string{
 								"uuid-1": "/config/scenario.yaml",
 							},
@@ -128,8 +131,7 @@ func TestCreateScenarioRun_ResiliencyScore(t *testing.T) {
 				Spec: krknv1alpha1.KrknGraphRunSpec{
 					Graph: map[string]krknv1alpha1.GraphScenarioNode{
 						"node-1": {
-							Name:  "test-scenario",
-							Image: "quay.io/krkn-chaos/krkn-hub:dummy-scenario",
+							Scenario: publicScenarioReference("test-scenario"),
 							Volumes: map[string]string{
 								"uuid-metrics": "/etc/kraken/metrics.yaml",
 								"uuid-config":  "/config/scenario.yaml",
@@ -189,8 +191,7 @@ func TestCreateScenarioRun_ResiliencyScore(t *testing.T) {
 				Spec: krknv1alpha1.KrknGraphRunSpec{
 					Graph: map[string]krknv1alpha1.GraphScenarioNode{
 						"node-1": {
-							Name:  "test-scenario",
-							Image: "quay.io/krkn-chaos/krkn-hub:dummy-scenario",
+							Scenario: publicScenarioReference("test-scenario"),
 						},
 					},
 					TargetRequestID:        "test-target",
@@ -211,15 +212,13 @@ func TestCreateScenarioRun_ResiliencyScore(t *testing.T) {
 				Spec: krknv1alpha1.KrknGraphRunSpec{
 					Graph: map[string]krknv1alpha1.GraphScenarioNode{
 						"node-1": {
-							Name:  "test-scenario",
-							Image: "quay.io/krkn-chaos/krkn-hub:dummy-scenario",
+							Scenario: publicScenarioReference("test-scenario"),
 							Volumes: map[string]string{
 								"uuid-A": "/etc/kraken/metrics.yaml",
 							},
 						},
 						"node-2": {
-							Name:  "test-scenario",
-							Image: "quay.io/krkn-chaos/krkn-hub:dummy-scenario",
+							Scenario: publicScenarioReference("test-scenario"),
 							Volumes: map[string]string{
 								"uuid-B": "/etc/kraken/metrics.yaml",
 							},
@@ -264,8 +263,7 @@ func TestCreateScenarioRun_ResiliencyScore(t *testing.T) {
 				Spec: krknv1alpha1.KrknGraphRunSpec{
 					Graph: map[string]krknv1alpha1.GraphScenarioNode{
 						"node-1": {
-							Name:  "test-scenario",
-							Image: "quay.io/krkn-chaos/krkn-hub:dummy-scenario",
+							Scenario: publicScenarioReference("test-scenario"),
 							// User tries to inject reserved env vars
 							Env: map[string]string{
 								"RESILIENCY_SCORE": "true",
@@ -296,8 +294,7 @@ func TestCreateScenarioRun_ResiliencyScore(t *testing.T) {
 				Spec: krknv1alpha1.KrknGraphRunSpec{
 					Graph: map[string]krknv1alpha1.GraphScenarioNode{
 						"node-1": {
-							Name:  "test-scenario",
-							Image: "quay.io/krkn-chaos/krkn-hub:dummy-scenario",
+							Scenario: publicScenarioReference("test-scenario"),
 							// User tries to inject wrong values
 							Env: map[string]string{
 								"RESILIENCY_SCORE": "false", // Wrong value

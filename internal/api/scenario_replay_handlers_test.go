@@ -74,8 +74,7 @@ func TestGetScenarioReplay_Success(t *testing.T) {
 			TargetClusters: map[string][]string{
 				"krkn-operator": {"cluster1"},
 			},
-			ScenarioName:  "dummy-scenario",
-			ScenarioImage: "quay.io/krkn-chaos/krkn-hub:dummy-scenario",
+			Scenario: publicScenarioReference("dummy-scenario"),
 			Environment: map[string]string{
 				"EXIT_STATUS": "0",
 			},
@@ -87,7 +86,6 @@ func TestGetScenarioReplay_Success(t *testing.T) {
 					FileID:    "file-uuid-456",
 				},
 			},
-			RegistryName: "my-registry",
 		},
 	}
 
@@ -125,8 +123,9 @@ func TestGetScenarioReplay_Success(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, "target-123", payload.TargetRequestID)
-	assert.Equal(t, "dummy-scenario", payload.ScenarioName)
-	assert.Equal(t, "quay.io/krkn-chaos/krkn-hub:dummy-scenario", payload.ScenarioImage)
+	assert.Equal(t, "dummy-scenario", payload.Scenario.Name)
+	assert.NotNil(t, payload.Scenario.Private)
+	assert.False(t, *payload.Scenario.Private)
 	assert.Equal(t, map[string][]string{"krkn-operator": {"cluster1"}}, payload.TargetClusters)
 	assert.Equal(t, map[string]string{"EXIT_STATUS": "0"}, payload.Environment)
 
@@ -135,9 +134,6 @@ func TestGetScenarioReplay_Success(t *testing.T) {
 	assert.Equal(t, "file-uuid-456", payload.FileReferences[0].FileID)
 	assert.Equal(t, "/etc/krkn/config.yaml", payload.FileReferences[0].MountPath)
 
-	// Verify registryName
-	require.NotNil(t, payload.RegistryName)
-	assert.Equal(t, "my-registry", *payload.RegistryName)
 }
 
 // TestGetScenarioReplay_JobNotFound tests 404 when job doesn't exist
@@ -315,8 +311,7 @@ func TestGetScenarioReplay_Unauthorized(t *testing.T) {
 			TargetClusters: map[string][]string{
 				"krkn-operator": {"cluster1"},
 			},
-			ScenarioName:  "dummy-scenario",
-			ScenarioImage: "quay.io/krkn-chaos/krkn-hub:dummy-scenario",
+			Scenario: publicScenarioReference("dummy-scenario"),
 		},
 	}
 
@@ -382,8 +377,7 @@ func TestGetScenarioReplay_WithInlineFiles(t *testing.T) {
 			TargetClusters: map[string][]string{
 				"krkn-operator": {"cluster2"},
 			},
-			ScenarioName:  "test-scenario",
-			ScenarioImage: "quay.io/test:latest",
+			Scenario: publicScenarioReference("test-scenario"),
 			Files: []krknv1alpha1.FileMount{
 				{
 					Name:      "inline.yaml",

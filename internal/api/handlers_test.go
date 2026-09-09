@@ -746,8 +746,7 @@ func TestPostScenarioRun_SingleTarget_Success(t *testing.T) {
 		"targetClusters": {
 			"krkn-operator": ["test-cluster"]
 		},
-		"scenarioImage": "quay.io/krkn/pod-scenarios:latest",
-		"scenarioName": "pod-delete"
+		"scenario": {"name": "pod-delete", "private": false}
 	}`
 
 	req := httptest.NewRequest("POST", ScenariosRunPath, strings.NewReader(reqBody))
@@ -807,8 +806,7 @@ func TestPostScenarioRun_MissingTargetUUIDs(t *testing.T) {
 
 	// Test
 	reqBody := `{
-		"scenarioImage": "quay.io/krkn/pod-scenarios:latest",
-		"scenarioName": "pod-delete"
+		"scenario": {"name": "pod-delete", "private": false}
 	}`
 
 	req := httptest.NewRequest("POST", ScenariosRunPath, strings.NewReader(reqBody))
@@ -845,8 +843,7 @@ func TestPostScenarioRun_MultipleTargets_AllSuccess(t *testing.T) {
 		"targetClusters": {
 			"krkn-operator": ["cluster-1", "cluster-2", "cluster-3"]
 		},
-		"scenarioImage": "quay.io/krkn/pod-scenarios:latest",
-		"scenarioName": "pod-delete"
+		"scenario": {"name": "pod-delete", "private": false}
 	}`
 
 	req := httptest.NewRequest("POST", ScenariosRunPath, strings.NewReader(reqBody))
@@ -896,8 +893,7 @@ func TestPostScenarioRun_MultipleTargets_PartialFailure(t *testing.T) {
 		"targetClusters": {
 			"krkn-operator": ["cluster-1", "invalid", "cluster-2"]
 		},
-		"scenarioImage": "quay.io/krkn/pod-scenarios:latest",
-		"scenarioName": "pod-delete"
+		"scenario": {"name": "pod-delete", "private": false}
 	}`
 
 	req := httptest.NewRequest("POST", ScenariosRunPath, strings.NewReader(reqBody))
@@ -947,8 +943,7 @@ func TestPostScenarioRun_MultipleTargets_AllFailure(t *testing.T) {
 		"targetClusters": {
 			"krkn-operator": ["invalid-1", "invalid-2"]
 		},
-		"scenarioImage": "quay.io/krkn/pod-scenarios:latest",
-		"scenarioName": "pod-delete"
+		"scenario": {"name": "pod-delete", "private": false}
 	}`
 
 	req := httptest.NewRequest("POST", ScenariosRunPath, strings.NewReader(reqBody))
@@ -983,17 +978,17 @@ func TestPostScenarioRun_Validation_ClusterNames(t *testing.T) {
 	}{
 		{
 			name:        "Empty array",
-			reqBody:     `{"targetRequestID": "test-id", "targetClusters": {"krkn-operator": []}, "scenarioImage": "img", "scenarioName": "test"}`,
+			reqBody:     `{"targetRequestID": "test-id", "targetClusters": {"krkn-operator": []}, "scenario": {"name": "test", "private": false}}`,
 			expectedErr: "provider 'krkn-operator' must have at least one cluster",
 		},
 		{
 			name:        "Duplicates",
-			reqBody:     `{"targetRequestID": "test-id", "targetClusters": {"krkn-operator": ["cluster1", "cluster1"]}, "scenarioImage": "img", "scenarioName": "test"}`,
+			reqBody:     `{"targetRequestID": "test-id", "targetClusters": {"krkn-operator": ["cluster1", "cluster1"]}, "scenario": {"name": "test", "private": false}}`,
 			expectedErr: "cluster 'cluster1' appears in multiple providers",
 		},
 		{
 			name:        "Empty string",
-			reqBody:     `{"targetRequestID": "test-id", "targetClusters": {"krkn-operator": ["cluster1", ""]}, "scenarioImage": "img", "scenarioName": "test"}`,
+			reqBody:     `{"targetRequestID": "test-id", "targetClusters": {"krkn-operator": ["cluster1", ""]}, "scenario": {"name": "test", "private": false}}`,
 			expectedErr: "cluster names cannot be empty",
 		},
 	}
@@ -1034,7 +1029,7 @@ func TestListScenarioRuns_Success(t *testing.T) {
 			Namespace: "default",
 		},
 		Spec: krknv1alpha1.KrknScenarioRunSpec{
-			ScenarioName: "pod-delete",
+			Scenario: publicScenarioReference("pod-delete"),
 			TargetClusters: map[string][]string{
 				"krkn-operator": {"cluster-1"},
 			},
@@ -1051,7 +1046,7 @@ func TestListScenarioRuns_Success(t *testing.T) {
 			Namespace: "default",
 		},
 		Spec: krknv1alpha1.KrknScenarioRunSpec{
-			ScenarioName: "node-drain",
+			Scenario: publicScenarioReference("node-drain"),
 			TargetClusters: map[string][]string{
 				"krkn-operator": {"cluster-2"},
 			},
@@ -1068,7 +1063,7 @@ func TestListScenarioRuns_Success(t *testing.T) {
 			Namespace: "default",
 		},
 		Spec: krknv1alpha1.KrknScenarioRunSpec{
-			ScenarioName: "pod-delete",
+			Scenario: publicScenarioReference("pod-delete"),
 			TargetClusters: map[string][]string{
 				"krkn-operator": {"cluster-3"},
 			},
@@ -1122,7 +1117,7 @@ func TestListScenarioRuns_FilterByScenarioName(t *testing.T) {
 			Namespace: "default",
 		},
 		Spec: krknv1alpha1.KrknScenarioRunSpec{
-			ScenarioName: "pod-delete",
+			Scenario: publicScenarioReference("pod-delete"),
 			TargetClusters: map[string][]string{
 				"krkn-operator": {"cluster-1"},
 			},
@@ -1139,7 +1134,7 @@ func TestListScenarioRuns_FilterByScenarioName(t *testing.T) {
 			Namespace: "default",
 		},
 		Spec: krknv1alpha1.KrknScenarioRunSpec{
-			ScenarioName: "node-drain",
+			Scenario: publicScenarioReference("node-drain"),
 			TargetClusters: map[string][]string{
 				"krkn-operator": {"cluster-2"},
 			},
@@ -1196,8 +1191,7 @@ func TestPostScenarioRun_CustomRunName_StoredAndReturned(t *testing.T) {
 		"targetClusters": {
 			"krkn-operator": ["test-cluster"]
 		},
-		"scenarioImage": "quay.io/krkn/pod-scenarios:latest",
-		"scenarioName": "pod-delete",
+		"scenario": {"name": "pod-delete", "private": false},
 		"customRunName": "my-chaos-run"
 	}`
 
@@ -1272,7 +1266,7 @@ func TestPostScenarioRun_DuplicateCustomRunName_Conflict(t *testing.T) {
 			Labels:    map[string]string{"krkn.krkn-chaos.dev/custom-run-name": "my-chaos-run"},
 		},
 		Spec: krknv1alpha1.KrknScenarioRunSpec{
-			ScenarioName:  "pod-delete",
+			Scenario:      publicScenarioReference("pod-delete"),
 			CustomRunName: "my-chaos-run",
 			TargetClusters: map[string][]string{
 				"krkn-operator": {"cluster-1"},
@@ -1292,8 +1286,7 @@ func TestPostScenarioRun_DuplicateCustomRunName_Conflict(t *testing.T) {
 		"targetClusters": {
 			"krkn-operator": ["test-cluster"]
 		},
-		"scenarioImage": "quay.io/krkn/pod-scenarios:latest",
-		"scenarioName": "pod-delete",
+		"scenario": {"name": "pod-delete", "private": false},
 		"customRunName": "my-chaos-run"
 	}`
 
@@ -1327,7 +1320,7 @@ func TestListScenarioRuns_IncludesCustomRunName(t *testing.T) {
 			Namespace: "default",
 		},
 		Spec: krknv1alpha1.KrknScenarioRunSpec{
-			ScenarioName:  "pod-delete",
+			Scenario:      publicScenarioReference("pod-delete"),
 			CustomRunName: "my-chaos-run",
 			TargetClusters: map[string][]string{
 				"krkn-operator": {"cluster-1"},
@@ -1379,7 +1372,7 @@ func TestGetScenarioRunStatus_IncludesCustomRunName(t *testing.T) {
 			Namespace: "default",
 		},
 		Spec: krknv1alpha1.KrknScenarioRunSpec{
-			ScenarioName:  "pod-delete",
+			Scenario:      publicScenarioReference("pod-delete"),
 			CustomRunName: "my-chaos-run",
 			TargetClusters: map[string][]string{
 				"krkn-operator": {"cluster-1"},
@@ -1417,6 +1410,10 @@ func TestGetScenarioRunStatus_IncludesCustomRunName(t *testing.T) {
 
 	if response.ScenarioRunName != "pod-delete-abc123" {
 		t.Errorf("Expected ScenarioRunName='pod-delete-abc123', got '%s'", response.ScenarioRunName)
+	}
+
+	if response.ScenarioName != "pod-delete" {
+		t.Errorf("Expected ScenarioName='pod-delete', got '%s'", response.ScenarioName)
 	}
 }
 

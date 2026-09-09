@@ -1,46 +1,40 @@
-# Project Configuration for krkn-operator
-# This file contains project-specific settings used by Claude Code and automation tools.
-# It should be the ONLY file you need to edit when adapting CLAUDE.md to a new project.
+# Repository-specific context for AGENTS.md.
+# Place this file in krkn-operator-ecosystem/krkn-operator/.
+# All relative paths are resolved from that repository's root.
 
 [project]
-# Project identifier - used as beads issue_prefix and in documentation
 name = "krkn-operator"
-
-# Project type - determines which sections of CLAUDE.md apply
 type = "go-operator"
-
-# Ecosystem this project belongs to
-ecosystem = "krkn-operator-ecosystem"
-
-# Brief project description
-description = "Core Kubernetes operator providing chaos engineering capabilities for the krkn ecosystem"
+description = "Main Krkn Kubernetes/OpenShift operator and REST API; orchestrates the containerized Krkn Python core and uses the shared krknctl Go library."
 
 [ecosystem_projects]
-# Related projects in the ecosystem (relative paths)
-core = "."  # This project
-acm = "../krkn-operator-acm"
-console = "../krkn-operator-console"
+krkn-operator = "."
+krkn-operator-console = "../krkn-operator-console"
+krkn-operator-acm = "../krkn-operator-acm"
+krknctl = "../../krknctl"
+krkn = "../../krkn"
+
+[paths]
+pkg_public_api = "pkg/"
+internal_api = "internal/"
 
 [beads]
-# Beads configuration - uses centralized database via symlink
-central_database = "/Users/tsebasti/Projects/beads/.beads"  # Centralized beads database location
-project_label = "project:krkn-operator"  # Label to identify this project's issues
-default_create_labels = ["project:krkn-operator"]  # Auto-apply to new issues
-export_path = "./beads/"  # Local JSON export path (gitignored)
+project_label = "project:krkn-operator"
+# Use the repository's existing .beads symlink to the shared central database.
+# Do not initialize a new database or replace the symlink.
+central_database = ".beads"
+export_path = "beads/"
+# Preserve the shared issue prefix already configured in Beads (tsebastiani).
+# Follow the repository's actual Git policy for exports; do not change it here.
 
-[go-operator]
-# Go-specific settings and commands
-test_command = "make test"
-lint_command = "make lint"
-build_command = "make build"
-pkg_public_api = "pkg/"  # Public API that other operators can import
-internal_api = "internal/"  # Private implementation details
+[commands]
+# Intentionally unset for now, not a blocker by itself.
+# When validation is needed, discover the current commands in the Makefile,
+# project scripts and CI. Commented examples below are not verified targets.
+# build = "make build"
+# test = "make test"
+# lint = "make lint"
+# format = "make fmt"
 
-# Code quality requirements
-min_coverage = 80  # Minimum test coverage percentage
-required_linters = ["golangci-lint"]
-
-[documentation]
-# Documentation standards
-godoc_required = true  # All exports must have godoc comments
-examples_required = true  # Complex APIs need usage examples
+# Coverage requirements come from the existing project/CI policy.
+# No new minimum coverage threshold is imposed by this file.

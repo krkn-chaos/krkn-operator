@@ -125,15 +125,16 @@ func MapScenarioNodeToScenarioRunSpec(
 	targetClusters map[string][]string,
 	ownerUserID string,
 ) (v1alpha1.KrknScenarioRunSpec, error) {
-	// Validate required fields
-	if node.Image == "" {
-		return v1alpha1.KrknScenarioRunSpec{}, fmt.Errorf("scenario node image is required")
-	}
-	if node.Name == "" {
-		return v1alpha1.KrknScenarioRunSpec{}, fmt.Errorf("scenario node name is required")
+	// Validate the registry-independent scenario reference. Image references
+	// supplied by callers are intentionally not accepted.
+	if err := node.Scenario.Validate(); err != nil {
+		return v1alpha1.KrknScenarioRunSpec{}, fmt.Errorf("invalid scenario reference: %w", err)
 	}
 	if scenarioName == "" {
 		return v1alpha1.KrknScenarioRunSpec{}, fmt.Errorf("scenario name is required")
+	}
+	if scenarioName != node.Scenario.Name {
+		return v1alpha1.KrknScenarioRunSpec{}, fmt.Errorf("scenario name does not match node scenario reference")
 	}
 	if targetRequestID == "" {
 		return v1alpha1.KrknScenarioRunSpec{}, fmt.Errorf("target request ID is required")
@@ -146,9 +147,11 @@ func MapScenarioNodeToScenarioRunSpec(
 	spec := v1alpha1.KrknScenarioRunSpec{
 		TargetRequestID: targetRequestID,
 		TargetClusters:  targetClusters,
-		ScenarioName:    scenarioName,
-		ScenarioImage:   node.Image,
-		OwnerUserID:     ownerUserID,
+		Scenario:        node.Scenario,
+		// Keep the internal name populated for callers that consume a freshly
+		// constructed object before it is serialized by Kubernetes.
+		ScenarioName: scenarioName,
+		OwnerUserID:  ownerUserID,
 	}
 
 	// Map environment variables from node
