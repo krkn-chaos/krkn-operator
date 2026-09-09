@@ -34,6 +34,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
+// +kubebuilder:rbac:groups=krkn.krkn-chaos.dev,resources=krknfiletypes,verbs=get;list;watch;create;update;patch;delete
+
 // FileTypesRouter routes file type requests
 func (h *Handler) FileTypesRouter(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {

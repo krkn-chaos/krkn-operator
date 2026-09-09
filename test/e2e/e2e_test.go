@@ -212,6 +212,48 @@ var _ = Describe("Manager", Ordered, func() {
 			Eventually(verifyControllerUp).Should(Succeed())
 		})
 
+		It("should grant KrknFileType permissions to the manager ClusterRole", func() {
+			By("reading the installed manager ClusterRole")
+			cmd := exec.Command("kubectl", "get", "clusterrole", "krkn-operator-manager-role",
+				"-o", "json")
+			output, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to read the installed manager Role")
+
+			var role struct {
+				Rules []struct {
+					APIGroups []string `json:"apiGroups"`
+					Resources []string `json:"resources"`
+					Verbs     []string `json:"verbs"`
+				} `json:"rules"`
+			}
+			Expect(json.Unmarshal([]byte(output), &role)).To(Succeed(), "Failed to parse the installed manager Role")
+
+			hasPermission := func(values []string, expected string) bool {
+				for _, value := range values {
+					if value == expected {
+						return true
+					}
+				}
+				return false
+			}
+
+			requiredVerbs := []string{"get", "list", "watch", "create", "update", "patch", "delete"}
+			for _, rule := range role.Rules {
+				if !hasPermission(rule.APIGroups, "krkn.krkn-chaos.dev") ||
+					!hasPermission(rule.Resources, "krknfiletypes") {
+					continue
+				}
+
+				for _, verb := range requiredVerbs {
+					Expect(rule.Verbs).To(ContainElement(verb),
+						"manager ClusterRole is missing verb %q for krknfiletypes", verb)
+				}
+				return
+			}
+
+			Fail("manager ClusterRole does not grant permissions for krknfiletypes")
+		})
+
 		It("should ensure the metrics endpoint is serving metrics", func() {
 			By("creating a ClusterRoleBinding for the service account to allow access to metrics")
 			cmd := exec.Command("kubectl", "create", "clusterrolebinding", metricsRoleBindingName,
