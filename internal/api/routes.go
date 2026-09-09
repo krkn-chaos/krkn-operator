@@ -113,3 +113,9 @@ const (
 const (
 	ElasticsearchConfigsPath = APIBasePath + "/elasticsearch-configs"
 )
+
+// Backup and restore endpoints
+const (
+	BackupPath  = APIBasePath + "/backup"
+	RestorePath = APIBasePath + "/restore"
+)

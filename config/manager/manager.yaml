@@ -111,7 +111,9 @@ spec:
           requests:
             cpu: 10m
             memory: 64Mi
-        volumeMounts: []
+        volumeMounts:
+        - name: backups
+          mountPath: /backups
       - name: data-provider
         image: krkn-chaos.docker.scarf.sh/krkn-chaos/krkn-operator-data-provider:latest
         imagePullPolicy: Always
@@ -124,6 +126,9 @@ spec:
           capabilities:
             drop:
             - "ALL"
-      volumes: []
+      volumes:
+      - name: backups
+        persistentVolumeClaim:
+          claimName: krkn-operator-backups
       serviceAccountName: controller-manager
       terminationGracePeriodSeconds: 10
