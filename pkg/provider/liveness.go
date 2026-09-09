@@ -77,12 +77,12 @@ func CheckClusterLiveness(ctx context.Context, kubeconfigBase64 string, timeout 
 
 	response, err := (&http.Client{Transport: transport}).Do(request)
 	if err != nil {
-		return fmt.Errorf("Kubernetes API liveness check failed: %w", err)
+		return fmt.Errorf("API server liveness check failed: %w", err)
 	}
 	defer response.Body.Close()
 
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
-		return fmt.Errorf("Kubernetes API liveness check returned HTTP status %s", response.Status)
+		return fmt.Errorf("API server liveness check returned HTTP status %s", response.Status)
 	}
 
 	return nil
