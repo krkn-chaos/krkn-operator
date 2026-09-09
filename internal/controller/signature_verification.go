@@ -65,14 +65,3 @@ func resolveImageSignature(ctx context.Context, config *krknctlconfig.Config, re
 	}
 	return status, nil
 }
-
-func verifyResolvedImageSignature(ctx context.Context, config *krknctlconfig.Config, reference krknv1alpha1.ScenarioReference, privateRegistry *krknctlmodels.RegistryV2, image string) error {
-	status, err := resolveImageSignature(ctx, config, reference, privateRegistry, image)
-	if err != nil {
-		return err
-	}
-	if status != verify.SignatureSigned {
-		return &InvalidImageSignatureError{Image: image, Status: status}
-	}
-	return nil
-}
