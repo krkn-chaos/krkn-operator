@@ -1836,7 +1836,8 @@ const docTemplate = `{
             "properties": {
                 "checked-at": {
                     "description": "CheckedAt is the time at which the liveness check was performed.\n+optional",
-                    "type": "string"
+                    "type": "string",
+                    "format": "date-time"
                 },
                 "cluster-api-url": {
                     "description": "ClusterAPIURL is the API server URL of the managed cluster",

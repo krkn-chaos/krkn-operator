@@ -19,6 +19,7 @@ package provider
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -33,8 +34,11 @@ const defaultLivenessTimeout = 5 * time.Second
 // CheckClusterLiveness verifies that a Kubernetes API server can be reached
 // with the supplied base64-encoded kubeconfig. The kubeconfig's TLS and
 // authentication settings are preserved. A non-positive timeout uses the
-// default timeout.
-func CheckClusterLiveness(ctx context.Context, kubeconfigBase64 string, timeout time.Duration) error {
+// default timeout. It returns an error when the context is nil or canceled,
+// the kubeconfig cannot be decoded or loaded, the Kubernetes transport or
+// request cannot be built, the request times out or fails, the response body
+// cannot be closed, or the API server returns a non-2xx status.
+func CheckClusterLiveness(ctx context.Context, kubeconfigBase64 string, timeout time.Duration) (err error) {
 	if ctx == nil {
 		return fmt.Errorf("context must not be nil")
 	}
@@ -79,7 +83,11 @@ func CheckClusterLiveness(ctx context.Context, kubeconfigBase64 string, timeout 
 	if err != nil {
 		return fmt.Errorf("api server liveness check failed: %w", err)
 	}
-	defer response.Body.Close()
+	defer func() {
+		if closeErr := response.Body.Close(); closeErr != nil {
+			err = errors.Join(err, fmt.Errorf("failed to close api server response body: %w", closeErr))
+		}
+	}()
 
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
 		return fmt.Errorf("api server liveness check returned HTTP status %s", response.Status)

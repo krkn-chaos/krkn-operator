@@ -20,17 +20,23 @@ package controller
 
 import (
 	"context"
+	"encoding/base64"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/clientcmd"
+	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
+	"github.com/krkn-chaos/krkn-operator/internal/kubeconfig"
 )
 
 const (
@@ -60,6 +66,77 @@ func setupTestReconciler(objs ...client.Object) *KrknTargetRequestReconciler {
 		OperatorName:      testOperatorName,
 		OperatorNamespace: testOperatorNamespace,
 	}
+}
+
+func TestBuildClusterTargetsRecordsLiveness(t *testing.T) {
+	tests := []struct {
+		name       string
+		statusCode int
+		wantOnline bool
+	}{
+		{name: "online target", statusCode: http.StatusOK, wantOnline: true},
+		{name: "offline target", statusCode: http.StatusServiceUnavailable, wantOnline: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(tt.statusCode)
+			}))
+			defer server.Close()
+
+			secretData, err := testTargetSecretData(t, server.URL)
+			if err != nil {
+				t.Fatalf("failed to create test secret data: %v", err)
+			}
+			secret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "target-secret",
+					Namespace: testOperatorNamespace,
+				},
+				Data: map[string][]byte{"kubeconfig": secretData},
+			}
+			target := &krknv1alpha1.KrknOperatorTarget{
+				ObjectMeta: metav1.ObjectMeta{Name: "target", Namespace: testOperatorNamespace},
+				Spec: krknv1alpha1.KrknOperatorTargetSpec{
+					ClusterName:   "cluster",
+					ClusterAPIURL: server.URL,
+					SecretUUID:    secret.Name,
+				},
+				Status: krknv1alpha1.KrknOperatorTargetStatus{Ready: true},
+			}
+
+			reconciler := setupTestReconciler(secret, target)
+			clusterTargets := reconciler.buildClusterTargets(context.Background(), []krknv1alpha1.KrknOperatorTarget{*target})
+			if len(clusterTargets) != 1 {
+				t.Fatalf("expected one cluster target, got %d", len(clusterTargets))
+			}
+
+			result := clusterTargets[0]
+			if result.Online == nil || *result.Online != tt.wantOnline {
+				t.Fatalf("Online = %v, want %v", result.Online, tt.wantOnline)
+			}
+			if result.CheckedAt == nil || result.CheckedAt.IsZero() {
+				t.Fatal("CheckedAt is nil or zero")
+			}
+		})
+	}
+}
+
+func testTargetSecretData(t *testing.T, serverURL string) ([]byte, error) {
+	t.Helper()
+	config := clientcmdapi.NewConfig()
+	config.Clusters["test"] = &clientcmdapi.Cluster{Server: serverURL}
+	config.AuthInfos["test-user"] = &clientcmdapi.AuthInfo{}
+	config.Contexts["test-context"] = &clientcmdapi.Context{Cluster: "test", AuthInfo: "test-user"}
+	config.CurrentContext = "test-context"
+
+	data, err := clientcmd.Write(*config)
+	if err != nil {
+		return nil, err
+	}
+	kubeconfigBase64 := base64.StdEncoding.EncodeToString(data)
+	return kubeconfig.MarshalSecretData(kubeconfigBase64)
 }
 
 func TestReconcile_SetsUUIDLabel(t *testing.T) {
