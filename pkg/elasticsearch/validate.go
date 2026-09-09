@@ -16,7 +16,11 @@ limitations under the License.
 
 package elasticsearch
 
-import "fmt"
+import (
+	"crypto/x509"
+	"fmt"
+	"strings"
+)
 
 // ValidateCreateRequest validates a CreateElasticsearchConfigRequest.
 func ValidateCreateRequest(req *CreateElasticsearchConfigRequest) error {
@@ -29,7 +33,7 @@ func ValidateCreateRequest(req *CreateElasticsearchConfigRequest) error {
 	if req.Port < 0 || req.Port > 65535 {
 		return fmt.Errorf("port must be between 0 and 65535")
 	}
-	return nil
+	return validateTLSSettings(req.Host, req.Username, req.CACert)
 }
 
 // ValidateUpdateRequest validates an UpdateElasticsearchConfigRequest.
@@ -39,6 +43,21 @@ func ValidateUpdateRequest(req *UpdateElasticsearchConfigRequest) error {
 	}
 	if req.Port < 0 || req.Port > 65535 {
 		return fmt.Errorf("port must be between 0 and 65535")
+	}
+	return validateTLSSettings(req.Host, req.Username, req.CACert)
+}
+
+// validateTLSSettings enforces that credentials are never sent over plaintext
+// HTTP and that any supplied CA certificate is valid PEM. It is shared by the
+// create and update paths so both reject insecure configurations up front.
+func validateTLSSettings(host, username, caCert string) error {
+	if username != "" && strings.HasPrefix(strings.ToLower(strings.TrimSpace(host)), "http://") {
+		return fmt.Errorf("credentials require a TLS connection; use an https host")
+	}
+	if caCert != "" {
+		if !x509.NewCertPool().AppendCertsFromPEM([]byte(caCert)) {
+			return fmt.Errorf("caCert must be a valid PEM-encoded certificate")
+		}
 	}
 	return nil
 }
