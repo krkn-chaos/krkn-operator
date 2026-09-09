@@ -28,12 +28,15 @@ import (
 )
 
 type mockScenarioProvider struct {
-	details map[string]*models.ScenarioDetail
-	err     map[string]error
+	details      map[string]*models.ScenarioDetail
+	err          map[string]error
+	tags         []models.ScenarioTag
+	signature    verify.SignatureStatus
+	signatureErr error
 }
 
 func (m *mockScenarioProvider) GetRegistryImages(_ *models.RegistryV2) (*[]models.ScenarioTag, error) {
-	return nil, nil
+	return &m.tags, nil
 }
 
 func (m *mockScenarioProvider) GetGlobalEnvironment(_ *models.RegistryV2, _ string) (*models.ScenarioDetail, error) {
@@ -52,7 +55,7 @@ func (m *mockScenarioProvider) GetScenarioDetail(scenario string, _ *models.Regi
 }
 
 func (m *mockScenarioProvider) GetImageSignatureStatus(_ context.Context, _ *models.RegistryV2, _ models.ScenarioTag) (verify.SignatureStatus, error) {
-	return verify.SignatureUnknown, nil
+	return m.signature, m.signatureErr
 }
 
 func (m *mockScenarioProvider) ScaffoldScenarios(_ []string, _ bool, _ *models.RegistryV2, _ bool, _ *provider.ScaffoldSeed) (*string, error) {

@@ -56,7 +56,7 @@ type SignatureVerificationSettingsResponse struct {
 // SignatureVerificationSettingsRequest updates the operator-wide image
 // signature verification setting.
 type SignatureVerificationSettingsRequest struct {
-	Enabled *bool `json:"enabled"`
+	Enabled *bool `json:"enabled" validate:"required"`
 }
 
 // DuplicateFileError is returned when a file with the same logical name already exists

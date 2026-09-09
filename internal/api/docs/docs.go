@@ -2966,6 +2966,9 @@ const docTemplate = `{
         },
         "internal_api.SignatureVerificationSettingsRequest": {
             "type": "object",
+            "required": [
+                "enabled"
+            ],
             "properties": {
                 "enabled": {
                     "type": "boolean"

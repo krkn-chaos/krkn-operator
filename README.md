@@ -38,6 +38,32 @@ helm install krkn-operator oci://quay.io/krkn-chaos/charts/krkn-operator --versi
 
 Interested in contributing or running Krkn Operator from source? See [CONTRIBUTING.md](CONTRIBUTING.md).
 
+## API compatibility notes
+
+Scenario run requests identify the scenario rather than supplying an executable
+image. The operator resolves the image from the scenario name and selected
+registry:
+
+```json
+{
+  "targetRequestId": "target-request-id",
+  "targetClusters": {"provider": ["cluster"]},
+  "scenario": {
+    "name": "pod-delete",
+    "private": false
+  }
+}
+```
+
+For a saved private registry, set `private` to `true` and include its
+`registryName`. Direct image references are not accepted.
+
+Authenticated users can read the image-signature verification setting at
+`GET /api/v1/operator/signature-verification`. Administrators can update it
+with `PATCH` and a required boolean body, for example
+`{"enabled":false}`. Image verification remains observable when enforcement
+is disabled; only the enforcement result is ignored.
+
 ## License
 
 Licensed under the [Apache License 2.0](LICENSE).

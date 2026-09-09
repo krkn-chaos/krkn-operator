@@ -124,16 +124,20 @@ type Handler struct {
 	namespace      string
 	grpcServerAddr string
 	secretManager  *auth.SecretManager
+	// scenarioProviderFactory is injectable for API tests; production handlers
+	// use the krknctl-backed factory assigned by NewHandler.
+	scenarioProviderFactory func(provider.Mode) (provider.ScenarioDataProvider, error)
 }
 
 // NewHandler creates a new Handler
 func NewHandler(client client.Client, clientset kubernetes.Interface, namespace string, grpcServerAddr string, secretManager *auth.SecretManager) *Handler {
 	return &Handler{
-		client:         client,
-		clientset:      clientset,
-		namespace:      namespace,
-		grpcServerAddr: grpcServerAddr,
-		secretManager:  secretManager,
+		client:                  client,
+		clientset:               clientset,
+		namespace:               namespace,
+		grpcServerAddr:          grpcServerAddr,
+		secretManager:           secretManager,
+		scenarioProviderFactory: createScenarioProvider,
 	}
 }
 
@@ -831,7 +835,11 @@ func (h *Handler) PostScenarios(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	scenarioProvider, err := createScenarioProvider(mode)
+	providerFactory := h.scenarioProviderFactory
+	if providerFactory == nil {
+		providerFactory = createScenarioProvider
+	}
+	scenarioProvider, err := providerFactory(mode)
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
 			Error:   "internal_error",

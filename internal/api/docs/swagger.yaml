@@ -834,6 +834,8 @@ definitions:
     properties:
       enabled:
         type: boolean
+    required:
+    - enabled
     type: object
   internal_api.SignatureVerificationSettingsResponse:
     properties:
