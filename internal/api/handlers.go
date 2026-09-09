@@ -123,6 +123,10 @@ type Handler struct {
 	namespace      string
 	grpcServerAddr string
 	secretManager  *auth.SecretManager
+	// esClient is a long-lived, connection-pooling client shared across all
+	// telemetry queries so transports are reused rather than allocated per
+	// request.
+	esClient *elasticsearch.Client
 }
 
 // NewHandler creates a new Handler
@@ -133,6 +137,7 @@ func NewHandler(client client.Client, clientset kubernetes.Interface, namespace 
 		namespace:      namespace,
 		grpcServerAddr: grpcServerAddr,
 		secretManager:  secretManager,
+		esClient:       elasticsearch.NewClient(),
 	}
 }
 

@@ -297,6 +297,8 @@ func NewServer(port int, client client.Client, clientset kubernetes.Interface, n
 	// Elasticsearch config endpoints - admin only
 	mux.Handle(ElasticsearchConfigsPath, authMw.RequireAuth(http.HandlerFunc(handler.ElasticsearchConfigsRouter)))
 	mux.Handle(ElasticsearchConfigsPath+"/", authMw.RequireAuth(http.HandlerFunc(handler.ElasticsearchConfigsRouter)))
+	// Elasticsearch telemetry query endpoint - any authenticated user
+	mux.Handle(ElasticsearchQueryPath, authMw.RequireAuth(http.HandlerFunc(handler.QueryElasticsearchTelemetry)))
 
 	// ==================== API v2 Endpoints ====================
 	// v2 REST endpoints reuse v1 handlers (backward compatible)
@@ -525,4 +527,12 @@ func (s *Server) NeedLeaderElection() bool {
 // Controllers use this to send real-time updates to WebSocket clients
 func (s *Server) GetV2Handler() *v2.Handler {
 	return s.v2Handler
+}
+
+// HTTPHandler returns the server's fully configured HTTP handler (mux plus
+// middleware). It exposes the same request pipeline the listener serves so
+// tests can exercise route registration and authentication through the real
+// server wiring instead of calling handlers directly.
+func (s *Server) HTTPHandler() http.Handler {
+	return s.server.Handler
 }
