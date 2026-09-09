@@ -26,7 +26,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/api/resource"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -41,23 +41,20 @@ import (
 
 type KrknAIRunReconciler struct {
 	client.Client
-	APIReader                client.Reader
-	Scheme                   *runtime.Scheme
-	Clientset                kubernetes.Interface
-	Namespace                string
-	OrchestratorImage        string
-	ResultsPVCName           string
-	ResultsStorageMode       string
-	ResultsStorageClassName  string
-	ResultsStorageAccessMode string
-	ResultsStorageSize       string
+	APIReader              client.Reader
+	Scheme                 *runtime.Scheme
+	Clientset              kubernetes.Interface
+	Namespace              string
+	OrchestratorImage      string
+	ServiceImage           string
+	ServiceURL             string
+	ServiceTokenSecretName string
 }
 
 // +kubebuilder:rbac:groups=krkn.krkn-chaos.dev,resources=krknairuns,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=krkn.krkn-chaos.dev,resources=krknairuns/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=krkn.krkn-chaos.dev,resources=krknairuns/finalizers,verbs=update
 // +kubebuilder:rbac:groups=krkn.krkn-chaos.dev,resources=krknscenarioruns,verbs=get;list;watch
-// +kubebuilder:rbac:groups="",resources=persistentvolumeclaims,verbs=get;create;delete
 // +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch;create;update;patch;delete
 
@@ -152,9 +149,8 @@ func (r *KrknAIRunReconciler) ensureProvisioned(ctx context.Context, aiRun *krkn
 	podName := aiResourceName("ai-run", aiRun.Name, "")
 	labels := map[string]string{"krkn.dev/ai-run": aiRun.Name}
 
-	resultsPVCName, err := r.resolveResultsPVC(ctx, aiRun)
-	if err != nil {
-		return err
+	if r.ServiceImage == "" || r.ServiceURL == "" || r.ServiceTokenSecretName == "" {
+		return fmt.Errorf("artifact service is not configured")
 	}
 
 	configMap := &corev1.ConfigMap{
@@ -173,183 +169,22 @@ func (r *KrknAIRunReconciler) ensureProvisioned(ctx context.Context, aiRun *krkn
 		return fmt.Errorf("failed to create kubeconfig ConfigMap: %w", err)
 	}
 
-	pod := buildOrchestratorPod(aiRun, podName, image, provider, cluster, configName, kubeconfigName, resultsPVCName, r.Namespace)
+	pod := buildOrchestratorPod(
+		aiRun, podName, image, provider, cluster, configName, kubeconfigName,
+		r.Namespace, r.ServiceImage, r.ServiceURL, r.ServiceTokenSecretName,
+	)
 	if err := r.setOwnerAndCreate(ctx, aiRun, pod); err != nil {
 		return fmt.Errorf("failed to create orchestrator Pod: %w", err)
 	}
 
 	changed := aiRun.Status.Phase != "Provisioning" ||
-		aiRun.Status.PVCName != resultsPVCName || aiRun.Status.OrchestratorPodName != podName
+		aiRun.Status.OrchestratorPodName != podName
 	aiRun.Status.Phase = "Provisioning"
-	aiRun.Status.PVCName = resultsPVCName
 	aiRun.Status.OrchestratorPodName = podName
 	if changed {
 		return r.Status().Update(ctx, aiRun)
 	}
 	return nil
-}
-
-func (r *KrknAIRunReconciler) validateExistingResultsPVC(
-	ctx context.Context, namespace, name, expectedAccessMode string,
-) error {
-	var pvc corev1.PersistentVolumeClaim
-	reader := r.APIReader
-	if reader == nil {
-		reader = r.Client
-	}
-	if err := reader.Get(ctx, types.NamespacedName{Name: name, Namespace: namespace}, &pvc); err != nil {
-		if apierrors.IsNotFound(err) {
-			return fmt.Errorf(`results PVC "%s" not found in namespace "%s"`, name, namespace)
-		}
-		return fmt.Errorf(`failed to get results PVC "%s": %w`, name, err)
-	}
-	if pvc.DeletionTimestamp != nil {
-		return fmt.Errorf(`results PVC "%s" is being deleted`, name)
-	}
-	if expectedAccessMode != "" && !hasAccessMode(pvc.Spec.AccessModes, expectedAccessMode) {
-		return fmt.Errorf(`results PVC "%s" must declare %s access mode`, name, expectedAccessMode)
-	}
-	return nil
-}
-
-func hasAccessMode(modes []corev1.PersistentVolumeAccessMode, expected string) bool {
-	for _, mode := range modes {
-		if string(mode) == expected {
-			return true
-		}
-	}
-	return false
-}
-
-const (
-	storageModeShared    = "shared"
-	storageModeDedicated = "dedicated"
-)
-
-func (r *KrknAIRunReconciler) resolveResultsPVC(ctx context.Context, aiRun *krknv1alpha1.KrknAIRun) (string, error) {
-	spec := aiRun.Spec.Storage
-	if spec != nil && spec.PVCName != "" {
-		if spec.StorageClassName != "" || spec.Size != "" {
-			return "", fmt.Errorf("storage pvcName cannot be combined with storageClassName or size")
-		}
-		return spec.PVCName, r.validateExistingResultsPVC(ctx, aiRun.Namespace, spec.PVCName, spec.AccessMode)
-	}
-
-	mode := r.ResultsStorageMode
-	if mode == "" {
-		mode = storageModeShared
-	}
-	if spec != nil && (spec.StorageClassName != "" || spec.AccessMode != "" || spec.Size != "") {
-		mode = storageModeDedicated
-	}
-
-	switch mode {
-	case storageModeShared:
-		name := r.ResultsPVCName
-		if name == "" {
-			name = "krkn-ai-results"
-		}
-		expectedAccessMode := r.installationAccessMode()
-		if !validAccessMode(expectedAccessMode) {
-			return "", fmt.Errorf(`invalid results storage access mode "%s": must be %q or %q`, expectedAccessMode, corev1.ReadWriteOnce, corev1.ReadWriteMany)
-		}
-		return name, r.validateExistingResultsPVC(ctx, aiRun.Namespace, name, expectedAccessMode)
-	case storageModeDedicated:
-		return r.ensureDedicatedResultsPVC(ctx, aiRun)
-	default:
-		return "", fmt.Errorf(`unsupported results storage mode "%s": must be %q or %q`, mode, storageModeShared, storageModeDedicated)
-	}
-}
-
-func (r *KrknAIRunReconciler) ensureDedicatedResultsPVC(
-	ctx context.Context, aiRun *krknv1alpha1.KrknAIRun,
-) (string, error) {
-	spec := aiRun.Spec.Storage
-	storageClassName := r.ResultsStorageClassName
-	accessMode := r.installationAccessMode()
-	size := r.ResultsStorageSize
-	if spec != nil {
-		if spec.StorageClassName != "" {
-			storageClassName = spec.StorageClassName
-		}
-		if spec.AccessMode != "" {
-			accessMode = spec.AccessMode
-		}
-		if spec.Size != "" {
-			size = spec.Size
-		}
-	}
-	if size == "" {
-		size = "1Gi"
-	}
-	if !validAccessMode(accessMode) {
-		return "", fmt.Errorf(`invalid results storage access mode "%s": must be %q or %q`, accessMode, corev1.ReadWriteOnce, corev1.ReadWriteMany)
-	}
-	storage, err := resource.ParseQuantity(size)
-	if err != nil {
-		return "", fmt.Errorf("invalid results storage size %q: %w", size, err)
-	}
-
-	name := aiResourceName("ai", aiRun.Name, "results")
-	var pvc corev1.PersistentVolumeClaim
-	reader := r.APIReader
-	if reader == nil {
-		reader = r.Client
-	}
-	err = reader.Get(ctx, types.NamespacedName{Name: name, Namespace: aiRun.Namespace}, &pvc)
-	if apierrors.IsNotFound(err) {
-		pvc = corev1.PersistentVolumeClaim{
-			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: aiRun.Namespace, Labels: map[string]string{
-				"krkn.dev/ai-run": aiRun.Name,
-			}},
-			Spec: corev1.PersistentVolumeClaimSpec{
-				AccessModes: []corev1.PersistentVolumeAccessMode{corev1.PersistentVolumeAccessMode(accessMode)},
-				Resources: corev1.VolumeResourceRequirements{
-					Requests: corev1.ResourceList{corev1.ResourceStorage: storage},
-				},
-			},
-		}
-		if storageClassName != "" {
-			pvc.Spec.StorageClassName = &storageClassName
-		}
-		if err := controllerutil.SetControllerReference(aiRun, &pvc, r.Scheme); err != nil {
-			return "", err
-		}
-		if err := r.Create(ctx, &pvc); err != nil && !apierrors.IsAlreadyExists(err) {
-			return "", fmt.Errorf("failed to create results PVC %q: %w", name, err)
-		}
-	} else if err != nil {
-		return "", fmt.Errorf(`failed to get results PVC "%s": %w`, name, err)
-	} else if !metav1.IsControlledBy(&pvc, aiRun) {
-		return "", fmt.Errorf(`dedicated results PVC "%s" already exists and is not owned by KrknAIRun "%s"`, name, aiRun.Name)
-	}
-
-	if err := r.validateExistingResultsPVC(ctx, aiRun.Namespace, name, accessMode); err != nil {
-		return "", err
-	}
-	return name, nil
-}
-
-func (r *KrknAIRunReconciler) installationAccessMode() string {
-	mode := r.ResultsStorageMode
-	if mode == "" {
-		mode = storageModeShared
-	}
-	return r.effectiveAccessMode(mode, r.ResultsStorageAccessMode)
-}
-
-func (r *KrknAIRunReconciler) effectiveAccessMode(mode, configured string) string {
-	if configured != "" {
-		return configured
-	}
-	if mode == storageModeDedicated {
-		return string(corev1.ReadWriteOnce)
-	}
-	return string(corev1.ReadWriteMany)
-}
-
-func validAccessMode(mode string) bool {
-	return mode == string(corev1.ReadWriteOnce) || mode == string(corev1.ReadWriteMany)
 }
 
 func (r *KrknAIRunReconciler) observeRun(ctx context.Context, aiRun *krknv1alpha1.KrknAIRun) (ctrl.Result, error) {
@@ -376,18 +211,40 @@ func (r *KrknAIRunReconciler) observeRun(ctx context.Context, aiRun *krknv1alpha
 	if pod.Status.Phase == corev1.PodRunning {
 		aiRun.Status.Phase = "Running"
 	}
-	if terminated := orchestratorTermination(&pod); terminated != nil {
+	if pod.Status.Phase == corev1.PodSucceeded || pod.Status.Phase == corev1.PodFailed {
+		orchestrator := containerTermination(&pod, "orchestrator")
+		uploader := containerTermination(&pod, "result-uploader")
+		if orchestrator == nil || uploader == nil {
+			return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+		}
 		aiRun.Status.CompletionTime = completionTime(aiRun.Status.CompletionTime)
-		if terminated.ExitCode == 0 {
+		artifactsCommitted := uploader.ExitCode == 0
+		conditionStatus := metav1.ConditionFalse
+		conditionReason := "ArtifactUploadFailed"
+		conditionMessage := terminationReason(uploader)
+		if artifactsCommitted {
+			conditionStatus = metav1.ConditionTrue
+			conditionReason = "ArtifactsCommitted"
+			conditionMessage = "Run artifacts were committed to the artifact service."
+		}
+		meta.SetStatusCondition(&aiRun.Status.Conditions, metav1.Condition{
+			Type:               "ArtifactsCommitted",
+			Status:             conditionStatus,
+			Reason:             conditionReason,
+			Message:            conditionMessage,
+			ObservedGeneration: aiRun.Generation,
+		})
+		if orchestrator.ExitCode == 0 && artifactsCommitted {
 			aiRun.Status.Phase = "Succeeded"
+			aiRun.Status.FailureReason = ""
 		} else {
 			aiRun.Status.Phase = "Failed"
-			aiRun.Status.FailureReason = terminationReason(terminated)
+			if orchestrator.ExitCode != 0 {
+				aiRun.Status.FailureReason = terminationReason(orchestrator)
+			} else {
+				aiRun.Status.FailureReason = terminationReason(uploader)
+			}
 		}
-	} else if pod.Status.Phase == corev1.PodFailed {
-		aiRun.Status.Phase = "Failed"
-		aiRun.Status.CompletionTime = completionTime(aiRun.Status.CompletionTime)
-		aiRun.Status.FailureReason = "orchestrator pod failed"
 	}
 
 	if !reflect.DeepEqual(oldStatus, &aiRun.Status) {
@@ -450,9 +307,9 @@ func completionTime(existing *metav1.Time) *metav1.Time {
 	return &now
 }
 
-func orchestratorTermination(pod *corev1.Pod) *corev1.ContainerStateTerminated {
+func containerTermination(pod *corev1.Pod, name string) *corev1.ContainerStateTerminated {
 	for _, status := range pod.Status.ContainerStatuses {
-		if status.Name == "orchestrator" && status.State.Terminated != nil {
+		if status.Name == name && status.State.Terminated != nil {
 			return status.State.Terminated
 		}
 	}
@@ -469,12 +326,13 @@ func terminationReason(terminated *corev1.ContainerStateTerminated) string {
 	if terminated.Message != "" {
 		return terminated.Message
 	}
-	return fmt.Sprintf("orchestrator exited with code %d", terminated.ExitCode)
+	return fmt.Sprintf("container exited with code %d", terminated.ExitCode)
 }
 
 func buildOrchestratorPod(
 	aiRun *krknv1alpha1.KrknAIRun,
-	podName, image, provider, cluster, configName, kubeconfigName, pvcName, namespace string,
+	podName, image, provider, cluster, configName, kubeconfigName, namespace string,
+	serviceImage, serviceURL, serviceTokenSecretName string,
 ) *corev1.Pod {
 	runAs := int64(1001)
 	activeDeadline := aiRun.Spec.ActiveDeadlineSeconds
@@ -516,22 +374,45 @@ func buildOrchestratorPod(
 			RestartPolicy:         corev1.RestartPolicyNever,
 			ActiveDeadlineSeconds: &activeDeadline,
 			SecurityContext:       &corev1.PodSecurityContext{RunAsUser: &runAs, RunAsGroup: &runAs, FSGroup: &runAs},
-			Containers: []corev1.Container{{
-				Name:            "orchestrator",
-				Image:           image,
-				ImagePullPolicy: corev1.PullAlways,
-				Env:             envs,
-				VolumeMounts: []corev1.VolumeMount{
-					{Name: "config", MountPath: "/input/krkn-ai.yaml", SubPath: "krkn-ai.yaml"},
-					{Name: "kubeconfig", MountPath: "/input/kubeconfig", SubPath: "config"},
-					{Name: "results", MountPath: "/output"},
-					{Name: "tmp", MountPath: "/tmp"},
+			Containers: []corev1.Container{
+				{
+					Name:            "orchestrator",
+					Image:           image,
+					ImagePullPolicy: corev1.PullAlways,
+					Env:             envs,
+					VolumeMounts: []corev1.VolumeMount{
+						{Name: "config", MountPath: "/input/krkn-ai.yaml", SubPath: "krkn-ai.yaml"},
+						{Name: "kubeconfig", MountPath: "/input/kubeconfig", SubPath: "config"},
+						{Name: "output", MountPath: "/output"},
+						{Name: "tmp", MountPath: "/tmp"},
+					},
 				},
-			}},
+				{
+					Name:            "result-uploader",
+					Image:           serviceImage,
+					ImagePullPolicy: corev1.PullAlways,
+					Command:         []string{"python", "-m", "krkn_ai.server", "uploader"},
+					Env: []corev1.EnvVar{
+						{Name: "KRKNAI_OUTPUT_DIR", Value: "/output"},
+						{Name: "KRKNAI_UPLOAD_STATE_DIR", Value: "/upload-state"},
+						{Name: "KRKNAI_RUN_UID", Value: string(aiRun.UID)},
+						{Name: "KRKNAI_SERVICE_URL", Value: serviceURL},
+						{Name: "KRKNAI_SERVICE_TOKEN", ValueFrom: &corev1.EnvVarSource{SecretKeyRef: &corev1.SecretKeySelector{
+							LocalObjectReference: corev1.LocalObjectReference{Name: serviceTokenSecretName},
+							Key:                  "token",
+						}}},
+					},
+					VolumeMounts: []corev1.VolumeMount{
+						{Name: "output", MountPath: "/output"},
+						{Name: "upload-state", MountPath: "/upload-state"},
+					},
+				},
+			},
 			Volumes: []corev1.Volume{
 				{Name: "config", VolumeSource: corev1.VolumeSource{ConfigMap: &corev1.ConfigMapVolumeSource{LocalObjectReference: corev1.LocalObjectReference{Name: configName}}}},
 				{Name: "kubeconfig", VolumeSource: corev1.VolumeSource{ConfigMap: &corev1.ConfigMapVolumeSource{LocalObjectReference: corev1.LocalObjectReference{Name: kubeconfigName}}}},
-				{Name: "results", VolumeSource: corev1.VolumeSource{PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: pvcName}}},
+				{Name: "output", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
+				{Name: "upload-state", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
 				{Name: "tmp", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
 			},
 		},

@@ -60,16 +60,17 @@ spec:
               fieldPath: metadata.namespace
         - name: KRKNAI_ORCHESTRATOR_IMAGE
           value: {{ .Values.images.aiOrchestrator.image | quote }}
-        - name: KRKNAI_RESULTS_PVC_NAME
-          value: {{ include "krkn-operator.aiResultsPVCName" . | quote }}
-        - name: KRKNAI_STORAGE_MODE
-          value: {{ .Values.aiOrchestrator.storage.mode | quote }}
-        - name: KRKNAI_STORAGE_CLASS_NAME
-          value: {{ .Values.aiOrchestrator.storage.storageClassName | quote }}
-        - name: KRKNAI_STORAGE_ACCESS_MODE
-          value: {{ .Values.aiOrchestrator.storage.accessMode | quote }}
-        - name: KRKNAI_STORAGE_SIZE
-          value: {{ .Values.aiOrchestrator.storage.size | quote }}
+        - name: KRKNAI_SERVICE_IMAGE
+          value: {{ .Values.images.aiService.image | quote }}
+        - name: KRKNAI_SERVICE_URL
+          value: {{ printf "http://%s-ai-service:8080" (include "krkn-operator.fullname" .) | quote }}
+        - name: KRKNAI_SERVICE_TOKEN_SECRET_NAME
+          value: {{ printf "%s-ai-service-token" (include "krkn-operator.fullname" .) | quote }}
+        - name: KRKNAI_SERVICE_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: {{ printf "%s-ai-service-token" (include "krkn-operator.fullname" .) | quote }}
+              key: token
         - name: JWT_SECRET
           valueFrom:
             secretKeyRef:

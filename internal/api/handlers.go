@@ -24,6 +24,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -54,6 +55,7 @@ import (
 	"github.com/krkn-chaos/krkn-operator/pkg/auth"
 	"github.com/krkn-chaos/krkn-operator/pkg/elasticsearch"
 	"github.com/krkn-chaos/krkn-operator/pkg/groupauth"
+	"github.com/krkn-chaos/krkn-operator/pkg/krknaiserver"
 	"github.com/krkn-chaos/krkn-operator/pkg/registry"
 	pb "github.com/krkn-chaos/krkn-operator/proto/dataprovider"
 )
@@ -122,6 +124,7 @@ type Handler struct {
 	namespace      string
 	grpcServerAddr string
 	secretManager  *auth.SecretManager
+	artifactClient *krknaiserver.Client
 }
 
 // NewHandler creates a new Handler
@@ -132,6 +135,7 @@ func NewHandler(client client.Client, clientset kubernetes.Interface, namespace 
 		namespace:      namespace,
 		grpcServerAddr: grpcServerAddr,
 		secretManager:  secretManager,
+		artifactClient: krknaiserver.New(os.Getenv("KRKNAI_SERVICE_URL"), os.Getenv("KRKNAI_SERVICE_TOKEN")),
 	}
 }
 

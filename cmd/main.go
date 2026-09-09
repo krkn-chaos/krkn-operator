@@ -292,26 +292,16 @@ func main() {
 		setupLog.Error(err, "unable to create controller", "controller", "KrknOperatorTargetProviderConfig")
 		os.Exit(1)
 	}
-	resultsPVCName := os.Getenv("KRKNAI_RESULTS_PVC_NAME")
-	if resultsPVCName == "" {
-		resultsPVCName = "krkn-ai-results"
-	}
-	resultsStorageMode := os.Getenv("KRKNAI_STORAGE_MODE")
-	resultsStorageClassName := os.Getenv("KRKNAI_STORAGE_CLASS_NAME")
-	resultsStorageAccessMode := os.Getenv("KRKNAI_STORAGE_ACCESS_MODE")
-	resultsStorageSize := os.Getenv("KRKNAI_STORAGE_SIZE")
 	if err = (&controller.KrknAIRunReconciler{
-		Client:                   mgr.GetClient(),
-		APIReader:                mgr.GetAPIReader(),
-		Scheme:                   mgr.GetScheme(),
-		Clientset:                clientset,
-		Namespace:                krknNamespace,
-		OrchestratorImage:        os.Getenv("KRKNAI_ORCHESTRATOR_IMAGE"),
-		ResultsPVCName:           resultsPVCName,
-		ResultsStorageMode:       resultsStorageMode,
-		ResultsStorageClassName:  resultsStorageClassName,
-		ResultsStorageAccessMode: resultsStorageAccessMode,
-		ResultsStorageSize:       resultsStorageSize,
+		Client:                 mgr.GetClient(),
+		APIReader:              mgr.GetAPIReader(),
+		Scheme:                 mgr.GetScheme(),
+		Clientset:              clientset,
+		Namespace:              krknNamespace,
+		OrchestratorImage:      os.Getenv("KRKNAI_ORCHESTRATOR_IMAGE"),
+		ServiceImage:           os.Getenv("KRKNAI_SERVICE_IMAGE"),
+		ServiceURL:             os.Getenv("KRKNAI_SERVICE_URL"),
+		ServiceTokenSecretName: os.Getenv("KRKNAI_SERVICE_TOKEN_SECRET_NAME"),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "KrknAIRun")
 		os.Exit(1)

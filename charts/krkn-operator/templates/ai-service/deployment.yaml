@@ -1,0 +1,56 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "krkn-operator.fullname" . }}-ai-service
+  namespace: {{ include "krkn-operator.namespace" . }}
+  labels:
+    {{- include "krkn-operator.labels" . | nindent 4 }}
+    app.kubernetes.io/component: ai-service
+spec:
+  replicas: {{ .Values.aiService.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "krkn-operator.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: ai-service
+  template:
+    metadata:
+      labels:
+        {{- include "krkn-operator.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: ai-service
+    spec:
+      {{- with .Values.images.pullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "krkn-operator.fullname" . }}-ai-service
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: ai-service
+          image: {{ .Values.images.aiService.image | quote }}
+          imagePullPolicy: {{ .Values.images.aiService.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          env:
+            - name: KRKNAI_SERVICE_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "krkn-operator.fullname" . }}-ai-service-token
+                  key: token
+          volumeMounts:
+            - name: artifacts
+              mountPath: /var/lib/krkn-ai
+          resources:
+            {{- toYaml .Values.aiService.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+      volumes:
+        - name: artifacts
+          persistentVolumeClaim:
+            claimName: {{ default (printf "%s-ai-service" (include "krkn-operator.fullname" .)) .Values.aiService.storage.existingClaim }}

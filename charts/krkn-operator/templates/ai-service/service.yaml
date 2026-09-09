@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "krkn-operator.fullname" . }}-ai-service
+  namespace: {{ include "krkn-operator.namespace" . }}
+  labels:
+    {{- include "krkn-operator.labels" . | nindent 4 }}
+    app.kubernetes.io/component: ai-service
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "krkn-operator.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: ai-service
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      protocol: TCP

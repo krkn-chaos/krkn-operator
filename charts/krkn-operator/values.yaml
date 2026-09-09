@@ -19,6 +19,9 @@ images:
   aiOrchestrator:
     image: quay.io/krkn-chaos/krkn-ai-operator:latest
     pullPolicy: Always
+  aiService:
+    image: quay.io/krkn-chaos/krkn-ai-service:latest
+    pullPolicy: Always
   dataProvider:
     image: krkn-chaos.docker.scarf.sh/krkn-chaos/krkn-operator-data-provider:latest
     pullPolicy: Always
@@ -31,19 +34,27 @@ images:
   pullSecrets: []
   # - name: my-registry-secret
 
-## AI orchestrator results storage
-aiOrchestrator:
+## Standalone AI artifact service
+aiService:
+  replicaCount: 1
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 250m
+      memory: 256Mi
+  # Empty generates and retains a dedicated RWO claim. An existing claim is never
+  # created, modified, or deleted by this chart.
   storage:
-    # shared creates one retained installation-scoped claim; dedicated creates
-    # one controller-owned claim per KrknAIRun.
-    mode: shared
-    # Use a pre-created claim for shared mode or an explicit run claim.
     existingClaim: ""
-    # Empty uses the cluster default storage class.
     storageClassName: ""
-    # Empty defaults to ReadWriteMany for shared and ReadWriteOnce for dedicated.
-    accessMode: ""
     size: 1Gi
+  # Empty generates a stable release Secret token.
+  serviceToken: ""
+  networkPolicy:
+    enabled: true
+
 
 
 ## Authentication & Security

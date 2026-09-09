@@ -1,0 +1,21 @@
+{{- if not .Values.aiService.storage.existingClaim }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "krkn-operator.fullname" . }}-ai-service
+  namespace: {{ include "krkn-operator.namespace" . }}
+  labels:
+    {{- include "krkn-operator.labels" . | nindent 4 }}
+    app.kubernetes.io/component: ai-service
+  annotations:
+    helm.sh/resource-policy: keep
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .Values.aiService.storage.size }}
+  {{- with .Values.aiService.storage.storageClassName }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+{{- end }}

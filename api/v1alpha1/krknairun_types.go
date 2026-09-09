@@ -36,11 +36,6 @@ type KrknAIRunSpec struct {
 	// +kubebuilder:default=krkn-ai.yaml
 	ConfigMapKey string `json:"configMapKey,omitempty"`
 
-	// Storage configures the results volume for this run. When omitted, the
-	// operator's installation-level storage configuration is used.
-	// +optional
-	Storage *KrknAIRunStorageSpec `json:"storage,omitempty"`
-
 	// +optional
 	OrchestratorImage string `json:"orchestratorImage,omitempty"`
 
@@ -59,35 +54,12 @@ type KrknAIRunSpec struct {
 	ActiveDeadlineSeconds int64 `json:"activeDeadlineSeconds,omitempty"`
 }
 
-// KrknAIRunStorageSpec selects an existing claim or a dynamically-created
-// per-run claim. Any field set here overrides the installation defaults.
-type KrknAIRunStorageSpec struct {
-	// PVCName mounts this pre-existing claim and never gives it an owner reference.
-	// +optional
-	PVCName string `json:"pvcName,omitempty"`
-
-	// StorageClassName creates a dedicated claim using this storage class.
-	// If set without PVCName, the claim is owned by this KrknAIRun.
-	// +optional
-	StorageClassName string `json:"storageClassName,omitempty"`
-
-	// AccessMode selects the access mode for a dynamically-created claim.
-	// +kubebuilder:validation:Enum=ReadWriteOnce;ReadWriteMany
-	// +optional
-	AccessMode string `json:"accessMode,omitempty"`
-
-	// Size is the requested size for a dynamically-created claim.
-	// +optional
-	Size string `json:"size,omitempty"`
-}
-
 // KrknAIRunStatus defines the observed state of KrknAIRun.
 type KrknAIRunStatus struct {
 	// +kubebuilder:validation:Enum=Pending;Provisioning;Running;Succeeded;Failed;Cancelled
 	Phase string `json:"phase,omitempty"`
 
 	OrchestratorPodName string             `json:"orchestratorPodName,omitempty"`
-	PVCName             string             `json:"pvcName,omitempty"`
 	StartTime           *metav1.Time       `json:"startTime,omitempty"`
 	CompletionTime      *metav1.Time       `json:"completionTime,omitempty"`
 	ScenarioRunRefs     []string           `json:"scenarioRunRefs,omitempty"`

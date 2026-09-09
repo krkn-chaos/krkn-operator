@@ -292,6 +292,10 @@ func NewServer(port int, client client.Client, clientset kubernetes.Interface, n
 	mux.Handle(GraphRunsPath, authMw.RequireAuth(http.HandlerFunc(handler.GraphRunsRouter)))
 	mux.Handle(GraphRunsPath+"/", authMw.RequireAuth(http.HandlerFunc(handler.GraphRunsRouter)))
 
+	// Krkn-AI artifacts are accessed only through the authenticated operator API.
+	mux.Handle(KrknAIPath, authMw.RequireAuth(http.HandlerFunc(handler.KrknAIRouter)))
+	mux.Handle(KrknAIPath+"/", authMw.RequireAuth(http.HandlerFunc(handler.KrknAIRouter)))
+
 	// Swagger UI - public endpoint for API documentation
 	mux.Handle("/api/swagger/", httpSwagger.WrapHandler)
 	// Elasticsearch config endpoints - admin only

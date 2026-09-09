@@ -1,0 +1,31 @@
+{{- if .Values.aiService.networkPolicy.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "krkn-operator.fullname" . }}-ai-service
+  namespace: {{ include "krkn-operator.namespace" . }}
+  labels:
+    {{- include "krkn-operator.labels" . | nindent 4 }}
+    app.kubernetes.io/component: ai-service
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "krkn-operator.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: ai-service
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "krkn-operator.selectorLabels" . | nindent 14 }}
+              app.kubernetes.io/component: operator
+              control-plane: controller-manager
+        - podSelector:
+            matchExpressions:
+              - key: krkn.dev/ai-run
+                operator: Exists
+      ports:
+        - protocol: TCP
+          port: 8080
+{{- end }}
