@@ -87,6 +87,25 @@ fi
   operator-sdk generate bundle "${bundle_args[@]}"
 )
 
+# Operator SDK writes its generated Dockerfile relative to the working
+# directory. Create a portable Dockerfile in the bundle itself so the output
+# can be built by a later release job without absolute temp paths.
+cat > "$output_dir/bundle.Dockerfile" <<EOF
+FROM scratch
+
+LABEL operators.operatorframework.io.bundle.mediatype.v1="registry+v1"
+LABEL operators.operatorframework.io.bundle.manifests.v1="manifests/"
+LABEL operators.operatorframework.io.bundle.metadata.v1="metadata/"
+LABEL operators.operatorframework.io.bundle.package.v1="krkn-operator"
+LABEL operators.operatorframework.io.bundle.channels.v1="$channel"
+LABEL operators.operatorframework.io.bundle.channel.default.v1="$channel"
+LABEL operators.operatorframework.io.metrics.builder="operator-sdk-v1.41.1"
+LABEL operators.operatorframework.io.metrics.mediatype.v1="metrics+v1"
+
+COPY manifests/ manifests/
+COPY metadata/ metadata/
+EOF
+
 csv_file="$output_dir/manifests/krkn-operator.clusterserviceversion.yaml"
 yq -i \
   '.metadata.annotations.containerImage = strenv(OPERATOR_IMAGE) |
