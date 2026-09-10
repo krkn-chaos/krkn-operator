@@ -46,6 +46,13 @@ jobs:
         chmod +x hack/olm/render-bundle.sh
         hack/olm/render-bundle.sh "${{ matrix.profile }}" "$VERSION" "dist/bundle-${{ matrix.profile }}"
 
+    - name: Build bundle image locally
+      run: |
+        docker build \
+          --file "dist/bundle-${{ matrix.profile }}/bundle.Dockerfile" \
+          --tag "krkn-operator-bundle:${{ matrix.profile }}-${VERSION}" \
+          "dist/bundle-${{ matrix.profile }}"
+
     - name: Upload bundle artifact
       uses: actions/upload-artifact@v4
       with:
