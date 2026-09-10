@@ -43,6 +43,7 @@ console_image=${CONSOLE_IMAGE:-krkn-chaos.docker.scarf.sh/krkn-chaos/krkn-operat
 export OPERATOR_IMAGE="$operator_image"
 export DATA_PROVIDER_IMAGE="$data_provider_image"
 export CONSOLE_IMAGE="$console_image"
+export EXAMPLES_FILE="$repo_root/config/olm/examples.yaml"
 
 work_dir=$(mktemp -d "${TMPDIR:-/tmp}/krkn-olm.XXXXXX")
 trap 'rm -rf "$work_dir"' EXIT
@@ -109,6 +110,7 @@ EOF
 csv_file="$output_dir/manifests/krkn-operator.clusterserviceversion.yaml"
 yq -i \
   '.metadata.annotations.containerImage = strenv(OPERATOR_IMAGE) |
+   .metadata.annotations."alm-examples" = (load(strenv(EXAMPLES_FILE)) | to_json) |
    .spec.relatedImages = [
      {"name": "krkn-operator", "image": strenv(OPERATOR_IMAGE)},
      {"name": "krkn-operator-data-provider", "image": strenv(DATA_PROVIDER_IMAGE)},
