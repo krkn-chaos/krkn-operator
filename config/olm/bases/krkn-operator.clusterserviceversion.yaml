@@ -1,0 +1,35 @@
+apiVersion: operators.coreos.com/v1alpha1
+kind: ClusterServiceVersion
+metadata:
+  name: krkn-operator.v0.0.0
+  annotations:
+    categories: "Monitoring,Storage"
+    description: "Krkn chaos engineering platform for Kubernetes and OpenShift."
+    containerImage: quay.io/krkn-chaos/krkn-operator:latest
+    support: krkn-chaos
+spec:
+  displayName: Krkn Operator
+  description: |
+    Krkn provides centralized chaos engineering and resiliency testing for
+    Kubernetes, OpenShift, Open Cluster Management, and Advanced Cluster Management.
+  version: 0.0.0
+  maturity: alpha
+  provider:
+    name: krkn-chaos
+  maintainers:
+  - name: krkn-chaos
+    email: krkn-chaos@redhat.com
+  links:
+  - name: Krkn documentation
+    url: https://krkn-chaos.github.io/krkn-operator/
+  - name: Krkn source code
+    url: https://github.com/krkn-chaos/krkn-operator
+  installModes:
+  - type: OwnNamespace
+    supported: true
+  - type: SingleNamespace
+    supported: true
+  - type: MultiNamespace
+    supported: false
+  - type: AllNamespaces
+    supported: false
