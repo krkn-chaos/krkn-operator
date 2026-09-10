@@ -12,6 +12,7 @@ spec:
   description: |
     Krkn provides centralized chaos engineering and resiliency testing for
     Kubernetes, OpenShift, Open Cluster Management, and Advanced Cluster Management.
+  minKubeVersion: 1.36.0
   version: 0.0.0
   maturity: alpha
   provider:

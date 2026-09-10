@@ -40,10 +40,12 @@ command -v yq >/dev/null || { echo "yq is required" >&2; exit 1; }
 operator_image=${OPERATOR_IMAGE:-krkn-chaos.docker.scarf.sh/krkn-chaos/krkn-operator:${version}}
 data_provider_image=${DATA_PROVIDER_IMAGE:-krkn-chaos.docker.scarf.sh/krkn-chaos/krkn-operator-data-provider:${version}}
 console_image=${CONSOLE_IMAGE:-krkn-chaos.docker.scarf.sh/krkn-chaos/krkn-operator-console:latest}
+min_kube_version=${MIN_KUBE_VERSION:-1.36.0}
 export OPERATOR_IMAGE="$operator_image"
 export DATA_PROVIDER_IMAGE="$data_provider_image"
 export CONSOLE_IMAGE="$console_image"
 export EXAMPLES_FILE="$repo_root/config/olm/examples.yaml"
+export MIN_KUBE_VERSION="$min_kube_version"
 
 work_dir=$(mktemp -d "${TMPDIR:-/tmp}/krkn-olm.XXXXXX")
 trap 'rm -rf "$work_dir"' EXIT
@@ -111,6 +113,7 @@ csv_file="$output_dir/manifests/krkn-operator.clusterserviceversion.yaml"
 yq -i \
   '.metadata.annotations.containerImage = strenv(OPERATOR_IMAGE) |
    .metadata.annotations."alm-examples" = (load(strenv(EXAMPLES_FILE)) | to_json) |
+   .spec.minKubeVersion = strenv(MIN_KUBE_VERSION) |
    .spec.relatedImages = [
      {"name": "krkn-operator", "image": strenv(OPERATOR_IMAGE)},
      {"name": "krkn-operator-data-provider", "image": strenv(DATA_PROVIDER_IMAGE)},
