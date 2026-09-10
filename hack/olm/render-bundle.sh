@@ -41,11 +41,28 @@ operator_image=${OPERATOR_IMAGE:-krkn-chaos.docker.scarf.sh/krkn-chaos/krkn-oper
 data_provider_image=${DATA_PROVIDER_IMAGE:-krkn-chaos.docker.scarf.sh/krkn-chaos/krkn-operator-data-provider:${version}}
 console_image=${CONSOLE_IMAGE:-krkn-chaos.docker.scarf.sh/krkn-chaos/krkn-operator-console:latest}
 min_kube_version=${MIN_KUBE_VERSION:-1.36.0}
+openshift_versions=${OPENSHIFT_VERSIONS:-v4.19-v4.20}
 export OPERATOR_IMAGE="$operator_image"
 export DATA_PROVIDER_IMAGE="$data_provider_image"
 export CONSOLE_IMAGE="$console_image"
 export EXAMPLES_FILE="$repo_root/config/olm/examples.yaml"
 export MIN_KUBE_VERSION="$min_kube_version"
+
+icon_file=${ICON_FILE:-$repo_root/config/olm/assets/krkn.svg}
+if [[ -f "$icon_file" ]]; then
+  case "${icon_file##*.}" in
+    svg) icon_mediatype=image/svg+xml ;;
+    png) icon_mediatype=image/png ;;
+    jpg|jpeg) icon_mediatype=image/jpeg ;;
+    *) echo "unsupported icon format: $icon_file" >&2; exit 1 ;;
+  esac
+  export ICON_BASE64="$(base64 < "$icon_file" | tr -d '\n')"
+  export ICON_MEDIATYPE="$icon_mediatype"
+else
+  export ICON_BASE64=""
+  export ICON_MEDIATYPE=""
+fi
+export OPENSHIFT_VERSIONS="$openshift_versions"
 
 work_dir=$(mktemp -d "${TMPDIR:-/tmp}/krkn-olm.XXXXXX")
 trap 'rm -rf "$work_dir"' EXIT
@@ -109,6 +126,13 @@ COPY manifests/ manifests/
 COPY metadata/ metadata/
 EOF
 
+if [[ "$profile" == "ocp" ]]; then
+  yq -i '.annotations."com.redhat.openshift.versions" = strenv(OPENSHIFT_VERSIONS)' \
+    "$output_dir/metadata/annotations.yaml"
+  printf 'LABEL com.redhat.openshift.versions="%s"\n' "$openshift_versions" \
+    >> "$output_dir/bundle.Dockerfile"
+fi
+
 csv_file="$output_dir/manifests/krkn-operator.clusterserviceversion.yaml"
 yq -i \
   '.metadata.annotations.containerImage = strenv(OPERATOR_IMAGE) |
@@ -120,5 +144,10 @@ yq -i \
      {"name": "krkn-operator-console", "image": strenv(CONSOLE_IMAGE)}
    ]' \
   "$csv_file"
+
+if [[ -n "$ICON_BASE64" ]]; then
+  yq -i '.spec.icon = [{"base64data": strenv(ICON_BASE64), "mediatype": strenv(ICON_MEDIATYPE)}]' \
+    "$csv_file"
+fi
 
 operator-sdk bundle validate "$output_dir"
