@@ -29,7 +29,8 @@ import (
 
 // ClustersResponse represents the response for GET /clusters endpoint
 type ClustersResponse struct {
-	// TargetData contains a map of operator-name to list of cluster targets
+	// TargetData contains a map of operator-name to list of cluster targets,
+	// including the latest optional liveness result for each target.
 	TargetData map[string][]krknv1alpha1.ClusterTarget `json:"targetData"`
 	// Status represents the current state of the request (pending, completed)
 	Status string `json:"status"`

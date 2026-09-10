@@ -2,12 +2,25 @@ basePath: /api/v1
 definitions:
   github_com_krkn-chaos_krkn-operator_api_v1alpha1.ClusterTarget:
     properties:
+      checked-at:
+        description: |-
+          CheckedAt is the time at which the liveness check was performed.
+          +optional
+        format: date-time
+        type: string
       cluster-api-url:
         description: ClusterAPIURL is the API server URL of the managed cluster
         type: string
       cluster-name:
         description: ClusterName is the name of the managed cluster
         type: string
+      online:
+        description: |-
+          Online indicates whether the cluster API responded to the liveness check
+          performed while building this target request. A nil value means that the
+          provider did not perform a liveness check.
+          +optional
+        type: boolean
     type: object
   github_com_krkn-chaos_krkn-operator_api_v1alpha1.GraphScenarioNode:
     properties:
