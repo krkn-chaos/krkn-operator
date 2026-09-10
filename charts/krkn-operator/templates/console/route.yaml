@@ -12,8 +12,8 @@ metadata:
     {{- toYaml . | nindent 4 }}
   {{- end }}
 spec:
-  {{- if .Values.console.route.host }}
-  host: {{ .Values.console.route.host }}
+  {{- if .Values.console.route.hostname }}
+  host: {{ .Values.console.route.hostname }}
   {{- end }}
   to:
     kind: Service
