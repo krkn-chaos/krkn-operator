@@ -1,3 +1,4 @@
+// Package olm bootstraps resources that are not installed by an OLM CSV.
 package olm
 
 import (
