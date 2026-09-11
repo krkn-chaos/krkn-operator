@@ -127,10 +127,15 @@ type Handler struct {
 	// scenarioProviderFactory is injectable for API tests; production handlers
 	// use the krknctl-backed factory assigned by NewHandler.
 	scenarioProviderFactory func(provider.Mode) (provider.ScenarioDataProvider, error)
+	jobTracker     *JobTracker
+	baseCtx        context.Context
+	baseCancel     context.CancelFunc
 }
 
-// NewHandler creates a new Handler
+// NewHandler creates a new Handler.
+// Call Shutdown() during server teardown to cancel in-flight background jobs.
 func NewHandler(client client.Client, clientset kubernetes.Interface, namespace string, grpcServerAddr string, secretManager *auth.SecretManager) *Handler {
+	bgCtx, bgCancel := context.WithCancel(context.Background())
 	return &Handler{
 		client:                  client,
 		clientset:               clientset,
@@ -138,7 +143,15 @@ func NewHandler(client client.Client, clientset kubernetes.Interface, namespace 
 		grpcServerAddr:          grpcServerAddr,
 		secretManager:           secretManager,
 		scenarioProviderFactory: createScenarioProvider,
+		jobTracker:              NewJobTracker(),
+		baseCtx:                 bgCtx,
+		baseCancel:              bgCancel,
 	}
+}
+
+// Shutdown cancels all in-flight background jobs.
+func (h *Handler) Shutdown() {
+	h.baseCancel()
 }
 
 // getTokenGenerator creates a TokenGenerator for JWT validation (used for WebSocket auth)
