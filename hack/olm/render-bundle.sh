@@ -104,7 +104,7 @@ fi
 
 (
   cd "$work_dir"
-  operator-sdk generate bundle "${bundle_args[@]}"
+  operator-sdk generate bundle "${bundle_args[@]}" < /dev/null
 )
 
 # Operator SDK writes its generated Dockerfile relative to the working
