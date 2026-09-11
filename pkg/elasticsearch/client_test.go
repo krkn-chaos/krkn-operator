@@ -22,6 +22,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -555,27 +556,67 @@ func TestRawTelemetrySourceFlatten(t *testing.T) {
 		{
 			name:   "config-style parameters (pod disruption)",
 			source: `{"run_uuid":"abc","job_status":true,"scenarios":[{"scenario_type":"pod","start_timestamp":100,"end_timestamp":200,"exit_status":0,"parameters":[{"config":{"namespace_pattern":"ns1"}}]}]}`,
-			want:   TelemetryDocument{RunUUID: "abc", ScenarioType: "pod", StartTimestamp: 100, EndTimestamp: 200, Namespace: "ns1", Status: true},
+			want: TelemetryDocument{RunUUID: "abc", ScenarioType: "pod", StartTimestamp: 100, EndTimestamp: 200, Namespace: "ns1", Status: true,
+				Scenarios: []ScenarioDetail{{ScenarioType: "pod", StartTimestamp: 100, EndTimestamp: 200, Parameters: json.RawMessage(`[{"config":{"namespace_pattern":"ns1"}}]`)}}},
 		},
 		{
 			name:   "object-style parameters (pvc scenario)",
 			source: `{"run_uuid":"pvc","job_status":true,"scenarios":[{"scenario_type":"pvc_scenarios","start_timestamp":1,"end_timestamp":2,"exit_status":0,"parameters":{"pvc_scenario":{"namespace":"openshift-monitoring","pvc_name":"x"}}}]}`,
-			want:   TelemetryDocument{RunUUID: "pvc", ScenarioType: "pvc_scenarios", StartTimestamp: 1, EndTimestamp: 2, Namespace: "openshift-monitoring", Status: true},
+			want: TelemetryDocument{RunUUID: "pvc", ScenarioType: "pvc_scenarios", StartTimestamp: 1, EndTimestamp: 2, Namespace: "openshift-monitoring", Status: true,
+				Scenarios: []ScenarioDetail{{ScenarioType: "pvc_scenarios", StartTimestamp: 1, EndTimestamp: 2, Parameters: json.RawMessage(`{"pvc_scenario":{"namespace":"openshift-monitoring","pvc_name":"x"}}`)}}},
 		},
 		{
 			name:   "array-nested parameters (time scenario)",
 			source: `{"run_uuid":"time","job_status":true,"scenarios":[{"scenario_type":"time_scenarios","start_timestamp":3,"end_timestamp":4,"exit_status":0,"parameters":{"time_scenarios":[{"namespace":"openshift-etcd","action":"skew_time"}]}}]}`,
-			want:   TelemetryDocument{RunUUID: "time", ScenarioType: "time_scenarios", StartTimestamp: 3, EndTimestamp: 4, Namespace: "openshift-etcd", Status: true},
+			want: TelemetryDocument{RunUUID: "time", ScenarioType: "time_scenarios", StartTimestamp: 3, EndTimestamp: 4, Namespace: "openshift-etcd", Status: true,
+				Scenarios: []ScenarioDetail{{ScenarioType: "time_scenarios", StartTimestamp: 3, EndTimestamp: 4, Parameters: json.RawMessage(`{"time_scenarios":[{"namespace":"openshift-etcd","action":"skew_time"}]}`)}}},
 		},
 		{
 			name:   "non-zero exit status marks failure",
 			source: `{"run_uuid":"def","job_status":true,"scenarios":[{"scenario_type":"node","exit_status":1}]}`,
-			want:   TelemetryDocument{RunUUID: "def", ScenarioType: "node", Status: false},
+			want: TelemetryDocument{RunUUID: "def", ScenarioType: "node", Status: false,
+				Scenarios: []ScenarioDetail{{ScenarioType: "node", ExitStatus: 1}}},
 		},
 		{
 			name:   "no scenarios keeps job status",
 			source: `{"run_uuid":"ghi","job_status":true}`,
 			want:   TelemetryDocument{RunUUID: "ghi", Status: true},
+		},
+		{
+			name:   "affected_pods recovery timings surfaced",
+			source: `{"run_uuid":"rec","job_status":true,"scenarios":[{"scenario_type":"pod_disruption","start_timestamp":5,"end_timestamp":6,"exit_status":0,"parameters":{"scenarios":[{"expected_recovery_time":90,"namespace":"openshift-etcd"}]},"affected_pods":{"recovered":[{"pod_name":"etcd-0","namespace":"openshift-etcd","total_recovery_time":37.5,"pod_readiness_time":37.5,"pod_rescheduling_time":0}]}}]}`,
+			want: TelemetryDocument{RunUUID: "rec", ScenarioType: "pod_disruption", StartTimestamp: 5, EndTimestamp: 6, Namespace: "openshift-etcd", Status: true,
+				Scenarios: []ScenarioDetail{{
+					ScenarioType: "pod_disruption", StartTimestamp: 5, EndTimestamp: 6,
+					Parameters: json.RawMessage(`{"scenarios":[{"expected_recovery_time":90,"namespace":"openshift-etcd"}]}`),
+					AffectedPods: &AffectedPods{Recovered: []RecoveredPod{
+						{PodName: "etcd-0", Namespace: "openshift-etcd", TotalRecoveryTime: 37.5, PodReadinessTime: 37.5, PodReschedulingTime: 0},
+					}},
+				}}},
+		},
+		{
+			name:   "cluster metadata and all scenarios surfaced",
+			source: `{"run_uuid":"m1","job_status":true,"kubernetes_objects_count":{"Pod":701,"ConfigMap":1064},"network_plugins":["OVNKubernetes"],"total_node_count":9,"cloud_infrastructure":"AWS","cloud_type":"self-managed","cluster_version":"4.19.0","major_version":"4.19","build_url":"https://example/1","fips_enabled":false,"tag":"cr","etcd_encryption_enabled":false,"ipsec_enabled":false,"node_summary_infos":[{"count":3,"nodes_type":"master","architecture":"amd64","instance_type":"m5.2xlarge","kernel_version":"5.14.0-570.51.1.el9_6.x86_64","kubelet_version":"v1.33.5","os_version":"Red Hat Enterprise Linux CoreOS 9.6.20250930-0 (Plow)"},{"count":3,"nodes_type":"worker","architecture":"amd64","instance_type":"m5.xlarge","kernel_version":"5.14.0-570.51.1.el9_6.x86_64","kubelet_version":"v1.33.5","os_version":"Red Hat Enterprise Linux CoreOS 9.6.20250930-0 (Plow)"}],"scenarios":[{"scenario_type":"application_outages_scenarios","start_timestamp":10,"end_timestamp":20,"exit_status":0,"parameters":{"application_outage":{"namespace":"openshift-console"}}},{"scenario_type":"pod","start_timestamp":30,"end_timestamp":40,"exit_status":0,"parameters":{"config":{"kill":1},"id":"kill-pods"}}]}`,
+			want: TelemetryDocument{RunUUID: "m1", ScenarioType: "application_outages_scenarios", StartTimestamp: 10, EndTimestamp: 20, Namespace: "openshift-console", Status: true,
+				Metadata: &ClusterMetadata{
+					KubernetesObjectsCount: map[string]int{"Pod": 701, "ConfigMap": 1064},
+					NetworkPlugins:         []string{"OVNKubernetes"},
+					TotalNodeCount:         9,
+					CloudInfrastructure:    "AWS",
+					CloudType:              "self-managed",
+					ClusterVersion:         "4.19.0",
+					MajorVersion:           "4.19",
+					BuildURL:               "https://example/1",
+					Tag:                    "cr",
+					NodeSummaryInfos: []NodeSummaryInfo{
+						{Count: 3, NodesType: "master", Architecture: "amd64", InstanceType: "m5.2xlarge", KernelVersion: "5.14.0-570.51.1.el9_6.x86_64", KubeletVersion: "v1.33.5", OSVersion: "Red Hat Enterprise Linux CoreOS 9.6.20250930-0 (Plow)"},
+						{Count: 3, NodesType: "worker", Architecture: "amd64", InstanceType: "m5.xlarge", KernelVersion: "5.14.0-570.51.1.el9_6.x86_64", KubeletVersion: "v1.33.5", OSVersion: "Red Hat Enterprise Linux CoreOS 9.6.20250930-0 (Plow)"},
+					},
+				},
+				Scenarios: []ScenarioDetail{
+					{ScenarioType: "application_outages_scenarios", StartTimestamp: 10, EndTimestamp: 20, Parameters: json.RawMessage(`{"application_outage":{"namespace":"openshift-console"}}`)},
+					{ScenarioType: "pod", StartTimestamp: 30, EndTimestamp: 40, Parameters: json.RawMessage(`{"config":{"kill":1},"id":"kill-pods"}`)},
+				}},
 		},
 	}
 	for _, tt := range tests {
@@ -585,7 +626,7 @@ func TestRawTelemetrySourceFlatten(t *testing.T) {
 				t.Fatalf("unmarshal error: %v", err)
 			}
 			got := src.flatten()
-			if got != tt.want {
+			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("flatten() = %+v, want %+v", got, tt.want)
 			}
 		})

@@ -21,6 +21,7 @@ limitations under the License.
 package elasticsearch
 
 import (
+	"encoding/json"
 	"fmt"
 	"time"
 )
@@ -177,11 +178,83 @@ type QueryTelemetryRequest struct {
 	EndDate   string `json:"endDate,omitempty"`
 }
 
-// TelemetryDocument is the flattened set of telemetry fields surfaced to the UI
-// table. Each document corresponds to one telemetry run; the scenario-level
-// fields (type, start/end, namespace) are taken from the run's first scenario.
-// Additional run detail (cluster config, node info, etc.) is intentionally not
-// included here — it will be fetched for an expanded row in a later change.
+// ClusterMetadata holds the run-level cluster and infrastructure details
+// surfaced alongside a telemetry run so the UI can render an expanded row. All
+// fields come from the top level of the telemetry document _source and are
+// optional: a missing field decodes to its zero value and is omitted from the
+// response.
+type ClusterMetadata struct {
+	// KubernetesObjectsCount maps object kind (e.g. "Pod", "ConfigMap") to the
+	// number of that kind present in the cluster at run time.
+	KubernetesObjectsCount map[string]int `json:"kubernetes_objects_count,omitempty"`
+	// NetworkPlugins lists the cluster network plugins (e.g. "OVNKubernetes").
+	NetworkPlugins        []string `json:"network_plugins,omitempty"`
+	TotalNodeCount        int      `json:"total_node_count,omitempty"`
+	CloudInfrastructure   string   `json:"cloud_infrastructure,omitempty"`
+	CloudType             string   `json:"cloud_type,omitempty"`
+	ClusterVersion        string   `json:"cluster_version,omitempty"`
+	MajorVersion          string   `json:"major_version,omitempty"`
+	BuildURL              string   `json:"build_url,omitempty"`
+	FIPSEnabled           bool     `json:"fips_enabled,omitempty"`
+	Tag                   string   `json:"tag,omitempty"`
+	EtcdEncryptionEnabled bool     `json:"etcd_encryption_enabled,omitempty"`
+	IPSecEnabled          bool     `json:"ipsec_enabled,omitempty"`
+	// NodeSummaryInfos lists one summary per distinct node group (role/shape) in
+	// the cluster at run time; nil when the source document carried none.
+	NodeSummaryInfos []NodeSummaryInfo `json:"node_summary_infos,omitempty"`
+}
+
+// NodeSummaryInfo holds the summary krkn records for one node group sharing a
+// role and hardware/software shape. Count is how many nodes fall in the group;
+// the remaining fields describe that group. All fields come from an element of
+// the telemetry document's node_summary_infos array.
+type NodeSummaryInfo struct {
+	Count          int    `json:"count"`
+	NodesType      string `json:"nodes_type"`
+	Architecture   string `json:"architecture"`
+	InstanceType   string `json:"instance_type"`
+	KernelVersion  string `json:"kernel_version"`
+	KubeletVersion string `json:"kubelet_version"`
+	OSVersion      string `json:"os_version"`
+}
+
+// RecoveredPod holds the recovery timings krkn records for a single pod that came
+// back after a pod_disruption scenario. Times are fractional seconds (e.g.
+// 37.533992528915405), so they are represented as float64.
+type RecoveredPod struct {
+	PodName             string  `json:"pod_name"`
+	Namespace           string  `json:"namespace"`
+	TotalRecoveryTime   float64 `json:"total_recovery_time"`
+	PodReadinessTime    float64 `json:"pod_readiness_time"`
+	PodReschedulingTime float64 `json:"pod_rescheduling_time"`
+}
+
+// AffectedPods groups the pods a scenario disrupted. Only the recovered pods,
+// which carry recovery timings, are surfaced for the pod-recovery chart.
+type AffectedPods struct {
+	Recovered []RecoveredPod `json:"recovered,omitempty"`
+}
+
+// ScenarioDetail describes a single scenario within a telemetry run. The
+// Parameters field is passed through verbatim as raw JSON because its shape
+// varies by scenario type (e.g. an application_outage block vs a pod-scenario
+// config/id object), so a fixed struct cannot represent it.
+type ScenarioDetail struct {
+	ScenarioType   string          `json:"scenario_type"`
+	StartTimestamp int64           `json:"start_timestamp"`
+	EndTimestamp   int64           `json:"end_timestamp"`
+	ExitStatus     int             `json:"exit_status"`
+	Parameters     json.RawMessage `json:"parameters,omitempty"`
+	// AffectedPods carries per-pod recovery timings for pod_disruption scenarios;
+	// nil when the source document had none.
+	AffectedPods *AffectedPods `json:"affected_pods,omitempty"`
+}
+
+// TelemetryDocument is the set of telemetry fields surfaced to the UI. Each
+// document corresponds to one telemetry run. The scalar table columns (type,
+// start/end, namespace) are taken from the run's first scenario for backward
+// compatibility with the table view, while Metadata and Scenarios carry the
+// full run detail used to render an expanded row.
 type TelemetryDocument struct {
 	// RunUUID uniquely identifies the telemetry run this document represents.
 	RunUUID string `json:"run_uuid"`
@@ -197,6 +270,11 @@ type TelemetryDocument struct {
 	// per-scenario exit_status downgrade, so it may differ from the run-level
 	// job_status used by TelemetryStats.
 	Status bool `json:"status"`
+	// Metadata holds run-level cluster/infrastructure detail; nil when the
+	// source document carried none of the metadata fields.
+	Metadata *ClusterMetadata `json:"metadata,omitempty"`
+	// Scenarios lists every scenario in the run, each with its raw parameters.
+	Scenarios []ScenarioDetail `json:"scenarios,omitempty"`
 }
 
 // TelemetryStats summarizes run-level pass/fail counts across the entire matched

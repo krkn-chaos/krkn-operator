@@ -231,7 +231,22 @@ type esSearchResponse struct {
 type rawTelemetrySource struct {
 	RunUUID   string `json:"run_uuid"`
 	JobStatus bool   `json:"job_status"`
-	Scenarios []struct {
+	// Run-level cluster/infrastructure metadata. Unknown/missing keys decode to
+	// their zero value and are omitted from the response.
+	KubernetesObjectsCount map[string]int    `json:"kubernetes_objects_count"`
+	NetworkPlugins         []string          `json:"network_plugins"`
+	TotalNodeCount         int               `json:"total_node_count"`
+	CloudInfrastructure    string            `json:"cloud_infrastructure"`
+	CloudType              string            `json:"cloud_type"`
+	ClusterVersion         string            `json:"cluster_version"`
+	MajorVersion           string            `json:"major_version"`
+	BuildURL               string            `json:"build_url"`
+	FIPSEnabled            bool              `json:"fips_enabled"`
+	Tag                    string            `json:"tag"`
+	EtcdEncryptionEnabled  bool              `json:"etcd_encryption_enabled"`
+	IPSecEnabled           bool              `json:"ipsec_enabled"`
+	NodeSummaryInfos       []NodeSummaryInfo `json:"node_summary_infos"`
+	Scenarios              []struct {
 		ScenarioType   string `json:"scenario_type"`
 		StartTimestamp int64  `json:"start_timestamp"`
 		EndTimestamp   int64  `json:"end_timestamp"`
@@ -239,7 +254,8 @@ type rawTelemetrySource struct {
 		// Parameters shape varies by scenario type (object keyed by scenario
 		// name, whose value may be an object or an array), so it is kept raw and
 		// searched for a namespace rather than decoded into a fixed struct.
-		Parameters json.RawMessage `json:"parameters"`
+		Parameters   json.RawMessage `json:"parameters"`
+		AffectedPods *AffectedPods   `json:"affected_pods"`
 	} `json:"scenarios"`
 }
 
@@ -247,8 +263,9 @@ type rawTelemetrySource struct {
 // surfaced to the UI, deriving scenario-level columns from the first scenario.
 func (s rawTelemetrySource) flatten() TelemetryDocument {
 	doc := TelemetryDocument{
-		RunUUID: s.RunUUID,
-		Status:  s.JobStatus,
+		RunUUID:  s.RunUUID,
+		Status:   s.JobStatus,
+		Metadata: s.metadata(),
 	}
 	if len(s.Scenarios) > 0 {
 		sc := s.Scenarios[0]
@@ -261,8 +278,58 @@ func (s rawTelemetrySource) flatten() TelemetryDocument {
 			doc.Status = false
 		}
 		doc.Namespace = namespaceFromParameters(sc.Parameters)
+
+		// Surface every scenario with its raw parameters for the expanded row.
+		doc.Scenarios = make([]ScenarioDetail, 0, len(s.Scenarios))
+		for _, scn := range s.Scenarios {
+			doc.Scenarios = append(doc.Scenarios, ScenarioDetail{
+				ScenarioType:   scn.ScenarioType,
+				StartTimestamp: scn.StartTimestamp,
+				EndTimestamp:   scn.EndTimestamp,
+				ExitStatus:     scn.ExitStatus,
+				Parameters:     scn.Parameters,
+				AffectedPods:   scn.AffectedPods,
+			})
+		}
 	}
 	return doc
+}
+
+// metadata builds the run-level ClusterMetadata from the raw source, returning
+// nil when the source carried none of the metadata fields so the JSON response
+// omits an empty object.
+func (s rawTelemetrySource) metadata() *ClusterMetadata {
+	empty := len(s.KubernetesObjectsCount) == 0 &&
+		len(s.NetworkPlugins) == 0 &&
+		s.TotalNodeCount == 0 &&
+		s.CloudInfrastructure == "" &&
+		s.CloudType == "" &&
+		s.ClusterVersion == "" &&
+		s.MajorVersion == "" &&
+		s.BuildURL == "" &&
+		!s.FIPSEnabled &&
+		s.Tag == "" &&
+		!s.EtcdEncryptionEnabled &&
+		!s.IPSecEnabled &&
+		len(s.NodeSummaryInfos) == 0
+	if empty {
+		return nil
+	}
+	return &ClusterMetadata{
+		KubernetesObjectsCount: s.KubernetesObjectsCount,
+		NetworkPlugins:         s.NetworkPlugins,
+		TotalNodeCount:         s.TotalNodeCount,
+		CloudInfrastructure:    s.CloudInfrastructure,
+		CloudType:              s.CloudType,
+		ClusterVersion:         s.ClusterVersion,
+		MajorVersion:           s.MajorVersion,
+		BuildURL:               s.BuildURL,
+		FIPSEnabled:            s.FIPSEnabled,
+		Tag:                    s.Tag,
+		EtcdEncryptionEnabled:  s.EtcdEncryptionEnabled,
+		IPSecEnabled:           s.IPSecEnabled,
+		NodeSummaryInfos:       s.NodeSummaryInfos,
+	}
 }
 
 // namespaceFromParameters extracts the target namespace from a scenario's raw
