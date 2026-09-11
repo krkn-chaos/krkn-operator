@@ -1,0 +1,16 @@
+# Values used to render the OpenShift OLM bundle.
+# The bundle intentionally contains no external exposure resource.
+acm:
+  enabled: false
+
+operator:
+  olmBootstrap: true
+
+console:
+  enabled: true
+  ingress:
+    enabled: false
+  gateway:
+    enabled: false
+  route:
+    enabled: false

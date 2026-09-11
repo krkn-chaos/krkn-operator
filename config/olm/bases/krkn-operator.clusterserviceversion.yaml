@@ -1,0 +1,47 @@
+apiVersion: operators.coreos.com/v1alpha1
+kind: ClusterServiceVersion
+metadata:
+  name: krkn-operator.v0.0.0
+  labels:
+    operatorframework.io/arch.amd64: supported
+    operatorframework.io/arch.arm64: supported
+    operatorframework.io/os.linux: supported
+  annotations:
+    categories: "Monitoring,Storage"
+    description: "Krkn chaos engineering platform for Kubernetes, OpenShift, OCM, and ACM."
+    containerImage: quay.io/krkn-chaos/krkn-operator:latest
+    support: krkn-chaos
+spec:
+  displayName: Krkn Operator
+  capabilityLevel: Basic Install
+  description: |
+    Krkn provides centralized chaos engineering and resiliency testing for
+    Kubernetes, OpenShift, Open Cluster Management, and Advanced Cluster Management.
+
+    The optional ACM integration has been tested with ACM 2.14, 2.15, and 2.16,
+    and with OCM 1.1.0, 1.2.0, and 1.3.1. Kubernetes and OpenShift compatibility
+    details are maintained in the compatibility documentation.
+  minKubeVersion: 1.36.0
+  version: 0.0.0
+  maturity: alpha
+  provider:
+    name: krkn-chaos
+  maintainers:
+  - name: krkn-chaos
+    email: krkn-chaos@redhat.com
+  links:
+  - name: Krkn documentation
+    url: https://krkn-chaos.github.io/krkn-operator/
+  - name: Krkn source code
+    url: https://github.com/krkn-chaos/krkn-operator
+  - name: Compatibility matrix
+    url: https://krkn-chaos.dev/docs/krkn-operator/compatibility/
+  installModes:
+  - type: OwnNamespace
+    supported: true
+  - type: SingleNamespace
+    supported: true
+  - type: MultiNamespace
+    supported: false
+  - type: AllNamespaces
+    supported: false

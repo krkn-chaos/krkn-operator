@@ -83,6 +83,7 @@ auth:
 operator:
   enabled: true
   replicaCount: 1
+  olmBootstrap: false
 
   resources:
     requests:

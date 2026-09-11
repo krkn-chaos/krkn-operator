@@ -1,0 +1,18 @@
+# Values used to render the generic Kubernetes OLM bundle.
+# The bundle intentionally contains no external exposure resource.
+acm:
+  enabled: false
+
+operator:
+  olmBootstrap: true
+
+console:
+  enabled: true
+  ingress:
+    enabled: false
+    tls:
+      enabled: false
+  gateway:
+    enabled: false
+  route:
+    enabled: false

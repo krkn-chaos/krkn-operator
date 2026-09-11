@@ -15,29 +15,30 @@ spec:
   {{- if .Values.console.ingress.className }}
   ingressClassName: {{ .Values.console.ingress.className }}
   {{- end }}
-  {{- if .Values.console.ingress.tls }}
+  {{- $tls := .Values.console.ingress.tls }}
+  {{- if or (and (kindIs "map" $tls) $tls.enabled) (and (kindIs "slice" $tls) (gt (len $tls) 0)) }}
   tls:
-    {{- range .Values.console.ingress.tls }}
+    {{- if kindIs "slice" $tls }}
+    {{- toYaml $tls | nindent 4 }}
+    {{- else }}
     - hosts:
-        {{- range .hosts }}
-        - {{ . | quote }}
-        {{- end }}
-      secretName: {{ .secretName }}
+      {{- if .Values.console.ingress.hostname }}
+      - {{ .Values.console.ingress.hostname | quote }}
+      {{- end }}
+      secretName: {{ $tls.secretName | default (printf "%s-tls" (include "krkn-operator.console.fullname" .)) }}
     {{- end }}
   {{- end }}
   rules:
-    {{- range .Values.console.ingress.hosts }}
-    - host: {{ .host | quote }}
+    - {{- if .Values.console.ingress.hostname }}
+      host: {{ .Values.console.ingress.hostname | quote }}
+      {{- end }}
       http:
         paths:
-          {{- range .paths }}
-          - path: {{ .path }}
-            pathType: {{ .pathType }}
-            backend:
-              service:
-                name: {{ include "krkn-operator.console.fullname" $ }}
-                port:
-                  number: {{ $.Values.console.service.port }}
-          {{- end }}
-    {{- end }}
+        - path: /
+          pathType: Prefix
+          backend:
+            service:
+              name: {{ include "krkn-operator.console.fullname" . }}
+              port:
+                number: {{ .Values.console.service.port }}
 {{- end }}
