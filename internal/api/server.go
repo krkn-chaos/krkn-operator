@@ -328,6 +328,7 @@ func NewServer(port int, client client.Client, clientset kubernetes.Interface, n
 	// WebSocket authentication is handled internally via Sec-WebSocket-Protocol header
 	mux.HandleFunc(v2.WebSocketRunsPath, v2Handler.WsHandler.HandleWebSocket)
 	mux.HandleFunc(v2.WebSocketGraphRunsPath, v2Handler.WsHandler.HandleWebSocket)
+	mux.HandleFunc(v2.WebSocketJobsPath, v2Handler.WsHandler.HandleWebSocket)
 	mux.HandleFunc(v2.WebSocketDashboardActiveRunsPath, v2Handler.WsHandler.HandleWebSocket)
 
 	// v2 WebSocket job logs streaming (reuse v1 handler, just different path)
