@@ -127,6 +127,10 @@ type FileInfo struct {
 	FileType string `json:"fileType,omitempty"`
 	// FilePurpose is the system-level classification (e.g., "workflow-template")
 	FilePurpose string `json:"filePurpose,omitempty"`
+	// Groups is a list of group names that can access this file.
+	Groups []string `json:"groups,omitempty"`
+	// AvailableToAll indicates whether the file is accessible to all users.
+	AvailableToAll bool `json:"availableToAll"`
 	// CreatedAt is the timestamp when the file was created (ISO 8601)
 	CreatedAt string `json:"createdAt,omitempty"`
 	// UpdatedAt is the timestamp when the file was last updated (ISO 8601)
