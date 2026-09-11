@@ -274,11 +274,15 @@ jobs:
 
           for profile in kubernetes ocp; do
             output_dir="dist/bundle-$profile"
+            bundle_repository="$REGISTRY/$IMAGE_NAMESPACE/krkn-operator-bundle"
+            if [[ "$profile" == "ocp" ]]; then
+              bundle_repository="$REGISTRY/$IMAGE_NAMESPACE/krkn-operator-bundle-ocp"
+            fi
             hack/olm/render-bundle.sh "$profile" "$bundle_version" "$output_dir"
 
             docker buildx build \
               --file "$output_dir/bundle.Dockerfile" \
-              --tag "$REGISTRY/$IMAGE_NAMESPACE/krkn-operator-bundle:$RELEASE_TAG-$profile" \
+              --tag "$bundle_repository:$RELEASE_TAG" \
               --push \
               "$output_dir"
           done
