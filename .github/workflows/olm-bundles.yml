@@ -32,10 +32,14 @@ jobs:
     - name: Set up Helm
       uses: azure/setup-helm@v4
 
-    - name: Set up Operator SDK
-      uses: operator-framework/setup-operator-sdk@v1
-      with:
-        operator-sdk-version: v1.41.1
+    - name: Install Operator SDK
+      run: |
+        version=v1.41.1
+        curl -fsSL \
+          -o /tmp/operator-sdk \
+          "https://github.com/operator-framework/operator-sdk/releases/download/${version}/operator-sdk_linux_amd64"
+        sudo install -m 0755 /tmp/operator-sdk /usr/local/bin/operator-sdk
+        operator-sdk version
 
     - name: Install yq
       run: |
