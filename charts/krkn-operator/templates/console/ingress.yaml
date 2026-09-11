@@ -15,13 +15,18 @@ spec:
   {{- if .Values.console.ingress.className }}
   ingressClassName: {{ .Values.console.ingress.className }}
   {{- end }}
-  {{- if .Values.console.ingress.tls.enabled }}
+  {{- $tls := .Values.console.ingress.tls }}
+  {{- if or (and (kindIs "map" $tls) $tls.enabled) (and (kindIs "slice" $tls) (gt (len $tls) 0)) }}
   tls:
+    {{- if kindIs "slice" $tls }}
+    {{- toYaml $tls | nindent 4 }}
+    {{- else }}
     - hosts:
       {{- if .Values.console.ingress.hostname }}
       - {{ .Values.console.ingress.hostname | quote }}
       {{- end }}
-      secretName: {{ .Values.console.ingress.tls.secretName | default (printf "%s-tls" (include "krkn-operator.console.fullname" .)) }}
+      secretName: {{ $tls.secretName | default (printf "%s-tls" (include "krkn-operator.console.fullname" .)) }}
+    {{- end }}
   {{- end }}
   rules:
     - {{- if .Values.console.ingress.hostname }}

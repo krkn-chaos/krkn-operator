@@ -46,6 +46,11 @@ jobs:
         sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/download/v4.45.1/yq_linux_amd64
         sudo chmod +x /usr/local/bin/yq
 
+    - name: Test chart exposure templates
+      run: |
+        chmod +x hack/olm/test-chart-exposure.sh
+        hack/olm/test-chart-exposure.sh
+
     - name: Render and validate bundle
       run: |
         chmod +x hack/olm/render-bundle.sh

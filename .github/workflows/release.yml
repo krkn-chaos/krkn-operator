@@ -268,9 +268,19 @@ jobs:
       - name: Render and publish bundles
         run: |
           bundle_version="${RELEASE_TAG#v}"
-          export OPERATOR_IMAGE="$REGISTRY/$IMAGE_NAMESPACE/krkn-operator:$RELEASE_TAG"
-          export DATA_PROVIDER_IMAGE="$REGISTRY/$IMAGE_NAMESPACE/krkn-operator-data-provider:$RELEASE_TAG"
-          export CONSOLE_IMAGE="krkn-chaos.docker.scarf.sh/krkn-chaos/krkn-operator-console:latest"
+          console_latest_url=$(curl -Ls -o /dev/null -w '%{url_effective}' https://github.com/krkn-chaos/krkn-operator-console/releases/latest)
+          console_version="${console_latest_url##*/tag/}"
+
+          resolve_digest() {
+            image="$1"
+            digest=$(docker buildx imagetools inspect "$image" | awk '$1 == "Digest:" { print $2; exit }')
+            test -n "$digest"
+            printf '%s@%s\n' "$image" "$digest"
+          }
+
+          export OPERATOR_IMAGE=$(resolve_digest "$REGISTRY/$IMAGE_NAMESPACE/krkn-operator:$RELEASE_TAG")
+          export DATA_PROVIDER_IMAGE=$(resolve_digest "$REGISTRY/$IMAGE_NAMESPACE/krkn-operator-data-provider:$RELEASE_TAG")
+          export CONSOLE_IMAGE=$(resolve_digest "krkn-chaos.docker.scarf.sh/krkn-chaos/krkn-operator-console:$console_version")
 
           for profile in kubernetes ocp; do
             output_dir="dist/bundle-$profile"

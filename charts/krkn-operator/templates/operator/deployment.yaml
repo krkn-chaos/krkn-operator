@@ -27,6 +27,26 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       serviceAccountName: {{ include "krkn-operator.serviceAccountName" . }}
+      {{- if .Values.operator.olmBootstrap }}
+      initContainers:
+      - name: olm-bootstrap-resources
+        image: {{ .Values.images.operator.image }}
+        imagePullPolicy: {{ .Values.images.operator.pullPolicy }}
+        command:
+        - /manager
+        args:
+        - --bootstrap-resources
+        env:
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+      {{- end }}
       securityContext:
         {{- toYaml .Values.operator.securityContext | nindent 8 }}
       containers:
@@ -61,7 +81,7 @@ spec:
         - name: JWT_SECRET
           valueFrom:
             secretKeyRef:
-              name: {{ include "krkn-operator.fullname" . }}-jwt-secret
+              name: {{ include "krkn-operator.fullname" . }}-jwt
               key: jwt-secret
         - name: JWT_EXPIRY_HOURS
           value: {{ .Values.auth.jwtExpiryHours | quote }}

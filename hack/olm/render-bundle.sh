@@ -7,6 +7,16 @@ usage() {
 }
 
 [[ $# -eq 3 ]] || usage
+[[ -n "$3" ]] || { echo "output-dir must not be empty" >&2; exit 2; }
+[[ "$3" != "/" && "$3" != "." && "$3" != ".." ]] || {
+  echo "output-dir is a protected path: $3" >&2
+  exit 2
+}
+output_basename=$(basename "$3")
+[[ "$output_basename" != "." && "$output_basename" != ".." ]] || {
+  echo "output-dir has a protected basename: $3" >&2
+  exit 2
+}
 
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 profile=$1
@@ -14,6 +24,10 @@ version=$2
 output_parent=$(dirname "$3")
 mkdir -p "$output_parent"
 output_dir="$(cd "$output_parent" && pwd)/$(basename "$3")"
+[[ "$output_dir" != "/" && "$output_dir" != "$repo_root" ]] || {
+  echo "refusing to remove protected output directory: $output_dir" >&2
+  exit 2
+}
 
 case "$profile" in
   ocp)
@@ -134,15 +148,37 @@ if [[ "$profile" == "ocp" ]]; then
 fi
 
 csv_file="$output_dir/manifests/krkn-operator.clusterserviceversion.yaml"
+resolved_operator_image="$OPERATOR_IMAGE"
+resolved_data_provider_image="$DATA_PROVIDER_IMAGE"
+resolved_console_image="$CONSOLE_IMAGE"
+if [[ "${USE_IMAGE_DIGESTS:-false}" == "true" ]]; then
+  resolved_operator_image=$(yq -r '.spec.install.spec.deployments[] | select(.name == "krkn-operator-operator") | .spec.template.spec.containers[] | select(.name == "manager") | .image' "$csv_file")
+  resolved_data_provider_image=$(yq -r '.spec.install.spec.deployments[] | select(.name == "krkn-operator-operator") | .spec.template.spec.containers[] | select(.name == "data-provider") | .image' "$csv_file")
+  resolved_console_image=$(yq -r '.spec.install.spec.deployments[] | select(.name == "krkn-operator-console") | .spec.template.spec.containers[] | select(.name == "console") | .image' "$csv_file")
+  for image in "$resolved_operator_image" "$resolved_data_provider_image" "$resolved_console_image"; do
+    [[ "$image" == *@sha256:* ]] || { echo "digest mode produced a mutable image: $image" >&2; exit 1; }
+  done
+fi
+export RESOLVED_OPERATOR_IMAGE="$resolved_operator_image"
+export RESOLVED_DATA_PROVIDER_IMAGE="$resolved_data_provider_image"
+export RESOLVED_CONSOLE_IMAGE="$resolved_console_image"
 yq -i \
-  '.metadata.annotations.containerImage = strenv(OPERATOR_IMAGE) |
+  '.metadata.annotations.containerImage = strenv(RESOLVED_OPERATOR_IMAGE) |
    .metadata.annotations."alm-examples" = (load(strenv(EXAMPLES_FILE)) | to_json) |
    .spec.minKubeVersion = strenv(MIN_KUBE_VERSION) |
    .spec.relatedImages = [
-     {"name": "krkn-operator", "image": strenv(OPERATOR_IMAGE)},
-     {"name": "krkn-operator-data-provider", "image": strenv(DATA_PROVIDER_IMAGE)},
-     {"name": "krkn-operator-console", "image": strenv(CONSOLE_IMAGE)}
-   ]' \
+     {"name": "krkn-operator", "image": strenv(RESOLVED_OPERATOR_IMAGE)},
+     {"name": "krkn-operator-data-provider", "image": strenv(RESOLVED_DATA_PROVIDER_IMAGE)},
+     {"name": "krkn-operator-console", "image": strenv(RESOLVED_CONSOLE_IMAGE)}
+   ] |
+   .spec.install.spec.permissions += [{
+     "serviceAccountName": "krkn-operator",
+     "rules": [{"apiGroups": [""], "resources": ["serviceaccounts"], "verbs": ["create", "get", "list", "watch"]}]
+   }] |
+   .spec.install.spec.clusterPermissions += [{
+     "serviceAccountName": "krkn-operator",
+     "rules": [{"apiGroups": ["rbac.authorization.k8s.io"], "resources": ["clusterroles", "clusterrolebindings"], "verbs": ["create", "get", "list", "watch"]}]
+   }]' \
   "$csv_file"
 
 if [[ -n "$ICON_BASE64" ]]; then

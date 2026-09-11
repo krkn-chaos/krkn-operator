@@ -27,6 +27,30 @@ helm install krkn-operator oci://quay.io/krkn-chaos/charts/krkn-operator --versi
   -n krkn-operator-system --create-namespace
 ```
 
+### OLM / OperatorHub bundles
+
+Release automation publishes separate bundle images for generic Kubernetes and
+OpenShift:
+
+- `quay.io/krkn-chaos/krkn-operator-bundle:<version>` — Kubernetes bundle;
+- `quay.io/krkn-chaos/krkn-operator-bundle-ocp:<version>` — OpenShift bundle.
+
+The bundles use the `stable-kubernetes` and `stable-ocp` channels respectively.
+The current OLM bundle floor is Kubernetes `1.36.0`; this is stricter than the
+broader Helm compatibility matrix and is intentionally kept until the older
+Kubernetes and OpenShift combinations are verified in OLM.
+For a disposable cluster with OLM installed, a published bundle can be tested
+with:
+
+```bash
+operator-sdk run bundle \
+  quay.io/krkn-chaos/krkn-operator-bundle:<version>
+```
+
+On OpenShift, use the `-ocp` repository. Route, Ingress, and Gateway resources
+are intentionally not created by the bundle; expose the console using the
+cluster administrator's preferred TLS and networking configuration.
+
 📖 For configuration, usage, compatibility, and advanced installation options, see the official documentation.📖 For configuration, usage, compatibility, and advanced installation options, see the **[official documentation](https://krkn-chaos.gateway.scarf.sh/krkn-operator/docs?source=github)**.
 
 ## Ecosystem

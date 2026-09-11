@@ -3,6 +3,9 @@
 acm:
   enabled: false
 
+operator:
+  olmBootstrap: true
+
 console:
   enabled: true
   ingress:
