@@ -18,7 +18,7 @@ const (
 	consoleName        = "krkn-operator-console"
 	metricsServiceName = "krkn-operator-operator-metrics"
 	consoleConfigMap   = "krkn-operator-console-nginx"
-	jwtSecretName      = "krkn-operator-jwt"
+	jwtSecretName      = "krkn-operator-jwt" // #nosec G101 -- This is a Secret name, not a credential; the value is generated at runtime.
 	scenarioRunnerSA   = "krkn-operator-krkn-scenario-runner"
 	scenarioRunnerRole = "krkn-operator-scenario-runner"
 )
