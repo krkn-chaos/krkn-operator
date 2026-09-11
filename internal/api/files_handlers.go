@@ -917,13 +917,15 @@ func buildFileResponse(configMap *corev1.ConfigMap) files.FileResponse {
 // buildFileInfo builds a FileInfo from a ConfigMap (minimal user-facing info)
 func buildFileInfo(configMap *corev1.ConfigMap) files.FileInfo {
 	return files.FileInfo{
-		FileID:      files.ExtractFileIDFromLabels(configMap.Labels),
-		FileName:    configMap.Annotations[files.WorkflowNameAnnotation],
-		Description: configMap.Annotations[files.DescriptionAnnotation],
-		FileType:    files.ExtractFileTypeFromLabels(configMap.Labels),
-		FilePurpose: files.ExtractFilePurposeFromLabels(configMap.Labels),
-		CreatedAt:   configMap.Annotations[files.CreatedAtAnnotation],
-		UpdatedAt:   configMap.Annotations[files.UpdatedAtAnnotation],
+		FileID:         files.ExtractFileIDFromLabels(configMap.Labels),
+		FileName:       configMap.Annotations[files.WorkflowNameAnnotation],
+		Description:    configMap.Annotations[files.DescriptionAnnotation],
+		FileType:       files.ExtractFileTypeFromLabels(configMap.Labels),
+		FilePurpose:    files.ExtractFilePurposeFromLabels(configMap.Labels),
+		Groups:         files.ExtractGroupsFromLabels(configMap.Labels),
+		AvailableToAll: configMap.Labels[files.AvailableToAllLabel] == "true",
+		CreatedAt:      configMap.Annotations[files.CreatedAtAnnotation],
+		UpdatedAt:      configMap.Annotations[files.UpdatedAtAnnotation],
 	}
 }
 
