@@ -281,6 +281,7 @@ jobs:
             hack/olm/render-bundle.sh "$profile" "$bundle_version" "$output_dir"
 
             docker buildx build \
+              --platform linux/amd64,linux/arm64 \
               --file "$output_dir/bundle.Dockerfile" \
               --tag "$bundle_repository:$RELEASE_TAG" \
               --push \

@@ -2,6 +2,10 @@ apiVersion: operators.coreos.com/v1alpha1
 kind: ClusterServiceVersion
 metadata:
   name: krkn-operator.v0.0.0
+  labels:
+    operatorframework.io/arch.amd64: supported
+    operatorframework.io/arch.arm64: supported
+    operatorframework.io/os.linux: supported
   annotations:
     categories: "Monitoring,Storage"
     description: "Krkn chaos engineering platform for Kubernetes, OpenShift, OCM, and ACM."
