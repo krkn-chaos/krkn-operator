@@ -1555,22 +1555,6 @@ func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 
-	// Set registry configuration if loaded
-	if registryConfig != nil {
-		scenarioRun.Spec.RegistryName = *req.RegistryName
-		scenarioRun.Spec.RegistryURL = registryConfig.RegistryURL
-		scenarioRun.Spec.ScenarioRepository = registryConfig.ScenarioRepository
-		if registryConfig.Token != nil {
-			scenarioRun.Spec.Token = *registryConfig.Token
-		}
-		if registryConfig.Username != nil {
-			scenarioRun.Spec.Username = *registryConfig.Username
-		}
-		if registryConfig.Password != nil {
-			scenarioRun.Spec.Password = *registryConfig.Password
-		}
-	}
-
 	// Set cloud credential reference on CRD spec (controller handles SecretKeyRef injection)
 	if req.CloudCredentialRef != "" {
 		scenarioRun.Spec.CloudCredentialRef = req.CloudCredentialRef

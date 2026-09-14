@@ -422,7 +422,7 @@ func TestUpdateCloudCredential_Success(t *testing.T) {
 	handler := NewTestHandler(fakeClient, fake.NewSimpleClientset(), "default", "localhost:50051")
 
 	body := cloudcreds.UpdateCloudCredentialRequest{
-		Description:    "Updated description",
+		Description:      "Updated description",
 		AWSDefaultRegion: "eu-west-1",
 	}
 	b, _ := json.Marshal(body)
