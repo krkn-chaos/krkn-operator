@@ -38,7 +38,7 @@ const (
 	UpdatedAtAnnotation   = "cloudcreds.krkn.krkn-chaos.dev/updated-at"
 
 	AppName                  = "krkn-operator"
-	ComponentCloudCredential = "cloud-credential"
+	ComponentCloudCredential = "cloud-credential" // #nosec G101 -- Kubernetes label component name, not a credential value
 )
 
 // BuildLabels creates the labels map for a cloud credential Secret

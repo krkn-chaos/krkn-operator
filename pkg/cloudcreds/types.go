@@ -31,42 +31,42 @@ const (
 	ProviderIBMCloud  = "ibmcloud"
 )
 
-// Secret data key constants for each provider
+// Secret data key constants for each provider (Kubernetes Secret .Data keys, not credential values).
 const (
 	// AWS
-	SecretKeyAWSAccessKeyID     = "aws-access-key-id"
-	SecretKeyAWSSecretAccessKey = "aws-secret-access-key"
-	SecretKeyAWSDefaultRegion   = "aws-default-region"
+	SecretKeyAWSAccessKeyID     = "aws-access-key-id"     // #nosec G101 -- Secret data key name, not a credential value
+	SecretKeyAWSSecretAccessKey = "aws-secret-access-key" // #nosec G101 -- Secret data key name, not a credential value
+	SecretKeyAWSDefaultRegion   = "aws-default-region"    // #nosec G101 -- Secret data key name, not a credential value
 
 	// GCP
-	SecretKeyGCPServiceAccountJSON = "gcp-service-account-json"
+	SecretKeyGCPServiceAccountJSON = "gcp-service-account-json" // #nosec G101 -- Secret data key name, not a credential value
 
 	// Azure
-	SecretKeyAzureTenantID       = "azure-tenant-id"
-	SecretKeyAzureClientID       = "azure-client-id"
-	SecretKeyAzureClientSecret   = "azure-client-secret"
-	SecretKeyAzureSubscriptionID = "azure-subscription-id"
+	SecretKeyAzureTenantID       = "azure-tenant-id"       // #nosec G101 -- Secret data key name, not a credential value
+	SecretKeyAzureClientID       = "azure-client-id"       // #nosec G101 -- Secret data key name, not a credential value
+	SecretKeyAzureClientSecret   = "azure-client-secret"   // #nosec G101 -- Secret data key name, not a credential value
+	SecretKeyAzureSubscriptionID = "azure-subscription-id" // #nosec G101 -- Secret data key name, not a credential value
 
 	// OpenStack
-	SecretKeyOSAuthURL     = "os-auth-url"
-	SecretKeyOSUsername    = "os-username"
-	SecretKeyOSPassword    = "os-password"
-	SecretKeyOSProjectName = "os-project-name"
-	SecretKeyOSDomainName  = "os-domain-name"
+	SecretKeyOSAuthURL     = "os-auth-url"     // #nosec G101 -- Secret data key name, not a credential value
+	SecretKeyOSUsername    = "os-username"     // #nosec G101 -- Secret data key name, not a credential value
+	SecretKeyOSPassword    = "os-password"     // #nosec G101 -- Secret data key name, not a credential value
+	SecretKeyOSProjectName = "os-project-name" // #nosec G101 -- Secret data key name, not a credential value
+	SecretKeyOSDomainName  = "os-domain-name"  // #nosec G101 -- Secret data key name, not a credential value
 
 	// Baremetal (IPMI/BMC)
-	SecretKeyBMCUser     = "bmc-user"
-	SecretKeyBMCPassword = "bmc-password"
-	SecretKeyBMCAddr     = "bmc-addr"
+	SecretKeyBMCUser     = "bmc-user"     // #nosec G101 -- Secret data key name, not a credential value
+	SecretKeyBMCPassword = "bmc-password" // #nosec G101 -- Secret data key name, not a credential value
+	SecretKeyBMCAddr     = "bmc-addr"     // #nosec G101 -- Secret data key name, not a credential value
 
 	// VMware vSphere
-	SecretKeyVSphereIP       = "vsphere-ip"
-	SecretKeyVSphereUsername = "vsphere-username"
-	SecretKeyVSpherePassword = "vsphere-password"
+	SecretKeyVSphereIP       = "vsphere-ip"       // #nosec G101 -- Secret data key name, not a credential value
+	SecretKeyVSphereUsername = "vsphere-username" // #nosec G101 -- Secret data key name, not a credential value
+	SecretKeyVSpherePassword = "vsphere-password" // #nosec G101 -- Secret data key name, not a credential value
 
 	// IBM Cloud
-	SecretKeyIBMCURL    = "ibmc-url"
-	SecretKeyIBMCAPIKey = "ibmc-apikey"
+	SecretKeyIBMCURL    = "ibmc-url"    // #nosec G101 -- Secret data key name, not a credential value
+	SecretKeyIBMCAPIKey = "ibmc-apikey" // #nosec G101 -- Secret data key name, not a credential value
 )
 
 // CreateCloudCredentialRequest represents the request to create a cloud credential config
