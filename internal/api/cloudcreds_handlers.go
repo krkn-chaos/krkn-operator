@@ -426,24 +426,6 @@ func (h *Handler) CloudCredentialsRouter(w http.ResponseWriter, r *http.Request)
 	})
 }
 
-// cloudCredentialExists checks whether a Secret with the given name exists.
-// Returns true if ANY Secret with that name exists (not just cloud credentials),
-// to prevent AlreadyExists errors when creating.
-func (h *Handler) cloudCredentialExists(ctx context.Context, name string) (bool, error) {
-	var secret corev1.Secret
-	err := h.client.Get(ctx, types.NamespacedName{
-		Name:      name,
-		Namespace: h.namespace,
-	}, &secret)
-	if err != nil {
-		if apierrors.IsNotFound(err) {
-			return false, nil
-		}
-		return false, err
-	}
-	return true, nil
-}
-
 // loadCloudCredentialSecret loads a cloud credential Secret by name
 func (h *Handler) loadCloudCredentialSecret(ctx context.Context, name string) (*corev1.Secret, error) {
 	var secret corev1.Secret
