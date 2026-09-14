@@ -251,6 +251,10 @@ console:
 ## RBAC
 rbac:
   create: true
+  # OLM creates the scenario-runner resources during bootstrap because the
+  # ServiceAccount namespace is chosen at installation time.
+  scenarioRunner:
+    create: true
 
 ## ServiceAccount
 serviceAccount:

@@ -2,7 +2,6 @@ package olm
 
 import (
 	"context"
-	"strings"
 	"testing"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -19,12 +18,8 @@ func TestEnsureResources(t *testing.T) {
 	if _, err := clientset.CoreV1().Secrets(namespace).Get(context.Background(), jwtSecretName, metav1.GetOptions{}); err != nil {
 		t.Fatalf("JWT secret was not created: %v", err)
 	}
-	configMap, err := clientset.CoreV1().ConfigMaps(namespace).Get(context.Background(), consoleConfigMap, metav1.GetOptions{})
-	if err != nil {
-		t.Fatalf("console ConfigMap was not created: %v", err)
-	}
-	if !strings.Contains(configMap.Data["nginx.conf"], namespace+".svc.cluster.local") {
-		t.Fatalf("console ConfigMap proxy does not target the operator namespace: %s", configMap.Data["nginx.conf"])
+	if _, err := clientset.CoreV1().ConfigMaps(namespace).Get(context.Background(), "krkn-operator-console-nginx", metav1.GetOptions{}); err == nil {
+		t.Fatal("bootstrap must not create the console ConfigMap")
 	}
 	for _, name := range []string{operatorName, metricsServiceName, consoleName} {
 		if _, err := clientset.CoreV1().Services(namespace).Get(context.Background(), name, metav1.GetOptions{}); err != nil {
@@ -37,21 +32,6 @@ func TestEnsureResources(t *testing.T) {
 
 	if err := EnsureResources(context.Background(), clientset, namespace, false); err != nil {
 		t.Fatalf("EnsureResources() second call error = %v", err)
-	}
-
-	configMap.Data["nginx.conf"] = nginxConfig(namespace + "-old")
-	if _, err := clientset.CoreV1().ConfigMaps(namespace).Update(context.Background(), configMap, metav1.UpdateOptions{}); err != nil {
-		t.Fatalf("seed stale console ConfigMap: %v", err)
-	}
-	if err := EnsureResources(context.Background(), clientset, namespace, false); err != nil {
-		t.Fatalf("EnsureResources() stale ConfigMap reconciliation error = %v", err)
-	}
-	configMap, err = clientset.CoreV1().ConfigMaps(namespace).Get(context.Background(), consoleConfigMap, metav1.GetOptions{})
-	if err != nil {
-		t.Fatalf("get reconciled console ConfigMap: %v", err)
-	}
-	if strings.Contains(configMap.Data["nginx.conf"], namespace+"-old.svc.cluster.local") {
-		t.Fatalf("stale console ConfigMap proxy was not reconciled: %s", configMap.Data["nginx.conf"])
 	}
 
 	secondNamespace := namespace + "-old"

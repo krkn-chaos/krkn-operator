@@ -21,7 +21,6 @@ const (
 	operatorName       = "krkn-operator-operator"
 	consoleName        = "krkn-operator-console"
 	metricsServiceName = "krkn-operator-operator-metrics"
-	consoleConfigMap   = "krkn-operator-console-nginx"
 	jwtSecretName      = "krkn-operator-jwt" // #nosec G101 -- This is a Secret name, not a credential; the value is generated at runtime.
 	scenarioRunnerSA   = "krkn-operator-krkn-scenario-runner"
 	scenarioRunnerRole = "krkn-operator-scenario-runner"
@@ -46,9 +45,6 @@ func EnsureResources(ctx context.Context, clientset kubernetes.Interface, namesp
 		return err
 	}
 	if err := ensureJWTSecret(ctx, clientset, namespace, labels); err != nil {
-		return err
-	}
-	if err := ensureConfigMap(ctx, clientset, namespace, labels); err != nil {
 		return err
 	}
 	if err := ensureServices(ctx, clientset, namespace, labels); err != nil {
@@ -96,34 +92,6 @@ func ensureJWTSecret(ctx context.Context, clientset kubernetes.Interface, namesp
 	}, metav1.CreateOptions{})
 	if err != nil && !apierrors.IsAlreadyExists(err) {
 		return fmt.Errorf("create JWT secret: %w", err)
-	}
-	return nil
-}
-
-func ensureConfigMap(ctx context.Context, clientset kubernetes.Interface, namespace string, labels map[string]string) error {
-	configMaps := clientset.CoreV1().ConfigMaps(namespace)
-	desiredData := map[string]string{"nginx.conf": nginxConfig(namespace)}
-	current, err := configMaps.Get(ctx, consoleConfigMap, metav1.GetOptions{})
-	if err == nil {
-		if current.Data["nginx.conf"] == desiredData["nginx.conf"] {
-			return nil
-		}
-		current.Data = desiredData
-		current.Labels = labels
-		if _, err := configMaps.Update(ctx, current, metav1.UpdateOptions{}); err != nil {
-			return fmt.Errorf("update console configmap: %w", err)
-		}
-		return nil
-	}
-	if !apierrors.IsNotFound(err) {
-		return fmt.Errorf("get console configmap: %w", err)
-	}
-	_, err = configMaps.Create(ctx, &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{Name: consoleConfigMap, Namespace: namespace, Labels: labels},
-		Data:       desiredData,
-	}, metav1.CreateOptions{})
-	if err != nil && !apierrors.IsAlreadyExists(err) {
-		return fmt.Errorf("create console configmap: %w", err)
 	}
 	return nil
 }
@@ -243,36 +211,4 @@ func namespaceHash(namespace string) string {
 
 func intstrFromInt(value int32) intstr.IntOrString {
 	return intstr.FromInt(int(value))
-}
-
-func nginxConfig(namespace string) string {
-	return fmt.Sprintf(`worker_processes auto;
-error_log /tmp/error.log notice;
-pid /tmp/nginx.pid;
-events { worker_connections 1024; }
-http {
-  include /etc/nginx/mime.types;
-  default_type application/octet-stream;
-  map $http_upgrade $connection_upgrade { default upgrade; '' close; }
-  client_body_temp_path /tmp/client_temp;
-  proxy_temp_path /tmp/proxy_temp;
-  server {
-    listen 8080;
-    server_name localhost;
-    location / { root /usr/share/nginx/html; index index.html index.htm; try_files $uri $uri/ /index.html; }
-    location /api/ {
-      proxy_pass http://%s.%s.svc.cluster.local:8080;
-      proxy_set_header Host $host;
-      proxy_set_header X-Real-IP $remote_addr;
-      proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-      proxy_set_header X-Forwarded-Proto $scheme;
-      proxy_http_version 1.1;
-      proxy_set_header Upgrade $http_upgrade;
-      proxy_set_header Connection $connection_upgrade;
-      proxy_connect_timeout 120s;
-      proxy_send_timeout 3600s;
-      proxy_read_timeout 3600s;
-    }
-  }
-}`, operatorName, namespace)
 }

@@ -7,6 +7,10 @@ operator:
   olmBootstrap: true
   olmOpenShift: true
 
+rbac:
+  scenarioRunner:
+    create: false
+
 console:
   enabled: true
   ingress:

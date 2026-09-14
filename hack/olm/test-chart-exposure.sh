@@ -8,6 +8,31 @@ chart_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../charts/krkn-operator" && pw
 work_dir=$(mktemp -d "${TMPDIR:-/tmp}/krkn-chart-exposure.XXXXXX")
 trap 'rm -rf "$work_dir"' EXIT
 
+helm template krkn-operator "$chart_dir" > "$work_dir/base.yaml"
+
+yq -e 'select(.kind == "ConfigMap" and .metadata.name == "krkn-operator-console-nginx") | .data["nginx.conf"] | contains("proxy_pass http://krkn-operator-operator:8080;")' \
+  "$work_dir/base.yaml" >/dev/null
+
+if yq -e 'select(.kind == "ConfigMap" and .metadata.name == "krkn-operator-console-nginx") | .data["nginx.conf"] | contains(".svc.cluster.local")' \
+  "$work_dir/base.yaml" >/dev/null; then
+  echo "console proxy must not hardcode a namespace" >&2
+  exit 1
+fi
+
+if ! rg -q 'scenario-runner|krkn-scenario-runner' "$work_dir/base.yaml"; then
+  echo "standard Helm profile must render scenario-runner resources" >&2
+  exit 1
+fi
+
+helm template krkn-operator "$chart_dir" \
+  --values "$chart_dir/values-olm-ocp.yaml" \
+  --api-versions security.openshift.io/v1/SecurityContextConstraints > "$work_dir/olm-ocp.yaml"
+
+if rg -q 'scenario-runner|krkn-scenario-runner' "$work_dir/olm-ocp.yaml"; then
+  echo "OLM profile must not render static scenario-runner resources" >&2
+  exit 1
+fi
+
 helm template krkn-operator "$chart_dir" \
   --set console.ingress.enabled=true \
   --set console.ingress.hostname=console.example.test \
