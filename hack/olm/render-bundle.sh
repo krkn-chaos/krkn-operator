@@ -181,6 +181,9 @@ yq -i \
    }, {
      "serviceAccountName": "krkn-operator",
      "rules": [{"apiGroups": ["rbac.authorization.k8s.io"], "resources": ["clusterrolebindings"], "verbs": ["create", "get", "list", "watch"]}]
+   }, {
+     "serviceAccountName": "krkn-operator",
+     "rules": [{"apiGroups": ["rbac.authorization.k8s.io"], "resources": ["clusterroles"], "resourceNames": ["krkn-operator-scenario-runner"], "verbs": ["bind", "escalate"]}]
    }]' \
   "$csv_file"
 
