@@ -59,6 +59,7 @@ install_crds() {
         print_info "CRDs installed successfully"
     else
         print_warning "Skipping CRD installation (INSTALL_CRDS=false)"
+        print_warning "If API fields are missing on CRs (e.g. cloudCredentialRef), run: make install"
     fi
 }
 
@@ -85,6 +86,13 @@ run_operator() {
     print_info "Press Ctrl+C to stop the operator"
     echo ""
 
+    # Bootstrap scenario-runner SA/RBAC in KRKN_NAMESPACE (separate init pass; flag exits after bootstrap).
+    print_info "Bootstrapping scenario-runner resources in namespace: $KRKN_NAMESPACE"
+    POD_NAMESPACE="${KRKN_NAMESPACE}" ./bin/manager \
+        --bootstrap-resources \
+        --metrics-bind-address=0 \
+        --leader-elect=false
+
     # Run the operator with custom flags and export namespaces.
     # POD_NAMESPACE must match KRKN_NAMESPACE so the cache and all components
     # watch the same namespace. Without this the operator falls back to the
@@ -95,7 +103,8 @@ run_operator() {
         --api-port="$API_PORT" \
         --metrics-bind-address="$METRICS_ADDR" \
         --health-probe-bind-address="$HEALTH_PROBE_ADDR" \
-        --metrics-secure=false
+        --metrics-secure=false \
+        --leader-elect=false
 }
 
 # Function to cleanup on exit
