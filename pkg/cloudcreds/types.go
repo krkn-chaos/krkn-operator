@@ -71,11 +71,16 @@ const (
 
 // CreateCloudCredentialRequest represents the request to create a cloud credential config
 type CreateCloudCredentialRequest struct {
-	Name           string   `json:"name"`
-	Provider       string   `json:"provider"`
-	Description    string   `json:"description,omitempty"`
-	Groups         []string `json:"groups,omitempty"`
-	AvailableToAll bool     `json:"availableToAll,omitempty"`
+	// Name is the unique Secret name for the credential.
+	Name string `json:"name"`
+	// Provider identifies the cloud provider for this credential.
+	Provider string `json:"provider"`
+	// Description is optional human-readable context for the credential.
+	Description string `json:"description,omitempty"`
+	// Groups controls which user groups may access the credential.
+	Groups []string `json:"groups,omitempty"`
+	// AvailableToAll grants access to all authenticated users.
+	AvailableToAll bool `json:"availableToAll,omitempty"`
 
 	// AWS fields
 	AWSAccessKeyID     string `json:"awsAccessKeyId,omitempty"`
