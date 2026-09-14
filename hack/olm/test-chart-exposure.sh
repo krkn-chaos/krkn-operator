@@ -26,11 +26,27 @@ yq -e 'select(.kind == "Ingress") | .spec.tls[0].secretName == "legacy-console-t
   "$work_dir/ingress-list.yaml" >/dev/null
 
 helm template krkn-operator "$chart_dir" \
+  --set console.ingress.enabled=true \
+  --set-json 'console.ingress.hosts=[{"host":"legacy.example.test","paths":[{"path":"/console","pathType":"Prefix"}]}]' > "$work_dir/ingress-hosts.yaml"
+
+yq -e 'select(.kind == "Ingress") | .spec.rules[0].host == "legacy.example.test" and .spec.rules[0].http.paths[0].path == "/console"' \
+  "$work_dir/ingress-hosts.yaml" >/dev/null
+
+helm template krkn-operator "$chart_dir" \
   --api-versions route.openshift.io/v1/Route \
   --set console.route.enabled=true \
   --set console.route.hostname=console.apps.example.test > "$work_dir/route.yaml"
 
 yq -e 'select(.kind == "Route") | .spec.host == "console.apps.example.test" and .spec.to.name == "krkn-operator-console"' \
   "$work_dir/route.yaml" >/dev/null
+
+helm template krkn-operator "$chart_dir" \
+  --api-versions route.openshift.io/v1/Route \
+  --set console.route.enabled=true \
+  --set console.route.hostname="" \
+  --set console.route.host=legacy.apps.example.test > "$work_dir/route-legacy.yaml"
+
+yq -e 'select(.kind == "Route") | .spec.host == "legacy.apps.example.test"' \
+  "$work_dir/route-legacy.yaml" >/dev/null
 
 echo "Ingress and Route rendering checks passed"

@@ -84,6 +84,7 @@ operator:
   enabled: true
   replicaCount: 1
   olmBootstrap: false
+  olmOpenShift: false
 
   resources:
     requests:
@@ -182,6 +183,7 @@ console:
     enabled: false
     className: "nginx"
     hostname: "krkn-operator.example.com"
+    hosts: []  # Legacy list of host/path mappings; takes precedence when non-empty.
 
     tls:
       enabled: false
@@ -223,6 +225,7 @@ console:
   route:
     enabled: false
     hostname: "krkn-operator.apps.cluster.example.com"
+    host: ""  # Legacy hostname fallback.
 
     tls:
       enabled: true

@@ -5,6 +5,7 @@ acm:
 
 operator:
   olmBootstrap: true
+  olmOpenShift: false
 
 console:
   enabled: true

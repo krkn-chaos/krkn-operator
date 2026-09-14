@@ -41,6 +41,8 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: metadata.namespace
+        - name: KRKN_OLM_OPENSHIFT
+          value: {{ .Values.operator.olmOpenShift | quote }}
         securityContext:
           allowPrivilegeEscalation: false
           capabilities:

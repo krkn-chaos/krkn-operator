@@ -4,6 +4,8 @@ package olm
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 
 	corev1 "k8s.io/api/core/v1"
@@ -12,6 +14,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/kubernetes"
+	rbacv1typed "k8s.io/client-go/kubernetes/typed/rbac/v1"
 )
 
 const (
@@ -22,12 +25,17 @@ const (
 	jwtSecretName      = "krkn-operator-jwt" // #nosec G101 -- This is a Secret name, not a credential; the value is generated at runtime.
 	scenarioRunnerSA   = "krkn-operator-krkn-scenario-runner"
 	scenarioRunnerRole = "krkn-operator-scenario-runner"
+	scenarioRunnerSCC  = "system:openshift:scc:anyuid"
 )
 
 // EnsureResources creates the non-deployment resources that OLM cannot install
 // from a CSV install strategy. It is called by the OLM bootstrap init container
-// before the operator and console deployments are started.
-func EnsureResources(ctx context.Context, clientset kubernetes.Interface, namespace string) error {
+// before the operator and console deployments are started. The namespace must
+// be the namespace containing the operator deployment. When openshift is true,
+// it also grants the scenario-runner service account the anyuid SCC required by
+// the OpenShift chart profile. The operation is idempotent and safe to retry;
+// resources created before a later error remain in the cluster.
+func EnsureResources(ctx context.Context, clientset kubernetes.Interface, namespace string, openshift bool) error {
 	labels := map[string]string{
 		"app.kubernetes.io/name":       "krkn-operator",
 		"app.kubernetes.io/instance":   "krkn-operator",
@@ -46,7 +54,7 @@ func EnsureResources(ctx context.Context, clientset kubernetes.Interface, namesp
 	if err := ensureServices(ctx, clientset, namespace, labels); err != nil {
 		return err
 	}
-	if err := ensureScenarioRunnerRBAC(ctx, clientset, namespace, labels); err != nil {
+	if err := ensureScenarioRunnerRBAC(ctx, clientset, namespace, labels, openshift); err != nil {
 		return err
 	}
 	return nil
@@ -159,7 +167,7 @@ func ensureServices(ctx context.Context, clientset kubernetes.Interface, namespa
 	return nil
 }
 
-func ensureScenarioRunnerRBAC(ctx context.Context, clientset kubernetes.Interface, namespace string, labels map[string]string) error {
+func ensureScenarioRunnerRBAC(ctx context.Context, clientset kubernetes.Interface, namespace string, labels map[string]string, openshift bool) error {
 	_, err := clientset.RbacV1().ClusterRoles().Get(ctx, scenarioRunnerRole, metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
 		_, err = clientset.RbacV1().ClusterRoles().Create(ctx, &rbacv1.ClusterRole{
@@ -178,29 +186,59 @@ func ensureScenarioRunnerRBAC(ctx context.Context, clientset kubernetes.Interfac
 	}
 
 	bindings := clientset.RbacV1().ClusterRoleBindings()
-	binding, err := bindings.Get(ctx, scenarioRunnerRole, metav1.GetOptions{})
+	bindingName := scenarioRunnerBindingName(namespace)
+	_, err = bindings.Get(ctx, bindingName, metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
 		_, err = bindings.Create(ctx, &rbacv1.ClusterRoleBinding{
-			ObjectMeta: metav1.ObjectMeta{Name: scenarioRunnerRole, Labels: labels},
+			ObjectMeta: metav1.ObjectMeta{Name: bindingName, Labels: labels},
 			RoleRef:    rbacv1.RoleRef{APIGroup: "rbac.authorization.k8s.io", Kind: "ClusterRole", Name: scenarioRunnerRole},
 			Subjects:   []rbacv1.Subject{{Kind: "ServiceAccount", Name: scenarioRunnerSA, Namespace: namespace}},
 		}, metav1.CreateOptions{})
 		if err != nil && !apierrors.IsAlreadyExists(err) {
 			return fmt.Errorf("create scenario runner cluster role binding: %w", err)
 		}
-	} else if err == nil {
-		desiredSubject := rbacv1.Subject{Kind: "ServiceAccount", Name: scenarioRunnerSA, Namespace: namespace}
-		if len(binding.Subjects) != 1 || binding.Subjects[0] != desiredSubject {
-			binding.Subjects = []rbacv1.Subject{desiredSubject}
-			binding.Labels = labels
-			if _, err := bindings.Update(ctx, binding, metav1.UpdateOptions{}); err != nil {
-				return fmt.Errorf("update scenario runner cluster role binding: %w", err)
-			}
-		}
 	} else if err != nil && !apierrors.IsAlreadyExists(err) {
 		return fmt.Errorf("get scenario runner cluster role binding: %w", err)
 	}
+	if openshift {
+		if err := ensureSCCBinding(ctx, bindings, namespace, labels); err != nil {
+			return err
+		}
+	}
 	return nil
+}
+
+func ensureSCCBinding(ctx context.Context, bindings rbacv1typed.ClusterRoleBindingInterface, namespace string, labels map[string]string) error {
+	name := scenarioRunnerSCCBindingName(namespace)
+	_, err := bindings.Get(ctx, name, metav1.GetOptions{})
+	if err == nil || apierrors.IsAlreadyExists(err) {
+		return nil
+	}
+	if !apierrors.IsNotFound(err) {
+		return fmt.Errorf("get scenario runner SCC binding: %w", err)
+	}
+	_, err = bindings.Create(ctx, &rbacv1.ClusterRoleBinding{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Labels: labels},
+		RoleRef:    rbacv1.RoleRef{APIGroup: "rbac.authorization.k8s.io", Kind: "ClusterRole", Name: scenarioRunnerSCC},
+		Subjects:   []rbacv1.Subject{{Kind: "ServiceAccount", Name: scenarioRunnerSA, Namespace: namespace}},
+	}, metav1.CreateOptions{})
+	if err != nil && !apierrors.IsAlreadyExists(err) {
+		return fmt.Errorf("create scenario runner SCC binding: %w", err)
+	}
+	return nil
+}
+
+func scenarioRunnerBindingName(namespace string) string {
+	return "krkn-operator-scenario-runner-" + namespaceHash(namespace)
+}
+
+func scenarioRunnerSCCBindingName(namespace string) string {
+	return "krkn-operator-scenario-runner-scc-" + namespaceHash(namespace)
+}
+
+func namespaceHash(namespace string) string {
+	digest := sha256.Sum256([]byte(namespace))
+	return hex.EncodeToString(digest[:])[:10]
 }
 
 func intstrFromInt(value int32) intstr.IntOrString {

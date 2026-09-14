@@ -177,9 +177,19 @@ yq -i \
    }] |
    .spec.install.spec.clusterPermissions += [{
      "serviceAccountName": "krkn-operator",
-     "rules": [{"apiGroups": ["rbac.authorization.k8s.io"], "resources": ["clusterroles", "clusterrolebindings"], "verbs": ["create", "get", "list", "watch"]}]
+     "rules": [{"apiGroups": ["rbac.authorization.k8s.io"], "resources": ["clusterroles"], "verbs": ["create", "get", "list", "watch"]}]
+   }, {
+     "serviceAccountName": "krkn-operator",
+     "rules": [{"apiGroups": ["rbac.authorization.k8s.io"], "resources": ["clusterrolebindings"], "verbs": ["create", "get", "list", "watch"]}]
    }]' \
   "$csv_file"
+
+if [[ "$profile" == "ocp" ]]; then
+  yq -i '.spec.install.spec.clusterPermissions += [{
+    "serviceAccountName": "krkn-operator",
+    "rules": [{"apiGroups": ["rbac.authorization.k8s.io"], "resources": ["clusterroles"], "resourceNames": ["system:openshift:scc:anyuid"], "verbs": ["bind"]}]
+  }]' "$csv_file"
+fi
 
 if [[ -n "$ICON_BASE64" ]]; then
   yq -i '.spec.icon = [{"base64data": strenv(ICON_BASE64), "mediatype": strenv(ICON_MEDIATYPE)}]' \
