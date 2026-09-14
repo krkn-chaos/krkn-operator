@@ -93,16 +93,26 @@ func ensureJWTSecret(ctx context.Context, clientset kubernetes.Interface, namesp
 }
 
 func ensureConfigMap(ctx context.Context, clientset kubernetes.Interface, namespace string, labels map[string]string) error {
-	_, err := clientset.CoreV1().ConfigMaps(namespace).Get(ctx, consoleConfigMap, metav1.GetOptions{})
-	if err == nil || apierrors.IsAlreadyExists(err) {
+	configMaps := clientset.CoreV1().ConfigMaps(namespace)
+	desiredData := map[string]string{"nginx.conf": nginxConfig(namespace)}
+	current, err := configMaps.Get(ctx, consoleConfigMap, metav1.GetOptions{})
+	if err == nil {
+		if current.Data["nginx.conf"] == desiredData["nginx.conf"] {
+			return nil
+		}
+		current.Data = desiredData
+		current.Labels = labels
+		if _, err := configMaps.Update(ctx, current, metav1.UpdateOptions{}); err != nil {
+			return fmt.Errorf("update console configmap: %w", err)
+		}
 		return nil
 	}
 	if !apierrors.IsNotFound(err) {
 		return fmt.Errorf("get console configmap: %w", err)
 	}
-	_, err = clientset.CoreV1().ConfigMaps(namespace).Create(ctx, &corev1.ConfigMap{
+	_, err = configMaps.Create(ctx, &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{Name: consoleConfigMap, Namespace: namespace, Labels: labels},
-		Data:       map[string]string{"nginx.conf": nginxConfig(namespace)},
+		Data:       desiredData,
 	}, metav1.CreateOptions{})
 	if err != nil && !apierrors.IsAlreadyExists(err) {
 		return fmt.Errorf("create console configmap: %w", err)
@@ -167,15 +177,25 @@ func ensureScenarioRunnerRBAC(ctx context.Context, clientset kubernetes.Interfac
 		return fmt.Errorf("get scenario runner cluster role: %w", err)
 	}
 
-	_, err = clientset.RbacV1().ClusterRoleBindings().Get(ctx, scenarioRunnerRole, metav1.GetOptions{})
+	bindings := clientset.RbacV1().ClusterRoleBindings()
+	binding, err := bindings.Get(ctx, scenarioRunnerRole, metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
-		_, err = clientset.RbacV1().ClusterRoleBindings().Create(ctx, &rbacv1.ClusterRoleBinding{
+		_, err = bindings.Create(ctx, &rbacv1.ClusterRoleBinding{
 			ObjectMeta: metav1.ObjectMeta{Name: scenarioRunnerRole, Labels: labels},
 			RoleRef:    rbacv1.RoleRef{APIGroup: "rbac.authorization.k8s.io", Kind: "ClusterRole", Name: scenarioRunnerRole},
 			Subjects:   []rbacv1.Subject{{Kind: "ServiceAccount", Name: scenarioRunnerSA, Namespace: namespace}},
 		}, metav1.CreateOptions{})
 		if err != nil && !apierrors.IsAlreadyExists(err) {
 			return fmt.Errorf("create scenario runner cluster role binding: %w", err)
+		}
+	} else if err == nil {
+		desiredSubject := rbacv1.Subject{Kind: "ServiceAccount", Name: scenarioRunnerSA, Namespace: namespace}
+		if len(binding.Subjects) != 1 || binding.Subjects[0] != desiredSubject {
+			binding.Subjects = []rbacv1.Subject{desiredSubject}
+			binding.Labels = labels
+			if _, err := bindings.Update(ctx, binding, metav1.UpdateOptions{}); err != nil {
+				return fmt.Errorf("update scenario runner cluster role binding: %w", err)
+			}
 		}
 	} else if err != nil && !apierrors.IsAlreadyExists(err) {
 		return fmt.Errorf("get scenario runner cluster role binding: %w", err)
