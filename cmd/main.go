@@ -210,12 +210,7 @@ func main() {
 	}
 	setupLog.Info("Operator namespace", "namespace", operatorNamespace)
 	if bootstrapResources {
-		clientset, err := kubernetes.NewForConfig(ctrl.GetConfigOrDie())
-		if err != nil {
-			setupLog.Error(err, "unable to create Kubernetes clientset for OLM bootstrap")
-			os.Exit(1)
-		}
-		if err := olmbootstrap.EnsureResources(context.Background(), clientset, operatorNamespace); err != nil {
+		if err := bootstrapOLMResources(operatorNamespace, os.Getenv("KRKN_OLM_OPENSHIFT") == "true"); err != nil {
 			setupLog.Error(err, "unable to bootstrap OLM resources", "namespace", operatorNamespace)
 			os.Exit(1)
 		}
@@ -399,6 +394,24 @@ func main() {
 		setupLog.Error(err, "problem running manager")
 		os.Exit(1)
 	}
+}
+
+var (
+	newOLMClientset = func() (kubernetes.Interface, error) {
+		return kubernetes.NewForConfig(ctrl.GetConfigOrDie())
+	}
+	ensureOLMResources = olmbootstrap.EnsureResources
+)
+
+func bootstrapOLMResources(namespace string, openshift bool) error {
+	clientset, err := newOLMClientset()
+	if err != nil {
+		return fmt.Errorf("create Kubernetes clientset for OLM bootstrap: %w", err)
+	}
+	if err := ensureOLMResources(context.Background(), clientset, namespace, openshift); err != nil {
+		return fmt.Errorf("bootstrap OLM resources: %w", err)
+	}
+	return nil
 }
 
 // ConfigStoreInitializer is a Runnable that initializes the kvstore from ConfigMap

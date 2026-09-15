@@ -21,7 +21,12 @@ spec:
     The optional ACM integration has been tested with ACM 2.14, 2.15, and 2.16,
     and with OCM 1.1.0, 1.2.0, and 1.3.1. Kubernetes and OpenShift compatibility
     details are maintained in the compatibility documentation.
-  minKubeVersion: 1.36.0
+
+    IMPORTANT: The installation creates the console Service, but does not create
+    an Ingress or an OpenShift Route. To access the console, expose the
+    krkn-operator-console Service manually according to your cluster's ingress,
+    gateway, TLS, and network configuration.
+  minKubeVersion: 1.19.0
   version: 0.0.0
   maturity: alpha
   provider:

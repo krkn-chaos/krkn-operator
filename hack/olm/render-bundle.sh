@@ -54,7 +54,7 @@ command -v yq >/dev/null || { echo "yq is required" >&2; exit 1; }
 operator_image=${OPERATOR_IMAGE:-krkn-chaos.docker.scarf.sh/krkn-chaos/krkn-operator:${version}}
 data_provider_image=${DATA_PROVIDER_IMAGE:-krkn-chaos.docker.scarf.sh/krkn-chaos/krkn-operator-data-provider:${version}}
 console_image=${CONSOLE_IMAGE:-krkn-chaos.docker.scarf.sh/krkn-chaos/krkn-operator-console:latest}
-min_kube_version=${MIN_KUBE_VERSION:-1.36.0}
+min_kube_version=${MIN_KUBE_VERSION:-1.19.0}
 openshift_versions=${OPENSHIFT_VERSIONS:-v4.19-v4.20}
 export OPERATOR_IMAGE="$operator_image"
 export DATA_PROVIDER_IMAGE="$data_provider_image"
@@ -177,9 +177,22 @@ yq -i \
    }] |
    .spec.install.spec.clusterPermissions += [{
      "serviceAccountName": "krkn-operator",
-     "rules": [{"apiGroups": ["rbac.authorization.k8s.io"], "resources": ["clusterroles", "clusterrolebindings"], "verbs": ["create", "get", "list", "watch"]}]
+     "rules": [{"apiGroups": ["rbac.authorization.k8s.io"], "resources": ["clusterroles"], "verbs": ["create", "get", "list", "watch"]}]
+   }, {
+     "serviceAccountName": "krkn-operator",
+     "rules": [{"apiGroups": ["rbac.authorization.k8s.io"], "resources": ["clusterrolebindings"], "verbs": ["create", "get", "list", "watch"]}]
+   }, {
+     "serviceAccountName": "krkn-operator",
+     "rules": [{"apiGroups": ["rbac.authorization.k8s.io"], "resources": ["clusterroles"], "resourceNames": ["krkn-operator-scenario-runner"], "verbs": ["bind", "escalate"]}]
    }]' \
   "$csv_file"
+
+if [[ "$profile" == "ocp" ]]; then
+  yq -i '.spec.install.spec.clusterPermissions += [{
+    "serviceAccountName": "krkn-operator",
+    "rules": [{"apiGroups": ["rbac.authorization.k8s.io"], "resources": ["clusterroles"], "resourceNames": ["system:openshift:scc:anyuid"], "verbs": ["bind"]}]
+  }]' "$csv_file"
+fi
 
 if [[ -n "$ICON_BASE64" ]]; then
   yq -i '.spec.icon = [{"base64data": strenv(ICON_BASE64), "mediatype": strenv(ICON_MEDIATYPE)}]' \

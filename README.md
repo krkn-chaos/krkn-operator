@@ -36,9 +36,8 @@ OpenShift:
 - `quay.io/krkn-chaos/krkn-operator-bundle-ocp:<version>` — OpenShift bundle.
 
 The bundles use the `stable-kubernetes` and `stable-ocp` channels respectively.
-The current OLM bundle floor is Kubernetes `1.36.0`; this is stricter than the
-broader Helm compatibility matrix and is intentionally kept until the older
-Kubernetes and OpenShift combinations are verified in OLM.
+The OLM bundle declares Kubernetes `1.19.0` as its minimum version, matching the
+published compatibility matrix.
 For a disposable cluster with OLM installed, a published bundle can be tested
 with:
 
