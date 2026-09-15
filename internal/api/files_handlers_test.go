@@ -1109,6 +1109,24 @@ func TestListAvailableFiles(t *testing.T) {
 				if len(response.Files) != tt.expectCount {
 					t.Errorf("Expected %d files, got %d", tt.expectCount, len(response.Files))
 				}
+
+				if tt.isAdmin {
+					var publicInfo, groupInfo files.FileInfo
+					for _, info := range response.Files {
+						switch info.FileID {
+						case publicFileID:
+							publicInfo = info
+						case groupFileID:
+							groupInfo = info
+						}
+					}
+					if !publicInfo.AvailableToAll {
+						t.Error("Expected public file to have AvailableToAll=true")
+					}
+					if len(groupInfo.Groups) != 1 || groupInfo.Groups[0] != "dev-team" {
+						t.Errorf("Expected group file groups to contain dev-team, got %v", groupInfo.Groups)
+					}
+				}
 			}
 		})
 	}
