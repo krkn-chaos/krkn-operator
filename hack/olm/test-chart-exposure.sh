@@ -22,7 +22,7 @@ if yq -e 'select(.kind == "ConfigMap" and .metadata.name == "krkn-operator-conso
   exit 1
 fi
 
-if ! rg -q 'scenario-runner|krkn-scenario-runner' "$work_dir/base.yaml"; then
+if ! grep -Eq 'scenario-runner|krkn-scenario-runner' "$work_dir/base.yaml"; then
   echo "standard Helm profile must render scenario-runner resources" >&2
   exit 1
 fi
@@ -31,7 +31,7 @@ helm template krkn-operator "$chart_dir" \
   --values "$chart_dir/values-olm-ocp.yaml" \
   --api-versions security.openshift.io/v1/SecurityContextConstraints > "$work_dir/olm-ocp.yaml"
 
-if rg -q 'scenario-runner|krkn-scenario-runner' "$work_dir/olm-ocp.yaml"; then
+if grep -Eq 'scenario-runner|krkn-scenario-runner' "$work_dir/olm-ocp.yaml"; then
   echo "OLM profile must not render static scenario-runner resources" >&2
   exit 1
 fi
