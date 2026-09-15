@@ -87,6 +87,44 @@ with `PATCH` and a required boolean body, for example
 `{"enabled":false}`. Image verification remains observable when enforcement
 is disabled; only the enforcement result is ignored.
 
+### v2 jobs WebSocket
+
+`GET /api/v2/ws/jobs` provides real-time updates for the unified, paginated
+list of scenario and graph jobs. Authenticate during the WebSocket handshake
+with the JWT subprotocol `access_token.<jwt-token>`:
+
+```javascript
+const socket = new WebSocket(
+  "wss://operator.example.com/api/v2/ws/jobs",
+  "access_token." + jwtToken,
+);
+```
+
+After the connection is established, subscribe with a JSON message. `page` is
+1-based and `limit` controls the page size; both are optional and default to
+the server's defaults:
+
+```json
+{
+  "action": "subscribe",
+  "resource": "jobs",
+  "page": 1,
+  "limit": 25
+}
+```
+
+The server sends an initial `snapshot` and sends another snapshot when the
+requested page changes. Each message has `resource: "jobs"`, a `data` object
+containing the `jobs` array and aggregate `stats`, and `pagination` metadata
+with `page`, `limit`, `total`, and `totalPages`. Send an `unsubscribe` message
+with `resource: "jobs"` to stop updates. Invalid subscription messages are
+returned on the socket as an error object with `error` and `message` fields.
+
+The handshake returns HTTP 400 when the authentication subprotocol is missing
+or malformed, and HTTP 401 when the JWT is invalid or expired. The optional
+`WEBSOCKET_ALLOWED_ORIGINS` environment variable restricts cross-origin
+handshakes when configured.
+
 ## License
 
 Licensed under the [Apache License 2.0](LICENSE).

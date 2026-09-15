@@ -55,6 +55,9 @@ const (
 	// Real-time graph run updates (multiplexed - subscribe to multiple graph run IDs)
 	WebSocketGraphRunsPath = WebSocketBasePath + "/graphruns"
 
+	// WebSocketJobsPath is the real-time unified jobs list endpoint (paginated view of ScenarioRuns and GraphRuns).
+	WebSocketJobsPath = WebSocketBasePath + "/jobs"
+
 	// Real-time dashboard active runs
 	WebSocketDashboardActiveRunsPath = WebSocketBasePath + "/dashboard/active-runs"
 

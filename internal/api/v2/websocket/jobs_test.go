@@ -488,3 +488,69 @@ func TestPaginateJobItems(t *testing.T) {
 		t.Errorf("expected total 10 even beyond range, got %d", meta.Total)
 	}
 }
+
+func TestJobsSubscriptionValidation(t *testing.T) {
+	// Verify that "jobs" is a valid resource type in the subscription handler
+	scheme := runtime.NewScheme()
+	_ = krknv1alpha1.AddToScheme(scheme)
+
+	fakeClient := fakeclient.NewClientBuilder().
+		WithScheme(scheme).
+		Build()
+
+	hub := NewHub()
+	handler := NewHandler(hub, fakeClient, "test-namespace", &mockAuthzChecker{}, nil)
+
+	client := &Client{
+		userID:          "test-user",
+		isAdmin:         false,
+		send:            make(chan []byte, 256),
+		subscriptions:   make(map[string]map[string]bool),
+		paginationState: make(map[string]*PaginationClientState),
+	}
+
+	// Test invalid resource - should error
+	invalidMsg := &ClientMessage{
+		Action:   "subscribe",
+		Resource: "invalid-resource",
+	}
+	handler.handleClientMessage(client, invalidMsg)
+
+	// Should have received an error message
+	select {
+	case data := <-client.send:
+		var errMsg ErrorMessage
+		if err := json.Unmarshal(data, &errMsg); err != nil {
+			t.Fatalf("failed to unmarshal error: %v", err)
+		}
+		if errMsg.Error != "invalid_resource" {
+			t.Errorf("expected invalid_resource error, got %s", errMsg.Error)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("expected error message for invalid resource")
+	}
+
+	// Test valid jobs resource - should succeed
+	validMsg := &ClientMessage{
+		Action:   "subscribe",
+		Resource: "jobs",
+	}
+	handler.handleClientMessage(client, validMsg)
+
+	// Should have received a snapshot, not an error
+	select {
+	case data := <-client.send:
+		var serverMsg ServerMessage
+		if err := json.Unmarshal(data, &serverMsg); err != nil {
+			t.Fatalf("failed to unmarshal: %v", err)
+		}
+		if serverMsg.Resource != "jobs" {
+			t.Errorf("expected resource 'jobs', got '%s'", serverMsg.Resource)
+		}
+		if serverMsg.Event != "snapshot" {
+			t.Errorf("expected event 'snapshot', got '%s'", serverMsg.Event)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("expected snapshot message for jobs resource")
+	}
+}
