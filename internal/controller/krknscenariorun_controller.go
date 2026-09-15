@@ -26,6 +26,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"reflect"
 	"strings"
 	"time"
@@ -812,8 +813,16 @@ func (r *KrknScenarioRunReconciler) submitScenarioPod(
 			},
 			Containers: []corev1.Container{
 				{
-					Name:            "scenario",
-					Image:           resources.containerImage,
+					Name:    "scenario",
+					Image:   resources.containerImage,
+					Command: []string{"/bin/bash", "-c"},
+					Args: []string{
+						"[ -x /home/krkn/kraken/containers/setup-ssh.sh ] && /home/krkn/kraken/containers/setup-ssh.sh; " +
+							"/home/krkn/run.sh; krkn_exit=$?; " +
+							"if [ -f /home/krkn/kraken/kraken.report.html ]; then echo '===KRKN_REPORT_HTML_START==='; base64 /home/krkn/kraken/kraken.report.html; echo '===KRKN_REPORT_HTML_END==='; fi; " +
+							"if [ -f /home/krkn/kraken/kraken.report.pdf ]; then echo '===KRKN_REPORT_PDF_START==='; base64 /home/krkn/kraken/kraken.report.pdf; echo '===KRKN_REPORT_PDF_END==='; fi; " +
+							"exit $krkn_exit",
+					},
 					Env:             resources.envVars,
 					VolumeMounts:    resources.volumeMounts,
 					ImagePullPolicy: corev1.PullAlways,
@@ -921,6 +930,13 @@ func (r *KrknScenarioRunReconciler) updateClusterJobStatuses(
 
 		// Skip terminal jobs
 		if job.Phase == "Succeeded" || job.Phase == "Cancelled" || job.Phase == "MaxRetriesExceeded" {
+			// A report extraction error is returned from reconciliation without
+			// setting ReportStatus, so a later reconciliation can retry it.
+			if job.Phase == "Succeeded" && scenarioRun.Status.ReportStatus == nil {
+				if err := r.extractAndStoreReports(ctx, scenarioRun, job); err != nil {
+					return err
+				}
+			}
 			logger.V(1).Info("skipping terminal job",
 				"cluster", job.ClusterName,
 				"jobID", job.JobID,
@@ -930,6 +946,11 @@ func (r *KrknScenarioRunReconciler) updateClusterJobStatuses(
 
 		// Skip Failed jobs unless they need retry processing
 		if job.Phase == "Failed" && job.RetryCount >= job.MaxRetries && !job.CancelRequested {
+			if scenarioRun.Status.ReportStatus == nil && r.Clientset != nil && job.PodName != "" {
+				if err := r.extractAndStoreReports(ctx, scenarioRun, job); err != nil {
+					return err
+				}
+			}
 			logger.V(1).Info("skipping failed job that exceeded retries",
 				"cluster", job.ClusterName,
 				"jobID", job.JobID,
@@ -1029,6 +1050,11 @@ func (r *KrknScenarioRunReconciler) updateClusterJobStatuses(
 				"cluster", job.ClusterName,
 				"jobID", job.JobID,
 				"duration", job.CompletionTime.Sub(job.StartTime.Time).String())
+			if scenarioRun.Status.ReportStatus == nil {
+				if err := r.extractAndStoreReports(ctx, scenarioRun, job); err != nil {
+					return err
+				}
+			}
 		case corev1.PodFailed:
 			job.Phase = "Failed"
 			job.Message = r.extractPodErrorMessage(&pod)
@@ -1129,6 +1155,14 @@ func (r *KrknScenarioRunReconciler) updateClusterJobStatuses(
 					"retryCount", job.RetryCount,
 					"maxRetries", maxRetries)
 			}
+
+			// A failed terminal run may still contain report markers in its logs.
+			// Extract only after retries are exhausted or cancellation is final.
+			if (job.Phase == "MaxRetriesExceeded" || job.Phase == "Cancelled" || job.Phase == "Failed") && scenarioRun.Status.ReportStatus == nil {
+				if err := r.extractAndStoreReports(ctx, scenarioRun, job); err != nil {
+					return err
+				}
+			}
 		case corev1.PodUnknown:
 			job.Phase = "Failed"
 			job.Message = "Pod in unknown state"
@@ -1138,6 +1172,11 @@ func (r *KrknScenarioRunReconciler) updateClusterJobStatuses(
 				"cluster", job.ClusterName,
 				"jobID", job.JobID,
 				"podName", job.PodName)
+			if scenarioRun.Status.ReportStatus == nil {
+				if err := r.extractAndStoreReports(ctx, scenarioRun, job); err != nil {
+					return err
+				}
+			}
 		}
 	}
 
@@ -1492,6 +1531,177 @@ func countJobPhaseChanges(oldJobs, newJobs []krknv1alpha1.ClusterJobStatus) int 
 		}
 	}
 	return count
+}
+
+// fetchScenarioPodLogs fetches logs from a completed scenario pod.
+// A log-fetch error is returned to controller-runtime so reconciliation can
+// retry without blocking a worker inside a local backoff loop.
+func (r *KrknScenarioRunReconciler) fetchScenarioPodLogs(ctx context.Context, podName string) ([]byte, error) {
+	logger := log.FromContext(ctx).WithName("fetch-scenario-logs")
+
+	logger.V(1).Info("fetching logs from scenario pod", "pod", podName)
+	if r.Clientset == nil {
+		return nil, fmt.Errorf("cannot fetch logs for pod %s: Kubernetes client is not configured", podName)
+	}
+
+	req := r.Clientset.CoreV1().Pods(r.Namespace).GetLogs(podName, &corev1.PodLogOptions{
+		Container: "scenario",
+	})
+
+	podLogs, err := req.Stream(ctx)
+	if err != nil {
+		logger.V(1).Info("pod logs not available; reconciliation will retry", "pod", podName, "error", err.Error())
+		return nil, fmt.Errorf("failed to open logs for pod %s: %w", podName, err)
+	}
+	defer podLogs.Close()
+
+	logBytes, err := io.ReadAll(podLogs)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read logs for pod %s: %w", podName, err)
+	}
+
+	logger.V(1).Info("successfully fetched pod logs", "pod", podName, "logSize", len(logBytes))
+	return logBytes, nil
+}
+
+// extractDelimitedContent finds content between start and end markers in logs.
+// Returns the content string and a boolean indicating if it was found.
+func extractDelimitedContent(logs, startMarker, endMarker string) (string, bool) {
+	startIdx := strings.LastIndex(logs, startMarker)
+	if startIdx == -1 {
+		return "", false
+	}
+	startIdx += len(startMarker)
+
+	endIdx := strings.LastIndex(logs, endMarker)
+	if endIdx == -1 || endIdx <= startIdx {
+		return "", false
+	}
+
+	return logs[startIdx:endIdx], true
+}
+
+// decodeReportPayloads decodes the report payloads extracted from pod logs.
+// Invalid payloads are reported individually so one valid report can still be
+// stored when the other format is corrupt.
+func decodeReportPayloads(htmlB64, pdfB64 string) (map[string]string, map[string][]byte, []string) {
+	data := make(map[string]string)
+	binaryData := make(map[string][]byte)
+	var messages []string
+
+	if htmlB64 != "" {
+		decoded, err := base64.StdEncoding.DecodeString(strings.TrimSpace(htmlB64))
+		if err != nil {
+			messages = append(messages, fmt.Sprintf("failed to decode HTML report: %v", err))
+		} else {
+			data["summary.html"] = string(decoded)
+		}
+	}
+
+	if pdfB64 != "" {
+		decoded, err := base64.StdEncoding.DecodeString(strings.TrimSpace(pdfB64))
+		if err != nil {
+			messages = append(messages, fmt.Sprintf("failed to decode PDF report: %v", err))
+		} else {
+			binaryData["summary.pdf"] = decoded
+		}
+	}
+
+	return data, binaryData, messages
+}
+
+// extractAndStoreReports extracts base64-encoded reports from pod logs and stores them in a ConfigMap.
+func (r *KrknScenarioRunReconciler) extractAndStoreReports(ctx context.Context, scenarioRun *krknv1alpha1.KrknScenarioRun, job *krknv1alpha1.ClusterJobStatus) error {
+	logger := log.FromContext(ctx)
+
+	logs, err := r.fetchScenarioPodLogs(ctx, job.PodName)
+	if err != nil {
+		logger.Error(err, "unable to read logs for report extraction; reconciliation will retry", "pod", job.PodName)
+		return err
+	}
+
+	logsStr := string(logs)
+	htmlB64, htmlFound := extractDelimitedContent(logsStr, "===KRKN_REPORT_HTML_START===", "===KRKN_REPORT_HTML_END===")
+	pdfB64, pdfFound := extractDelimitedContent(logsStr, "===KRKN_REPORT_PDF_START===", "===KRKN_REPORT_PDF_END===")
+
+	if !htmlFound && !pdfFound {
+		message := fmt.Sprintf("No reports found for scenario run %q in completed pod %q; expected kraken.report.html or kraken.report.pdf", scenarioRun.Name, job.PodName)
+		scenarioRun.Status.ReportStatus = &krknv1alpha1.ReportStatus{Message: message}
+		logger.V(1).Info(message, "pod", job.PodName)
+		return nil
+	}
+
+	cmName := fmt.Sprintf("krkn-report-%s", scenarioRun.Name)
+	now := metav1.Now()
+
+	configMap := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      cmName,
+			Namespace: r.Namespace,
+			Labels: map[string]string{
+				"app":               "krkn-operator",
+				"component":         "reports",
+				"krkn-scenario-run": scenarioRun.Name,
+			},
+		},
+		Data:       make(map[string]string),
+		BinaryData: make(map[string][]byte),
+	}
+
+	decodedHTML, decodedPDF, decodeMessages := decodeReportPayloads(htmlB64, pdfB64)
+	for name, value := range decodedHTML {
+		configMap.Data[name] = value
+	}
+	for name, value := range decodedPDF {
+		configMap.BinaryData[name] = value
+	}
+
+	if len(configMap.Data) == 0 && len(configMap.BinaryData) == 0 {
+		message := fmt.Sprintf("Report generation failed for scenario run %q in pod %q: %s", scenarioRun.Name, job.PodName, strings.Join(decodeMessages, "; "))
+		scenarioRun.Status.ReportStatus = &krknv1alpha1.ReportStatus{Message: message}
+		logger.Info(message, "pod", job.PodName)
+		return nil
+	}
+
+	if err := controllerutil.SetControllerReference(scenarioRun, configMap, r.Scheme); err != nil {
+		scenarioRun.Status.ReportStatus = &krknv1alpha1.ReportStatus{Message: fmt.Sprintf("Report generation failed for scenario run %q: unable to set ownership on ConfigMap %q: %v", scenarioRun.Name, cmName, err)}
+		logger.Error(err, "failed to set owner reference on report ConfigMap", "configMapName", cmName)
+		return err
+	}
+
+	if err := r.Create(ctx, configMap); err != nil {
+		if !apierrors.IsAlreadyExists(err) {
+			scenarioRun.Status.ReportStatus = &krknv1alpha1.ReportStatus{Message: fmt.Sprintf("Report generation failed for scenario run %q: unable to create ConfigMap %q: %v", scenarioRun.Name, cmName, err)}
+			logger.Error(err, "failed to create report ConfigMap", "configMapName", cmName)
+			return err
+		}
+		var existing corev1.ConfigMap
+		if err := r.Get(ctx, types.NamespacedName{Name: cmName, Namespace: r.Namespace}, &existing); err != nil {
+			scenarioRun.Status.ReportStatus = &krknv1alpha1.ReportStatus{Message: fmt.Sprintf("Report generation failed for scenario run %q: unable to read existing ConfigMap %q: %v", scenarioRun.Name, cmName, err)}
+			logger.Error(err, "failed to get existing report ConfigMap", "configMapName", cmName)
+			return err
+		}
+		existing.Data = configMap.Data
+		existing.BinaryData = configMap.BinaryData
+		if err := r.Update(ctx, &existing); err != nil {
+			scenarioRun.Status.ReportStatus = &krknv1alpha1.ReportStatus{Message: fmt.Sprintf("Report generation failed for scenario run %q: unable to update ConfigMap %q: %v", scenarioRun.Name, cmName, err)}
+			logger.Error(err, "failed to update existing report ConfigMap", "configMapName", cmName)
+			return err
+		}
+	}
+
+	scenarioRun.Status.ReportStatus = &krknv1alpha1.ReportStatus{
+		Generated:     true,
+		HTMLAvailable: len(configMap.Data) > 0 && configMap.Data["summary.html"] != "",
+		PDFAvailable:  len(configMap.BinaryData) > 0 && len(configMap.BinaryData["summary.pdf"]) > 0,
+		GeneratedAt:   &now,
+		Location:      cmName,
+		FileSize:      int64(len(configMap.Data["summary.html"]) + len(configMap.BinaryData["summary.pdf"])),
+		Message:       strings.Join(decodeMessages, "; "),
+	}
+
+	logger.Info("extracted and stored reports in ConfigMap", "configMapName", cmName, "htmlAvailable", scenarioRun.Status.ReportStatus.HTMLAvailable, "pdfAvailable", scenarioRun.Status.ReportStatus.PDFAvailable)
+	return nil
 }
 
 // SetupWithManager sets up the controller with the Manager
