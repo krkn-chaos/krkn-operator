@@ -1,0 +1,88 @@
+- apiVersion: krkn.krkn-chaos.dev/v1alpha1
+  kind: KrknFileType
+  metadata:
+    name: configuration
+  spec:
+    name: configuration
+    color: '#4A90E2'
+- apiVersion: krkn.krkn-chaos.dev/v1alpha1
+  kind: KrknGraphRun
+  metadata:
+    name: example-graph-run
+  spec:
+    graph:
+      node-1:
+        name: pod-delete
+        scenario:
+          name: pod-delete
+          private: false
+    targetRequestId: example-target-request
+    targetClusters:
+      krkn-operator:
+      - cluster-1
+- apiVersion: krkn.krkn-chaos.dev/v1alpha1
+  kind: KrknOperatorTarget
+  metadata:
+    name: example-target
+  spec:
+    uuid: example-target
+    clusterName: cluster-1
+    clusterAPIURL: https://api.example.invalid:6443
+    secretType: kubeconfig
+    secretUUID: example-kubeconfig
+- apiVersion: krkn.krkn-chaos.dev/v1alpha1
+  kind: KrknOperatorTargetProvider
+  metadata:
+    name: krkn-operator
+  spec:
+    operator-name: krkn-operator
+    active: true
+- apiVersion: krkn.krkn-chaos.dev/v1alpha1
+  kind: KrknOperatorTargetProviderConfig
+  metadata:
+    name: example-provider-config
+  spec:
+    uuid: example-provider-config
+- apiVersion: krkn.krkn-chaos.dev/v1alpha1
+  kind: KrknScenarioRun
+  metadata:
+    name: example-scenario-run
+  spec:
+    targetRequestId: example-target-request
+    targetClusters:
+      krkn-operator:
+      - cluster-1
+    scenario:
+      name: pod-delete
+      private: false
+- apiVersion: krkn.krkn-chaos.dev/v1alpha1
+  kind: KrknTargetRequest
+  metadata:
+    name: example-target-request
+  spec:
+    uuid: example-target-request
+- apiVersion: krkn.krkn-chaos.dev/v1alpha1
+  kind: KrknUserGroup
+  metadata:
+    name: platform-engineers
+  spec:
+    name: platform-engineers
+    description: Platform engineering team
+    clusterPermissions:
+      https://api.example.invalid:6443:
+        actions:
+        - view
+        - run
+- apiVersion: krkn.krkn-chaos.dev/v1alpha1
+  kind: KrknUser
+  metadata:
+    name: admin-example
+    labels:
+      krkn.krkn-chaos.dev/user-account: 'true'
+      krkn.krkn-chaos.dev/role: admin
+  spec:
+    userId: admin@example.invalid
+    name: Example
+    surname: Administrator
+    role: admin
+    passwordSecretRef: example-password
