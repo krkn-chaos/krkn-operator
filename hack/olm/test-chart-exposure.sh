@@ -13,6 +13,9 @@ helm template krkn-operator "$chart_dir" > "$work_dir/base.yaml"
 yq -e 'select(.kind == "ConfigMap" and .metadata.name == "krkn-operator-console-nginx") | .data["nginx.conf"] | contains("proxy_pass http://krkn-operator-operator:8080;")' \
   "$work_dir/base.yaml" >/dev/null
 
+yq -e 'select(.kind == "Role") | .rules[] | select(.apiGroups[0] == "" and .resources[0] == "events" and .verbs[0] == "create" and .verbs[1] == "patch")' \
+  "$work_dir/base.yaml" >/dev/null
+
 if yq -e 'select(.kind == "ConfigMap" and .metadata.name == "krkn-operator-console-nginx") | .data["nginx.conf"] | contains(".svc.cluster.local")' \
   "$work_dir/base.yaml" >/dev/null; then
   echo "console proxy must not hardcode a namespace" >&2
