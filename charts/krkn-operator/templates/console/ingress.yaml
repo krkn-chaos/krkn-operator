@@ -24,6 +24,22 @@ spec:
       secretName: {{ .Values.console.ingress.tls.secretName | default (printf "%s-tls" (include "krkn-operator.console.fullname" .)) }}
   {{- end }}
   rules:
+    {{- with .Values.console.ingress.hosts }}
+    {{- range . }}
+    - host: {{ .host | quote }}
+      http:
+        paths:
+        {{- range .paths }}
+        - path: {{ .path | default "/" | quote }}
+          pathType: {{ .pathType | default "Prefix" }}
+          backend:
+            service:
+              name: {{ include "krkn-operator.console.fullname" $ }}
+              port:
+                number: {{ $.Values.console.service.port }}
+        {{- end }}
+    {{- end }}
+    {{- else }}
     - {{- if .Values.console.ingress.hostname }}
       host: {{ .Values.console.ingress.hostname | quote }}
       {{- end }}
@@ -36,4 +52,5 @@ spec:
               name: {{ include "krkn-operator.console.fullname" . }}
               port:
                 number: {{ .Values.console.service.port }}
+    {{- end }}
 {{- end }}

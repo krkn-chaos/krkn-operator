@@ -83,6 +83,8 @@ auth:
 operator:
   enabled: true
   replicaCount: 1
+  olmBootstrap: false
+  olmOpenShift: false
 
   resources:
     requests:
@@ -181,6 +183,7 @@ console:
     enabled: false
     className: "nginx"
     hostname: "krkn-operator.example.com"
+    hosts: []  # Legacy list of host/path mappings; takes precedence when non-empty.
 
     tls:
       enabled: false
@@ -222,6 +225,7 @@ console:
   route:
     enabled: false
     hostname: "krkn-operator.apps.cluster.example.com"
+    host: ""  # Legacy hostname fallback.
 
     tls:
       enabled: true
@@ -247,6 +251,10 @@ console:
 ## RBAC
 rbac:
   create: true
+  # OLM creates the scenario-runner resources during bootstrap because the
+  # ServiceAccount namespace is chosen at installation time.
+  scenarioRunner:
+    create: true
 
 ## ServiceAccount
 serviceAccount:

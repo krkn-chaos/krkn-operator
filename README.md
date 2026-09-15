@@ -27,6 +27,29 @@ helm install krkn-operator oci://quay.io/krkn-chaos/charts/krkn-operator --versi
   -n krkn-operator-system --create-namespace
 ```
 
+### OLM / OperatorHub bundles
+
+Release automation publishes separate bundle images for generic Kubernetes and
+OpenShift:
+
+- `quay.io/krkn-chaos/krkn-operator-bundle:<version>` — Kubernetes bundle;
+- `quay.io/krkn-chaos/krkn-operator-bundle-ocp:<version>` — OpenShift bundle.
+
+The bundles use the `stable-kubernetes` and `stable-ocp` channels respectively.
+The OLM bundle declares Kubernetes `1.19.0` as its minimum version, matching the
+published compatibility matrix.
+For a disposable cluster with OLM installed, a published bundle can be tested
+with:
+
+```bash
+operator-sdk run bundle \
+  quay.io/krkn-chaos/krkn-operator-bundle:<version>
+```
+
+On OpenShift, use the `-ocp` repository. Route, Ingress, and Gateway resources
+are intentionally not created by the bundle; expose the console using the
+cluster administrator's preferred TLS and networking configuration.
+
 📖 For configuration, usage, compatibility, and advanced installation options, see the official documentation.📖 For configuration, usage, compatibility, and advanced installation options, see the **[official documentation](https://krkn-chaos.gateway.scarf.sh/krkn-operator/docs?source=github)**.
 
 ## Ecosystem
@@ -37,6 +60,32 @@ helm install krkn-operator oci://quay.io/krkn-chaos/charts/krkn-operator --versi
 ## Development
 
 Interested in contributing or running Krkn Operator from source? See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## API compatibility notes
+
+Scenario run requests identify the scenario rather than supplying an executable
+image. The operator resolves the image from the scenario name and selected
+registry:
+
+```json
+{
+  "targetRequestId": "target-request-id",
+  "targetClusters": {"provider": ["cluster"]},
+  "scenario": {
+    "name": "pod-delete",
+    "private": false
+  }
+}
+```
+
+For a saved private registry, set `private` to `true` and include its
+`registryName`. Direct image references are not accepted.
+
+Authenticated users can read the image-signature verification setting at
+`GET /api/v1/operator/signature-verification`. Administrators can update it
+with `PATCH` and a required boolean body, for example
+`{"enabled":false}`. Image verification remains observable when enforcement
+is disabled; only the enforcement result is ignored.
 
 ## License
 

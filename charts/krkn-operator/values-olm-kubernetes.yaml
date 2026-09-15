@@ -3,6 +3,14 @@
 acm:
   enabled: false
 
+operator:
+  olmBootstrap: true
+  olmOpenShift: false
+
+rbac:
+  scenarioRunner:
+    create: false
+
 console:
   enabled: true
   ingress:

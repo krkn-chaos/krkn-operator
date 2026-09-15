@@ -57,9 +57,10 @@ data:
             }
 
             # Proxy API calls to operator service
-            # HELM: Dynamic service URL based on release name and namespace
             location /api/ {
-                proxy_pass http://{{ include "krkn-operator.operator.fullname" . }}.{{ include "krkn-operator.namespace" . }}.svc.cluster.local:{{ .Values.operator.service.port }};
+                # The console and operator Service are always in the same namespace.
+                # Kubernetes resolves the short Service name using the pod's DNS search domain.
+                proxy_pass http://{{ include "krkn-operator.operator.fullname" . }}:{{ .Values.operator.service.port }};
 
                 # Proxy headers
                 proxy_set_header Host $host;

@@ -52,6 +52,7 @@ import (
 	"github.com/krkn-chaos/krkn-operator/internal/api"
 	v2ws "github.com/krkn-chaos/krkn-operator/internal/api/v2/websocket"
 	"github.com/krkn-chaos/krkn-operator/internal/controller"
+	olmbootstrap "github.com/krkn-chaos/krkn-operator/internal/olm"
 	"github.com/krkn-chaos/krkn-operator/pkg/auth"
 	"github.com/krkn-chaos/krkn-operator/pkg/configmap"
 	"github.com/krkn-chaos/krkn-operator/pkg/configstore"
@@ -82,6 +83,7 @@ func main() {
 	var enableHTTP2 bool
 	var apiPort int
 	var grpcServerAddr string
+	var bootstrapResources bool
 	var tlsOpts []func(*tls.Config)
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
 		"Use :8443 for HTTPS or :8080 for HTTP, or leave as 0 to disable the metrics service.")
@@ -102,6 +104,7 @@ func main() {
 		"If set, HTTP/2 will be enabled for the metrics and webhook servers")
 	flag.IntVar(&apiPort, "api-port", 8080, "The port for the REST API server")
 	flag.StringVar(&grpcServerAddr, "grpc-server-address", "localhost:50051", "The address of the gRPC data provider server")
+	flag.BoolVar(&bootstrapResources, "bootstrap-resources", false, "Create resources required by OLM before starting the operator")
 	opts := zap.Options{
 		Development: true,
 	}
@@ -206,6 +209,14 @@ func main() {
 		operatorNamespace = "krkn-operator-system" // fallback default
 	}
 	setupLog.Info("Operator namespace", "namespace", operatorNamespace)
+	if bootstrapResources {
+		if err := bootstrapOLMResources(operatorNamespace, os.Getenv("KRKN_OLM_OPENSHIFT") == "true"); err != nil {
+			setupLog.Error(err, "unable to bootstrap OLM resources", "namespace", operatorNamespace)
+			os.Exit(1)
+		}
+		setupLog.Info("OLM resources bootstrapped", "namespace", operatorNamespace)
+		return
+	}
 
 	// Get the namespace for KrknTargetRequest CRs from environment variable
 	// Defaults to operator namespace if not set
@@ -383,6 +394,24 @@ func main() {
 		setupLog.Error(err, "problem running manager")
 		os.Exit(1)
 	}
+}
+
+var (
+	newOLMClientset = func() (kubernetes.Interface, error) {
+		return kubernetes.NewForConfig(ctrl.GetConfigOrDie())
+	}
+	ensureOLMResources = olmbootstrap.EnsureResources
+)
+
+func bootstrapOLMResources(namespace string, openshift bool) error {
+	clientset, err := newOLMClientset()
+	if err != nil {
+		return fmt.Errorf("create Kubernetes clientset for OLM bootstrap: %w", err)
+	}
+	if err := ensureOLMResources(context.Background(), clientset, namespace, openshift); err != nil {
+		return fmt.Errorf("bootstrap OLM resources: %w", err)
+	}
+	return nil
 }
 
 // ConfigStoreInitializer is a Runnable that initializes the kvstore from ConfigMap
