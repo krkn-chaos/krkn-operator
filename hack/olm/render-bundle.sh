@@ -184,6 +184,14 @@ yq -i \
    }, {
      "serviceAccountName": "krkn-operator",
      "rules": [{"apiGroups": ["rbac.authorization.k8s.io"], "resources": ["clusterroles"], "resourceNames": ["krkn-operator-scenario-runner"], "verbs": ["bind", "escalate"]}]
+   }, {
+     "serviceAccountName": "krkn-operator",
+     "rules": [
+       {"apiGroups": [""], "resources": ["nodes"], "verbs": ["get", "list", "watch", "patch", "update"]},
+       {"apiGroups": [""], "resources": ["pods"], "verbs": ["create", "delete", "get", "list", "patch", "update", "watch"]},
+       {"apiGroups": [""], "resources": ["pods/log", "pods/exec"], "verbs": ["create", "delete", "get", "list", "patch", "update", "watch"]},
+       {"apiGroups": [""], "resources": ["services"], "verbs": ["get", "list", "watch"]}
+     ]
    }]' \
   "$csv_file"
 
