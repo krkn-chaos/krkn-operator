@@ -452,7 +452,13 @@ func TestValidateQueryRequest(t *testing.T) {
 		wantErr  bool
 		wantSize int
 	}{
-		{"missing config name", QueryTelemetryRequest{}, true, 0},
+		{"neither config nor inline", QueryTelemetryRequest{}, true, 0},
+		{"both config and inline", QueryTelemetryRequest{ConfigName: "c", Inline: &InlineConnection{Host: "https://h", TelemetryIndex: "i"}}, true, 0},
+		{"inline valid defaults size", QueryTelemetryRequest{Inline: &InlineConnection{Host: "https://h", TelemetryIndex: "i"}}, false, DefaultQuerySize},
+		{"inline missing host", QueryTelemetryRequest{Inline: &InlineConnection{TelemetryIndex: "i"}}, true, 0},
+		{"inline missing index", QueryTelemetryRequest{Inline: &InlineConnection{Host: "https://h"}}, true, 0},
+		{"inline bad port", QueryTelemetryRequest{Inline: &InlineConnection{Host: "https://h", TelemetryIndex: "i", Port: 70000}}, true, 0},
+		{"inline creds over http", QueryTelemetryRequest{Inline: &InlineConnection{Host: "http://h", TelemetryIndex: "i", Username: "u"}}, true, 0},
 		{"negative size", QueryTelemetryRequest{ConfigName: "c", Size: -1}, true, 0},
 		{"zero size defaults", QueryTelemetryRequest{ConfigName: "c", Size: 0}, false, DefaultQuerySize},
 		{"oversized clamped", QueryTelemetryRequest{ConfigName: "c", Size: 10000}, false, MaxQuerySize},

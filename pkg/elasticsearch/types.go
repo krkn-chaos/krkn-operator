@@ -45,7 +45,9 @@ type CreateElasticsearchConfigRequest struct {
 	InsecureSkipTLSVerify bool `json:"insecureSkipTlsVerify,omitempty"`
 }
 
-// UpdateElasticsearchConfigRequest represents the request to update an ES config
+// UpdateElasticsearchConfigRequest represents the request to update an ES config.
+// InsecureSkipTLSVerify is a pointer so an omitted field (nil, "leave as-is") is
+// distinguishable from an explicit false ("re-enable verification").
 type UpdateElasticsearchConfigRequest struct {
 	Host           string `json:"host"`
 	Port           int    `json:"port,omitempty"`
@@ -60,8 +62,9 @@ type UpdateElasticsearchConfigRequest struct {
 	CACert string `json:"caCert,omitempty"`
 	// InsecureSkipTLSVerify disables TLS certificate verification entirely. It is
 	// a restricted last resort for self-signed clusters without CA material;
-	// prefer CACert.
-	InsecureSkipTLSVerify bool `json:"insecureSkipTlsVerify,omitempty"`
+	// prefer CACert. A nil pointer leaves the stored setting unchanged; a non-nil
+	// value explicitly sets or clears it.
+	InsecureSkipTLSVerify *bool `json:"insecureSkipTlsVerify,omitempty"`
 }
 
 // ElasticsearchConfigResponse represents an ES config in API responses.
@@ -75,10 +78,14 @@ type ElasticsearchConfigResponse struct {
 	MetricsIndex   string `json:"metricsIndex,omitempty"`
 	AlertsIndex    string `json:"alertsIndex,omitempty"`
 	GrafanaURL     string `json:"grafanaUrl,omitempty"`
-	CreatedAt      string `json:"createdAt,omitempty"`
-	CreatedBy      string `json:"createdBy,omitempty"`
-	UpdatedAt      string `json:"updatedAt,omitempty"`
-	UpdatedBy      string `json:"updatedBy,omitempty"`
+	// InsecureSkipTLSVerify reports whether TLS certificate verification is
+	// disabled for this config. Surfaced so the admin edit form can show and
+	// re-submit the current setting; it is not a secret.
+	InsecureSkipTLSVerify bool   `json:"insecureSkipTlsVerify,omitempty"`
+	CreatedAt             string `json:"createdAt,omitempty"`
+	CreatedBy             string `json:"createdBy,omitempty"`
+	UpdatedAt             string `json:"updatedAt,omitempty"`
+	UpdatedBy             string `json:"updatedBy,omitempty"`
 }
 
 // ListElasticsearchConfigsResponse represents the response for listing ES configs
@@ -112,12 +119,35 @@ const (
 	MaxQuerySize     = 500
 )
 
+// InlineConnection carries an ephemeral Elasticsearch connection supplied
+// directly on a query request instead of referencing a saved config. It lets a
+// user (including non-admins, who cannot create stored configs) connect to an ES
+// cluster and fetch telemetry without persisting any credentials server-side.
+// The values are used only for the duration of the request and are never stored.
+//
+// TLS verification is intentionally not configurable here: disabling it and
+// supplying a custom CA are admin-only, per-config concerns. An inline
+// connection always uses default TLS verification, and credentials are still
+// rejected over plaintext HTTP.
+type InlineConnection struct {
+	Host           string `json:"host"`
+	Port           int    `json:"port,omitempty"`
+	Username       string `json:"username,omitempty"`
+	Password       string `json:"password,omitempty"`
+	TelemetryIndex string `json:"telemetryIndex"`
+}
+
 // QueryTelemetryRequest represents a request to query telemetry documents from
-// the telemetry index of a saved Elasticsearch config. Credentials are resolved
-// server-side from the named config; the client only references it by name.
+// the telemetry index of an Elasticsearch cluster. It supports two mutually
+// exclusive modes: a saved config referenced by ConfigName (credentials resolved
+// server-side from the named Secret), or an ephemeral Inline connection whose
+// credentials are supplied on the request and never persisted. Exactly one of
+// ConfigName or Inline must be provided.
 type QueryTelemetryRequest struct {
-	ConfigName string `json:"configName"`
-	Size       int    `json:"size,omitempty"`
+	ConfigName string `json:"configName,omitempty"`
+	// Inline carries an ephemeral connection when no saved config is used.
+	Inline *InlineConnection `json:"inline,omitempty"`
+	Size   int               `json:"size,omitempty"`
 	// StartDate and EndDate bound the search by the document timestamp. They are
 	// "yyyy-MM-dd" date strings (as produced by the UI date pickers). Empty
 	// values fall back to a default trailing window in the query client.
@@ -146,10 +176,30 @@ type QueryTelemetryResponse struct {
 }
 
 // ValidateQueryRequest validates a QueryTelemetryRequest and normalizes the
-// requested size into the supported bounds.
+// requested size into the supported bounds. Exactly one of configName or inline
+// must be supplied; an inline connection additionally requires a host and a
+// telemetry index and must satisfy the shared TLS rules.
 func ValidateQueryRequest(req *QueryTelemetryRequest) error {
-	if req.ConfigName == "" {
-		return fmt.Errorf("configName is required")
+	hasConfigName := req.ConfigName != ""
+	hasInline := req.Inline != nil
+	if hasConfigName == hasInline {
+		return fmt.Errorf("exactly one of configName or inline is required")
+	}
+	if hasInline {
+		if req.Inline.Host == "" {
+			return fmt.Errorf("inline.host is required")
+		}
+		if req.Inline.TelemetryIndex == "" {
+			return fmt.Errorf("inline.telemetryIndex is required")
+		}
+		if req.Inline.Port < 0 || req.Inline.Port > 65535 {
+			return fmt.Errorf("inline.port must be between 0 and 65535")
+		}
+		// Inline connections cannot supply a custom CA; pass an empty CA so only
+		// the plaintext-credential rule applies.
+		if err := validateTLSSettings(req.Inline.Host, req.Inline.Username, ""); err != nil {
+			return err
+		}
 	}
 	if req.Size < 0 {
 		return fmt.Errorf("size must not be negative")

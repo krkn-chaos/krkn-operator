@@ -739,6 +739,63 @@ func TestQueryElasticsearchTelemetry_Success(t *testing.T) {
 	}
 }
 
+func TestQueryElasticsearchTelemetry_InlineSuccess(t *testing.T) {
+	esServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"hits":{"hits":[{"_source":{"run_uuid":"xyz","job_status":true,"scenarios":[{"scenario_type":"node","start_timestamp":100,"end_timestamp":200,"exit_status":0,"parameters":[{"config":{"namespace":"ns2"}}]}]}}]}}`))
+	}))
+	defer esServer.Close()
+
+	// No stored config exists: the inline connection drives the query directly.
+	fakeClient := fakeclient.NewClientBuilder().WithScheme(newEsScheme()).Build()
+	handler := NewTestHandler(fakeClient, fake.NewSimpleClientset(), "default", "localhost:50051")
+
+	body, _ := json.Marshal(elasticsearch.QueryTelemetryRequest{
+		Inline: &elasticsearch.InlineConnection{
+			Host:           esServer.URL,
+			TelemetryIndex: "krkn-telemetry",
+		},
+	})
+	req := httptest.NewRequest(http.MethodPost, ElasticsearchQueryPath, bytes.NewReader(body))
+	// A non-admin user: inline query must be allowed without admin privileges.
+	req = req.WithContext(createUserContext("user@example.com"))
+	w := httptest.NewRecorder()
+
+	handler.QueryElasticsearchTelemetry(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp elasticsearch.QueryTelemetryResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if resp.Total != 1 || len(resp.Documents) != 1 {
+		t.Fatalf("expected 1 document, got %d", resp.Total)
+	}
+	if resp.Documents[0].RunUUID != "xyz" || resp.Documents[0].Namespace != "ns2" {
+		t.Errorf("unexpected document: %+v", resp.Documents[0])
+	}
+}
+
+func TestQueryElasticsearchTelemetry_InlineMissingHost(t *testing.T) {
+	fakeClient := fakeclient.NewClientBuilder().WithScheme(newEsScheme()).Build()
+	handler := NewTestHandler(fakeClient, fake.NewSimpleClientset(), "default", "localhost:50051")
+
+	body, _ := json.Marshal(elasticsearch.QueryTelemetryRequest{
+		Inline: &elasticsearch.InlineConnection{TelemetryIndex: "krkn-telemetry"},
+	})
+	req := httptest.NewRequest(http.MethodPost, ElasticsearchQueryPath, bytes.NewReader(body))
+	req = req.WithContext(createUserContext("user@example.com"))
+	w := httptest.NewRecorder()
+
+	handler.QueryElasticsearchTelemetry(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d", w.Code)
+	}
+}
+
 func TestQueryElasticsearchTelemetry_ConfigNotFound(t *testing.T) {
 	fakeClient := fakeclient.NewClientBuilder().WithScheme(newEsScheme()).Build()
 	handler := NewTestHandler(fakeClient, fake.NewSimpleClientset(), "default", "localhost:50051")

@@ -322,10 +322,14 @@ func (h *Handler) UpdateElasticsearchConfig(w http.ResponseWriter, r *http.Reque
 	if req.CACert != "" {
 		secret.Data[elasticsearch.SecretKeyCACert] = []byte(req.CACert)
 	}
-	if req.InsecureSkipTLSVerify {
-		secret.Annotations[elasticsearch.InsecureSkipTLSVerifyAnnotation] = "true"
-	} else {
-		delete(secret.Annotations, elasticsearch.InsecureSkipTLSVerifyAnnotation)
+	// A nil pointer means the caller omitted the field: leave the stored TLS
+	// setting untouched. A non-nil value explicitly sets or clears it.
+	if req.InsecureSkipTLSVerify != nil {
+		if *req.InsecureSkipTLSVerify {
+			secret.Annotations[elasticsearch.InsecureSkipTLSVerifyAnnotation] = "true"
+		} else {
+			delete(secret.Annotations, elasticsearch.InsecureSkipTLSVerifyAnnotation)
+		}
 	}
 
 	if err := h.client.Update(ctx, secret); err != nil {
@@ -480,24 +484,33 @@ func (h *Handler) QueryElasticsearchTelemetry(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	secret, err := h.loadElasticsearchConfigSecret(ctx, req.ConfigName)
-	if err != nil {
-		if apierrors.IsNotFound(err) {
-			writeJSONError(w, http.StatusNotFound, ErrorResponse{
-				Error:   "not_found",
-				Message: fmt.Sprintf("Elasticsearch config '%s' not found", req.ConfigName),
-			})
-		} else {
-			logger.Error(err, "Failed to load elasticsearch config", "name", req.ConfigName)
-			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
-				Error:   "internal_error",
-				Message: "Failed to load Elasticsearch config",
-			})
+	// Resolve the connection either from an ephemeral inline config (credentials
+	// supplied on the request, never persisted) or from a saved config Secret.
+	// ValidateQueryRequest guarantees exactly one of the two is set.
+	var conn elasticsearch.ConnectionParams
+	source := "inline"
+	if req.Inline != nil {
+		conn = buildInlineConnectionParams(req.Inline)
+	} else {
+		source = req.ConfigName
+		secret, err := h.loadElasticsearchConfigSecret(ctx, req.ConfigName)
+		if err != nil {
+			if apierrors.IsNotFound(err) {
+				writeJSONError(w, http.StatusNotFound, ErrorResponse{
+					Error:   "not_found",
+					Message: fmt.Sprintf("Elasticsearch config '%s' not found", req.ConfigName),
+				})
+			} else {
+				logger.Error(err, "Failed to load elasticsearch config", "name", req.ConfigName)
+				writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+					Error:   "internal_error",
+					Message: "Failed to load Elasticsearch config",
+				})
+			}
+			return
 		}
-		return
+		conn = buildConnectionParams(secret)
 	}
-
-	conn := buildConnectionParams(secret)
 
 	docs, err := h.esClient.QueryTelemetry(ctx, conn, req.Size, req.StartDate, req.EndDate)
 	if err != nil {
@@ -507,9 +520,9 @@ func (h *Handler) QueryElasticsearchTelemetry(w http.ResponseWriter, r *http.Req
 		var statusErr *elasticsearch.StatusError
 		if errors.As(err, &statusErr) {
 			logger.Error(err, "Elasticsearch returned a non-success status",
-				"name", req.ConfigName, "status", statusErr.StatusCode)
+				"source", source, "status", statusErr.StatusCode)
 		} else {
-			logger.Error(err, "Failed to query elasticsearch telemetry", "name", req.ConfigName)
+			logger.Error(err, "Failed to query elasticsearch telemetry", "source", source)
 		}
 		writeJSONError(w, http.StatusBadGateway, ErrorResponse{
 			Error:   "upstream_error",
@@ -518,7 +531,7 @@ func (h *Handler) QueryElasticsearchTelemetry(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	logger.Info("Queried Elasticsearch telemetry", "name", req.ConfigName, "results", len(docs))
+	logger.Info("Queried Elasticsearch telemetry", "source", source, "results", len(docs))
 
 	writeJSON(w, http.StatusOK, elasticsearch.QueryTelemetryResponse{
 		Documents: docs,
@@ -558,6 +571,28 @@ func buildConnectionParams(secret *corev1.Secret) elasticsearch.ConnectionParams
 		Index:              secret.Annotations[elasticsearch.TelemetryIndexAnnotation],
 		CACert:             caCert,
 		InsecureSkipVerify: secret.Annotations[elasticsearch.InsecureSkipTLSVerifyAnnotation] == "true",
+	}
+}
+
+// buildInlineConnectionParams assembles connection parameters from an ephemeral
+// inline connection supplied on a query request. The credentials are used only
+// for this request and are never persisted. A zero port falls back to the
+// default Elasticsearch port.
+func buildInlineConnectionParams(inline *elasticsearch.InlineConnection) elasticsearch.ConnectionParams {
+	port := inline.Port
+	if port == 0 {
+		port = elasticsearch.DefaultPort
+	}
+
+	// Inline connections always use default TLS verification with the system
+	// trust store: no custom CA, no insecure skip. Those remain admin-only,
+	// per-config settings.
+	return elasticsearch.ConnectionParams{
+		Host:     inline.Host,
+		Port:     port,
+		Username: inline.Username,
+		Password: inline.Password,
+		Index:    inline.TelemetryIndex,
 	}
 }
 
@@ -614,17 +649,18 @@ func buildElasticsearchConfigResponse(secret *corev1.Secret) elasticsearch.Elast
 	}
 
 	return elasticsearch.ElasticsearchConfigResponse{
-		Name:           secret.Name,
-		Host:           secret.Annotations[elasticsearch.HostAnnotation],
-		Port:           port,
-		Username:       username,
-		TelemetryIndex: secret.Annotations[elasticsearch.TelemetryIndexAnnotation],
-		MetricsIndex:   secret.Annotations[elasticsearch.MetricsIndexAnnotation],
-		AlertsIndex:    secret.Annotations[elasticsearch.AlertsIndexAnnotation],
-		GrafanaURL:     secret.Annotations[elasticsearch.GrafanaURLAnnotation],
-		CreatedAt:      secret.Annotations[elasticsearch.CreatedAtAnnotation],
-		CreatedBy:      secret.Annotations[elasticsearch.CreatedByAnnotation],
-		UpdatedAt:      secret.Annotations[elasticsearch.UpdatedAtAnnotation],
-		UpdatedBy:      secret.Annotations[elasticsearch.UpdatedByAnnotation],
+		Name:                  secret.Name,
+		Host:                  secret.Annotations[elasticsearch.HostAnnotation],
+		Port:                  port,
+		Username:              username,
+		TelemetryIndex:        secret.Annotations[elasticsearch.TelemetryIndexAnnotation],
+		MetricsIndex:          secret.Annotations[elasticsearch.MetricsIndexAnnotation],
+		AlertsIndex:           secret.Annotations[elasticsearch.AlertsIndexAnnotation],
+		GrafanaURL:            secret.Annotations[elasticsearch.GrafanaURLAnnotation],
+		InsecureSkipTLSVerify: secret.Annotations[elasticsearch.InsecureSkipTLSVerifyAnnotation] == "true",
+		CreatedAt:             secret.Annotations[elasticsearch.CreatedAtAnnotation],
+		CreatedBy:             secret.Annotations[elasticsearch.CreatedByAnnotation],
+		UpdatedAt:             secret.Annotations[elasticsearch.UpdatedAtAnnotation],
+		UpdatedBy:             secret.Annotations[elasticsearch.UpdatedByAnnotation],
 	}
 }
