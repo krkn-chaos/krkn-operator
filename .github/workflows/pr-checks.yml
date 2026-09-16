@@ -20,6 +20,13 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - name: Verify generated manifests are up to date
+        run: |
+          make manifests
+          # intent-to-add, so a brand new CRD file is caught too, git diff ignores untracked files
+          git add -AN config/crd/bases charts/krkn-operator/crds
+          git diff --exit-code config/crd/bases charts/krkn-operator/crds
+
       - name: Run gosec security scanner
         uses: securego/gosec@master
         with:
