@@ -2066,6 +2066,19 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if isFailedJob(targetJob) {
+		logger.Info("Skipping log stream for failed job",
+			"scenarioRunName", scenarioRunName,
+			"jobID", jobID,
+			"failureReason", targetJob.FailureReason)
+		message := "ERROR: Logs unavailable because the job failed"
+		if targetJob.FailureReason != "" {
+			message += fmt.Sprintf(" (%s)", targetJob.FailureReason)
+		}
+		writeWSError(conn, logger, message)
+		return
+	}
+
 	logger.Info("Permission check passed for log access",
 		"scenarioRunName", scenarioRunName,
 		"jobID", jobID,
@@ -2126,6 +2139,15 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 	}
 
 	logger.Info("Found pod for job", "scenarioRunName", scenarioRunName, "jobID", jobID, "podName", pod.Name, "podPhase", pod.Status.Phase)
+	if reason := preStartFailureReason(&pod); reason != "" {
+		logger.Info("Skipping log stream for pod that failed before container startup",
+			"scenarioRunName", scenarioRunName,
+			"jobID", jobID,
+			"podName", pod.Name,
+			"failureReason", reason)
+		writeWSError(conn, logger, fmt.Sprintf("ERROR: Logs unavailable because the pod failed before startup (%s)", reason))
+		return
+	}
 
 	// Parse query parameters
 	follow := r.URL.Query().Get("follow") == "true"
@@ -2222,6 +2244,37 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 				"error", err.Error())
 		}
 	}
+}
+
+// isFailedJob identifies terminal jobs for which requesting logs is not useful.
+// MaxRetriesExceeded is intentionally excluded: its PodName points to the
+// latest retry pod, whose final logs should remain available for diagnosis.
+func isFailedJob(job *krknv1alpha1.ClusterJobStatus) bool {
+	switch job.Phase {
+	case "Failed", "Cancelled":
+		return true
+	default:
+		return false
+	}
+}
+
+// preStartFailureReason returns the Kubernetes waiting reason when a pod
+// cannot start its scenario container. This check is based on the pod itself
+// because CR status may lag behind the pod status during reconciliation.
+func preStartFailureReason(pod *corev1.Pod) string {
+	statuses := append(pod.Status.InitContainerStatuses, pod.Status.ContainerStatuses...)
+	for _, status := range statuses {
+		if status.State.Waiting == nil {
+			continue
+		}
+		switch status.State.Waiting.Reason {
+		case "ErrImagePull", "ImagePullBackOff", "InvalidImageName",
+			"CreateContainerConfigError", "CreateContainerError", "RunContainerError",
+			"CrashLoopBackOff":
+			return status.State.Waiting.Reason
+		}
+	}
+	return ""
 }
 
 // ListScenarioRuns handles GET /api/v1/scenarios/run endpoint
