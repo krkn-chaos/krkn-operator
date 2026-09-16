@@ -174,6 +174,12 @@ func (r *KrknScenarioRunReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		return ctrl.Result{}, err
 	}
 
+	// Normalize scenario reference (backward compatibility for legacy scenarioName/scenarioImage format)
+	if err := scenarioRun.Spec.NormalizeScenarioReference(); err != nil {
+		logger.Error(err, "failed to normalize scenario reference")
+		return ctrl.Result{}, err
+	}
+
 	// Initialize status if first reconcile
 	if scenarioRun.Status.Phase == "" {
 		// Calculate total targets

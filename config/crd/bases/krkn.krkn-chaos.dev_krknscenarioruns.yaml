@@ -107,6 +107,8 @@ spec:
                 description: OwnerUserID is the email address of the user who created
                   this scenario run
                 type: string
+              registryName:
+                type: string
               retryBackoff:
                 default: exponential
                 description: RetryBackoff determines the backoff strategy for retries
@@ -141,6 +143,14 @@ spec:
                 - name
                 - private
                 type: object
+              scenarioImage:
+                type: string
+              scenarioName:
+                description: |-
+                  Legacy fields accept the old API format from console <v0.X.
+                  When set, they are converted to Scenario format automatically.
+                  These are kept for backward compatibility but should not be used in new code.
+                type: string
               targetClusters:
                 additionalProperties:
                   items:

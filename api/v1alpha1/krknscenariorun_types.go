@@ -156,17 +156,20 @@ type KrknScenarioRunSpec struct {
 	// source of image identity; complete image references are not accepted.
 	Scenario ScenarioReference `json:"scenario"`
 
-	// Legacy fields remain only as Go compatibility shims for code that builds
-	// old in-memory test objects. They are not serialized into the CRD and are
-	// never used to select a pod image.
-	ScenarioName       string `json:"-"`
-	ScenarioImage      string `json:"-"`
+	// Legacy fields accept the old API format from console <v0.X.
+	// When set, they are converted to Scenario format automatically.
+	// These are kept for backward compatibility but should not be used in new code.
+	ScenarioName  string `json:"scenarioName,omitempty"`
+	ScenarioImage string `json:"scenarioImage,omitempty"`
+	RegistryName  string `json:"registryName,omitempty"`
+
+	// Unused legacy fields remain only as Go compatibility shims for code that builds
+	// old in-memory test objects. They are not serialized into the CRD.
 	RegistryURL        string `json:"-"`
 	ScenarioRepository string `json:"-"`
 	Token              string `json:"-"`
 	Username           string `json:"-"`
 	Password           string `json:"-"`
-	RegistryName       string `json:"-"`
 
 	// KubeconfigPath is the path where kubeconfig will be mounted in the pod
 	// +optional
@@ -196,6 +199,31 @@ type KrknScenarioRunSpec struct {
 	// +optional
 	// +kubebuilder:default="10s"
 	RetryDelay string `json:"retryDelay,omitempty"`
+}
+
+// NormalizeScenarioReference converts legacy scenarioName/scenarioImage fields to the new
+// Scenario reference format. This supports backward compatibility with console requests that
+// haven't been updated yet. If both formats are provided, the new Scenario format takes precedence.
+func (s *KrknScenarioRunSpec) NormalizeScenarioReference() error {
+	// If Scenario is already set via the new format, use it as-is
+	if s.Scenario.Name != "" {
+		return nil
+	}
+
+	// If legacy fields are set, convert them to Scenario format
+	if s.ScenarioName != "" {
+		// Determine if this is a private or public scenario based on whether registryName is set
+		isPrivate := s.RegistryName != ""
+		s.Scenario = ScenarioReference{
+			Name:         s.ScenarioName,
+			Private:      &isPrivate,
+			RegistryName: s.RegistryName,
+		}
+		return nil
+	}
+
+	// If neither format is provided, return error
+	return fmt.Errorf("either scenario.name or scenarioName is required")
 }
 
 // KrknScenarioRunStatus defines the observed state of KrknScenarioRun
