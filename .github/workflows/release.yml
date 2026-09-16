@@ -223,7 +223,6 @@ jobs:
             --title "Release $VERSION" \
             --generate-notes \
             --verify-tag
-
   publish-olm-bundles:
     name: Build and publish OLM bundles
     needs: create-manifests
@@ -254,25 +253,30 @@ jobs:
       - name: Install Operator SDK
         run: |
           version=v1.41.1
-          curl -fsSL \
-            -o /tmp/operator-sdk \
+          curl --fail --location --retry 3 \
+            --output /tmp/operator-sdk \
             "https://github.com/operator-framework/operator-sdk/releases/download/${version}/operator-sdk_linux_amd64"
           sudo install -m 0755 /tmp/operator-sdk /usr/local/bin/operator-sdk
           operator-sdk version
 
       - name: Install yq
         run: |
-          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/download/v4.45.1/yq_linux_amd64
-          sudo chmod +x /usr/local/bin/yq
+          curl --fail --location --retry 3 \
+            --output /tmp/yq \
+            https://github.com/mikefarah/yq/releases/download/v4.45.1/yq_linux_amd64
+          sudo install -m 0755 /tmp/yq /usr/local/bin/yq
 
       - name: Render and publish bundles
         run: |
           bundle_version="${RELEASE_TAG#v}"
-          console_latest_url=$(curl -Ls -o /dev/null -w '%{url_effective}' https://github.com/krkn-chaos/krkn-operator-console/releases/latest)
+          console_latest_url=$(curl --fail --location --silent --show-error \
+            -o /dev/null -w '%{url_effective}' \
+            https://github.com/krkn-chaos/krkn-operator-console/releases/latest)
           console_version="${console_latest_url##*/tag/}"
 
           resolve_digest() {
-            image="$1"
+            local image=$1
+            local digest
             digest=$(docker buildx imagetools inspect "$image" | awk '$1 == "Digest:" { print $2; exit }')
             test -n "$digest"
             printf '%s@%s\n' "$image" "$digest"
