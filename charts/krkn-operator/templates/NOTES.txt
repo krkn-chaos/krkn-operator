@@ -156,6 +156,24 @@ To enable monitoring:
 {{- end }}
 
 =============================================================================
+KRKN-AI
+=============================================================================
+{{- if .Values.krknAI.enabled }}
+Krkn-AI is enabled. The KrknAIRun CRD and artifact service are installed and
+the operator reconciles KrknAIRun resources.
+{{- else }}
+Krkn-AI is disabled. The KrknAIRun CRD, artifact service, and orchestrator
+resources are not installed. Enable it with --set krknAI.enabled=true.
+{{- end }}
+
+=============================================================================
+CRD UPGRADES
+=============================================================================
+The KrknAIRun CRD is retained on uninstall. Other CRDs stored in the chart's
+crds/ directory are not upgraded automatically. Apply their latest definitions
+explicitly before using newly added fields.
+
+=============================================================================
 🚀 NEXT STEPS
 =============================================================================
 

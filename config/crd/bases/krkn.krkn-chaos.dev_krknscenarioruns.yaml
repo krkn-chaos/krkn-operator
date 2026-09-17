@@ -107,6 +107,10 @@ spec:
                 description: OwnerUserID is the email address of the user who created
                   this scenario run
                 type: string
+              registryName:
+                description: RegistryName is the legacy persisted managed-registry
+                  identity.
+                type: string
               retryBackoff:
                 default: exponential
                 description: RetryBackoff determines the backoff strategy for retries
@@ -122,8 +126,9 @@ spec:
                 type: string
               scenario:
                 description: |-
-                  Scenario identifies the scenario and registry to resolve. It is the only
-                  source of image identity; complete image references are not accepted.
+                  Scenario identifies the scenario and registry to resolve. New resources
+                  must set this field. It remains optional in storage while legacy resources
+                  are migrated from ScenarioName and RegistryName.
                 properties:
                   name:
                     description: Name is the scenario tag/name to resolve.
@@ -131,7 +136,8 @@ spec:
                   private:
                     description: |-
                       Private selects a saved private registry when true, or krknctl's public
-                      Quay provider when false. A pointer makes the field mandatory on input.
+                      Quay provider when false. A pointer makes omission distinguishable from an
+                      explicit false value.
                     type: boolean
                   registryName:
                     description: RegistryName identifies the saved private registry
@@ -141,6 +147,11 @@ spec:
                 - name
                 - private
                 type: object
+              scenarioName:
+                description: |-
+                  ScenarioName is the legacy persisted scenario identity. It is retained
+                  temporarily for safe upgrade migration and is never treated as an image.
+                type: string
               targetClusters:
                 additionalProperties:
                   items:
@@ -156,7 +167,6 @@ spec:
                   CR
                 type: string
             required:
-            - scenario
             - targetClusters
             - targetRequestId
             type: object
@@ -209,9 +219,11 @@ spec:
                       type: string
                     phase:
                       description: Phase is the current phase of the job (Pending,
-                        Running, Succeeded, Failed, Retrying, Cancelled, MaxRetriesExceeded)
+                        Creating, Running, Succeeded, Failed, Retrying, Cancelled,
+                        MaxRetriesExceeded)
                       enum:
                       - Pending
+                      - Creating
                       - Running
                       - Succeeded
                       - Failed

@@ -27,12 +27,36 @@ if ! grep -Eq 'scenario-runner|krkn-scenario-runner' "$work_dir/base.yaml"; then
   exit 1
 fi
 
+if grep -Eq 'krkn-operator-ai-service|krkn-operator-krkn-ai-orchestrator|krknairuns.krkn.krkn-chaos.dev' "$work_dir/base.yaml"; then
+  echo "Krkn-AI resources must not render by default" >&2
+  exit 1
+fi
+if ! grep -Fq -- '--enable-krkn-ai=false' "$work_dir/base.yaml"; then
+  echo "operator must disable Krkn-AI by default" >&2
+  exit 1
+fi
+
+helm template krkn-operator "$chart_dir" --set krknAI.enabled=true > "$work_dir/krkn-ai.yaml"
+if ! grep -Eq 'krkn-operator-ai-service|krkn-operator-krkn-ai-orchestrator|krknairuns.krkn.krkn-chaos.dev' "$work_dir/krkn-ai.yaml"; then
+  echo "enabled Krkn-AI profile must render its resources and CRD" >&2
+  exit 1
+fi
+if ! grep -Fq -- '--enable-krkn-ai=true' "$work_dir/krkn-ai.yaml"; then
+  echo "operator must enable Krkn-AI controller when requested" >&2
+  exit 1
+fi
+
 helm template krkn-operator "$chart_dir" \
   --values "$chart_dir/values-olm-ocp.yaml" \
   --api-versions security.openshift.io/v1/SecurityContextConstraints > "$work_dir/olm-ocp.yaml"
 
 if grep -Eq 'scenario-runner|krkn-scenario-runner' "$work_dir/olm-ocp.yaml"; then
   echo "OLM profile must not render static scenario-runner resources" >&2
+  exit 1
+fi
+
+if grep -Eq 'krkn-operator-ai-service|krkn-operator-krkn-ai-orchestrator|krknairuns.krkn.krkn-chaos.dev' "$work_dir/olm-ocp.yaml"; then
+  echo "OLM profile must not expose the Helm-only Krkn-AI beta" >&2
   exit 1
 fi
 

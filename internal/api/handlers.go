@@ -24,6 +24,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -46,6 +47,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -56,6 +58,7 @@ import (
 	"github.com/krkn-chaos/krkn-operator/pkg/auth"
 	"github.com/krkn-chaos/krkn-operator/pkg/elasticsearch"
 	"github.com/krkn-chaos/krkn-operator/pkg/groupauth"
+	"github.com/krkn-chaos/krkn-operator/pkg/krknaiserver"
 	"github.com/krkn-chaos/krkn-operator/pkg/registry"
 	pb "github.com/krkn-chaos/krkn-operator/proto/dataprovider"
 )
@@ -124,6 +127,7 @@ type Handler struct {
 	namespace      string
 	grpcServerAddr string
 	secretManager  *auth.SecretManager
+	artifactClient *krknaiserver.Client
 	// scenarioProviderFactory is injectable for API tests; production handlers
 	// use the krknctl-backed factory assigned by NewHandler.
 	scenarioProviderFactory func(provider.Mode) (provider.ScenarioDataProvider, error)
@@ -137,6 +141,7 @@ func NewHandler(client client.Client, clientset kubernetes.Interface, namespace 
 		namespace:               namespace,
 		grpcServerAddr:          grpcServerAddr,
 		secretManager:           secretManager,
+		artifactClient:          krknaiserver.New(os.Getenv("KRKNAI_SERVICE_URL"), os.Getenv("KRKNAI_SERVICE_TOKEN")),
 		scenarioProviderFactory: createScenarioProvider,
 	}
 }
@@ -1611,6 +1616,14 @@ func normalizeLegacyScenarioRunRequest(req *ScenarioRunRequest) {
 	}
 }
 
+func scenarioReferenceForResponse(spec krknv1alpha1.KrknScenarioRunSpec) krknv1alpha1.ScenarioReference {
+	reference, _, err := spec.ResolveScenarioReference()
+	if err != nil {
+		return spec.Scenario
+	}
+	return reference
+}
+
 // GetScenarioRunStatus handles GET /api/v1/scenarios/run/{scenarioRunName} endpoint
 // It returns the current status of a scenario run
 //
@@ -1659,6 +1672,7 @@ func (h *Handler) GetScenarioRunStatus(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, status, ErrorResponse{Error: errCode, Message: errMsg})
 		return
 	}
+	scenario := scenarioReferenceForResponse(scenarioRun.Spec)
 
 	claims := auth.GetClaimsFromContext(ctx)
 
@@ -1699,7 +1713,7 @@ func (h *Handler) GetScenarioRunStatus(w http.ResponseWriter, r *http.Request) {
 				// Allow access and return 201 Created with empty jobs array
 				response := ScenarioRunStatusResponse{
 					ScenarioRunName:  scenarioRunName,
-					ScenarioName:     scenarioRun.Spec.Scenario.Name,
+					ScenarioName:     scenario.Name,
 					Phase:            scenarioRun.Status.Phase,
 					TotalTargets:     scenarioRun.Status.TotalTargets,
 					SuccessfulJobs:   scenarioRun.Status.SuccessfulJobs,
@@ -1707,7 +1721,7 @@ func (h *Handler) GetScenarioRunStatus(w http.ResponseWriter, r *http.Request) {
 					RunningJobs:      scenarioRun.Status.RunningJobs,
 					ClusterJobs:      []ClusterJobStatusResponse{},
 					OwnerUserID:      scenarioRun.Spec.OwnerUserID,
-					RegistryName:     scenarioRun.Spec.Scenario.RegistryName,
+					RegistryName:     scenario.RegistryName,
 					GraphRunName:     scenarioRun.Labels["krkn.dev/graph-run"],
 					GraphNodeID:      scenarioRun.Labels["krkn.dev/graph-node"],
 					ResiliencyScores: convertClusterResiliencyScores(scenarioRun.Status.ResiliencyScores),
@@ -1748,7 +1762,7 @@ func (h *Handler) GetScenarioRunStatus(w http.ResponseWriter, r *http.Request) {
 
 	response := ScenarioRunStatusResponse{
 		ScenarioRunName:  scenarioRunName,
-		ScenarioName:     scenarioRun.Spec.Scenario.Name,
+		ScenarioName:     scenario.Name,
 		Phase:            scenarioRun.Status.Phase,
 		TotalTargets:     scenarioRun.Status.TotalTargets,
 		SuccessfulJobs:   scenarioRun.Status.SuccessfulJobs,
@@ -1756,7 +1770,7 @@ func (h *Handler) GetScenarioRunStatus(w http.ResponseWriter, r *http.Request) {
 		RunningJobs:      scenarioRun.Status.RunningJobs,
 		ClusterJobs:      clusterJobs,
 		OwnerUserID:      scenarioRun.Spec.OwnerUserID,
-		RegistryName:     scenarioRun.Spec.Scenario.RegistryName,
+		RegistryName:     scenario.RegistryName,
 		GraphRunName:     scenarioRun.Labels["krkn.dev/graph-run"],
 		GraphNodeID:      scenarioRun.Labels["krkn.dev/graph-node"],
 		CustomRunName:    scenarioRun.Spec.CustomRunName,
@@ -2228,11 +2242,12 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 // It returns a list of all scenario runs (KrknScenarioRun CRs)
 //
 // @Summary List scenario runs
-// @Description Get list of all scenario runs with optional filtering by phase or scenario name
+// @Description Get list of all scenario runs with optional filtering by phase, scenario name, or Kubernetes labels
 // @Tags scenarios
 // @Produce json
 // @Param phase query string false "Filter by phase (Running, Succeeded, Failed)"
 // @Param scenarioName query string false "Filter by scenario name"
+// @Param labelSelector query string false "Kubernetes label selector"
 // @Param page query int false "Page number (1-based). Omit for all results."
 // @Param limit query int false "Items per page (defaults to jobs.defaultPageSize config, fallback 20; max 500). Only used when page is set."
 // @Success 200 {object} ScenarioRunListResponse "List of scenario runs with pagination"
@@ -2245,10 +2260,23 @@ func (h *Handler) ListScenarioRuns(w http.ResponseWriter, r *http.Request) {
 	// Parse query parameters for filtering
 	phaseFilter := r.URL.Query().Get("phase") // e.g., Running, Succeeded, Failed
 	scenarioNameFilter := r.URL.Query().Get("scenarioName")
+	labelSelector := r.URL.Query().Get("labelSelector")
+	listOptions := []client.ListOption{client.InNamespace(h.namespace)}
+	if labelSelector != "" {
+		selector, err := labels.Parse(labelSelector)
+		if err != nil {
+			writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+				Error:   "bad_request",
+				Message: "invalid labelSelector",
+			})
+			return
+		}
+		listOptions = append(listOptions, client.MatchingLabelsSelector{Selector: selector})
+	}
 
-	// List all KrknScenarioRun CRs in the namespace
+	// List all KrknScenarioRun CRs in the namespace.
 	var scenarioRunList krknv1alpha1.KrknScenarioRunList
-	if err := h.client.List(ctx, &scenarioRunList, client.InNamespace(h.namespace)); err != nil {
+	if err := h.client.List(ctx, &scenarioRunList, listOptions...); err != nil {
 		log.FromContext(ctx).Error(err, "Failed to list scenario runs")
 		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
 			Error:   "internal_error",
@@ -2263,17 +2291,18 @@ func (h *Handler) ListScenarioRuns(w http.ResponseWriter, r *http.Request) {
 	// Convert to response format with optional filtering
 	runs := make([]ScenarioRunListItem, 0)
 	for _, sr := range scenarioRunList.Items {
+		scenario := scenarioReferenceForResponse(sr.Spec)
 		// Apply filters
 		if phaseFilter != "" && sr.Status.Phase != phaseFilter {
 			continue
 		}
-		if scenarioNameFilter != "" && sr.Spec.Scenario.Name != scenarioNameFilter {
+		if scenarioNameFilter != "" && scenario.Name != scenarioNameFilter {
 			continue
 		}
 
 		run := ScenarioRunListItem{
 			ScenarioRunName:  sr.Name,
-			ScenarioName:     sr.Spec.Scenario.Name,
+			ScenarioName:     scenario.Name,
 			Phase:            sr.Status.Phase,
 			TotalTargets:     sr.Status.TotalTargets,
 			SuccessfulJobs:   sr.Status.SuccessfulJobs,

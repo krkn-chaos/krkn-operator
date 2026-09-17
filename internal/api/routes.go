@@ -114,3 +114,8 @@ const (
 const (
 	ElasticsearchConfigsPath = APIBasePath + "/elasticsearch-configs"
 )
+
+// Krkn-AI configuration, run, and artifact endpoints.
+const (
+	KrknAIPath = APIBasePath + "/krkn-ai"
+)

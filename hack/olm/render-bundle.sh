@@ -91,8 +91,8 @@ helm template krkn-operator "$repo_root/charts/krkn-operator" \
   --set-string "images.console.image=${console_image}" \
   --output-dir "$render_dir" >/dev/null
 
-# Helm does not render the chart's CRD directory through templates. Bundle
-# generation still needs those CRDs alongside the rendered workload resources.
+# OLM bundles include the chart's always-on CRDs. The conditional Krkn-AI beta
+# CRD remains Helm-only until its opt-in OLM installation is implemented.
 mkdir -p "$render_dir/krkn-operator/crds"
 cp "$repo_root"/charts/krkn-operator/crds/*.yaml "$render_dir/krkn-operator/crds/"
 

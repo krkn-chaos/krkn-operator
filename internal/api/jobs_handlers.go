@@ -127,6 +127,7 @@ func BuildUnifiedJobList(scenarioRuns []krknv1alpha1.KrknScenarioRun, graphRuns 
 
 	for i := range scenarioRuns {
 		sr := &scenarioRuns[i]
+		scenario := scenarioReferenceForResponse(sr.Spec)
 		// Skip ScenarioRuns that are part of a GraphRun
 		if sr.Labels["krkn.dev/graph-run"] != "" {
 			continue
@@ -134,7 +135,7 @@ func BuildUnifiedJobList(scenarioRuns []krknv1alpha1.KrknScenarioRun, graphRuns 
 
 		item := ScenarioRunListItem{
 			ScenarioRunName:  sr.Name,
-			ScenarioName:     sr.Spec.Scenario.Name,
+			ScenarioName:     scenario.Name,
 			Phase:            sr.Status.Phase,
 			TotalTargets:     sr.Status.TotalTargets,
 			SuccessfulJobs:   sr.Status.SuccessfulJobs,
