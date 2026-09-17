@@ -101,7 +101,7 @@ Alternatively, use the helper script which also installs CRDs, service account a
 
 This script automatically:
 - Checks cluster connectivity
-- Creates or uses the target namespace (defaults to `default`, override with `KRKN_NAMESPACE=my-ns`)
+- Creates or uses the target namespace (defaults to `krkn-operator-system`, override with `KRKN_NAMESPACE=my-ns`)
 - Installs CRDs
 - Provisions a `ServiceAccount` and least-privilege `ClusterRole` for scenario execution (pod chaos, node operations, discovery)
 - On OpenShift, grants the `anyuid` Security Context Constraint (required for UID 1001)
