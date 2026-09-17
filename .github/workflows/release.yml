@@ -267,12 +267,13 @@ jobs:
           sudo install -m 0755 /tmp/yq /usr/local/bin/yq
 
       - name: Render and publish bundles
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           bundle_version="${RELEASE_TAG#v}"
-          console_latest_url=$(curl --fail --location --silent --show-error \
-            -o /dev/null -w '%{url_effective}' \
-            https://github.com/krkn-chaos/krkn-operator-console/releases/latest)
-          console_version="${console_latest_url##*/tag/}"
+          console_version=$(hack/olm/select-compatible-release.sh \
+            krkn-chaos/krkn-operator-console "$RELEASE_TAG")
+          echo "Selected compatible console release: $console_version"
 
           resolve_digest() {
             local image=$1
