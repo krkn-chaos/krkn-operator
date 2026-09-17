@@ -60,6 +60,15 @@ jobs:
           echo "JWT Secret manifests must not be included in OLM bundles" >&2
           exit 1
         fi
+        csv_file="$output_dir/manifests/krkn-operator.clusterserviceversion.yaml"
+        test "$(yq -r '.metadata.annotations.capabilities' "$csv_file")" = "Basic Install"
+        test "$(yq -r '.metadata.annotations.repository' "$csv_file")" = "https://github.com/krkn-chaos/krkn-operator"
+        test "$(yq '.spec.keywords | length' "$csv_file")" -gt 0
+        test "$(yq '.spec.customresourcedefinitions.owned | length' "$csv_file")" -eq 9
+        if test "$(yq '[.spec.customresourcedefinitions.owned[] | select((.description // "") == "")] | length' "$csv_file")" -ne 0; then
+          echo "All owned CRDs must have a description" >&2
+          exit 1
+        fi
 
     - name: Build bundle image locally
       run: |

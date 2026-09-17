@@ -7,9 +7,11 @@ metadata:
     operatorframework.io/arch.arm64: supported
     operatorframework.io/os.linux: supported
   annotations:
+    capabilities: Basic Install
     categories: "Monitoring,Storage"
     description: "Krkn chaos engineering platform for Kubernetes, OpenShift, OCM, and ACM."
     containerImage: quay.io/krkn-chaos/krkn-operator:latest
+    repository: https://github.com/krkn-chaos/krkn-operator
     support: krkn-chaos
 spec:
   displayName: Krkn Operator
@@ -31,6 +33,12 @@ spec:
   maturity: alpha
   provider:
     name: krkn-chaos
+  keywords:
+  - chaos engineering
+  - resiliency
+  - kubernetes
+  - openshift
+  - open cluster management
   maintainers:
   - name: krkn-chaos
     email: krkn-chaos@redhat.com
