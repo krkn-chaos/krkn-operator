@@ -31,22 +31,23 @@ jobs:
 
       - name: Fetch latest component versions
         id: versions
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           # Extract operator version from tag
           OPERATOR_VERSION=${GITHUB_REF#refs/tags/}
           echo "operator=${OPERATOR_VERSION}" >> $GITHUB_OUTPUT
 
-          # Fetch latest ACM version (using redirect method to avoid rate limit)
-          ACM_LATEST_URL=$(curl -Ls -o /dev/null -w %{url_effective} https://github.com/krkn-chaos/krkn-operator-acm/releases/latest)
-          ACM_VERSION=$(echo $ACM_LATEST_URL | sed 's|.*/tag/||')
+          chmod +x hack/olm/select-compatible-release.sh
+          ACM_VERSION=$(hack/olm/select-compatible-release.sh \
+            krkn-chaos/krkn-operator-acm "$OPERATOR_VERSION")
           echo "acm=${ACM_VERSION}" >> $GITHUB_OUTPUT
-          echo "Latest ACM version: ${ACM_VERSION}"
+          echo "Compatible ACM version: ${ACM_VERSION}"
 
-          # Fetch latest Console version (using redirect method to avoid rate limit)
-          CONSOLE_LATEST_URL=$(curl -Ls -o /dev/null -w %{url_effective} https://github.com/krkn-chaos/krkn-operator-console/releases/latest)
-          CONSOLE_VERSION=$(echo $CONSOLE_LATEST_URL | sed 's|.*/tag/||')
+          CONSOLE_VERSION=$(hack/olm/select-compatible-release.sh \
+            krkn-chaos/krkn-operator-console "$OPERATOR_VERSION")
           echo "console=${CONSOLE_VERSION}" >> $GITHUB_OUTPUT
-          echo "Latest Console version: ${CONSOLE_VERSION}"
+          echo "Compatible console version: ${CONSOLE_VERSION}"
 
       - name: Update Chart metadata and image tags
         run: |

@@ -20,6 +20,9 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - name: Test release component selection
+        run: hack/olm/test-select-compatible-release.sh
+
       - name: Run gosec security scanner
         uses: securego/gosec@master
         with:
