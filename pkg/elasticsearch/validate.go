@@ -20,7 +20,25 @@ import (
 	"crypto/x509"
 	"fmt"
 	"strings"
+
+	"github.com/krkn-chaos/krkn-operator/pkg/groupauth"
 )
+
+func validateAccess(groups []string, availableToAll bool) error {
+	if len(groups) > 0 && availableToAll {
+		return fmt.Errorf("an Elasticsearch config cannot be both public and assigned to a group")
+	}
+	for _, group := range groups {
+		sanitized := groupauth.SanitizeGroupName(strings.TrimSpace(group))
+		if sanitized == "" {
+			return fmt.Errorf("group name %q is invalid", group)
+		}
+		if len(sanitized) > 63 {
+			return fmt.Errorf("group name %q exceeds the 63-character label limit", group)
+		}
+	}
+	return nil
+}
 
 // ValidateCreateRequest validates a CreateElasticsearchConfigRequest.
 func ValidateCreateRequest(req *CreateElasticsearchConfigRequest) error {
@@ -33,7 +51,7 @@ func ValidateCreateRequest(req *CreateElasticsearchConfigRequest) error {
 	if req.Port < 0 || req.Port > 65535 {
 		return fmt.Errorf("port must be between 0 and 65535")
 	}
-	return validateTLSSettings(req.Host, req.Username, req.CACert)
+	return validateAccess(req.Groups, req.AvailableToAll)
 }
 
 // ValidateUpdateRequest validates an UpdateElasticsearchConfigRequest.
@@ -44,20 +62,9 @@ func ValidateUpdateRequest(req *UpdateElasticsearchConfigRequest) error {
 	if req.Port < 0 || req.Port > 65535 {
 		return fmt.Errorf("port must be between 0 and 65535")
 	}
-	return validateTLSSettings(req.Host, req.Username, req.CACert)
-}
-
-// validateTLSSettings enforces that credentials are never sent over plaintext
-// HTTP and that any supplied CA certificate is valid PEM. It is shared by the
-// create and update paths so both reject insecure configurations up front.
-func validateTLSSettings(host, username, caCert string) error {
-	if username != "" && strings.HasPrefix(strings.ToLower(strings.TrimSpace(host)), "http://") {
-		return fmt.Errorf("credentials require a TLS connection; use an https host")
+	availableToAll := false
+	if req.AvailableToAll != nil {
+		availableToAll = *req.AvailableToAll
 	}
-	if caCert != "" {
-		if !x509.NewCertPool().AppendCertsFromPEM([]byte(caCert)) {
-			return fmt.Errorf("caCert must be a valid PEM-encoded certificate")
-		}
-	}
-	return nil
+	return validateAccess(req.Groups, availableToAll)
 }

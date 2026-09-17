@@ -35,7 +35,6 @@ type CreateElasticsearchConfigRequest struct {
 	TelemetryIndex string `json:"telemetryIndex,omitempty"`
 	MetricsIndex   string `json:"metricsIndex,omitempty"`
 	AlertsIndex    string `json:"alertsIndex,omitempty"`
-	GrafanaURL     string `json:"grafanaUrl,omitempty"`
 	// CACert is an optional PEM-encoded CA certificate (or bundle) used to trust
 	// a self-signed cluster while keeping TLS verification enabled.
 	CACert string `json:"caCert,omitempty"`
@@ -43,6 +42,8 @@ type CreateElasticsearchConfigRequest struct {
 	// a restricted last resort for self-signed clusters without CA material;
 	// prefer CACert.
 	InsecureSkipTLSVerify bool `json:"insecureSkipTlsVerify,omitempty"`
+	Groups         []string `json:"groups,omitempty"`
+	AvailableToAll bool     `json:"availableToAll,omitempty"`
 }
 
 // UpdateElasticsearchConfigRequest represents the request to update an ES config.
@@ -65,6 +66,8 @@ type UpdateElasticsearchConfigRequest struct {
 	// prefer CACert. A nil pointer leaves the stored setting unchanged; a non-nil
 	// value explicitly sets or clears it.
 	InsecureSkipTLSVerify *bool `json:"insecureSkipTlsVerify,omitempty"`
+	Groups         []string `json:"groups,omitempty"`
+	AvailableToAll *bool    `json:"availableToAll,omitempty"`
 }
 
 // ElasticsearchConfigResponse represents an ES config in API responses.
@@ -86,6 +89,8 @@ type ElasticsearchConfigResponse struct {
 	CreatedBy             string `json:"createdBy,omitempty"`
 	UpdatedAt             string `json:"updatedAt,omitempty"`
 	UpdatedBy             string `json:"updatedBy,omitempty"`
+	Groups         []string `json:"groups,omitempty"`
+	AvailableToAll bool     `json:"availableToAll"`
 }
 
 // ListElasticsearchConfigsResponse represents the response for listing ES configs
