@@ -12,10 +12,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        ocm-version:
-          - v1.3.1  # Latest (May 2026)
-          - v1.2.0  # Previous major (Feb 2026)
-          - v1.1.0  # Two releases back (Oct 2025)
+        include:
+          - ocm-version: v1.3.1  # Latest (May 2026)
+            managed-serviceaccount-version: 0.10.0
+          - ocm-version: v1.2.0  # Previous major (Feb 2026)
+            managed-serviceaccount-version: 0.10.0
+          - ocm-version: v1.1.0  # Two releases back (Oct 2025)
+            managed-serviceaccount-version: 0.8.0
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -148,6 +151,7 @@ jobs:
           echo "Installing ManagedServiceAccount addon..."
           helm install -n open-cluster-management-addon --create-namespace \
             managed-serviceaccount ocm/managed-serviceaccount \
+            --version "${{ matrix.managed-serviceaccount-version }}" \
             --kube-context kind-hub
 
           echo "Waiting for addon manager pod to be created..."
