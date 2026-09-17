@@ -95,7 +95,7 @@ Key configuration values (see [values.yaml](charts/krkn-operator/values.yaml) fo
 | `console.ingress.enabled` | Enable Kubernetes Ingress | `false` |
 | `console.ingress.hostname` | Ingress hostname | `krkn-operator.example.com` |
 | `console.route.enabled` | Enable OpenShift Route | `false` |
-| `console.route.hostname` | Route hostname | `krkn-operator.apps.cluster.example.com` |
+| `console.route.hostname` | Route hostname; empty lets OpenShift generate one | empty |
 | `acm.enabled` | Enable ACM integration | `false` |
 | `acm.config.secretName` | ACM managed clusters secret | `application-manager` |
 | `auth.jwtSecret` | JWT secret (base64) | Auto-generated |
