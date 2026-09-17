@@ -54,7 +54,12 @@ jobs:
     - name: Render and validate bundle
       run: |
         chmod +x hack/olm/render-bundle.sh
-        hack/olm/render-bundle.sh "${{ matrix.profile }}" "$VERSION" "dist/bundle-${{ matrix.profile }}"
+        output_dir="dist/bundle-${{ matrix.profile }}"
+        hack/olm/render-bundle.sh "${{ matrix.profile }}" "$VERSION" "$output_dir"
+        if find "$output_dir/manifests" -type f -name '*jwt*secret*' -print -quit | grep -q .; then
+          echo "JWT Secret manifests must not be included in OLM bundles" >&2
+          exit 1
+        fi
 
     - name: Build bundle image locally
       run: |

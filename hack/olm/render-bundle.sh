@@ -91,6 +91,12 @@ helm template krkn-operator "$repo_root/charts/krkn-operator" \
   --set-string "images.console.image=${console_image}" \
   --output-dir "$render_dir" >/dev/null
 
+# Helm renders a JWT Secret for Helm installations, where randAlphaNum gives
+# each release its own value. OLM uses EnsureResources to create this Secret
+# with crypto/rand at install time; carrying Helm's rendered value in a
+# published bundle would expose a reusable credential.
+rm -f "$render_dir/krkn-operator/templates/secrets/jwt-secret.yaml"
+
 # Helm does not render the chart's CRD directory through templates. Bundle
 # generation still needs those CRDs alongside the rendered workload resources.
 mkdir -p "$render_dir/krkn-operator/crds"
