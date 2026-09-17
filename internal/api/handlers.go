@@ -2066,19 +2066,6 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if isFailedJob(targetJob) {
-		logger.Info("Skipping log stream for failed job",
-			"scenarioRunName", scenarioRunName,
-			"jobID", jobID,
-			"failureReason", targetJob.FailureReason)
-		message := "ERROR: Logs unavailable because the job failed"
-		if targetJob.FailureReason != "" {
-			message += fmt.Sprintf(" (%s)", targetJob.FailureReason)
-		}
-		writeWSError(conn, logger, message)
-		return
-	}
-
 	logger.Info("Permission check passed for log access",
 		"scenarioRunName", scenarioRunName,
 		"jobID", jobID,
@@ -2243,18 +2230,6 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 				"jobID", jobID,
 				"error", err.Error())
 		}
-	}
-}
-
-// isFailedJob identifies terminal jobs for which requesting logs is not useful.
-// MaxRetriesExceeded is intentionally excluded: its PodName points to the
-// latest retry pod, whose final logs should remain available for diagnosis.
-func isFailedJob(job *krknv1alpha1.ClusterJobStatus) bool {
-	switch job.Phase {
-	case "Failed", "Cancelled":
-		return true
-	default:
-		return false
 	}
 }
 
