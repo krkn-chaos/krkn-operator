@@ -70,6 +70,16 @@ yq -e 'select(.kind == "Route") | .spec.host == "console.apps.example.test" and 
 
 helm template krkn-operator "$chart_dir" \
   --api-versions route.openshift.io/v1/Route \
+  --set console.route.enabled=true > "$work_dir/route-generated.yaml"
+
+if yq -e 'select(.kind == "Route") | has("spec") and (.spec | has("host"))' \
+  "$work_dir/route-generated.yaml" >/dev/null; then
+  echo "default OpenShift Route must not force a hostname" >&2
+  exit 1
+fi
+
+helm template krkn-operator "$chart_dir" \
+  --api-versions route.openshift.io/v1/Route \
   --set console.route.enabled=true \
   --set console.route.hostname="" \
   --set console.route.host=legacy.apps.example.test > "$work_dir/route-legacy.yaml"

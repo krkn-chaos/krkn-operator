@@ -224,7 +224,9 @@ console:
   # OpenShift Route configuration
   route:
     enabled: false
-    hostname: "krkn-operator.apps.cluster.example.com"
+    # Leave empty to let OpenShift generate the Route hostname. Set this
+    # explicitly only when the cluster has a configured DNS name for it.
+    hostname: ""
     host: ""  # Legacy hostname fallback.
 
     tls:
