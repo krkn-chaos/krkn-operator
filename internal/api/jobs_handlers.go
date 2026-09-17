@@ -135,6 +135,7 @@ func BuildUnifiedJobList(scenarioRuns []krknv1alpha1.KrknScenarioRun, graphRuns 
 		item := ScenarioRunListItem{
 			ScenarioRunName:  sr.Name,
 			ScenarioName:     sr.Spec.Scenario.Name,
+			ScenarioImage:    scenarioRunImage(sr.Status.ClusterJobs),
 			Phase:            sr.Status.Phase,
 			TotalTargets:     sr.Status.TotalTargets,
 			SuccessfulJobs:   sr.Status.SuccessfulJobs,
@@ -192,4 +193,15 @@ func BuildUnifiedJobList(scenarioRuns []krknv1alpha1.KrknScenarioRun, graphRuns 
 	})
 
 	return jobs
+}
+
+// scenarioRunImage returns the resolved image from the first cluster job that
+// has one. The image is stored on each job after server-side resolution.
+func scenarioRunImage(jobs []krknv1alpha1.ClusterJobStatus) string {
+	for _, job := range jobs {
+		if job.ContainerImage != "" {
+			return job.ContainerImage
+		}
+	}
+	return ""
 }

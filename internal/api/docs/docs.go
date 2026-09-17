@@ -2850,6 +2850,10 @@ const docTemplate = `{
                     "description": "RunningJobs is the number of currently running jobs",
                     "type": "integer"
                 },
+                "scenarioImage": {
+                    "description": "ScenarioImage is the resolved container image used by the scenario jobs",
+                    "type": "string"
+                },
                 "scenarioName": {
                     "description": "ScenarioName is the name of the scenario being executed",
                     "type": "string"
