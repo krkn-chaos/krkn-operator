@@ -92,14 +92,17 @@ definitions:
     properties:
       alertsIndex:
         type: string
+      availableToAll:
+        type: boolean
       caCert:
         description: |-
-          CACert is an optional PEM-encoded CA certificate (or bundle) trusted in
-          addition to the host's system root CAs, so a self-signed cluster is reachable
-          with TLS verification still enabled and publicly trusted chains keep working.
+          CACert is an optional PEM-encoded CA certificate (or bundle) used to trust
+          a self-signed cluster while keeping TLS verification enabled.
         type: string
-      grafanaUrl:
-        type: string
+      groups:
+        items:
+          type: string
+        type: array
       host:
         type: string
       insecureSkipTlsVerify:
@@ -137,12 +140,16 @@ definitions:
     properties:
       alertsIndex:
         type: string
+      availableToAll:
+        type: boolean
       createdAt:
         type: string
       createdBy:
         type: string
-      grafanaUrl:
-        type: string
+      groups:
+        items:
+          type: string
+        type: array
       host:
         type: string
       insecureSkipTlsVerify:
@@ -297,6 +304,8 @@ definitions:
     properties:
       alertsIndex:
         type: string
+      availableToAll:
+        type: boolean
       caCert:
         description: |-
           CACert is an optional PEM-encoded CA certificate (or bundle) trusted in
@@ -305,8 +314,10 @@ definitions:
           It is a pointer to make omission (nil, "leave the stored CA unchanged")
           distinguishable from an explicit empty string ("clear the stored CA").
         type: string
-      grafanaUrl:
-        type: string
+      groups:
+        items:
+          type: string
+        type: array
       host:
         type: string
       insecureSkipTlsVerify:
@@ -1089,6 +1100,8 @@ definitions:
         description: |-
           ScenarioImage is accepted for backwards compatibility but is ignored.
           Images are always resolved server-side from Scenario.
+          ScenarioImage is always serialized for config responses. It is empty
+          until the controller has resolved an executable image for a job.
         type: string
       scenarioName:
         description: |-

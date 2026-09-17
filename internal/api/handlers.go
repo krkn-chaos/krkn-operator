@@ -1476,6 +1476,30 @@ func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
+		if err := h.migrateLegacyElasticsearchConfig(ctx, esSecret); err != nil {
+			logger.Error(err, "Failed to migrate Elasticsearch config access settings", "name", req.ElasticsearchConfigName)
+			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+				Error:   "internal_error",
+				Message: "Failed to validate Elasticsearch config access",
+			})
+			return
+		}
+		accessible, err := h.canAccessElasticsearchConfig(ctx, esSecret)
+		if err != nil {
+			logger.Error(err, "Failed to check Elasticsearch config access", "name", req.ElasticsearchConfigName)
+			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+				Error:   "internal_error",
+				Message: "Failed to validate Elasticsearch config access",
+			})
+			return
+		}
+		if !accessible {
+			writeJSONError(w, http.StatusForbidden, ErrorResponse{
+				Error:   "forbidden",
+				Message: fmt.Sprintf("Access denied to Elasticsearch config '%s'", req.ElasticsearchConfigName),
+			})
+			return
+		}
 		if req.Environment == nil {
 			req.Environment = make(map[string]string)
 		}

@@ -18,7 +18,11 @@ package elasticsearch
 
 import (
 	"fmt"
+	"strconv"
+	"strings"
 	"time"
+
+	"github.com/krkn-chaos/krkn-operator/pkg/groupauth"
 )
 
 // Label and annotation keys for Elasticsearch config Secrets
@@ -27,6 +31,8 @@ const (
 	AppNameLabel = "app.kubernetes.io/name"
 	// AppComponentLabel is the standard component label
 	AppComponentLabel = "app.kubernetes.io/component"
+	// AvailableToAllLabel marks configs accessible by all users.
+	AvailableToAllLabel = "elasticsearch.krkn.krkn-chaos.dev/available-to-all"
 
 	// HostAnnotation stores the Elasticsearch host URL
 	HostAnnotation = "elasticsearch.krkn.krkn-chaos.dev/host"
@@ -38,8 +44,6 @@ const (
 	MetricsIndexAnnotation = "elasticsearch.krkn.krkn-chaos.dev/metrics-index"
 	// AlertsIndexAnnotation stores the alerts index name
 	AlertsIndexAnnotation = "elasticsearch.krkn.krkn-chaos.dev/alerts-index"
-	// GrafanaURLAnnotation stores the optional Grafana dashboard URL
-	GrafanaURLAnnotation = "elasticsearch.krkn.krkn-chaos.dev/grafana-url"
 	// InsecureSkipTLSVerifyAnnotation, when set to "true", disables TLS
 	// certificate verification for the cluster connection. This is opt-in for
 	// self-signed telemetry clusters; verification is enabled by default.
@@ -71,15 +75,31 @@ const (
 )
 
 // BuildLabels creates the labels map for an Elasticsearch config Secret
-func BuildLabels() map[string]string {
-	return map[string]string{
+func BuildLabels(groups []string, availableToAll bool) map[string]string {
+	labels := map[string]string{
 		AppNameLabel:      AppName,
 		AppComponentLabel: ComponentElasticsearchConfig,
 	}
+	labels[AvailableToAllLabel] = strconv.FormatBool(availableToAll)
+	for _, groupName := range groups {
+		labels[groupauth.GroupLabelKey(groupName)] = "true"
+	}
+	return labels
+}
+
+// ExtractGroupsFromLabels extracts group names from an Elasticsearch config Secret.
+func ExtractGroupsFromLabels(labels map[string]string) []string {
+	groups := []string{}
+	for key, value := range labels {
+		if strings.HasPrefix(key, groupauth.GroupLabelPrefix) && value == "true" {
+			groups = append(groups, strings.TrimPrefix(key, groupauth.GroupLabelPrefix))
+		}
+	}
+	return groups
 }
 
 // BuildAnnotations creates the annotations map for an Elasticsearch config Secret
-func BuildAnnotations(host string, port int, telemetryIndex, metricsIndex, alertsIndex, grafanaURL, createdBy string) map[string]string {
+func BuildAnnotations(host string, port int, telemetryIndex, metricsIndex, alertsIndex, createdBy string) map[string]string {
 	annotations := map[string]string{
 		HostAnnotation:      host,
 		PortAnnotation:      fmt.Sprintf("%d", port),
@@ -96,15 +116,11 @@ func BuildAnnotations(host string, port int, telemetryIndex, metricsIndex, alert
 	if alertsIndex != "" {
 		annotations[AlertsIndexAnnotation] = alertsIndex
 	}
-	if grafanaURL != "" {
-		annotations[GrafanaURLAnnotation] = grafanaURL
-	}
-
 	return annotations
 }
 
 // UpdateAnnotations updates the annotations for an Elasticsearch config Secret
-func UpdateAnnotations(existing map[string]string, host string, port int, telemetryIndex, metricsIndex, alertsIndex, grafanaURL, updatedBy string) map[string]string {
+func UpdateAnnotations(existing map[string]string, host string, port int, telemetryIndex, metricsIndex, alertsIndex, updatedBy string) map[string]string {
 	updated := make(map[string]string)
 	for k, v := range existing {
 		updated[k] = v
@@ -131,11 +147,5 @@ func UpdateAnnotations(existing map[string]string, host string, port int, teleme
 	} else {
 		delete(updated, AlertsIndexAnnotation)
 	}
-	if grafanaURL != "" {
-		updated[GrafanaURLAnnotation] = grafanaURL
-	} else {
-		delete(updated, GrafanaURLAnnotation)
-	}
-
 	return updated
 }
