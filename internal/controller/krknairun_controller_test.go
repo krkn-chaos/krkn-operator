@@ -169,8 +169,8 @@ func assertAIRunPodRuntimeConfig(
 			uploaderOutputDir = env.Value
 		}
 	}
-	if uploaderOutputDir != "/output/"+string(aiRun.UID) {
-		t.Fatalf("uploader must receive the run directory, got %q", uploaderOutputDir)
+	if uploaderOutputDir != "/output" {
+		t.Fatalf("uploader must receive the shared output parent directory, got %q", uploaderOutputDir)
 	}
 	var orchestratorPodName string
 	for _, env := range pod.Spec.Containers[0].Env {

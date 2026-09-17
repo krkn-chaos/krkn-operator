@@ -470,7 +470,7 @@ func buildOrchestratorPod(
 					ImagePullPolicy: defaultPullPolicy(options.serviceImagePullPolicy),
 					Command:         []string{"python", "-m", "krkn_ai.server", "uploader"},
 					Env: []corev1.EnvVar{
-						{Name: "KRKNAI_OUTPUT_DIR", Value: "/output/" + string(aiRun.UID)},
+						{Name: "KRKNAI_OUTPUT_DIR", Value: "/output"},
 						{Name: "KRKNAI_UPLOAD_STATE_DIR", Value: "/upload-state"},
 						{Name: "KRKNAI_RUN_UID", Value: string(aiRun.UID)},
 						{Name: "KRKNAI_SERVICE_URL", Value: options.serviceURL},
