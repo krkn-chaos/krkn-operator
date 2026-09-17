@@ -350,7 +350,7 @@ func (c ConnectionParams) tlsConfig() (*tls.Config, error) {
 // failing the whole query, so the returned slice may contain fewer documents
 // than the cluster reported hits. On success with no matching hits it returns a
 // non-nil, empty (len 0) slice and a nil error.
-func (c *Client) QueryTelemetry(ctx context.Context, conn ConnectionParams, size int, startDate, endDate string) (docs []TelemetryDocument, err error) {
+func (c *Client) QueryTelemetry(ctx context.Context, conn ConnectionParams, size int, startDate, endDate string) ([]TelemetryDocument, error) {
 	if conn.Index == "" {
 		return nil, fmt.Errorf("telemetry index is not configured for this Elasticsearch config")
 	}
@@ -362,22 +362,55 @@ func (c *Client) QueryTelemetry(ctx context.Context, conn ConnectionParams, size
 		return nil, fmt.Errorf("refusing to send credentials over plaintext HTTP; use https")
 	}
 
-	// Resolve the request executor: an injected Doer (tests) takes precedence;
-	// otherwise use the pooled http.Client for conn's TLS configuration.
-	doer := c.doer
-	if doer == nil {
-		transport, terr := c.transport(conn)
-		if terr != nil {
-			return nil, terr
-		}
-		// The http.Client is cheap; the pooled transport it wraps is what carries
-		// (and reuses) the underlying connections across queries.
-		doer = &http.Client{
-			Timeout:   queryTimeout,
-			Transport: transport,
-		}
+	doer, err := c.resolveDoer(conn)
+	if err != nil {
+		return nil, err
 	}
 
+	payload, err := buildSearchBody(size, startDate, endDate)
+	if err != nil {
+		return nil, err
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, queryTimeout)
+	defer cancel()
+	req, err := newSearchRequest(ctx, base, conn, payload)
+	if err != nil {
+		return nil, err
+	}
+
+	respBody, err := executeSearch(doer, req)
+	if err != nil {
+		return nil, err
+	}
+
+	return decodeTelemetry(respBody)
+}
+
+// resolveDoer selects the request executor for conn: an injected Doer (tests)
+// takes precedence; otherwise it wraps the pooled per-TLS-configuration
+// transport in a timeout-bounded http.Client.
+func (c *Client) resolveDoer(conn ConnectionParams) (Doer, error) {
+	if c.doer != nil {
+		return c.doer, nil
+	}
+	transport, err := c.transport(conn)
+	if err != nil {
+		return nil, err
+	}
+	// The http.Client is cheap; the pooled transport it wraps is what carries
+	// (and reuses) the underlying connections across queries.
+	return &http.Client{
+		Timeout:   queryTimeout,
+		Transport: transport,
+	}, nil
+}
+
+// buildSearchBody marshals the _search request body for the given size and date
+// bounds. Results are sorted newest-first so the size limit keeps the most
+// recent documents. startDate/endDate are "yyyy-MM-dd"; empty values default to
+// a trailing 30-day window.
+func buildSearchBody(size int, startDate, endDate string) ([]byte, error) {
 	// Lower bound: default to the start of the day 30 days ago; an explicit
 	// startDate is parsed via the "yyyy-MM-dd" format below.
 	gte := "now-30d/d"
@@ -434,11 +467,14 @@ func (c *Client) QueryTelemetry(ctx context.Context, conn ConnectionParams, size
 	if err != nil {
 		return nil, fmt.Errorf("failed to encode search query: %w", err)
 	}
+	return payload, nil
+}
 
+// newSearchRequest builds the POST _search request against conn.Index, setting
+// the JSON content type and basic-auth credentials when configured. The request
+// is bound to ctx.
+func newSearchRequest(ctx context.Context, base string, conn ConnectionParams, payload []byte) (*http.Request, error) {
 	url := fmt.Sprintf("%s/%s/_search", base, conn.Index)
-
-	ctx, cancel := context.WithTimeout(ctx, queryTimeout)
-	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
 	if err != nil {
 		return nil, fmt.Errorf("failed to build search request: %w", err)
@@ -447,7 +483,13 @@ func (c *Client) QueryTelemetry(ctx context.Context, conn ConnectionParams, size
 	if conn.Username != "" {
 		req.SetBasicAuth(conn.Username, conn.Password)
 	}
+	return req, nil
+}
 
+// executeSearch runs req, enforces the response-size cap, and validates the HTTP
+// status. It returns the raw success body (2xx); a non-2xx status yields a
+// *StatusError carrying a bounded, log-only body snippet.
+func executeSearch(doer Doer, req *http.Request) (body []byte, err error) {
 	resp, err := doer.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to reach Elasticsearch: %w", err)
@@ -481,12 +523,20 @@ func (c *Client) QueryTelemetry(ctx context.Context, conn ConnectionParams, size
 		return nil, &StatusError{StatusCode: resp.StatusCode, Body: snippet}
 	}
 
+	return respBody, nil
+}
+
+// decodeTelemetry parses a successful _search body and flattens each hit into a
+// TelemetryDocument. Hits whose _source does not match the expected telemetry
+// shape are skipped rather than failing the whole query, so the returned slice
+// may be shorter than the reported hit count; on no hits it is non-nil and empty.
+func decodeTelemetry(respBody []byte) ([]TelemetryDocument, error) {
 	var parsed esSearchResponse
 	if err := json.Unmarshal(respBody, &parsed); err != nil {
 		return nil, fmt.Errorf("failed to decode Elasticsearch response: %w", err)
 	}
 
-	docs = make([]TelemetryDocument, 0, len(parsed.Hits.Hits))
+	docs := make([]TelemetryDocument, 0, len(parsed.Hits.Hits))
 	for _, hit := range parsed.Hits.Hits {
 		var src rawTelemetrySource
 		if err := json.Unmarshal(hit.Source, &src); err != nil {
