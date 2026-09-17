@@ -195,6 +195,35 @@ yq -i \
    }]' \
   "$csv_file"
 
+# OLM expects each owned API to have a human-readable description and an
+# example annotation on the corresponding CRD. The CRD schemas already carry
+# the authoritative descriptions; copy them into the generated CSV and add a
+# per-kind example to the rendered CRD instead of maintaining a second list.
+for crd_file in "$output_dir"/manifests/*.yaml; do
+  [[ -f "$crd_file" ]] || continue
+  [[ "$(yq -r '.kind // ""' "$crd_file")" == "CustomResourceDefinition" ]] || continue
+
+  crd_name=$(yq -r '.metadata.name // ""' "$crd_file")
+  crd_kind=$(yq -r '.spec.names.kind // ""' "$crd_file")
+  crd_description=$(yq -r '.spec.versions[0].schema.openAPIV3Schema.description // ""' "$crd_file")
+  [[ -n "$crd_name" && -n "$crd_kind" ]] || continue
+
+  export CRD_NAME="$crd_name"
+  export CRD_KIND="$crd_kind"
+  export CRD_DESCRIPTION="$crd_description"
+  export CRD_EXAMPLE_JSON="$(yq -o=json -I=0 '[.[] | select(.kind == strenv(CRD_KIND))]' "$EXAMPLES_FILE")"
+
+  yq -i \
+    '.metadata.annotations = (.metadata.annotations // {}) |
+     .metadata.annotations."alm-examples" = strenv(CRD_EXAMPLE_JSON)' \
+    "$crd_file"
+
+  yq -i \
+    '(.spec.customresourcedefinitions.owned[] |
+      select(.name == strenv(CRD_NAME))).description = strenv(CRD_DESCRIPTION)' \
+    "$csv_file"
+done
+
 if [[ "$profile" == "ocp" ]]; then
   yq -i '.spec.install.spec.clusterPermissions += [{
     "serviceAccountName": "krkn-operator",
