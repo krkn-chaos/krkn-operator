@@ -20,11 +20,47 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
+
+// resolveManagedClusterKubeconfig retrieves a kubeconfig from a provider-specific Secret.
+func resolveManagedClusterKubeconfig(ctx context.Context, c client.Client, namespace, targetID, providerName, clusterName string) (string, error) {
+	var secret corev1.Secret
+	if err := c.Get(ctx, types.NamespacedName{Name: targetID, Namespace: namespace}, &secret); err != nil {
+		return "", fmt.Errorf("failed to fetch secret: %w", err)
+	}
+
+	managedClustersBytes, exists := secret.Data["managed-clusters"]
+	if !exists {
+		return "", fmt.Errorf("managed-clusters not found in secret")
+	}
+
+	var managedClusters map[string]map[string]struct {
+		Kubeconfig string `json:"kubeconfig"`
+	}
+	if err := json.Unmarshal(managedClustersBytes, &managedClusters); err != nil {
+		return "", fmt.Errorf("failed to parse managed-clusters JSON: %w", err)
+	}
+
+	providerClusters, exists := managedClusters[providerName]
+	if !exists {
+		return "", fmt.Errorf("provider '%s' not found in managed-clusters", providerName)
+	}
+
+	clusterConfig, exists := providerClusters[clusterName]
+	if !exists {
+		return "", fmt.Errorf("cluster '%s' not found in %s", clusterName, providerName)
+	}
+
+	return clusterConfig.Kubeconfig, nil
+}
 
 // checkProviderActive verifies if the specified provider is registered and active.
 // Returns true if the provider exists and is active, false otherwise.

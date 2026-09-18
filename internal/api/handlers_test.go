@@ -1128,6 +1128,7 @@ func TestListScenarioRuns_FilterByScenarioName(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "run-1",
 			Namespace: "default",
+			Labels:    map[string]string{"krkn.dev/ai-run": "ai-run"},
 		},
 		Spec: krknv1alpha1.KrknScenarioRunSpec{
 			Scenario: publicScenarioReference("pod-delete"),
@@ -1145,6 +1146,7 @@ func TestListScenarioRuns_FilterByScenarioName(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "run-2",
 			Namespace: "default",
+			Labels:    map[string]string{"krkn.dev/ai-run": "other-run"},
 		},
 		Spec: krknv1alpha1.KrknScenarioRunSpec{
 			Scenario: publicScenarioReference("node-drain"),
@@ -1184,6 +1186,21 @@ func TestListScenarioRuns_FilterByScenarioName(t *testing.T) {
 
 	if response.ScenarioRuns[0].ScenarioName != "pod-delete" {
 		t.Errorf("Expected ScenarioName='pod-delete', got '%s'", response.ScenarioRuns[0].ScenarioName)
+	}
+
+	labelReq := httptest.NewRequest(
+		"GET", ScenariosRunPath+"?labelSelector=krkn.dev%2Fai-run%3Dai-run", nil,
+	)
+	labelResponse := httptest.NewRecorder()
+	handler.ListScenarioRuns(labelResponse, labelReq)
+	if labelResponse.Code != http.StatusOK {
+		t.Fatalf("label filter returned status %d: %s", labelResponse.Code, labelResponse.Body.String())
+	}
+	if err := json.Unmarshal(labelResponse.Body.Bytes(), &response); err != nil {
+		t.Fatalf("failed to unmarshal label-filtered response: %v", err)
+	}
+	if len(response.ScenarioRuns) != 1 || response.ScenarioRuns[0].ScenarioRunName != "run-1" {
+		t.Fatalf("label filter returned unexpected runs: %+v", response.ScenarioRuns)
 	}
 }
 

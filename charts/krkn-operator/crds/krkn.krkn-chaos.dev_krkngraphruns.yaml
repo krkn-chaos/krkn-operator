@@ -101,7 +101,8 @@ spec:
                         private:
                           description: |-
                             Private selects a saved private registry when true, or krknctl's public
-                            Quay provider when false. A pointer makes the field mandatory on input.
+                            Quay provider when false. A pointer makes omission distinguishable from an
+                            explicit false value.
                           type: boolean
                         registryName:
                           description: RegistryName identifies the saved private registry
@@ -260,7 +261,8 @@ spec:
                   type: object
                 type: array
               message:
-                description: Message contains human-readable context about the current phase.
+                description: Message contains human-readable context for the current
+                  phase.
                 type: string
               nodeStatuses:
                 description: NodeStatuses contains the status of each node in the

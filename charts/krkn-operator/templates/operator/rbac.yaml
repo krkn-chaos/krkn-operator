@@ -80,6 +80,31 @@ rules:
   - patch
   - update
   - watch
+{{- if .Values.krknAI.enabled }}
+- apiGroups:
+  - krkn.krkn-chaos.dev
+  resources:
+  - krknairuns
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - serviceaccounts
+  verbs:
+  - get
+- apiGroups:
+  - krkn.krkn-chaos.dev
+  resources:
+  - krknairuns/status
+  verbs:
+  - get
+  - patch
+  - update
 - apiGroups:
   - krkn.krkn-chaos.dev
   resources:
@@ -96,6 +121,13 @@ rules:
   - get
   - patch
   - update
+- apiGroups:
+  - krkn.krkn-chaos.dev
+  resources:
+  - krknairuns/finalizers
+  verbs:
+  - update
+{{- end }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
