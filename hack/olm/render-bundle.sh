@@ -70,7 +70,8 @@ if [[ -f "$icon_file" ]]; then
     jpg|jpeg) icon_mediatype=image/jpeg ;;
     *) echo "unsupported icon format: $icon_file" >&2; exit 1 ;;
   esac
-  export ICON_BASE64="$(base64 < "$icon_file" | tr -d '\n')"
+  # Keep the base64 value valid while avoiding a single very long YAML line.
+  export ICON_BASE64="$(base64 < "$icon_file" | tr -d '\n' | fold -w 76)"
   export ICON_MEDIATYPE="$icon_mediatype"
 else
   export ICON_BASE64=""
@@ -217,7 +218,7 @@ for crd_file in "$output_dir"/manifests/*.yaml; do
   export CRD_NAME="$crd_name"
   export CRD_KIND="$crd_kind"
   export CRD_DESCRIPTION="$crd_description"
-  export CRD_EXAMPLE_JSON="$(yq -o=json -I=0 '[.[] | select(.kind == strenv(CRD_KIND))]' "$EXAMPLES_FILE")"
+  export CRD_EXAMPLE_JSON="$(yq -o=json -I=2 '[.[] | select(.kind == strenv(CRD_KIND))]' "$EXAMPLES_FILE")"
 
   yq -i \
     '.metadata.annotations = (.metadata.annotations // {}) |
@@ -241,5 +242,22 @@ if [[ -n "$ICON_BASE64" ]]; then
   yq -i '.spec.icon = [{"base64data": strenv(ICON_BASE64), "mediatype": strenv(ICON_MEDIATYPE)}]' \
     "$csv_file"
 fi
+
+# Keep generated YAML readable and compatible with the catalog linter. Operator
+# SDK emits large JSON annotations, CRD descriptions, and inline icon data as
+# single-line scalars. Literal block scalars preserve their values while
+# avoiding line-length warnings. Explicit document markers also make the
+# generated files valid standalone YAML documents for yamllint.
+while IFS= read -r yaml_file; do
+  yq -i '(... | select(tag == "!!str" and length > 180)) style="literal"' "$yaml_file"
+  if [[ "$(head -n 1 "$yaml_file")" != "---" ]]; then
+    normalized_file="$yaml_file.normalized"
+    {
+      printf '%s\n' '---'
+      cat "$yaml_file"
+    } > "$normalized_file"
+    mv "$normalized_file" "$yaml_file"
+  fi
+done < <(find "$output_dir" -type f -name '*.yaml' -print)
 
 operator-sdk bundle validate "$output_dir"

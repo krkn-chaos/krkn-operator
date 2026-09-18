@@ -69,6 +69,15 @@ jobs:
           echo "All owned CRDs must have a description" >&2
           exit 1
         fi
+        while IFS= read -r yaml_file; do
+          test "$(head -n 1 "$yaml_file")" = "---"
+          if awk 'length($0) > 180 { exit 1 }' "$yaml_file"; then
+            :
+          else
+            echo "YAML line exceeds 180 characters: $yaml_file" >&2
+            exit 1
+          fi
+        done < <(find "$output_dir" -type f -name '*.yaml' -print)
 
     - name: Build bundle image locally
       run: |
