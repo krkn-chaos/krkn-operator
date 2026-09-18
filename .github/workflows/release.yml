@@ -294,6 +294,15 @@ jobs:
               bundle_repository="$REGISTRY/$IMAGE_NAMESPACE/krkn-operator-bundle-ocp"
             fi
             hack/olm/render-bundle.sh "$profile" "$bundle_version" "$output_dir"
+            while IFS= read -r yaml_file; do
+              test "$(head -n 1 "$yaml_file")" = "---"
+              if awk 'length($0) > 180 { exit 1 }' "$yaml_file"; then
+                :
+              else
+                echo "YAML line exceeds 180 characters: $yaml_file" >&2
+                exit 1
+              fi
+            done < <(find "$output_dir" -type f -name '*.yaml' -print)
 
             docker buildx build \
               --platform linux/amd64,linux/arm64 \
