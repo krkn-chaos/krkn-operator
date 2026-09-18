@@ -23,6 +23,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -107,6 +108,17 @@ func (h *Handler) CreateElasticsearchConfig(w http.ResponseWriter, r *http.Reque
 		req.GrafanaURL,
 		createdBy,
 	)
+	if req.InsecureSkipTLSVerify {
+		annotations[elasticsearch.InsecureSkipTLSVerifyAnnotation] = "true"
+	}
+
+	data := map[string][]byte{
+		elasticsearch.SecretKeyUsername: []byte(req.Username),
+		elasticsearch.SecretKeyPassword: []byte(req.Password),
+	}
+	if req.CACert != "" {
+		data[elasticsearch.SecretKeyCACert] = []byte(req.CACert)
+	}
 
 	secret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
@@ -116,10 +128,7 @@ func (h *Handler) CreateElasticsearchConfig(w http.ResponseWriter, r *http.Reque
 			Annotations: annotations,
 		},
 		Type: corev1.SecretTypeOpaque,
-		Data: map[string][]byte{
-			elasticsearch.SecretKeyUsername: []byte(req.Username),
-			elasticsearch.SecretKeyPassword: []byte(req.Password),
-		},
+		Data: data,
 	}
 
 	if err := h.client.Create(ctx, secret); err != nil {
@@ -310,6 +319,18 @@ func (h *Handler) UpdateElasticsearchConfig(w http.ResponseWriter, r *http.Reque
 	if req.Password != "" {
 		secret.Data[elasticsearch.SecretKeyPassword] = []byte(req.Password)
 	}
+	if req.CACert != "" {
+		secret.Data[elasticsearch.SecretKeyCACert] = []byte(req.CACert)
+	}
+	// A nil pointer means the caller omitted the field: leave the stored TLS
+	// setting untouched. A non-nil value explicitly sets or clears it.
+	if req.InsecureSkipTLSVerify != nil {
+		if *req.InsecureSkipTLSVerify {
+			secret.Annotations[elasticsearch.InsecureSkipTLSVerifyAnnotation] = "true"
+		} else {
+			delete(secret.Annotations, elasticsearch.InsecureSkipTLSVerifyAnnotation)
+		}
+	}
 
 	if err := h.client.Update(ctx, secret); err != nil {
 		logger.Error(err, "Failed to update elasticsearch config", "name", configName)
@@ -429,6 +450,152 @@ func (h *Handler) ElasticsearchConfigsRouter(w http.ResponseWriter, r *http.Requ
 	})
 }
 
+// QueryElasticsearchTelemetry handles POST /api/v1/elasticsearch-query
+// It resolves the named Elasticsearch config Secret server-side (credentials
+// never leave the backend), connects to the cluster, and returns the most recent
+// telemetry documents. Available to any authenticated user, mirroring
+// ListElasticsearchConfigs.
+func (h *Handler) QueryElasticsearchTelemetry(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	logger := log.FromContext(ctx).WithName("query-elasticsearch-telemetry")
+
+	if r.Method != http.MethodPost {
+		writeJSONError(w, http.StatusMethodNotAllowed, ErrorResponse{
+			Error:   "method_not_allowed",
+			Message: "Only POST is allowed on " + ElasticsearchQueryPath,
+		})
+		return
+	}
+
+	var req elasticsearch.QueryTelemetryRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+			Error:   "bad_request",
+			Message: "Invalid request body: " + err.Error(),
+		})
+		return
+	}
+
+	if err := elasticsearch.ValidateQueryRequest(&req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+			Error:   "bad_request",
+			Message: err.Error(),
+		})
+		return
+	}
+
+	// Resolve the connection either from an ephemeral inline config (credentials
+	// supplied on the request, never persisted) or from a saved config Secret.
+	// ValidateQueryRequest guarantees exactly one of the two is set.
+	var conn elasticsearch.ConnectionParams
+	source := "inline"
+	if req.Inline != nil {
+		conn = buildInlineConnectionParams(req.Inline)
+	} else {
+		source = req.ConfigName
+		secret, err := h.loadElasticsearchConfigSecret(ctx, req.ConfigName)
+		if err != nil {
+			if apierrors.IsNotFound(err) {
+				writeJSONError(w, http.StatusNotFound, ErrorResponse{
+					Error:   "not_found",
+					Message: fmt.Sprintf("Elasticsearch config '%s' not found", req.ConfigName),
+				})
+			} else {
+				logger.Error(err, "Failed to load elasticsearch config", "name", req.ConfigName)
+				writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+					Error:   "internal_error",
+					Message: "Failed to load Elasticsearch config",
+				})
+			}
+			return
+		}
+		conn = buildConnectionParams(secret)
+	}
+
+	docs, err := h.esClient.QueryTelemetry(ctx, conn, req.Size, req.StartDate, req.EndDate)
+	if err != nil {
+		// Log bounded upstream diagnostics server-side for troubleshooting, but
+		// never return raw upstream bodies or internal client errors to the
+		// caller: respond with a stable, sanitized 502 message instead.
+		var statusErr *elasticsearch.StatusError
+		if errors.As(err, &statusErr) {
+			logger.Error(err, "Elasticsearch returned a non-success status",
+				"source", source, "status", statusErr.StatusCode)
+		} else {
+			logger.Error(err, "Failed to query elasticsearch telemetry", "source", source)
+		}
+		writeJSONError(w, http.StatusBadGateway, ErrorResponse{
+			Error:   "upstream_error",
+			Message: "Failed to query Elasticsearch",
+		})
+		return
+	}
+
+	logger.Info("Queried Elasticsearch telemetry", "source", source, "results", len(docs))
+
+	writeJSON(w, http.StatusOK, elasticsearch.QueryTelemetryResponse{
+		Documents: docs,
+		Total:     len(docs),
+	})
+}
+
+// buildConnectionParams assembles the connection parameters for a query from a
+// config Secret, reading the host/port/index from annotations and the
+// credentials from the Secret data.
+func buildConnectionParams(secret *corev1.Secret) elasticsearch.ConnectionParams {
+	port := elasticsearch.DefaultPort
+	if portStr := secret.Annotations[elasticsearch.PortAnnotation]; portStr != "" {
+		if p, err := strconv.Atoi(portStr); err == nil {
+			port = p
+		}
+	}
+
+	username := ""
+	if u, ok := secret.Data[elasticsearch.SecretKeyUsername]; ok {
+		username = string(u)
+	}
+	password := ""
+	if p, ok := secret.Data[elasticsearch.SecretKeyPassword]; ok {
+		password = string(p)
+	}
+	caCert := ""
+	if c, ok := secret.Data[elasticsearch.SecretKeyCACert]; ok {
+		caCert = string(c)
+	}
+
+	return elasticsearch.ConnectionParams{
+		Host:               secret.Annotations[elasticsearch.HostAnnotation],
+		Port:               port,
+		Username:           username,
+		Password:           password,
+		Index:              secret.Annotations[elasticsearch.TelemetryIndexAnnotation],
+		CACert:             caCert,
+		InsecureSkipVerify: secret.Annotations[elasticsearch.InsecureSkipTLSVerifyAnnotation] == "true",
+	}
+}
+
+// buildInlineConnectionParams assembles connection parameters from an ephemeral
+// inline connection supplied on a query request. The credentials are used only
+// for this request and are never persisted. A zero port falls back to the
+// default Elasticsearch port.
+func buildInlineConnectionParams(inline *elasticsearch.InlineConnection) elasticsearch.ConnectionParams {
+	port := inline.Port
+	if port == 0 {
+		port = elasticsearch.DefaultPort
+	}
+
+	// Inline connections always use default TLS verification with the system
+	// trust store: no custom CA, no insecure skip. Those remain admin-only,
+	// per-config settings.
+	return elasticsearch.ConnectionParams{
+		Host:     inline.Host,
+		Port:     port,
+		Username: inline.Username,
+		Password: inline.Password,
+		Index:    inline.TelemetryIndex,
+	}
+}
+
 // elasticsearchConfigExists reports whether an Elasticsearch config Secret with the given name
 // exists. It returns (false, nil) when the secret is absent, (true, nil) when it is present, and
 // (false, err) for any API or permission error so callers can surface a 500 rather than silently
@@ -482,17 +649,18 @@ func buildElasticsearchConfigResponse(secret *corev1.Secret) elasticsearch.Elast
 	}
 
 	return elasticsearch.ElasticsearchConfigResponse{
-		Name:           secret.Name,
-		Host:           secret.Annotations[elasticsearch.HostAnnotation],
-		Port:           port,
-		Username:       username,
-		TelemetryIndex: secret.Annotations[elasticsearch.TelemetryIndexAnnotation],
-		MetricsIndex:   secret.Annotations[elasticsearch.MetricsIndexAnnotation],
-		AlertsIndex:    secret.Annotations[elasticsearch.AlertsIndexAnnotation],
-		GrafanaURL:     secret.Annotations[elasticsearch.GrafanaURLAnnotation],
-		CreatedAt:      secret.Annotations[elasticsearch.CreatedAtAnnotation],
-		CreatedBy:      secret.Annotations[elasticsearch.CreatedByAnnotation],
-		UpdatedAt:      secret.Annotations[elasticsearch.UpdatedAtAnnotation],
-		UpdatedBy:      secret.Annotations[elasticsearch.UpdatedByAnnotation],
+		Name:                  secret.Name,
+		Host:                  secret.Annotations[elasticsearch.HostAnnotation],
+		Port:                  port,
+		Username:              username,
+		TelemetryIndex:        secret.Annotations[elasticsearch.TelemetryIndexAnnotation],
+		MetricsIndex:          secret.Annotations[elasticsearch.MetricsIndexAnnotation],
+		AlertsIndex:           secret.Annotations[elasticsearch.AlertsIndexAnnotation],
+		GrafanaURL:            secret.Annotations[elasticsearch.GrafanaURLAnnotation],
+		InsecureSkipTLSVerify: secret.Annotations[elasticsearch.InsecureSkipTLSVerifyAnnotation] == "true",
+		CreatedAt:             secret.Annotations[elasticsearch.CreatedAtAnnotation],
+		CreatedBy:             secret.Annotations[elasticsearch.CreatedByAnnotation],
+		UpdatedAt:             secret.Annotations[elasticsearch.UpdatedAtAnnotation],
+		UpdatedBy:             secret.Annotations[elasticsearch.UpdatedByAnnotation],
 	}
 }
