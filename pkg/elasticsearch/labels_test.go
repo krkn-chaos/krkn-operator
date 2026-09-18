@@ -23,7 +23,7 @@ import (
 )
 
 func TestBuildLabels(t *testing.T) {
-	got := BuildLabels()
+	got := BuildLabels(nil, false)
 
 	if got[AppNameLabel] != AppName {
 		t.Errorf("AppNameLabel = %q, want %q", got[AppNameLabel], AppName)
@@ -31,8 +31,26 @@ func TestBuildLabels(t *testing.T) {
 	if got[AppComponentLabel] != ComponentElasticsearchConfig {
 		t.Errorf("AppComponentLabel = %q, want %q", got[AppComponentLabel], ComponentElasticsearchConfig)
 	}
-	if len(got) != 2 {
-		t.Errorf("BuildLabels() returned %d labels, want 2", len(got))
+	if got[AvailableToAllLabel] != "false" {
+		t.Errorf("AvailableToAllLabel = %q, want false", got[AvailableToAllLabel])
+	}
+	if len(got) != 3 {
+		t.Errorf("BuildLabels() returned %d labels, want 3", len(got))
+	}
+}
+
+func TestBuildLabelsAccessControl(t *testing.T) {
+	got := BuildLabels([]string{"platform"}, false)
+	if got[AvailableToAllLabel] != "false" {
+		t.Error("group config should be explicitly marked unavailable to all")
+	}
+	if got["group.krkn.krkn-chaos.dev/platform"] != "true" {
+		t.Error("expected group label")
+	}
+
+	public := BuildLabels(nil, true)
+	if public[AvailableToAllLabel] != "true" {
+		t.Error("expected public config label")
 	}
 }
 

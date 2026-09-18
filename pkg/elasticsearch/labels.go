@@ -18,7 +18,11 @@ package elasticsearch
 
 import (
 	"fmt"
+	"strconv"
+	"strings"
 	"time"
+
+	"github.com/krkn-chaos/krkn-operator/pkg/groupauth"
 )
 
 // Label and annotation keys for Elasticsearch config Secrets
@@ -27,6 +31,8 @@ const (
 	AppNameLabel = "app.kubernetes.io/name"
 	// AppComponentLabel is the standard component label
 	AppComponentLabel = "app.kubernetes.io/component"
+	// AvailableToAllLabel marks configs accessible by all users.
+	AvailableToAllLabel = "elasticsearch.krkn.krkn-chaos.dev/available-to-all"
 
 	// HostAnnotation stores the Elasticsearch host URL
 	HostAnnotation = "elasticsearch.krkn.krkn-chaos.dev/host"
@@ -71,11 +77,27 @@ const (
 )
 
 // BuildLabels creates the labels map for an Elasticsearch config Secret
-func BuildLabels() map[string]string {
-	return map[string]string{
+func BuildLabels(groups []string, availableToAll bool) map[string]string {
+	labels := map[string]string{
 		AppNameLabel:      AppName,
 		AppComponentLabel: ComponentElasticsearchConfig,
 	}
+	labels[AvailableToAllLabel] = strconv.FormatBool(availableToAll)
+	for _, groupName := range groups {
+		labels[groupauth.GroupLabelKey(groupName)] = "true"
+	}
+	return labels
+}
+
+// ExtractGroupsFromLabels extracts group names from an Elasticsearch config Secret.
+func ExtractGroupsFromLabels(labels map[string]string) []string {
+	groups := []string{}
+	for key, value := range labels {
+		if strings.HasPrefix(key, groupauth.GroupLabelPrefix) && value == "true" {
+			groups = append(groups, strings.TrimPrefix(key, groupauth.GroupLabelPrefix))
+		}
+	}
+	return groups
 }
 
 // BuildAnnotations creates the annotations map for an Elasticsearch config Secret

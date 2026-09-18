@@ -27,6 +27,7 @@ import (
 	"testing"
 	"time"
 
+	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -34,7 +35,6 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 	fakeclient "sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
 	"github.com/krkn-chaos/krkn-operator/pkg/auth"
 	"github.com/krkn-chaos/krkn-operator/pkg/elasticsearch"
 )
@@ -45,7 +45,7 @@ func newEsTestSecret(name, namespace, host string, port int) *corev1.Secret {
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: namespace,
-			Labels:    elasticsearch.BuildLabels(),
+			Labels:    elasticsearch.BuildLabels(nil, true),
 			Annotations: elasticsearch.BuildAnnotations(
 				host, port, "telemetry-idx", "metrics-idx", "alerts-idx", "", "admin@test.local",
 			),
@@ -61,6 +61,7 @@ func newEsTestSecret(name, namespace, host string, port int) *corev1.Secret {
 func newEsScheme() *runtime.Scheme {
 	scheme := runtime.NewScheme()
 	_ = corev1.AddToScheme(scheme)
+	_ = krknv1alpha1.AddToScheme(scheme)
 	return scheme
 }
 
@@ -204,6 +205,8 @@ func TestCreateElasticsearchConfig_InvalidBody(t *testing.T) {
 func TestListElasticsearchConfigs_Success(t *testing.T) {
 	s1 := newEsTestSecret("es-prod", "default", "https://prod.es.example.com", 9200)
 	s2 := newEsTestSecret("es-staging", "default", "https://staging.es.example.com", 9300)
+	delete(s1.Labels, elasticsearch.AvailableToAllLabel)
+	delete(s2.Labels, elasticsearch.AvailableToAllLabel)
 	fakeClient := fakeclient.NewClientBuilder().WithScheme(newEsScheme()).WithObjects(s1, s2).Build()
 	handler := NewTestHandler(fakeClient, fake.NewSimpleClientset(), "default", "localhost:50051")
 
@@ -226,6 +229,19 @@ func TestListElasticsearchConfigs_Success(t *testing.T) {
 	}
 	if len(resp.Configs) != 2 {
 		t.Errorf("expected 2 configs, got %d", len(resp.Configs))
+	}
+	for _, config := range resp.Configs {
+		if !config.AvailableToAll {
+			t.Errorf("expected legacy config %q to be public", config.Name)
+		}
+	}
+
+	var migrated corev1.Secret
+	if err := fakeClient.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "es-prod"}, &migrated); err != nil {
+		t.Fatalf("failed to get migrated config: %v", err)
+	}
+	if migrated.Labels[elasticsearch.AvailableToAllLabel] != "true" {
+		t.Error("expected legacy config to be persisted as public")
 	}
 }
 
@@ -266,6 +282,85 @@ func TestListElasticsearchConfigs_NonAdminAllowed(t *testing.T) {
 	// List is open to any authenticated user, not admin-only
 	if w.Code != http.StatusOK {
 		t.Errorf("expected 200 for non-admin list, got %d", w.Code)
+	}
+}
+
+func TestListElasticsearchConfigs_GroupAccess(t *testing.T) {
+	groupSecret := newEsTestSecret("es-group", "default", "https://group.es.example.com", 9200)
+	groupSecret.Labels = elasticsearch.BuildLabels([]string{"platform"}, false)
+	publicSecret := newEsTestSecret("es-public", "default", "https://public.es.example.com", 9200)
+	user := &krknv1alpha1.KrknUser{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "krknuser-user-example-com",
+			Namespace: "default",
+			Labels:    map[string]string{"group.krkn.krkn-chaos.dev/platform": "true"},
+		},
+		Spec: krknv1alpha1.KrknUserSpec{UserID: "user@example.com"},
+	}
+	group := &krknv1alpha1.KrknUserGroup{
+		ObjectMeta: metav1.ObjectMeta{Name: "platform", Namespace: "default"},
+		Spec:       krknv1alpha1.KrknUserGroupSpec{Name: "platform"},
+	}
+
+	fakeClient := fakeclient.NewClientBuilder().WithScheme(newEsScheme()).WithObjects(groupSecret, publicSecret, user, group).Build()
+	handler := NewTestHandler(fakeClient, fake.NewSimpleClientset(), "default", "localhost:50051")
+	req := httptest.NewRequest(http.MethodGet, ElasticsearchConfigsPath, nil).WithContext(createUserContext("user@example.com"))
+	w := httptest.NewRecorder()
+
+	handler.ListElasticsearchConfigs(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp elasticsearch.ListElasticsearchConfigsResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal failed: %v", err)
+	}
+	if resp.Total != 2 {
+		t.Errorf("expected public and authorized group configs, got %d", resp.Total)
+	}
+}
+
+func TestListElasticsearchConfigs_GroupAccessDenied(t *testing.T) {
+	groupSecret := newEsTestSecret("es-group", "default", "https://group.es.example.com", 9200)
+	groupSecret.Labels = elasticsearch.BuildLabels([]string{"platform"}, false)
+	publicSecret := newEsTestSecret("es-public", "default", "https://public.es.example.com", 9200)
+	user := &krknv1alpha1.KrknUser{
+		ObjectMeta: metav1.ObjectMeta{Name: "krknuser-user-example-com", Namespace: "default"},
+		Spec:       krknv1alpha1.KrknUserSpec{UserID: "user@example.com"},
+	}
+
+	fakeClient := fakeclient.NewClientBuilder().WithScheme(newEsScheme()).WithObjects(groupSecret, publicSecret, user).Build()
+	handler := NewTestHandler(fakeClient, fake.NewSimpleClientset(), "default", "localhost:50051")
+	req := httptest.NewRequest(http.MethodGet, ElasticsearchConfigsPath, nil).WithContext(createUserContext("user@example.com"))
+	w := httptest.NewRecorder()
+
+	handler.ListElasticsearchConfigs(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp elasticsearch.ListElasticsearchConfigsResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal failed: %v", err)
+	}
+	if resp.Total != 1 || resp.Configs[0].Name != "es-public" {
+		t.Errorf("expected only public config, got %+v", resp.Configs)
+	}
+}
+
+func TestListElasticsearchConfigs_GroupLookupFailure(t *testing.T) {
+	groupSecret := newEsTestSecret("es-group", "default", "https://group.es.example.com", 9200)
+	groupSecret.Labels = elasticsearch.BuildLabels([]string{"platform"}, false)
+	fakeClient := fakeclient.NewClientBuilder().WithScheme(newEsScheme()).WithObjects(groupSecret).Build()
+	handler := NewTestHandler(fakeClient, fake.NewSimpleClientset(), "default", "localhost:50051")
+	req := httptest.NewRequest(http.MethodGet, ElasticsearchConfigsPath, nil).WithContext(createUserContext("missing@example.com"))
+	w := httptest.NewRecorder()
+
+	handler.ListElasticsearchConfigs(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("expected 500 when group lookup fails, got %d", w.Code)
 	}
 }
 
@@ -471,7 +566,7 @@ func TestUpdateElasticsearchConfig_NilDataMapDoesNotPanic(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "no-data-es",
 			Namespace: "default",
-			Labels:    elasticsearch.BuildLabels(),
+			Labels:    elasticsearch.BuildLabels(nil, false),
 			Annotations: elasticsearch.BuildAnnotations(
 				"https://es.example.com", 9200, "", "", "", "", "admin@test.local",
 			),
@@ -694,7 +789,7 @@ func newEsTestSecretWithHost(name, namespace, host, telemetryIndex string) *core
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: namespace,
-			Labels:    elasticsearch.BuildLabels(),
+			Labels:    elasticsearch.BuildLabels(nil, true),
 			Annotations: elasticsearch.BuildAnnotations(
 				host, 9200, telemetryIndex, "", "", "", "admin@test.local",
 			),

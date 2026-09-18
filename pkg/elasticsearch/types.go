@@ -42,7 +42,9 @@ type CreateElasticsearchConfigRequest struct {
 	// InsecureSkipTLSVerify disables TLS certificate verification entirely. It is
 	// a restricted last resort for self-signed clusters without CA material;
 	// prefer CACert.
-	InsecureSkipTLSVerify bool `json:"insecureSkipTlsVerify,omitempty"`
+	InsecureSkipTLSVerify bool     `json:"insecureSkipTlsVerify,omitempty"`
+	Groups                []string `json:"groups,omitempty"`
+	AvailableToAll        bool     `json:"availableToAll,omitempty"`
 }
 
 // UpdateElasticsearchConfigRequest represents the request to update an ES config.
@@ -64,7 +66,9 @@ type UpdateElasticsearchConfigRequest struct {
 	// a restricted last resort for self-signed clusters without CA material;
 	// prefer CACert. A nil pointer leaves the stored setting unchanged; a non-nil
 	// value explicitly sets or clears it.
-	InsecureSkipTLSVerify *bool `json:"insecureSkipTlsVerify,omitempty"`
+	InsecureSkipTLSVerify *bool    `json:"insecureSkipTlsVerify,omitempty"`
+	Groups                []string `json:"groups,omitempty"`
+	AvailableToAll        *bool    `json:"availableToAll,omitempty"`
 }
 
 // ElasticsearchConfigResponse represents an ES config in API responses.
@@ -81,11 +85,13 @@ type ElasticsearchConfigResponse struct {
 	// InsecureSkipTLSVerify reports whether TLS certificate verification is
 	// disabled for this config. Surfaced so the admin edit form can show and
 	// re-submit the current setting; it is not a secret.
-	InsecureSkipTLSVerify bool   `json:"insecureSkipTlsVerify,omitempty"`
-	CreatedAt             string `json:"createdAt,omitempty"`
-	CreatedBy             string `json:"createdBy,omitempty"`
-	UpdatedAt             string `json:"updatedAt,omitempty"`
-	UpdatedBy             string `json:"updatedBy,omitempty"`
+	InsecureSkipTLSVerify bool     `json:"insecureSkipTlsVerify,omitempty"`
+	CreatedAt             string   `json:"createdAt,omitempty"`
+	CreatedBy             string   `json:"createdBy,omitempty"`
+	UpdatedAt             string   `json:"updatedAt,omitempty"`
+	UpdatedBy             string   `json:"updatedBy,omitempty"`
+	Groups                []string `json:"groups,omitempty"`
+	AvailableToAll        bool     `json:"availableToAll"`
 }
 
 // ListElasticsearchConfigsResponse represents the response for listing ES configs

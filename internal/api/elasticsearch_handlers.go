@@ -31,6 +31,7 @@ import (
 
 	"github.com/krkn-chaos/krkn-operator/pkg/auth"
 	"github.com/krkn-chaos/krkn-operator/pkg/elasticsearch"
+	"github.com/krkn-chaos/krkn-operator/pkg/groupauth"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -98,7 +99,7 @@ func (h *Handler) CreateElasticsearchConfig(w http.ResponseWriter, r *http.Reque
 		port = elasticsearch.DefaultPort
 	}
 
-	labels := elasticsearch.BuildLabels()
+	labels := elasticsearch.BuildLabels(req.Groups, req.AvailableToAll)
 	annotations := elasticsearch.BuildAnnotations(
 		req.Host,
 		port,
@@ -170,9 +171,30 @@ func (h *Handler) ListElasticsearchConfigs(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	configs := make([]elasticsearch.ElasticsearchConfigResponse, len(secretList.Items))
-	for i, secret := range secretList.Items {
-		configs[i] = buildElasticsearchConfigResponse(&secret)
+	configs := make([]elasticsearch.ElasticsearchConfigResponse, 0, len(secretList.Items))
+	for i := range secretList.Items {
+		secret := &secretList.Items[i]
+		if err := h.migrateLegacyElasticsearchConfig(ctx, secret); err != nil {
+			logger.Error(err, "Failed to migrate legacy Elasticsearch config", "name", secret.Name)
+			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+				Error:   "internal_error",
+				Message: "Failed to migrate Elasticsearch config access settings",
+			})
+			return
+		}
+		accessible, err := h.canAccessElasticsearchConfig(ctx, secret)
+		if err != nil {
+			logger.Error(err, "Failed to evaluate Elasticsearch config access", "name", secret.Name)
+			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+				Error:   "internal_error",
+				Message: "Failed to evaluate Elasticsearch config access",
+			})
+			return
+		}
+		if !accessible {
+			continue
+		}
+		configs = append(configs, buildElasticsearchConfigResponse(secret))
 	}
 
 	logger.Info("Listed Elasticsearch configs", "total", len(configs))
@@ -223,6 +245,14 @@ func (h *Handler) GetElasticsearchConfig(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	if err := h.migrateLegacyElasticsearchConfig(ctx, secret); err != nil {
+		logger.Error(err, "Failed to migrate legacy Elasticsearch config", "name", secret.Name)
+		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+			Error:   "internal_error",
+			Message: "Failed to migrate Elasticsearch config access settings",
+		})
+		return
+	}
 	logger.Info("Retrieved Elasticsearch config", "name", configName)
 	writeJSON(w, http.StatusOK, buildElasticsearchConfigResponse(secret))
 }
@@ -305,6 +335,10 @@ func (h *Handler) UpdateElasticsearchConfig(w http.ResponseWriter, r *http.Reque
 		req.GrafanaURL,
 		updatedBy,
 	)
+	if req.Groups != nil || req.AvailableToAll != nil {
+		availableToAll := req.AvailableToAll != nil && *req.AvailableToAll
+		secret.Labels = elasticsearch.BuildLabels(req.Groups, availableToAll)
+	}
 
 	// Guard against a Secret that was created without a Data map.
 	if secret.Data == nil {
@@ -648,6 +682,12 @@ func buildElasticsearchConfigResponse(secret *corev1.Secret) elasticsearch.Elast
 		username = string(u)
 	}
 
+	groups := elasticsearch.ExtractGroupsFromLabels(secret.Labels)
+	availableToAll := secret.Labels[elasticsearch.AvailableToAllLabel] == "true"
+	if len(groups) == 0 && secret.Labels[elasticsearch.AvailableToAllLabel] == "" {
+		availableToAll = true
+	}
+
 	return elasticsearch.ElasticsearchConfigResponse{
 		Name:                  secret.Name,
 		Host:                  secret.Annotations[elasticsearch.HostAnnotation],
@@ -662,5 +702,51 @@ func buildElasticsearchConfigResponse(secret *corev1.Secret) elasticsearch.Elast
 		CreatedBy:             secret.Annotations[elasticsearch.CreatedByAnnotation],
 		UpdatedAt:             secret.Annotations[elasticsearch.UpdatedAtAnnotation],
 		UpdatedBy:             secret.Annotations[elasticsearch.UpdatedByAnnotation],
+		Groups:                groups,
+		AvailableToAll:        availableToAll,
 	}
+}
+
+// migrateLegacyElasticsearchConfig marks configs created before access control
+// was introduced as public while preserving explicitly assigned group configs.
+func (h *Handler) migrateLegacyElasticsearchConfig(ctx context.Context, secret *corev1.Secret) error {
+	if len(elasticsearch.ExtractGroupsFromLabels(secret.Labels)) > 0 || secret.Labels[elasticsearch.AvailableToAllLabel] != "" {
+		return nil
+	}
+	if secret.Labels == nil {
+		secret.Labels = map[string]string{}
+	}
+	secret.Labels[elasticsearch.AvailableToAllLabel] = "true"
+	if err := h.client.Update(ctx, secret); err != nil {
+		return fmt.Errorf("persist public access for legacy config %q: %w", secret.Name, err)
+	}
+	return nil
+}
+
+func (h *Handler) canAccessElasticsearchConfig(ctx context.Context, secret *corev1.Secret) (bool, error) {
+	if auth.IsAdmin(ctx) || secret.Labels[elasticsearch.AvailableToAllLabel] == "true" {
+		return true, nil
+	}
+	// Configs created before access control was introduced remain available.
+	if len(elasticsearch.ExtractGroupsFromLabels(secret.Labels)) == 0 && secret.Labels[elasticsearch.AvailableToAllLabel] == "" {
+		return true, nil
+	}
+	claims := auth.GetClaimsFromContext(ctx)
+	if claims == nil {
+		return false, nil
+	}
+	userGroups, err := groupauth.GetUserGroups(ctx, h.client, claims.UserID, h.namespace)
+	if err != nil {
+		return false, fmt.Errorf("get user groups: %w", err)
+	}
+	userGroupNames := make(map[string]bool, len(userGroups))
+	for _, group := range userGroups {
+		userGroupNames[group.Name] = true
+	}
+	for _, group := range elasticsearch.ExtractGroupsFromLabels(secret.Labels) {
+		if userGroupNames[group] {
+			return true, nil
+		}
+	}
+	return false, nil
 }
