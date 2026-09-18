@@ -18,11 +18,47 @@ package elasticsearch
 
 import (
 	"crypto/x509"
+	"encoding/pem"
 	"fmt"
+	"net/url"
 	"strings"
 
 	"github.com/krkn-chaos/krkn-operator/pkg/groupauth"
 )
+
+func validateTLSSettings(host, username, caCert string) error {
+	parsed, err := url.Parse(host)
+	if err != nil {
+		return fmt.Errorf("host must be a valid URL")
+	}
+	if username != "" && strings.EqualFold(parsed.Scheme, "http") {
+		return fmt.Errorf("credentials require a TLS connection; use an https host")
+	}
+	if caCert == "" {
+		return nil
+	}
+
+	rest := []byte(caCert)
+	parsedCertificate := false
+	for len(rest) > 0 {
+		block, remaining := pem.Decode(rest)
+		if block == nil {
+			break
+		}
+		rest = remaining
+		if block.Type != "CERTIFICATE" {
+			continue
+		}
+		if _, err := x509.ParseCertificate(block.Bytes); err != nil {
+			return fmt.Errorf("caCert must be a valid PEM-encoded certificate")
+		}
+		parsedCertificate = true
+	}
+	if !parsedCertificate {
+		return fmt.Errorf("caCert must be a valid PEM-encoded certificate")
+	}
+	return nil
+}
 
 func validateAccess(groups []string, availableToAll bool) error {
 	if len(groups) > 0 && availableToAll {
@@ -51,6 +87,9 @@ func ValidateCreateRequest(req *CreateElasticsearchConfigRequest) error {
 	if req.Port < 0 || req.Port > 65535 {
 		return fmt.Errorf("port must be between 0 and 65535")
 	}
+	if err := validateTLSSettings(req.Host, req.Username, req.CACert); err != nil {
+		return err
+	}
 	return validateAccess(req.Groups, req.AvailableToAll)
 }
 
@@ -61,6 +100,9 @@ func ValidateUpdateRequest(req *UpdateElasticsearchConfigRequest) error {
 	}
 	if req.Port < 0 || req.Port > 65535 {
 		return fmt.Errorf("port must be between 0 and 65535")
+	}
+	if err := validateTLSSettings(req.Host, req.Username, req.CACert); err != nil {
+		return err
 	}
 	availableToAll := false
 	if req.AvailableToAll != nil {

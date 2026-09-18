@@ -35,7 +35,6 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 	fakeclient "sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
 	"github.com/krkn-chaos/krkn-operator/pkg/auth"
 	"github.com/krkn-chaos/krkn-operator/pkg/elasticsearch"
 )
@@ -790,7 +789,7 @@ func newEsTestSecretWithHost(name, namespace, host, telemetryIndex string) *core
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: namespace,
-			Labels:    elasticsearch.BuildLabels(),
+			Labels:    elasticsearch.BuildLabels(nil, true),
 			Annotations: elasticsearch.BuildAnnotations(
 				host, 9200, telemetryIndex, "", "", "", "admin@test.local",
 			),

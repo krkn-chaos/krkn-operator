@@ -702,8 +702,8 @@ func buildElasticsearchConfigResponse(secret *corev1.Secret) elasticsearch.Elast
 		CreatedBy:             secret.Annotations[elasticsearch.CreatedByAnnotation],
 		UpdatedAt:             secret.Annotations[elasticsearch.UpdatedAtAnnotation],
 		UpdatedBy:             secret.Annotations[elasticsearch.UpdatedByAnnotation],
-		Groups:         groups,
-		AvailableToAll: availableToAll,
+		Groups:                groups,
+		AvailableToAll:        availableToAll,
 	}
 }
 
