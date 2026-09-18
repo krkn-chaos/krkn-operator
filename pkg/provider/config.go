@@ -37,6 +37,10 @@ import (
 const (
 	// UUIDLabel is the label key for the UUID
 	UUIDLabel = "krkn.krkn-chaos.dev/uuid"
+	// ProviderConfigLabel identifies ConfigMaps containing saved provider settings.
+	ProviderConfigLabel = "krkn.krkn-chaos.dev/provider-config"
+	// ProviderConfigLabelValue is the value used for ProviderConfigLabel.
+	ProviderConfigLabelValue = "true"
 )
 
 // CreateProviderConfigRequest creates a new KrknOperatorTargetProviderConfig CR

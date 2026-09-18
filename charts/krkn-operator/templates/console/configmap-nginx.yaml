@@ -60,6 +60,8 @@ data:
             location /api/ {
                 # The console and operator Service are always in the same namespace.
                 # Kubernetes resolves the short Service name using the pod's DNS search domain.
+                client_max_body_size 105m;
+
                 proxy_pass http://{{ include "krkn-operator.operator.fullname" . }}:{{ .Values.operator.service.port }};
 
                 # Proxy headers
