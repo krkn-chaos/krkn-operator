@@ -2274,6 +2274,7 @@ func (h *Handler) ListScenarioRuns(w http.ResponseWriter, r *http.Request) {
 		run := ScenarioRunListItem{
 			ScenarioRunName:  sr.Name,
 			ScenarioName:     sr.Spec.Scenario.Name,
+			ScenarioImage:    scenarioRunImage(sr.Status.ClusterJobs),
 			Phase:            sr.Status.Phase,
 			TotalTargets:     sr.Status.TotalTargets,
 			SuccessfulJobs:   sr.Status.SuccessfulJobs,

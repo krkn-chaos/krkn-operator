@@ -65,6 +65,11 @@ func TestGetScenarioRunConfig_Success(t *testing.T) {
 				},
 			},
 		},
+		Status: krknv1alpha1.KrknScenarioRunStatus{
+			ClusterJobs: []krknv1alpha1.ClusterJobStatus{
+				{ContainerImage: "quay.io/krkn-chaos/krkn-hub:dummy-scenario"},
+			},
+		},
 	}
 
 	fakeClient := fake.NewClientBuilder().
@@ -96,6 +101,7 @@ func TestGetScenarioRunConfig_Success(t *testing.T) {
 
 	assert.Equal(t, "target-123", payload.TargetRequestID)
 	assert.Equal(t, "dummy-scenario", payload.Scenario.Name)
+	assert.Equal(t, "quay.io/krkn-chaos/krkn-hub:dummy-scenario", payload.ScenarioImage)
 	assert.NotNil(t, payload.Scenario.Private)
 	assert.False(t, *payload.Scenario.Private)
 	assert.Equal(t, map[string][]string{"krkn-operator": {"cluster1", "cluster2"}}, payload.TargetClusters)
@@ -106,6 +112,21 @@ func TestGetScenarioRunConfig_Success(t *testing.T) {
 	assert.Equal(t, "file-uuid-001", payload.FileReferences[0].FileID)
 	assert.Equal(t, "/etc/krkn/config.yaml", payload.FileReferences[0].MountPath)
 
+}
+
+func TestReconstructScenarioRunPayload_AlwaysSerializesScenarioImage(t *testing.T) {
+	scenarioRun := &krknv1alpha1.KrknScenarioRun{
+		Spec: krknv1alpha1.KrknScenarioRunSpec{
+			Scenario: publicScenarioReference("pending-scenario"),
+		},
+	}
+
+	payload, err := (&Handler{}).reconstructScenarioRunPayload(context.Background(), scenarioRun)
+	require.NoError(t, err)
+
+	encoded, err := json.Marshal(payload)
+	require.NoError(t, err)
+	assert.Contains(t, string(encoded), `"scenarioImage":""`)
 }
 
 func TestGetScenarioRunConfig_NotFound(t *testing.T) {

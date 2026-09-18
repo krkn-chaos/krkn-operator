@@ -230,6 +230,9 @@ func (h *Handler) reconstructScenarioRunPayload(ctx context.Context, scenarioRun
 		TargetRequestID: scenarioRun.Spec.TargetRequestID,
 		TargetClusters:  scenarioRun.Spec.TargetClusters,
 		Scenario:        scenarioRun.Spec.Scenario,
+		// Retain the resolved image for console display and replay compatibility.
+		// The server still resolves the executable image from Scenario on submit.
+		ScenarioImage: scenarioRunImage(scenarioRun.Status.ClusterJobs),
 
 		// Optional fields
 		Environment:    scenarioRun.Spec.Environment,
