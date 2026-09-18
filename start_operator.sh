@@ -14,7 +14,7 @@ NC='\033[0m' # No Color
 API_PORT=${API_PORT:-8080}
 METRICS_ADDR=${METRICS_ADDR:-":8443"}
 HEALTH_PROBE_ADDR=${HEALTH_PROBE_ADDR:-":8083"}
-KRKN_NAMESPACE=${KRKN_NAMESPACE:-"default"}
+KRKN_NAMESPACE=${KRKN_NAMESPACE:-"krkn-operator-system"}
 INSTALL_CRDS=${INSTALL_CRDS:-true}
 BUILD=${BUILD:-true}
 
@@ -191,7 +191,7 @@ Environment variables:
     API_PORT                REST API port (default: 8080)
     METRICS_ADDR            Metrics endpoint address (default: :8443)
     HEALTH_PROBE_ADDR       Health probe address (default: :8083)
-    KRKN_NAMESPACE          Namespace for KrknTargetRequest CRs (default: default)
+    KRKN_NAMESPACE          Namespace for KrknTargetRequest CRs (default: krkn-operator-system)
     INSTALL_CRDS            Install CRDs (default: true)
     BUILD                   Build operator (default: true)
 
