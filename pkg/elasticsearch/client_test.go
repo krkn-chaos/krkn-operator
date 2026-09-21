@@ -314,6 +314,35 @@ func TestClientTransportPooling(t *testing.T) {
 	}
 }
 
+// roundTripperFunc is a non-*http.Transport RoundTripper used to simulate a
+// replaced http.DefaultTransport.
+type roundTripperFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripperFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func TestClientTransportDefaultNotHTTPTransport(t *testing.T) {
+	// If http.DefaultTransport is replaced with a non-*http.Transport, transport
+	// must fall back to a fresh *http.Transport instead of panicking on a nil
+	// pointer dereference in Clone.
+	orig := http.DefaultTransport
+	http.DefaultTransport = roundTripperFunc(func(*http.Request) (*http.Response, error) {
+		return nil, nil
+	})
+	defer func() { http.DefaultTransport = orig }()
+
+	c := NewClient()
+	tr, err := c.transport(ConnectionParams{Host: "https://a.example.com"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if tr == nil {
+		t.Fatal("expected a non-nil transport fallback")
+	}
+	if tr.TLSClientConfig == nil {
+		t.Error("expected TLS config to be attached to the fallback transport")
+	}
+}
+
 func TestTransportKey(t *testing.T) {
 	tests := []struct {
 		name string

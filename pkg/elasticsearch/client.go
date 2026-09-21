@@ -151,9 +151,15 @@ func (c *Client) transport(conn ConnectionParams) (*http.Transport, error) {
 		return nil, err
 	}
 	// Clone the stdlib default transport so we inherit its connection-pool and
-	// timeout defaults, then attach the per-configuration TLS settings.
-	t, _ := http.DefaultTransport.(*http.Transport)
-	transport := t.Clone()
+	// timeout defaults, then attach the per-configuration TLS settings. The type
+	// assertion can fail if http.DefaultTransport has been replaced with a
+	// non-*http.Transport (e.g. by a test or dependency); fall back to a fresh
+	// *http.Transport rather than dereferencing a nil pointer in Clone.
+	base, ok := http.DefaultTransport.(*http.Transport)
+	if !ok {
+		base = &http.Transport{}
+	}
+	transport := base.Clone()
 	transport.TLSClientConfig = tlsConfig
 	c.transports[key] = transport
 	return transport, nil
@@ -324,7 +330,15 @@ func (c ConnectionParams) tlsConfig() (*tls.Config, error) {
 
 	cfg := &tls.Config{MinVersion: tls.VersionTLS12}
 	if c.CACert != "" {
-		pool := x509.NewCertPool()
+		// Start from the system roots so the custom CA is additive: a cluster
+		// presenting a publicly trusted chain still verifies even when it is not
+		// part of the supplied bundle. SystemCertPool can fail (e.g. on a minimal
+		// image without a trust store); fall back to an empty pool holding only
+		// the supplied CA rather than failing the request.
+		pool, err := x509.SystemCertPool()
+		if err != nil || pool == nil {
+			pool = x509.NewCertPool()
+		}
 		if !pool.AppendCertsFromPEM([]byte(c.CACert)) {
 			return nil, fmt.Errorf("failed to parse CA certificate: no valid PEM certificates found")
 		}

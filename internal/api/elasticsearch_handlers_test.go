@@ -21,6 +21,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -464,6 +465,116 @@ func TestUpdateElasticsearchConfig_PreservesUsernameWhenEmpty(t *testing.T) {
 	}
 }
 
+// testCAPEM is a valid PEM certificate used to seed a stored CA in update tests.
+const testCAPEM = `-----BEGIN CERTIFICATE-----
+MIIBhTCCASugAwIBAgIQIRi6zePL6mKjOipn+dNuaTAKBggqhkjOPQQDAjASMRAw
+DgYDVQQKEwdBY21lIENvMB4XDTE3MTAyMDE5NDMwNloXDTE4MTAyMDE5NDMwNlow
+EjEQMA4GA1UEChMHQWNtZSBDbzBZMBMGByqGSM49AgEGCCqGSM49AwEHA0IABD0d
+7VNhbWvZLWPuj/RtHFjvtJBEwOkhbN/BnnE8rnZR8+sbwnc/KhCk3FhnpHZnQz7B
+5aETbbIgmuvewdjvSBSjYzBhMA4GA1UdDwEB/wQEAwICpDATBgNVHSUEDDAKBggr
+BgEFBQcDATAPBgNVHRMBAf8EBTADAQH/MCkGA1UdEQQiMCCCDmxvY2FsaG9zdDo1
+NDUzgg4xMjcuMC4wLjE6NTQ1MzAKBggqhkjOPQQDAgNIADBFAiEA2zpJEPQyz6/l
+Wf86aX6PepsntZv2GYlA5UpabfT2EZICICpJ5h/iI+i341gBmLiAFQOyTDT+/wQc
+6MF9+Yw1Yy0t
+-----END CERTIFICATE-----`
+
+func TestUpdateElasticsearchConfig_ClearsCACertWhenEmptyStringSupplied(t *testing.T) {
+	// A non-nil, empty CACert explicitly clears the stored certificate.
+	secret := newEsTestSecret("prod-es", "default", "https://es.example.com", 9200)
+	secret.Data[elasticsearch.SecretKeyCACert] = []byte(testCAPEM)
+	fakeClient := fakeclient.NewClientBuilder().WithScheme(newEsScheme()).WithObjects(secret).Build()
+	handler := NewTestHandler(fakeClient, fake.NewSimpleClientset(), "default", "localhost:50051")
+
+	body := elasticsearch.UpdateElasticsearchConfigRequest{
+		Host:   "https://es.example.com",
+		CACert: strPtr(""), // explicit clear
+	}
+	b, _ := json.Marshal(body)
+	req := httptest.NewRequest(http.MethodPut, ElasticsearchConfigsPath+"/prod-es", bytes.NewReader(b))
+	req = req.WithContext(createAdminContext())
+	w := httptest.NewRecorder()
+
+	handler.UpdateElasticsearchConfig(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var updated corev1.Secret
+	key := types.NamespacedName{Namespace: secret.Namespace, Name: secret.Name}
+	if err := fakeClient.Get(context.Background(), key, &updated); err != nil {
+		t.Fatalf("failed to get updated secret: %v", err)
+	}
+	if _, ok := updated.Data[elasticsearch.SecretKeyCACert]; ok {
+		t.Errorf("expected caCert key removed, still present: %q", updated.Data[elasticsearch.SecretKeyCACert])
+	}
+}
+
+func TestUpdateElasticsearchConfig_PreservesCACertWhenOmitted(t *testing.T) {
+	// A nil CACert (field omitted) leaves the stored certificate untouched.
+	stored := []byte(testCAPEM)
+	secret := newEsTestSecret("prod-es", "default", "https://es.example.com", 9200)
+	secret.Data[elasticsearch.SecretKeyCACert] = stored
+	fakeClient := fakeclient.NewClientBuilder().WithScheme(newEsScheme()).WithObjects(secret).Build()
+	handler := NewTestHandler(fakeClient, fake.NewSimpleClientset(), "default", "localhost:50051")
+
+	body := elasticsearch.UpdateElasticsearchConfigRequest{Host: "https://es.example.com"} // CACert nil
+	b, _ := json.Marshal(body)
+	req := httptest.NewRequest(http.MethodPut, ElasticsearchConfigsPath+"/prod-es", bytes.NewReader(b))
+	req = req.WithContext(createAdminContext())
+	w := httptest.NewRecorder()
+
+	handler.UpdateElasticsearchConfig(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var updated corev1.Secret
+	key := types.NamespacedName{Namespace: secret.Namespace, Name: secret.Name}
+	if err := fakeClient.Get(context.Background(), key, &updated); err != nil {
+		t.Fatalf("failed to get updated secret: %v", err)
+	}
+	if got := updated.Data[elasticsearch.SecretKeyCACert]; string(got) != string(stored) {
+		t.Errorf("expected caCert preserved, got %q", got)
+	}
+}
+
+func TestUpdateElasticsearchConfig_RejectsRetainedCredentialsOverPlaintext(t *testing.T) {
+	// Existing config has a stored username. The update omits credentials (keeping
+	// them) but switches Host to http://. The merged connection therefore has a
+	// username over plaintext, which the query client refuses. The update must be
+	// rejected rather than persisted.
+	secret := newEsTestSecret("prod-es", "default", "https://es.example.com", 9200)
+	fakeClient := fakeclient.NewClientBuilder().WithScheme(newEsScheme()).WithObjects(secret).Build()
+	handler := NewTestHandler(fakeClient, fake.NewSimpleClientset(), "default", "localhost:50051")
+
+	body := elasticsearch.UpdateElasticsearchConfigRequest{
+		Host:     "http://new-es.example.com",
+		Username: "", // preserved -> "elastic"
+	}
+	b, _ := json.Marshal(body)
+	req := httptest.NewRequest(http.MethodPut, ElasticsearchConfigsPath+"/prod-es", bytes.NewReader(b))
+	req = req.WithContext(createAdminContext())
+	w := httptest.NewRecorder()
+
+	handler.UpdateElasticsearchConfig(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for retained credentials over http, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// The rejected update must not have been persisted.
+	var stored corev1.Secret
+	key := types.NamespacedName{Namespace: secret.Namespace, Name: secret.Name}
+	if err := fakeClient.Get(context.Background(), key, &stored); err != nil {
+		t.Fatalf("failed to get secret: %v", err)
+	}
+	if host := stored.Annotations[elasticsearch.HostAnnotation]; host != "https://es.example.com" {
+		t.Errorf("expected host unchanged, got %q", host)
+	}
+}
+
 func TestUpdateElasticsearchConfig_NilDataMapDoesNotPanic(t *testing.T) {
 	// Construct a secret that has no Data map (nil) to verify the handler
 	// initializes it before writing rather than panicking.
@@ -626,6 +737,8 @@ func TestElasticsearchConfigsRouter_RoutesCorrectly(t *testing.T) {
 		{http.MethodGet, ElasticsearchConfigsPath + "/es-a", nil, http.StatusOK},
 		{http.MethodPut, ElasticsearchConfigsPath + "/es-a", elasticsearch.UpdateElasticsearchConfigRequest{Host: "https://updated.example.com"}, http.StatusOK},
 		{http.MethodDelete, ElasticsearchConfigsPath + "/es-b", nil, http.StatusOK},
+		{http.MethodPatch, ElasticsearchConfigsPath, nil, http.StatusMethodNotAllowed},
+		{http.MethodGet, ElasticsearchConfigsPath + "/a/b/extra", nil, http.StatusNotFound},
 	}
 
 	for _, tt := range tests {
@@ -651,36 +764,6 @@ func TestElasticsearchConfigsRouter_RoutesCorrectly(t *testing.T) {
 				t.Errorf("expected %d, got %d: %s", tt.wantStatus, w.Code, w.Body.String())
 			}
 		})
-	}
-}
-
-func TestElasticsearchConfigsRouter_MethodNotAllowed(t *testing.T) {
-	fakeClient := fakeclient.NewClientBuilder().WithScheme(newEsScheme()).Build()
-	handler := NewTestHandler(fakeClient, fake.NewSimpleClientset(), "default", "localhost:50051")
-
-	req := httptest.NewRequest(http.MethodPatch, ElasticsearchConfigsPath, nil)
-	req = req.WithContext(createAdminContext())
-	w := httptest.NewRecorder()
-
-	handler.ElasticsearchConfigsRouter(w, req)
-
-	if w.Code != http.StatusMethodNotAllowed {
-		t.Errorf("expected 405, got %d", w.Code)
-	}
-}
-
-func TestElasticsearchConfigsRouter_NotFound(t *testing.T) {
-	fakeClient := fakeclient.NewClientBuilder().WithScheme(newEsScheme()).Build()
-	handler := NewTestHandler(fakeClient, fake.NewSimpleClientset(), "default", "localhost:50051")
-
-	req := httptest.NewRequest(http.MethodGet, ElasticsearchConfigsPath+"/a/b/extra", nil)
-	req = req.WithContext(createAdminContext())
-	w := httptest.NewRecorder()
-
-	handler.ElasticsearchConfigsRouter(w, req)
-
-	if w.Code != http.StatusNotFound {
-		t.Errorf("expected 404, got %d", w.Code)
 	}
 }
 
@@ -782,68 +865,72 @@ func TestQueryElasticsearchTelemetry_InlineSuccess(t *testing.T) {
 	}
 }
 
-func TestQueryElasticsearchTelemetry_InlineMissingHost(t *testing.T) {
-	fakeClient := fakeclient.NewClientBuilder().WithScheme(newEsScheme()).Build()
-	handler := NewTestHandler(fakeClient, fake.NewSimpleClientset(), "default", "localhost:50051")
-
-	body, _ := json.Marshal(elasticsearch.QueryTelemetryRequest{
-		Inline: &elasticsearch.InlineConnection{TelemetryIndex: "krkn-telemetry"},
-	})
-	req := httptest.NewRequest(http.MethodPost, ElasticsearchQueryPath, bytes.NewReader(body))
-	req = req.WithContext(createUserContext("user@example.com"))
-	w := httptest.NewRecorder()
-
-	handler.QueryElasticsearchTelemetry(w, req)
-
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("expected 400, got %d", w.Code)
+// TestQueryElasticsearchTelemetry_StatusCases covers the request-validation and
+// method-guard paths that share one flow: build the handler against an empty
+// client (no stored config), issue the request, and assert only the HTTP status.
+// Success paths with body/stats assertions are tested separately.
+func TestQueryElasticsearchTelemetry_StatusCases(t *testing.T) {
+	mustBody := func(req elasticsearch.QueryTelemetryRequest) []byte {
+		b, err := json.Marshal(req)
+		if err != nil {
+			t.Fatalf("failed to marshal request body: %v", err)
+		}
+		return b
 	}
-}
 
-func TestQueryElasticsearchTelemetry_ConfigNotFound(t *testing.T) {
-	fakeClient := fakeclient.NewClientBuilder().WithScheme(newEsScheme()).Build()
-	handler := NewTestHandler(fakeClient, fake.NewSimpleClientset(), "default", "localhost:50051")
-
-	body, _ := json.Marshal(elasticsearch.QueryTelemetryRequest{ConfigName: "missing"})
-	req := httptest.NewRequest(http.MethodPost, ElasticsearchQueryPath, bytes.NewReader(body))
-	req = req.WithContext(createUserContext("user@example.com"))
-	w := httptest.NewRecorder()
-
-	handler.QueryElasticsearchTelemetry(w, req)
-
-	if w.Code != http.StatusNotFound {
-		t.Errorf("expected 404, got %d", w.Code)
+	tests := []struct {
+		name       string
+		method     string
+		body       []byte
+		wantStatus int
+	}{
+		{
+			name:   "inline missing host",
+			method: http.MethodPost,
+			body: mustBody(elasticsearch.QueryTelemetryRequest{
+				Inline: &elasticsearch.InlineConnection{TelemetryIndex: "krkn-telemetry"},
+			}),
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name:       "config not found",
+			method:     http.MethodPost,
+			body:       mustBody(elasticsearch.QueryTelemetryRequest{ConfigName: "missing"}),
+			wantStatus: http.StatusNotFound,
+		},
+		{
+			name:       "missing config name",
+			method:     http.MethodPost,
+			body:       mustBody(elasticsearch.QueryTelemetryRequest{}),
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name:       "method not allowed",
+			method:     http.MethodGet,
+			body:       nil,
+			wantStatus: http.StatusMethodNotAllowed,
+		},
 	}
-}
 
-func TestQueryElasticsearchTelemetry_MissingConfigName(t *testing.T) {
-	fakeClient := fakeclient.NewClientBuilder().WithScheme(newEsScheme()).Build()
-	handler := NewTestHandler(fakeClient, fake.NewSimpleClientset(), "default", "localhost:50051")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fakeClient := fakeclient.NewClientBuilder().WithScheme(newEsScheme()).Build()
+			handler := NewTestHandler(fakeClient, fake.NewSimpleClientset(), "default", "localhost:50051")
 
-	body, _ := json.Marshal(elasticsearch.QueryTelemetryRequest{})
-	req := httptest.NewRequest(http.MethodPost, ElasticsearchQueryPath, bytes.NewReader(body))
-	req = req.WithContext(createUserContext("user@example.com"))
-	w := httptest.NewRecorder()
+			var reqBody io.Reader
+			if tt.body != nil {
+				reqBody = bytes.NewReader(tt.body)
+			}
+			req := httptest.NewRequest(tt.method, ElasticsearchQueryPath, reqBody)
+			req = req.WithContext(createUserContext("user@example.com"))
+			w := httptest.NewRecorder()
 
-	handler.QueryElasticsearchTelemetry(w, req)
+			handler.QueryElasticsearchTelemetry(w, req)
 
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("expected 400, got %d", w.Code)
-	}
-}
-
-func TestQueryElasticsearchTelemetry_MethodNotAllowed(t *testing.T) {
-	fakeClient := fakeclient.NewClientBuilder().WithScheme(newEsScheme()).Build()
-	handler := NewTestHandler(fakeClient, fake.NewSimpleClientset(), "default", "localhost:50051")
-
-	req := httptest.NewRequest(http.MethodGet, ElasticsearchQueryPath, nil)
-	req = req.WithContext(createUserContext("user@example.com"))
-	w := httptest.NewRecorder()
-
-	handler.QueryElasticsearchTelemetry(w, req)
-
-	if w.Code != http.StatusMethodNotAllowed {
-		t.Errorf("expected 405, got %d", w.Code)
+			if w.Code != tt.wantStatus {
+				t.Errorf("expected %d, got %d", tt.wantStatus, w.Code)
+			}
+		})
 	}
 }
 
