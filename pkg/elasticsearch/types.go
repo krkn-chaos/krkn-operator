@@ -233,6 +233,9 @@ type QueryTelemetryResponse struct {
 // must be supplied; an inline connection additionally requires a host and a
 // telemetry index and must satisfy the shared TLS rules.
 func ValidateQueryRequest(req *QueryTelemetryRequest) error {
+	if req == nil {
+		return fmt.Errorf("request is required")
+	}
 	hasConfigName := req.ConfigName != ""
 	hasInline := req.Inline != nil
 	if hasConfigName == hasInline {

@@ -538,6 +538,12 @@ func TestValidateQueryRequest(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("nil request", func(t *testing.T) {
+		if err := ValidateQueryRequest(nil); err == nil {
+			t.Fatal("expected error for nil request, got nil")
+		}
+	})
 }
 
 func TestRawTelemetrySourceFlatten(t *testing.T) {
