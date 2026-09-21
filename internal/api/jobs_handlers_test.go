@@ -517,7 +517,7 @@ func TestBuildUnifiedJobList_IncludesResolvedScenarioImage(t *testing.T) {
 			},
 			Status: krknv1alpha1.KrknScenarioRunStatus{
 				ClusterJobs: []krknv1alpha1.ClusterJobStatus{
-					{ContainerImage: "quay.io/krkn-chaos/krkn-hub:pod-disruption"},
+					{ScenarioImage: "quay.io/krkn-chaos/krkn-hub:pod-disruption"},
 				},
 			},
 		},

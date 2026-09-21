@@ -182,7 +182,7 @@ func TestListScenarioRuns(t *testing.T) {
 func TestListScenarioRuns_IncludesResolvedScenarioImage(t *testing.T) {
 	run := makeScenarioRun("scenario-run", time.Now())
 	run.Status.ClusterJobs = []krknv1alpha1.ClusterJobStatus{
-		{ContainerImage: "quay.io/krkn-chaos/krkn-hub:pod-disruption"},
+		{ScenarioImage: "quay.io/krkn-chaos/krkn-hub:pod-disruption"},
 	}
 
 	scheme := runtime.NewScheme()

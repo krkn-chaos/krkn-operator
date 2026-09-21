@@ -67,7 +67,7 @@ func TestGetScenarioRunConfig_Success(t *testing.T) {
 		},
 		Status: krknv1alpha1.KrknScenarioRunStatus{
 			ClusterJobs: []krknv1alpha1.ClusterJobStatus{
-				{ContainerImage: "quay.io/krkn-chaos/krkn-hub:dummy-scenario"},
+				{ScenarioImage: "quay.io/krkn-chaos/krkn-hub:dummy-scenario"},
 			},
 		},
 	}

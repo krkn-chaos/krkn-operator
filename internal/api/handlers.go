@@ -1734,7 +1734,7 @@ func (h *Handler) GetScenarioRunStatus(w http.ResponseWriter, r *http.Request) {
 			ClusterName:     job.ClusterName,
 			JobID:           job.JobID,
 			PodName:         job.PodName,
-			ContainerImage:  job.ContainerImage,
+			ScenarioImage:   job.ScenarioImage,
 			Phase:           job.Phase,
 			Message:         job.Message,
 			StartTime:       convertMetaTime(job.StartTime),

@@ -322,7 +322,7 @@ func (r *KrknScenarioRunReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 				idx := outcome.target.existingJobIndex
 				scenarioRun.Status.ClusterJobs[idx].JobID = outcome.jobID
 				scenarioRun.Status.ClusterJobs[idx].PodName = outcome.podName
-				scenarioRun.Status.ClusterJobs[idx].ContainerImage = outcome.image
+				scenarioRun.Status.ClusterJobs[idx].ScenarioImage = outcome.image
 				scenarioRun.Status.ClusterJobs[idx].Phase = "Pending"
 				scenarioRun.Status.ClusterJobs[idx].StartTime = &now
 				scenarioRun.Status.ClusterJobs[idx].CompletionTime = nil
@@ -333,16 +333,16 @@ func (r *KrknScenarioRunReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 					"retryAttempt", scenarioRun.Status.ClusterJobs[idx].RetryCount)
 			} else {
 				scenarioRun.Status.ClusterJobs = append(scenarioRun.Status.ClusterJobs, krknv1alpha1.ClusterJobStatus{
-					ProviderName:   outcome.target.providerName,
-					ClusterName:    outcome.target.clusterName,
-					ClusterAPIURL:  outcome.target.clusterAPIURL,
-					JobID:          outcome.jobID,
-					PodName:        outcome.podName,
-					ContainerImage: outcome.image,
-					Phase:          "Pending",
-					StartTime:      &now,
-					RetryCount:     0,
-					MaxRetries:     0,
+					ProviderName:  outcome.target.providerName,
+					ClusterName:   outcome.target.clusterName,
+					ClusterAPIURL: outcome.target.clusterAPIURL,
+					JobID:         outcome.jobID,
+					PodName:       outcome.podName,
+					ScenarioImage: outcome.image,
+					Phase:         "Pending",
+					StartTime:     &now,
+					RetryCount:    0,
+					MaxRetries:    0,
 				})
 				logger.Info("created new cluster job",
 					"cluster", outcome.target.clusterName,
@@ -872,7 +872,7 @@ func (r *KrknScenarioRunReconciler) createClusterJob(
 	if existingJobIndex >= 0 {
 		scenarioRun.Status.ClusterJobs[existingJobIndex].JobID = resources.jobID
 		scenarioRun.Status.ClusterJobs[existingJobIndex].PodName = podName
-		scenarioRun.Status.ClusterJobs[existingJobIndex].ContainerImage = resources.containerImage
+		scenarioRun.Status.ClusterJobs[existingJobIndex].ScenarioImage = resources.containerImage
 		scenarioRun.Status.ClusterJobs[existingJobIndex].Phase = "Pending"
 		scenarioRun.Status.ClusterJobs[existingJobIndex].StartTime = &now
 		scenarioRun.Status.ClusterJobs[existingJobIndex].CompletionTime = nil
@@ -883,16 +883,16 @@ func (r *KrknScenarioRunReconciler) createClusterJob(
 			"retryAttempt", scenarioRun.Status.ClusterJobs[existingJobIndex].RetryCount)
 	} else {
 		scenarioRun.Status.ClusterJobs = append(scenarioRun.Status.ClusterJobs, krknv1alpha1.ClusterJobStatus{
-			ProviderName:   providerName,
-			ClusterName:    resources.clusterName,
-			ClusterAPIURL:  resources.clusterAPIURL,
-			JobID:          resources.jobID,
-			PodName:        podName,
-			ContainerImage: resources.containerImage,
-			Phase:          "Pending",
-			StartTime:      &now,
-			RetryCount:     0,
-			MaxRetries:     0,
+			ProviderName:  providerName,
+			ClusterName:   resources.clusterName,
+			ClusterAPIURL: resources.clusterAPIURL,
+			JobID:         resources.jobID,
+			PodName:       podName,
+			ScenarioImage: resources.containerImage,
+			Phase:         "Pending",
+			StartTime:     &now,
+			RetryCount:    0,
+			MaxRetries:    0,
 		})
 		logger.Info("created new cluster job",
 			"cluster", resources.clusterName,
@@ -993,12 +993,12 @@ func (r *KrknScenarioRunReconciler) updateClusterJobStatuses(
 			"podPhase", pod.Status.Phase)
 
 		// Backfill container image if not set (for legacy runs)
-		if job.ContainerImage == "" && len(pod.Spec.Containers) > 0 {
-			job.ContainerImage = pod.Spec.Containers[0].Image
-			logger.V(1).Info("backfilled container image from pod spec",
+		if job.ScenarioImage == "" && len(pod.Spec.Containers) > 0 {
+			job.ScenarioImage = pod.Spec.Containers[0].Image
+			logger.V(1).Info("backfilled scenario image from pod spec",
 				"cluster", job.ClusterName,
 				"jobID", job.JobID,
-				"containerImage", job.ContainerImage)
+				"scenarioImage", job.ScenarioImage)
 		}
 
 		// Update job status based on pod phase

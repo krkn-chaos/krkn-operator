@@ -375,8 +375,8 @@ type ClusterJobStatusResponse struct {
 	JobID string `json:"jobId"`
 	// PodName is the name of the pod running the scenario
 	PodName string `json:"podName,omitempty"`
-	// ContainerImage is the full container image path being run
-	ContainerImage string `json:"containerImage,omitempty"`
+	// ScenarioImage is the resolved container image path being run
+	ScenarioImage string `json:"scenarioImage,omitempty"`
 	// Phase is the current phase of the job
 	Phase string `json:"phase"`
 	// StartTime is when the job started

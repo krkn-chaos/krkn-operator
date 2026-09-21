@@ -199,8 +199,8 @@ func BuildUnifiedJobList(scenarioRuns []krknv1alpha1.KrknScenarioRun, graphRuns 
 // has one. The image is stored on each job after server-side resolution.
 func scenarioRunImage(jobs []krknv1alpha1.ClusterJobStatus) string {
 	for _, job := range jobs {
-		if job.ContainerImage != "" {
-			return job.ContainerImage
+		if job.ScenarioImage != "" {
+			return job.ScenarioImage
 		}
 	}
 	return ""
