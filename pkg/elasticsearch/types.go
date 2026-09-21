@@ -36,8 +36,9 @@ type CreateElasticsearchConfigRequest struct {
 	MetricsIndex   string `json:"metricsIndex,omitempty"`
 	AlertsIndex    string `json:"alertsIndex,omitempty"`
 	GrafanaURL     string `json:"grafanaUrl,omitempty"`
-	// CACert is an optional PEM-encoded CA certificate (or bundle) used to trust
-	// a self-signed cluster while keeping TLS verification enabled.
+	// CACert is an optional PEM-encoded CA certificate (or bundle) trusted in
+	// addition to the host's system root CAs, so a self-signed cluster is reachable
+	// with TLS verification still enabled and publicly trusted chains keep working.
 	CACert string `json:"caCert,omitempty"`
 	// InsecureSkipTLSVerify disables TLS certificate verification entirely. It is
 	// a restricted last resort for self-signed clusters without CA material;
@@ -57,9 +58,12 @@ type UpdateElasticsearchConfigRequest struct {
 	MetricsIndex   string `json:"metricsIndex,omitempty"`
 	AlertsIndex    string `json:"alertsIndex,omitempty"`
 	GrafanaURL     string `json:"grafanaUrl,omitempty"`
-	// CACert is an optional PEM-encoded CA certificate (or bundle) used to trust
-	// a self-signed cluster while keeping TLS verification enabled.
-	CACert string `json:"caCert,omitempty"`
+	// CACert is an optional PEM-encoded CA certificate (or bundle) trusted in
+	// addition to the host's system root CAs, so a self-signed cluster is reachable
+	// with TLS verification still enabled and publicly trusted chains keep working.
+	// It is a pointer to make omission (nil, "leave the stored CA unchanged")
+	// distinguishable from an explicit empty string ("clear the stored CA").
+	CACert *string `json:"caCert,omitempty"`
 	// InsecureSkipTLSVerify disables TLS certificate verification entirely. It is
 	// a restricted last resort for self-signed clusters without CA material;
 	// prefer CACert. A nil pointer leaves the stored setting unchanged; a non-nil
@@ -115,8 +119,13 @@ type DeleteElasticsearchConfigResponse struct {
 // request omits a size; MaxQuerySize caps how many documents a single request
 // may return to protect the API server and browser.
 const (
+	// DefaultQuerySize is the document count applied when a query request omits
+	// size (or sends 0). Unit: documents per request.
 	DefaultQuerySize = 50
-	MaxQuerySize     = 500
+	// MaxQuerySize is the upper bound on documents a single query request may
+	// return; larger requested sizes are clamped to this value. Unit: documents
+	// per request.
+	MaxQuerySize = 500
 )
 
 // InlineConnection carries an ephemeral Elasticsearch connection supplied
@@ -130,10 +139,19 @@ const (
 // connection always uses default TLS verification, and credentials are still
 // rejected over plaintext HTTP.
 type InlineConnection struct {
-	Host           string `json:"host"`
-	Port           int    `json:"port,omitempty"`
-	Username       string `json:"username,omitempty"`
-	Password       string `json:"password,omitempty"`
+	// Host is the Elasticsearch host, optionally scheme-bearing (e.g.
+	// "https://es.example.com"). Required.
+	Host string `json:"host"`
+	// Port is the Elasticsearch port. Optional; must be 0-65535. When 0 the
+	// query client applies the default port.
+	Port int `json:"port,omitempty"`
+	// Username is the basic-auth user. Optional; when set the connection must
+	// resolve to https (credentials are refused over plaintext HTTP).
+	Username string `json:"username,omitempty"`
+	// Password is the basic-auth password. Optional; used only with Username and
+	// never persisted server-side.
+	Password string `json:"password,omitempty"`
+	// TelemetryIndex is the index queried for telemetry documents. Required.
 	TelemetryIndex string `json:"telemetryIndex"`
 }
 
@@ -144,10 +162,14 @@ type InlineConnection struct {
 // credentials are supplied on the request and never persisted. Exactly one of
 // ConfigName or Inline must be provided.
 type QueryTelemetryRequest struct {
+	// ConfigName references a saved Elasticsearch config by name; credentials are
+	// resolved server-side. Mutually exclusive with Inline; exactly one is required.
 	ConfigName string `json:"configName,omitempty"`
 	// Inline carries an ephemeral connection when no saved config is used.
 	Inline *InlineConnection `json:"inline,omitempty"`
-	Size   int               `json:"size,omitempty"`
+	// Size is the max documents to return. Optional; 0 defaults to DefaultQuerySize
+	// and values above MaxQuerySize are clamped. Unit: documents.
+	Size int `json:"size,omitempty"`
 	// StartDate and EndDate bound the search by the document timestamp. They are
 	// "yyyy-MM-dd" date strings (as produced by the UI date pickers). Empty
 	// values fall back to a default trailing window in the query client.
@@ -161,12 +183,20 @@ type QueryTelemetryRequest struct {
 // Additional run detail (cluster config, node info, etc.) is intentionally not
 // included here — it will be fetched for an expanded row in a later change.
 type TelemetryDocument struct {
-	RunUUID        string `json:"run_uuid"`
-	ScenarioType   string `json:"scenario_type"`
-	StartTimestamp int64  `json:"start_timestamp"`
-	EndTimestamp   int64  `json:"end_timestamp"`
-	Namespace      string `json:"namespace"`
-	Status         bool   `json:"status"`
+	// RunUUID uniquely identifies the telemetry run this document represents.
+	RunUUID string `json:"run_uuid"`
+	// ScenarioType is the chaos scenario type from the run's first scenario.
+	ScenarioType string `json:"scenario_type"`
+	// StartTimestamp is the scenario start time. Unit: Unix seconds (UTC).
+	StartTimestamp int64 `json:"start_timestamp"`
+	// EndTimestamp is the scenario end time. Unit: Unix seconds (UTC).
+	EndTimestamp int64 `json:"end_timestamp"`
+	// Namespace is the target namespace from the run's first scenario.
+	Namespace string `json:"namespace"`
+	// Status is the run outcome: true = pass, false = fail. It applies the
+	// per-scenario exit_status downgrade, so it may differ from the run-level
+	// job_status used by TelemetryStats.
+	Status bool `json:"status"`
 }
 
 // TelemetryStats summarizes run-level pass/fail counts across the entire matched
@@ -174,15 +204,25 @@ type TelemetryDocument struct {
 // aggregation on the run-level job_status boolean, so they intentionally do not
 // apply the per-scenario exit_status downgrade that a document's status field uses.
 type TelemetryStats struct {
-	Pass        int     `json:"pass"`
-	Fail        int     `json:"fail"`
-	PassPercent float64 `json:"pass_percent"` // 0-100, rounded to 2 decimals; 0 when no runs
+	// Pass is the count of runs with job_status true across the whole matched
+	// window (not just the returned page). Unit: runs.
+	Pass int `json:"pass"`
+	// Fail is the count of runs with job_status false across the whole matched
+	// window (not just the returned page). Unit: runs.
+	Fail int `json:"fail"`
+	// PassPercent is Pass / (Pass + Fail) * 100 across the matched window.
+	// Range: 0-100, rounded to 2 decimals; 0 when no runs match.
+	PassPercent float64 `json:"pass_percent"`
 }
 
 // QueryTelemetryResponse wraps the telemetry documents returned to the client.
 type QueryTelemetryResponse struct {
+	// Documents is the size-capped page of matched telemetry runs. Length is
+	// bounded by the request Size (see DefaultQuerySize/MaxQuerySize).
 	Documents []TelemetryDocument `json:"documents"`
-	Total     int                 `json:"total"`
+	// Total is the number of documents in this returned page (len(Documents)),
+	// not the total matched across the window. Unit: documents.
+	Total int `json:"total"`
 	// Stats summarizes pass/fail across the whole matched window, so Stats.Pass +
 	// Stats.Fail can exceed Total (which counts only the returned documents page).
 	Stats TelemetryStats `json:"stats"`

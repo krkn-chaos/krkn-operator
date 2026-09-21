@@ -311,6 +311,29 @@ func (h *Handler) UpdateElasticsearchConfig(w http.ResponseWriter, r *http.Reque
 		secret.Data = make(map[string][]byte)
 	}
 
+	// Validate the fully merged connection before persisting. Empty update
+	// credentials fall back to the stored Secret values, so the request-only
+	// validation above cannot see a retained username paired with a newly set
+	// http:// host. Compute the effective username/CA and reject a configuration
+	// the query client would refuse, rather than saving it and returning success.
+	mergedUsername := req.Username
+	if mergedUsername == "" {
+		mergedUsername = string(secret.Data[elasticsearch.SecretKeyUsername])
+	}
+	// A nil CACert keeps the stored value; a non-nil one (including an explicit
+	// empty string that clears it) is the effective value.
+	mergedCACert := string(secret.Data[elasticsearch.SecretKeyCACert])
+	if req.CACert != nil {
+		mergedCACert = *req.CACert
+	}
+	if err := elasticsearch.ValidateMergedConnection(req.Host, mergedUsername, mergedCACert); err != nil {
+		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+			Error:   "bad_request",
+			Message: err.Error(),
+		})
+		return
+	}
+
 	// Only overwrite credentials when the caller explicitly supplies them;
 	// an empty string (omitempty) means "keep the existing value".
 	if req.Username != "" {
@@ -319,8 +342,14 @@ func (h *Handler) UpdateElasticsearchConfig(w http.ResponseWriter, r *http.Reque
 	if req.Password != "" {
 		secret.Data[elasticsearch.SecretKeyPassword] = []byte(req.Password)
 	}
-	if req.CACert != "" {
-		secret.Data[elasticsearch.SecretKeyCACert] = []byte(req.CACert)
+	// A nil CACert leaves the stored certificate untouched. A non-nil value with
+	// content replaces it; a non-nil empty string explicitly clears it.
+	if req.CACert != nil {
+		if *req.CACert != "" {
+			secret.Data[elasticsearch.SecretKeyCACert] = []byte(*req.CACert)
+		} else {
+			delete(secret.Data, elasticsearch.SecretKeyCACert)
+		}
 	}
 	// A nil pointer means the caller omitted the field: leave the stored TLS
 	// setting untouched. A non-nil value explicitly sets or clears it.

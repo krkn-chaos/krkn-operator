@@ -83,11 +83,24 @@ Results are sorted newest-first by timestamp before the `size` limit is applied.
       "status": true
     }
   ],
-  "total": 1
+  "total": 1,
+  "stats": {
+    "pass": 42,
+    "fail": 8,
+    "pass_percent": 84.0
+  }
 }
 ```
 
 `total` is the number of documents returned. Hits whose stored shape cannot be parsed are skipped rather than failing the request, so `total` may be smaller than the cluster's raw hit count.
+
+`stats` summarizes run-level pass/fail across the entire matched time window (all documents in range), not just the returned `size`-capped page, so `pass` + `fail` may exceed `total`. Fields:
+
+| Field          | Type   | Description |
+|----------------|--------|-------------|
+| `pass`         | int    | Runs with `job_status` true in the matched window. |
+| `fail`         | int    | Runs with `job_status` false in the matched window. |
+| `pass_percent` | float  | `pass` / (`pass` + `fail`) as a percentage, `0`-`100`, rounded to 2 decimals; `0` when no runs matched. |
 
 **Errors:**
 

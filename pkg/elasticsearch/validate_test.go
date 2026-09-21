@@ -18,6 +18,9 @@ package elasticsearch
 
 import "testing"
 
+// strPtr returns a pointer to s, for the tri-state CACert field in update tests.
+func strPtr(s string) *string { return &s }
+
 func TestValidateCreateRequest(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -151,6 +154,33 @@ func TestValidateUpdateRequest(t *testing.T) {
 		{
 			name:    "password can be empty on update (keeps existing)",
 			req:     UpdateElasticsearchConfigRequest{Host: "https://es.example.com", Username: "elastic", Password: ""},
+			wantErr: false,
+		},
+		{
+			name:    "credentials over plaintext http rejected",
+			req:     UpdateElasticsearchConfigRequest{Host: "http://es.example.com", Username: "elastic", Password: "secret"},
+			wantErr: true,
+			errMsg:  "credentials require a TLS connection; use an https host",
+		},
+		{
+			name:    "no credentials over http allowed",
+			req:     UpdateElasticsearchConfigRequest{Host: "http://es.example.com"},
+			wantErr: false,
+		},
+		{
+			name:    "malformed ca cert rejected",
+			req:     UpdateElasticsearchConfigRequest{Host: "https://es.example.com", CACert: strPtr("not-a-pem")},
+			wantErr: true,
+			errMsg:  "caCert must be a valid PEM-encoded certificate",
+		},
+		{
+			name:    "nil ca cert not validated (keeps stored)",
+			req:     UpdateElasticsearchConfigRequest{Host: "https://es.example.com", CACert: nil},
+			wantErr: false,
+		},
+		{
+			name:    "empty ca cert clears stored and is valid",
+			req:     UpdateElasticsearchConfigRequest{Host: "https://es.example.com", CACert: strPtr("")},
 			wantErr: false,
 		},
 	}

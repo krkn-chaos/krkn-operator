@@ -200,6 +200,119 @@ func TestCreateElasticsearchConfig_InvalidBody(t *testing.T) {
 	}
 }
 
+// boolPtr returns a pointer to b, for tri-state pointer fields in update tests.
+func boolPtr(b bool) *bool { return &b }
+
+func TestCreateElasticsearchConfig_StoresCACert(t *testing.T) {
+	fakeClient := fakeclient.NewClientBuilder().WithScheme(newEsScheme()).Build()
+	handler := NewTestHandler(fakeClient, fake.NewSimpleClientset(), "default", "localhost:50051")
+
+	body := elasticsearch.CreateElasticsearchConfigRequest{
+		Name:   "ca-es",
+		Host:   "https://es.example.com",
+		CACert: testCAPEM,
+	}
+	b, _ := json.Marshal(body)
+	req := httptest.NewRequest(http.MethodPost, ElasticsearchConfigsPath, bytes.NewReader(b))
+	req = req.WithContext(createAdminContext())
+	w := httptest.NewRecorder()
+
+	handler.CreateElasticsearchConfig(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var stored corev1.Secret
+	key := types.NamespacedName{Namespace: "default", Name: "ca-es"}
+	if err := fakeClient.Get(context.Background(), key, &stored); err != nil {
+		t.Fatalf("failed to get secret: %v", err)
+	}
+	if got := string(stored.Data[elasticsearch.SecretKeyCACert]); got != testCAPEM {
+		t.Errorf("expected caCert stored, got %q", got)
+	}
+}
+
+func TestCreateElasticsearchConfig_RejectsMalformedCACert(t *testing.T) {
+	fakeClient := fakeclient.NewClientBuilder().WithScheme(newEsScheme()).Build()
+	handler := NewTestHandler(fakeClient, fake.NewSimpleClientset(), "default", "localhost:50051")
+
+	body := elasticsearch.CreateElasticsearchConfigRequest{
+		Name:   "bad-ca-es",
+		Host:   "https://es.example.com",
+		CACert: "not-a-pem",
+	}
+	b, _ := json.Marshal(body)
+	req := httptest.NewRequest(http.MethodPost, ElasticsearchConfigsPath, bytes.NewReader(b))
+	req = req.WithContext(createAdminContext())
+	w := httptest.NewRecorder()
+
+	handler.CreateElasticsearchConfig(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for malformed caCert, got %d: %s", w.Code, w.Body.String())
+	}
+	var stored corev1.Secret
+	key := types.NamespacedName{Namespace: "default", Name: "bad-ca-es"}
+	if err := fakeClient.Get(context.Background(), key, &stored); err == nil {
+		t.Error("expected secret not persisted after malformed caCert rejection")
+	}
+}
+
+func TestCreateElasticsearchConfig_SetsInsecureAnnotation(t *testing.T) {
+	fakeClient := fakeclient.NewClientBuilder().WithScheme(newEsScheme()).Build()
+	handler := NewTestHandler(fakeClient, fake.NewSimpleClientset(), "default", "localhost:50051")
+
+	body := elasticsearch.CreateElasticsearchConfigRequest{
+		Name:                  "insecure-es",
+		Host:                  "https://es.example.com",
+		InsecureSkipTLSVerify: true,
+	}
+	b, _ := json.Marshal(body)
+	req := httptest.NewRequest(http.MethodPost, ElasticsearchConfigsPath, bytes.NewReader(b))
+	req = req.WithContext(createAdminContext())
+	w := httptest.NewRecorder()
+
+	handler.CreateElasticsearchConfig(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var stored corev1.Secret
+	key := types.NamespacedName{Namespace: "default", Name: "insecure-es"}
+	if err := fakeClient.Get(context.Background(), key, &stored); err != nil {
+		t.Fatalf("failed to get secret: %v", err)
+	}
+	if got := stored.Annotations[elasticsearch.InsecureSkipTLSVerifyAnnotation]; got != "true" {
+		t.Errorf("expected insecure annotation \"true\", got %q", got)
+	}
+}
+
+func TestCreateElasticsearchConfig_OmitsInsecureAnnotationByDefault(t *testing.T) {
+	fakeClient := fakeclient.NewClientBuilder().WithScheme(newEsScheme()).Build()
+	handler := NewTestHandler(fakeClient, fake.NewSimpleClientset(), "default", "localhost:50051")
+
+	body := elasticsearch.CreateElasticsearchConfigRequest{Name: "secure-es", Host: "https://es.example.com"}
+	b, _ := json.Marshal(body)
+	req := httptest.NewRequest(http.MethodPost, ElasticsearchConfigsPath, bytes.NewReader(b))
+	req = req.WithContext(createAdminContext())
+	w := httptest.NewRecorder()
+
+	handler.CreateElasticsearchConfig(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var stored corev1.Secret
+	key := types.NamespacedName{Namespace: "default", Name: "secure-es"}
+	if err := fakeClient.Get(context.Background(), key, &stored); err != nil {
+		t.Fatalf("failed to get secret: %v", err)
+	}
+	if _, ok := stored.Annotations[elasticsearch.InsecureSkipTLSVerifyAnnotation]; ok {
+		t.Error("expected no insecure annotation when not requested")
+	}
+}
+
 // ── ListElasticsearchConfigs ─────────────────────────────────────────────────
 
 func TestListElasticsearchConfigs_Success(t *testing.T) {
@@ -660,6 +773,186 @@ func TestUpdateElasticsearchConfig_Forbidden(t *testing.T) {
 
 	if w.Code != http.StatusForbidden {
 		t.Errorf("expected 403, got %d", w.Code)
+	}
+}
+
+func TestUpdateElasticsearchConfig_StoresCACert(t *testing.T) {
+	// An update supplying a new CACert persists it to the Secret's data.
+	secret := newEsTestSecret("prod-es", "default", "https://es.example.com", 9200)
+	fakeClient := fakeclient.NewClientBuilder().WithScheme(newEsScheme()).WithObjects(secret).Build()
+	handler := NewTestHandler(fakeClient, fake.NewSimpleClientset(), "default", "localhost:50051")
+
+	body := elasticsearch.UpdateElasticsearchConfigRequest{
+		Host:   "https://es.example.com",
+		CACert: strPtr(testCAPEM),
+	}
+	b, _ := json.Marshal(body)
+	req := httptest.NewRequest(http.MethodPut, ElasticsearchConfigsPath+"/prod-es", bytes.NewReader(b))
+	req = req.WithContext(createAdminContext())
+	w := httptest.NewRecorder()
+
+	handler.UpdateElasticsearchConfig(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var updated corev1.Secret
+	key := types.NamespacedName{Namespace: secret.Namespace, Name: secret.Name}
+	if err := fakeClient.Get(context.Background(), key, &updated); err != nil {
+		t.Fatalf("failed to get updated secret: %v", err)
+	}
+	if got := string(updated.Data[elasticsearch.SecretKeyCACert]); got != testCAPEM {
+		t.Errorf("expected caCert stored, got %q", got)
+	}
+}
+
+func TestUpdateElasticsearchConfig_RejectsMalformedCACert(t *testing.T) {
+	// A non-nil, malformed CACert is rejected and the config is left unchanged.
+	secret := newEsTestSecret("prod-es", "default", "https://es.example.com", 9200)
+	fakeClient := fakeclient.NewClientBuilder().WithScheme(newEsScheme()).WithObjects(secret).Build()
+	handler := NewTestHandler(fakeClient, fake.NewSimpleClientset(), "default", "localhost:50051")
+
+	body := elasticsearch.UpdateElasticsearchConfigRequest{
+		Host:   "https://es.example.com",
+		CACert: strPtr("not-a-pem"),
+	}
+	b, _ := json.Marshal(body)
+	req := httptest.NewRequest(http.MethodPut, ElasticsearchConfigsPath+"/prod-es", bytes.NewReader(b))
+	req = req.WithContext(createAdminContext())
+	w := httptest.NewRecorder()
+
+	handler.UpdateElasticsearchConfig(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for malformed caCert, got %d: %s", w.Code, w.Body.String())
+	}
+	var stored corev1.Secret
+	key := types.NamespacedName{Namespace: secret.Namespace, Name: secret.Name}
+	if err := fakeClient.Get(context.Background(), key, &stored); err != nil {
+		t.Fatalf("failed to get secret: %v", err)
+	}
+	if _, ok := stored.Data[elasticsearch.SecretKeyCACert]; ok {
+		t.Error("expected no caCert persisted after rejection")
+	}
+}
+
+func TestUpdateElasticsearchConfig_RejectsCredentialsOverPlaintext(t *testing.T) {
+	// An update explicitly supplying a username over an http:// host is rejected.
+	secret := newEsTestSecret("prod-es", "default", "https://es.example.com", 9200)
+	fakeClient := fakeclient.NewClientBuilder().WithScheme(newEsScheme()).WithObjects(secret).Build()
+	handler := NewTestHandler(fakeClient, fake.NewSimpleClientset(), "default", "localhost:50051")
+
+	body := elasticsearch.UpdateElasticsearchConfigRequest{
+		Host:     "http://new-es.example.com",
+		Username: "elastic",
+		Password: "s3cr3t",
+	}
+	b, _ := json.Marshal(body)
+	req := httptest.NewRequest(http.MethodPut, ElasticsearchConfigsPath+"/prod-es", bytes.NewReader(b))
+	req = req.WithContext(createAdminContext())
+	w := httptest.NewRecorder()
+
+	handler.UpdateElasticsearchConfig(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for credentials over http, got %d: %s", w.Code, w.Body.String())
+	}
+	var stored corev1.Secret
+	key := types.NamespacedName{Namespace: secret.Namespace, Name: secret.Name}
+	if err := fakeClient.Get(context.Background(), key, &stored); err != nil {
+		t.Fatalf("failed to get secret: %v", err)
+	}
+	if host := stored.Annotations[elasticsearch.HostAnnotation]; host != "https://es.example.com" {
+		t.Errorf("expected host unchanged, got %q", host)
+	}
+}
+
+func TestUpdateElasticsearchConfig_AddsInsecureAnnotation(t *testing.T) {
+	// A non-nil true InsecureSkipTLSVerify sets the annotation on a config without it.
+	secret := newEsTestSecret("prod-es", "default", "https://es.example.com", 9200)
+	fakeClient := fakeclient.NewClientBuilder().WithScheme(newEsScheme()).WithObjects(secret).Build()
+	handler := NewTestHandler(fakeClient, fake.NewSimpleClientset(), "default", "localhost:50051")
+
+	body := elasticsearch.UpdateElasticsearchConfigRequest{
+		Host:                  "https://es.example.com",
+		InsecureSkipTLSVerify: boolPtr(true),
+	}
+	b, _ := json.Marshal(body)
+	req := httptest.NewRequest(http.MethodPut, ElasticsearchConfigsPath+"/prod-es", bytes.NewReader(b))
+	req = req.WithContext(createAdminContext())
+	w := httptest.NewRecorder()
+
+	handler.UpdateElasticsearchConfig(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var updated corev1.Secret
+	key := types.NamespacedName{Namespace: secret.Namespace, Name: secret.Name}
+	if err := fakeClient.Get(context.Background(), key, &updated); err != nil {
+		t.Fatalf("failed to get updated secret: %v", err)
+	}
+	if got := updated.Annotations[elasticsearch.InsecureSkipTLSVerifyAnnotation]; got != "true" {
+		t.Errorf("expected insecure annotation \"true\", got %q", got)
+	}
+}
+
+func TestUpdateElasticsearchConfig_RemovesInsecureAnnotation(t *testing.T) {
+	// A non-nil false InsecureSkipTLSVerify removes an existing annotation.
+	secret := newEsTestSecret("prod-es", "default", "https://es.example.com", 9200)
+	secret.Annotations[elasticsearch.InsecureSkipTLSVerifyAnnotation] = "true"
+	fakeClient := fakeclient.NewClientBuilder().WithScheme(newEsScheme()).WithObjects(secret).Build()
+	handler := NewTestHandler(fakeClient, fake.NewSimpleClientset(), "default", "localhost:50051")
+
+	body := elasticsearch.UpdateElasticsearchConfigRequest{
+		Host:                  "https://es.example.com",
+		InsecureSkipTLSVerify: boolPtr(false),
+	}
+	b, _ := json.Marshal(body)
+	req := httptest.NewRequest(http.MethodPut, ElasticsearchConfigsPath+"/prod-es", bytes.NewReader(b))
+	req = req.WithContext(createAdminContext())
+	w := httptest.NewRecorder()
+
+	handler.UpdateElasticsearchConfig(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var updated corev1.Secret
+	key := types.NamespacedName{Namespace: secret.Namespace, Name: secret.Name}
+	if err := fakeClient.Get(context.Background(), key, &updated); err != nil {
+		t.Fatalf("failed to get updated secret: %v", err)
+	}
+	if _, ok := updated.Annotations[elasticsearch.InsecureSkipTLSVerifyAnnotation]; ok {
+		t.Error("expected insecure annotation removed")
+	}
+}
+
+func TestUpdateElasticsearchConfig_PreservesInsecureAnnotationWhenOmitted(t *testing.T) {
+	// A nil InsecureSkipTLSVerify (field omitted) leaves an existing annotation untouched.
+	secret := newEsTestSecret("prod-es", "default", "https://es.example.com", 9200)
+	secret.Annotations[elasticsearch.InsecureSkipTLSVerifyAnnotation] = "true"
+	fakeClient := fakeclient.NewClientBuilder().WithScheme(newEsScheme()).WithObjects(secret).Build()
+	handler := NewTestHandler(fakeClient, fake.NewSimpleClientset(), "default", "localhost:50051")
+
+	body := elasticsearch.UpdateElasticsearchConfigRequest{Host: "https://es.example.com"} // InsecureSkipTLSVerify nil
+	b, _ := json.Marshal(body)
+	req := httptest.NewRequest(http.MethodPut, ElasticsearchConfigsPath+"/prod-es", bytes.NewReader(b))
+	req = req.WithContext(createAdminContext())
+	w := httptest.NewRecorder()
+
+	handler.UpdateElasticsearchConfig(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var updated corev1.Secret
+	key := types.NamespacedName{Namespace: secret.Namespace, Name: secret.Name}
+	if err := fakeClient.Get(context.Background(), key, &updated); err != nil {
+		t.Fatalf("failed to get updated secret: %v", err)
+	}
+	if got := updated.Annotations[elasticsearch.InsecureSkipTLSVerifyAnnotation]; got != "true" {
+		t.Errorf("expected insecure annotation preserved as \"true\", got %q", got)
 	}
 }
 
