@@ -130,7 +130,7 @@ func TestQueryTelemetryRejectsInlineDestinationBeforeOutbound(t *testing.T) {
 				Index:               "telemetry",
 				RestrictDestination: true,
 			}
-			_, _, err := c.QueryTelemetry(context.Background(), conn, 10, "", "")
+			_, _, _, _, err := c.QueryTelemetry(context.Background(), conn, 10, 0, "", "", nil)
 			if err == nil {
 				t.Fatal("expected a destination error, got nil")
 			}
@@ -152,7 +152,7 @@ func TestQueryTelemetryAllowsUnrestrictedLoopback(t *testing.T) {
 	defer srv.Close()
 
 	conn := ConnectionParams{Host: srv.URL, Index: "telemetry"} // RestrictDestination false
-	if _, _, err := NewClient().QueryTelemetry(context.Background(), conn, 10, "", ""); err != nil {
+	if _, _, _, _, err := NewClient().QueryTelemetry(context.Background(), conn, 10, 0, "", "", nil); err != nil {
 		t.Fatalf("unrestricted loopback query should succeed, got: %v", err)
 	}
 }
