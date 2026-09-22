@@ -543,6 +543,17 @@ func (h *Handler) QueryElasticsearchTelemetry(w http.ResponseWriter, r *http.Req
 
 	docs, stats, err := h.esClient.QueryTelemetry(ctx, conn, req.Size, req.StartDate, req.EndDate)
 	if err != nil {
+		// A rejected inline destination is a client error (the caller asked the
+		// operator to reach an address the destination policy forbids), not an
+		// upstream failure. Return 400 without echoing the specific address.
+		if errors.Is(err, elasticsearch.ErrDestinationNotAllowed) {
+			logger.Info("Rejected telemetry query to a disallowed destination", "source", source)
+			writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+				Error:   "bad_request",
+				Message: "The requested Elasticsearch destination is not permitted",
+			})
+			return
+		}
 		// Log bounded upstream diagnostics server-side for troubleshooting, but
 		// never return raw upstream bodies or internal client errors to the
 		// caller: respond with a stable, sanitized 502 message instead.
@@ -623,6 +634,10 @@ func buildInlineConnectionParams(inline *elasticsearch.InlineConnection) elastic
 		Username: inline.Username,
 		Password: inline.Password,
 		Index:    inline.TelemetryIndex,
+		// Inline connections are user-supplied and reachable by any authenticated
+		// user, so they are subject to the destination policy (loopback/private/
+		// metadata/etc. are rejected) to prevent server-side request forgery.
+		RestrictDestination: true,
 	}
 }
 

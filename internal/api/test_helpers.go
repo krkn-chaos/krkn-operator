@@ -26,6 +26,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/krkn-chaos/krkn-operator/pkg/auth"
+	"github.com/krkn-chaos/krkn-operator/pkg/elasticsearch"
 )
 
 // TestJWTSecret returns a corev1.Secret with the test JWT key
@@ -89,4 +90,13 @@ func NewTestHandler(client client.Client, clientset kubernetes.Interface, namesp
 	}
 
 	return NewHandler(client, clientset, namespace, grpcServerAddr, secretManager)
+}
+
+// WithESClient overrides the telemetry Elasticsearch client, letting tests inject
+// a client backed by a stub Doer (see elasticsearch.WithHTTPClient) so the
+// telemetry query flow can be exercised without reaching a real cluster. It
+// returns the handler to allow call chaining.
+func (h *Handler) WithESClient(c *elasticsearch.Client) *Handler {
+	h.esClient = c
+	return h
 }

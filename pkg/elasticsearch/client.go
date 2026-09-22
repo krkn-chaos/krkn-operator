@@ -191,6 +191,15 @@ type ConnectionParams struct {
 	// clusters where no CA material is available; the default (false) verifies
 	// the server certificate. Prefer CACert over this.
 	InsecureSkipVerify bool
+	// RestrictDestination, when true, subjects this connection to the inline
+	// destination policy (see ssrf.go): the target scheme/port is enforced, the
+	// host is DNS-resolved and every resolved address is rejected if it is
+	// loopback, private, link-local, metadata, multicast, or unspecified, and
+	// redirects are re-validated per hop. It is set for user-supplied inline
+	// connections, which any authenticated user can request, to prevent
+	// server-side request forgery. Admin-created saved configs leave it false
+	// because they legitimately point at trusted in-cluster (private) clusters.
+	RestrictDestination bool
 }
 
 // esSearchResponse mirrors the subset of the Elasticsearch _search response we
@@ -393,6 +402,16 @@ func (c *Client) QueryTelemetry(ctx context.Context, conn ConnectionParams, size
 		return nil, TelemetryStats{}, fmt.Errorf("refusing to send credentials over plaintext HTTP; use https")
 	}
 
+	// Inline (user-supplied) connections are subject to the destination policy.
+	// Validate before any outbound request so a request that targets a
+	// disallowed address is rejected without probing it. The dial-time guard in
+	// resolveDoer re-checks the resolved address to close the DNS-rebinding gap.
+	if conn.RestrictDestination {
+		if err := validateInlineDestination(ctx, base); err != nil {
+			return nil, TelemetryStats{}, err
+		}
+	}
+
 	doer, err := c.resolveDoer(conn)
 	if err != nil {
 		return nil, TelemetryStats{}, err
@@ -428,6 +447,20 @@ func (c *Client) resolveDoer(conn ConnectionParams) (Doer, error) {
 	transport, err := c.transport(conn)
 	if err != nil {
 		return nil, err
+	}
+	// Restricted (inline) connections get a dedicated, non-pooled transport with
+	// a validating dialer and a redirect policy, so the destination guard applies
+	// to the actual connection and to every redirect hop. It is not shared via
+	// the TLS-keyed pool because that pool is intentionally host-agnostic. Inline
+	// queries are ad-hoc, so forgoing connection reuse here is acceptable.
+	if conn.RestrictDestination {
+		guarded := transport.Clone()
+		guarded.DialContext = guardedDialContext()
+		return &http.Client{
+			Timeout:       queryTimeout,
+			Transport:     guarded,
+			CheckRedirect: guardedCheckRedirect,
+		}, nil
 	}
 	// The http.Client is cheap; the pooled transport it wraps is what carries
 	// (and reuses) the underlying connections across queries.

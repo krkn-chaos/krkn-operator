@@ -1120,19 +1120,27 @@ func TestQueryElasticsearchTelemetry_Success(t *testing.T) {
 }
 
 func TestQueryElasticsearchTelemetry_InlineSuccess(t *testing.T) {
-	esServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"hits":{"hits":[{"_source":{"run_uuid":"xyz","job_status":true,"scenarios":[{"scenario_type":"node","start_timestamp":100,"end_timestamp":200,"exit_status":0,"parameters":[{"config":{"namespace":"ns2"}}]}]}}]}}`))
-	}))
-	defer esServer.Close()
+	// The inline destination policy resolves and validates the host, so a real
+	// loopback httptest server would be rejected as a private address. Inject a
+	// stub Doer and target a literal public IP (validated without DNS) so the
+	// success flow is exercised hermetically without any real network access.
+	stub := esDoerFunc(func(r *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader(`{"hits":{"hits":[{"_source":{"run_uuid":"xyz","job_status":true,"scenarios":[{"scenario_type":"node","start_timestamp":100,"end_timestamp":200,"exit_status":0,"parameters":[{"config":{"namespace":"ns2"}}]}]}}]}}`)),
+			Header:     make(http.Header),
+		}, nil
+	})
 
 	// No stored config exists: the inline connection drives the query directly.
 	fakeClient := fakeclient.NewClientBuilder().WithScheme(newEsScheme()).Build()
-	handler := NewTestHandler(fakeClient, fake.NewSimpleClientset(), "default", "localhost:50051")
+	handler := NewTestHandler(fakeClient, fake.NewSimpleClientset(), "default", "localhost:50051").
+		WithESClient(elasticsearch.NewClient(elasticsearch.WithHTTPClient(stub)))
 
 	body, _ := json.Marshal(elasticsearch.QueryTelemetryRequest{
 		Inline: &elasticsearch.InlineConnection{
-			Host:           esServer.URL,
+			Host:           "https://93.184.216.34",
+			Port:           443,
 			TelemetryIndex: "krkn-telemetry",
 		},
 	})
@@ -1155,6 +1163,52 @@ func TestQueryElasticsearchTelemetry_InlineSuccess(t *testing.T) {
 	}
 	if resp.Documents[0].RunUUID != "xyz" || resp.Documents[0].Namespace != "ns2" {
 		t.Errorf("unexpected document: %+v", resp.Documents[0])
+	}
+}
+
+// esDoerFunc adapts a function to the elasticsearch.Doer interface for injection.
+type esDoerFunc func(*http.Request) (*http.Response, error)
+
+func (f esDoerFunc) Do(r *http.Request) (*http.Response, error) { return f(r) }
+
+// TestQueryElasticsearchTelemetry_InlineRejectsInternalDestination proves the
+// SSRF guard: an inline query targeting an internal address is rejected with 400
+// before any outbound request is attempted. The injected Doer fails the test if
+// it is ever called.
+func TestQueryElasticsearchTelemetry_InlineRejectsInternalDestination(t *testing.T) {
+	cases := []string{
+		"http://127.0.0.1",
+		"https://10.0.0.1",
+		"http://169.254.169.254",
+		"https://192.168.1.10",
+	}
+	for _, host := range cases {
+		t.Run(host, func(t *testing.T) {
+			stub := esDoerFunc(func(r *http.Request) (*http.Response, error) {
+				t.Fatalf("outbound request must not be made; got %s", r.URL)
+				return nil, nil
+			})
+			fakeClient := fakeclient.NewClientBuilder().WithScheme(newEsScheme()).Build()
+			handler := NewTestHandler(fakeClient, fake.NewSimpleClientset(), "default", "localhost:50051").
+				WithESClient(elasticsearch.NewClient(elasticsearch.WithHTTPClient(stub)))
+
+			body, _ := json.Marshal(elasticsearch.QueryTelemetryRequest{
+				Inline: &elasticsearch.InlineConnection{
+					Host:           host,
+					Port:           9200,
+					TelemetryIndex: "krkn-telemetry",
+				},
+			})
+			req := httptest.NewRequest(http.MethodPost, ElasticsearchQueryPath, bytes.NewReader(body))
+			req = req.WithContext(createUserContext("user@example.com"))
+			w := httptest.NewRecorder()
+
+			handler.QueryElasticsearchTelemetry(w, req)
+
+			if w.Code != http.StatusBadRequest {
+				t.Fatalf("expected 400 for internal destination %s, got %d: %s", host, w.Code, w.Body.String())
+			}
+		})
 	}
 }
 
