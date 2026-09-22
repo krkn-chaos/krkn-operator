@@ -129,6 +129,10 @@ const (
 	// return; larger requested sizes are clamped to this value. Unit: documents
 	// per request.
 	MaxQuerySize = 500
+	// MaxResultWindow mirrors Elasticsearch's default index.max_result_window. A
+	// from+size deep-pagination request beyond this is rejected by the cluster, so
+	// requests that would exceed it are rejected up front with a clear error.
+	MaxResultWindow = 10000
 )
 
 // InlineConnection carries an ephemeral Elasticsearch connection supplied
@@ -173,11 +177,19 @@ type QueryTelemetryRequest struct {
 	// Size is the max documents to return. Optional; 0 defaults to DefaultQuerySize
 	// and values above MaxQuerySize are clamped. Unit: documents.
 	Size int `json:"size,omitempty"`
+	// Page is the 1-based page number for pagination. Values below 1 default to 1
+	// in ValidateQueryRequest. The offset sent to Elasticsearch is (Page-1)*Size.
+	Page int `json:"page,omitempty"`
 	// StartDate and EndDate bound the search by the document timestamp. They are
 	// "yyyy-MM-dd" date strings (as produced by the UI date pickers). Empty
 	// values fall back to a default trailing window in the query client.
 	StartDate string `json:"startDate,omitempty"`
 	EndDate   string `json:"endDate,omitempty"`
+	// Filters narrows the search to documents matching selected facet values,
+	// keyed by facet category (one of the keys in facetFields). The values for a
+	// category are OR-ed together; different categories are AND-ed. Unknown
+	// category keys are rejected by ValidateQueryRequest.
+	Filters map[string][]string `json:"filters,omitempty"`
 }
 
 // ClusterMetadata holds the run-level cluster and infrastructure details
@@ -336,17 +348,30 @@ type TelemetryStats struct {
 	PassPercent float64 `json:"pass_percent"`
 }
 
+// FacetOption is one selectable value for a filter category, with the number of
+// documents in the matched window that carry it. It populates the value
+// multi-select in the UI.
+type FacetOption struct {
+	Value string `json:"value"`
+	Count int    `json:"count"`
+}
+
 // QueryTelemetryResponse wraps the telemetry documents returned to the client.
 type QueryTelemetryResponse struct {
 	// Documents is the size-capped page of matched telemetry runs. Length is
 	// bounded by the request Size (see DefaultQuerySize/MaxQuerySize).
 	Documents []TelemetryDocument `json:"documents"`
-	// Total is the number of documents in this returned page (len(Documents)),
-	// not the total matched across the window. Unit: documents.
+	// Total is the count of documents matching the query across the whole matched
+	// window (not just the returned page), used by the client to compute the page
+	// count. It equals Stats.Pass + Stats.Fail.
 	Total int `json:"total"`
-	// Stats summarizes pass/fail across the whole matched window, so Stats.Pass +
-	// Stats.Fail can exceed Total (which counts only the returned documents page).
+	// Stats summarizes pass/fail across the whole matched window.
 	Stats TelemetryStats `json:"stats"`
+	// Facets maps each filter category (a key from facetFields) to the available
+	// values in the matched window, derived from a terms aggregation per category.
+	// The UI uses it to populate the value multi-select. Because filters are
+	// applied in the query, facets narrow as filters are selected.
+	Facets map[string][]FacetOption `json:"facets,omitempty"`
 }
 
 // QueryAlertsRequest represents a request to query alert documents from the
@@ -446,7 +471,54 @@ func ValidateQueryRequest(req *QueryTelemetryRequest) error {
 			return err
 		}
 	}
-	return validateQueryOptions(&req.Size, req.StartDate, req.EndDate)
+	if req.Size < 0 {
+		return fmt.Errorf("size must not be negative")
+	}
+	if req.Size == 0 {
+		req.Size = DefaultQuerySize
+	}
+	if req.Size > MaxQuerySize {
+		req.Size = MaxQuerySize
+	}
+	if req.Page < 1 {
+		req.Page = 1
+	}
+	// Reject deep pages the cluster cannot serve: from+size must stay within the
+	// result window. from is (Page-1)*Size, so guard on the offset alone.
+	if (req.Page-1)*req.Size >= MaxResultWindow {
+		return fmt.Errorf("requested page exceeds the maximum result window of %d", MaxResultWindow)
+	}
+	if err := validateDate("startDate", req.StartDate); err != nil {
+		return err
+	}
+	if err := validateDate("endDate", req.EndDate); err != nil {
+		return err
+	}
+	if req.StartDate != "" && req.EndDate != "" && req.StartDate > req.EndDate {
+		return fmt.Errorf("startDate must not be after endDate")
+	}
+	if req.EndDate != "" && req.EndDate > time.Now().UTC().Format(dateLayout) {
+		return fmt.Errorf("endDate must not be in the future")
+	}
+	if err := validateFilters(req.Filters); err != nil {
+		return err
+	}
+	return nil
+}
+
+// validateFilters rejects filter categories that are not known facet fields.
+// Empty value slices are dropped from the map so they never reach the query
+// builder as no-op clauses.
+func validateFilters(filters map[string][]string) error {
+	for key, values := range filters {
+		if !isFacetField(key) {
+			return fmt.Errorf("unknown filter category %q", key)
+		}
+		if len(values) == 0 {
+			delete(filters, key)
+		}
+	}
+	return nil
 }
 
 // dateLayout is the date-only layout accepted for query bounds and understood by

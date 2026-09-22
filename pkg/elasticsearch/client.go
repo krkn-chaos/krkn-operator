@@ -38,6 +38,44 @@ import (
 // unreachable cluster cannot block an API handler indefinitely.
 const queryTimeout = 15 * time.Second
 
+// facetField describes one filterable telemetry category: the stable key used in
+// the request Filters map and the response Facets map, the Elasticsearch field
+// its terms aggregation and filter clauses target, and whether that field is a
+// boolean (so selected string values are coerced to bool in the query).
+type facetField struct {
+	Key     string
+	Field   string
+	Boolean bool
+}
+
+// facetFields is the single source of truth for the filterable categories. It
+// drives the terms aggregations, the query filter clauses, and the facet buckets
+// returned to the UI, so a category is added in exactly one place. Keyword
+// sub-fields are used for the analyzed string fields so aggregations and term
+// matches operate on the exact value.
+var facetFields = []facetField{
+	{Key: "scenario_type", Field: "scenarios.scenario_type.keyword"},
+	{Key: "job_status", Field: "job_status", Boolean: true},
+	{Key: "cloud_infrastructure", Field: "cloud_infrastructure.keyword"},
+	{Key: "cloud_type", Field: "cloud_type.keyword"},
+	{Key: "major_version", Field: "major_version.keyword"},
+	{Key: "network_plugins", Field: "network_plugins.keyword"},
+}
+
+// jobStatusFacetKey is the facet category whose true/false buckets also feed the
+// pass/fail TelemetryStats summary.
+const jobStatusFacetKey = "job_status"
+
+// isFacetField reports whether key names a known filter category.
+func isFacetField(key string) bool {
+	for _, f := range facetFields {
+		if f.Key == key {
+			return true
+		}
+	}
+	return false
+}
+
 // maxResponseBytes caps how much of an Elasticsearch response we will buffer in
 // memory. The requested hit count does not bound the size of individual _source
 // documents (or of an error body), so a misbehaving or malicious cluster could
@@ -207,21 +245,33 @@ type ConnectionParams struct {
 // telemetry shape and then flattened into a TelemetryDocument.
 type esSearchResponse struct {
 	Hits struct {
+		// Total is the count of documents matching the query across the whole
+		// window, independent of the size/from page. track_total_hits is set on
+		// the request so Value stays accurate beyond the default 10,000 cap.
+		Total struct {
+			Value int64 `json:"value"`
+		} `json:"total"`
 		Hits []struct {
 			Source json.RawMessage `json:"_source"`
 		} `json:"hits"`
 	} `json:"hits"`
-	// Aggregations carries the by_job_status terms aggregation used to summarize
-	// pass/fail across the whole matched window (independent of the hits size cap).
-	Aggregations struct {
-		ByJobStatus struct {
-			Buckets []struct {
-				// KeyAsString is "true"/"false" for the boolean job_status field.
-				KeyAsString string `json:"key_as_string"`
-				DocCount    int    `json:"doc_count"`
-			} `json:"buckets"`
-		} `json:"by_job_status"`
-	} `json:"aggregations"`
+	// Aggregations carries one terms aggregation per facet category (keyed by the
+	// facet key). Each feeds the response Facets; the job_status aggregation also
+	// feeds the pass/fail summary. The aggregations span the whole matched window
+	// (independent of the hits size cap).
+	Aggregations map[string]termsAggregation `json:"aggregations"`
+}
+
+// termsAggregation is the decoded shape of an Elasticsearch terms aggregation.
+// Key is kept raw because a bucket key may be a string, number, or boolean
+// depending on the aggregated field; KeyAsString carries the formatted key for
+// boolean/numeric fields.
+type termsAggregation struct {
+	Buckets []struct {
+		Key         json.RawMessage `json:"key"`
+		KeyAsString string          `json:"key_as_string"`
+		DocCount    int             `json:"doc_count"`
+	} `json:"buckets"`
 }
 
 type esAlertSearchResponse struct {
@@ -546,7 +596,11 @@ func (c ConnectionParams) tlsConfig() (*tls.Config, error) {
 
 // QueryTelemetry connects to the Elasticsearch/OpenSearch cluster described by
 // conn and returns telemetry documents from conn.Index. size is clamped to the
-// supported bounds by the caller. startDate and endDate ("yyyy-MM-dd") bound the
+// supported bounds by the caller and from is the zero-based offset of the first
+// returned document (for pagination); together they select one page of the sorted
+// results. It also returns total, the count of documents matching the query across
+// the whole window (independent of size/from), for computing a page count.
+// startDate and endDate ("yyyy-MM-dd") bound the
 // search by document timestamp; empty values default to a trailing 30-day
 // window. Results are sorted newest-first by timestamp (with a deterministic
 // _doc tie-breaker) before the size limit is applied, so the most recent
@@ -573,18 +627,61 @@ func (c ConnectionParams) tlsConfig() (*tls.Config, error) {
 // failing the whole query, so the returned slice may contain fewer documents
 // than the cluster reported hits. On success with no matching hits it returns a
 // non-nil, empty (len 0) slice and a nil error.
+//
 // It also returns a TelemetryStats summary of run-level pass/fail counts derived
 // from a terms aggregation on job_status. The aggregation runs over every document
-// matching the time-range filter, so the summary spans the whole matched window
+// matching the query filter, so the summary spans the whole matched window
 // regardless of size (Stats.Pass + Stats.Fail can exceed len(docs)). On any error
 // the returned stats are the zero value.
-func (c *Client) QueryTelemetry(ctx context.Context, conn ConnectionParams, size int, startDate, endDate string) (docs []TelemetryDocument, stats TelemetryStats, err error) {
+//
+// filters narrows the search to documents matching selected facet values (keyed
+// by a facetFields key); values within a category are OR-ed and categories are
+// AND-ed, and they are applied in the query so both hits and aggregations
+// reflect them. The returned facets map carries, per category, the available
+// values (with doc counts) from a terms aggregation, used to populate the UI
+// value multi-select. On any error the returned facets are nil.
+func (c *Client) QueryTelemetry(ctx context.Context, conn ConnectionParams, size, from int, startDate, endDate string, filters map[string][]string) (docs []TelemetryDocument, total int, stats TelemetryStats, facets map[string][]FacetOption, err error) {
 	if conn.Index == "" {
-		return nil, TelemetryStats{}, fmt.Errorf("telemetry index is not configured for this Elasticsearch config")
+		return nil, 0, TelemetryStats{}, nil, fmt.Errorf("telemetry index is not configured for this Elasticsearch config")
 	}
-	respBody, err := c.executeQuery(ctx, conn, size, startDate, endDate, buildSearchBody)
+
+	base := conn.baseURL()
+	// Never send credentials over plaintext HTTP where they could be observed on
+	// the wire. Require TLS whenever a username/password is configured.
+	if conn.Username != "" && strings.HasPrefix(base, "http://") {
+		return nil, 0, TelemetryStats{}, nil, fmt.Errorf("refusing to send credentials over plaintext HTTP; use https")
+	}
+
+	// Inline (user-supplied) connections are subject to the destination policy.
+	// Validate before any outbound request so a request that targets a
+	// disallowed address is rejected without probing it. The dial-time guard in
+	// resolveDoer re-checks the resolved address to close the DNS-rebinding gap.
+	if conn.RestrictDestination {
+		if err := validateInlineDestination(ctx, base); err != nil {
+			return nil, 0, TelemetryStats{}, nil, err
+		}
+	}
+
+	doer, err := c.resolveDoer(conn)
 	if err != nil {
-		return nil, TelemetryStats{}, err
+		return nil, 0, TelemetryStats{}, nil, err
+	}
+
+	payload, err := buildSearchBody(size, from, startDate, endDate, filters)
+	if err != nil {
+		return nil, 0, TelemetryStats{}, nil, err
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, queryTimeout)
+	defer cancel()
+	req, err := newSearchRequest(ctx, base, conn, payload)
+	if err != nil {
+		return nil, 0, TelemetryStats{}, nil, err
+	}
+
+	respBody, err := executeSearch(doer, req)
+	if err != nil {
+		return nil, 0, TelemetryStats{}, nil, err
 	}
 
 	return decodeTelemetry(respBody)
@@ -677,11 +774,12 @@ func (c *Client) resolveDoer(conn ConnectionParams) (Doer, error) {
 	}, nil
 }
 
-// buildSearchBody marshals the _search request body for the given size and date
-// bounds. Results are sorted newest-first so the size limit keeps the most
-// recent documents. startDate/endDate are "yyyy-MM-dd"; empty values default to
-// a trailing 30-day window.
-func buildSearchBody(size int, startDate, endDate string) ([]byte, error) {
+// buildSearchBody marshals the _search request body for the given size, offset,
+// date bounds, and facet filters. Results are sorted newest-first so the size
+// limit keeps the most recent documents. from is the zero-based pagination
+// offset. startDate/endDate are "yyyy-MM-dd"; empty values default to a trailing
+// 30-day window. filters adds one terms clause per selected facet category.
+func buildSearchBody(size, from int, startDate, endDate string, filters map[string][]string) ([]byte, error) {
 	// Lower bound: default to the start of the day 30 days ago; an explicit
 	// startDate is parsed via the "yyyy-MM-dd" format below.
 	gte := "now-30d/d"
@@ -699,7 +797,10 @@ func buildSearchBody(size int, startDate, endDate string) ([]byte, error) {
 
 	body := map[string]any{
 		"size": size,
-		"from": 0,
+		"from": from,
+		// Count all matching documents (not just the first 10,000) so the client
+		// can compute an accurate page count for the returned window.
+		"track_total_hits": true,
 		// Sort newest-first by the same timestamp field the range filter uses so
 		// the size limit keeps the most recent documents. unmapped_type keeps the
 		// request from failing on indices where timestamp is not mapped, and the
@@ -715,26 +816,15 @@ func buildSearchBody(size int, startDate, endDate string) ([]byte, error) {
 		},
 		"query": map[string]any{
 			"bool": map[string]any{
-				"filter": []any{
-					map[string]any{
-						"range": map[string]any{
-							"timestamp": timestampRange,
-						},
-					},
-				},
+				"filter": buildFilterClauses(timestampRange, filters),
 			},
 		},
-		// Aggregate run-level job_status across the whole matched window so the
-		// pass/fail summary is independent of the hits size limit. A boolean field
-		// yields at most two buckets ("true"/"false").
-		"aggs": map[string]any{
-			"by_job_status": map[string]any{
-				"terms": map[string]any{
-					"field": "job_status",
-					"size":  10,
-				},
-			},
-		},
+		// One terms aggregation per facet category so the UI can populate the
+		// value multi-select. Aggregations span the whole matched window (they are
+		// independent of the hits size limit). The job_status aggregation also
+		// feeds the pass/fail summary; a boolean field yields at most two buckets
+		// ("true"/"false").
+		"aggs": buildFacetAggs(),
 	}
 
 	payload, err := json.Marshal(body)
@@ -745,7 +835,7 @@ func buildSearchBody(size int, startDate, endDate string) ([]byte, error) {
 }
 
 func buildAlertsSearchBody(size int, startDate, endDate string) ([]byte, error) {
-	payload, err := buildSearchBody(size, startDate, endDate)
+	payload, err := buildSearchBody(size, 0, startDate, endDate, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -849,13 +939,16 @@ func executeSearch(doer Doer, req *http.Request) (body []byte, err error) {
 // TelemetryDocument. Hits whose _source does not match the expected telemetry
 // shape are skipped rather than failing the whole query, so the returned slice
 // may be shorter than the reported hit count; on no hits it is non-nil and empty.
-func decodeTelemetry(respBody []byte) (docs []TelemetryDocument, stats TelemetryStats, err error) {
+// It also returns the total matching-document count, the pass/fail stats summary,
+// and the per-category facet options, all derived from the response aggregations
+// and total (which span the whole matched window, independent of the size cap).
+func decodeTelemetry(respBody []byte) ([]TelemetryDocument, int, TelemetryStats, map[string][]FacetOption, error) {
 	var parsed esSearchResponse
 	if err := json.Unmarshal(respBody, &parsed); err != nil {
-		return nil, TelemetryStats{}, fmt.Errorf("failed to decode Elasticsearch response: %w", err)
+		return nil, 0, TelemetryStats{}, nil, fmt.Errorf("failed to decode Elasticsearch response: %w", err)
 	}
 
-	docs = make([]TelemetryDocument, 0, len(parsed.Hits.Hits))
+	docs := make([]TelemetryDocument, 0, len(parsed.Hits.Hits))
 	for _, hit := range parsed.Hits.Hits {
 		var src rawTelemetrySource
 		if err := json.Unmarshal(hit.Source, &src); err != nil {
@@ -866,9 +959,11 @@ func decodeTelemetry(respBody []byte) (docs []TelemetryDocument, stats Telemetry
 		docs = append(docs, src.flatten())
 	}
 
-	stats = statsFromBuckets(parsed)
+	total := int(parsed.Hits.Total.Value)
+	stats := statsFromBuckets(parsed)
+	facets := facetsFromBuckets(parsed)
 
-	return docs, stats, nil
+	return docs, total, stats, facets, nil
 }
 
 func decodeAlerts(respBody []byte) ([]AlertDocument, error) {
@@ -886,13 +981,70 @@ func decodeAlerts(respBody []byte) ([]AlertDocument, error) {
 	return docs, nil
 }
 
-// statsFromBuckets derives the run-level pass/fail summary from the by_job_status
+// buildFilterClauses assembles the bool.filter clauses: always the timestamp
+// range, plus one terms clause per selected facet category. Values within a
+// category are OR-ed by the terms clause; separate clauses AND across
+// categories. Boolean facets (job_status) coerce "true"/"false" strings to real
+// booleans; unparseable boolean values are skipped. Empty categories contribute
+// no clause.
+func buildFilterClauses(timestampRange map[string]any, filters map[string][]string) []any {
+	clauses := []any{
+		map[string]any{
+			"range": map[string]any{
+				"timestamp": timestampRange,
+			},
+		},
+	}
+	for _, f := range facetFields {
+		values := filters[f.Key]
+		if len(values) == 0 {
+			continue
+		}
+		terms := make([]any, 0, len(values))
+		for _, v := range values {
+			if f.Boolean {
+				switch v {
+				case "true":
+					terms = append(terms, true)
+				case "false":
+					terms = append(terms, false)
+				}
+				continue
+			}
+			terms = append(terms, v)
+		}
+		if len(terms) == 0 {
+			continue
+		}
+		clauses = append(clauses, map[string]any{
+			"terms": map[string]any{f.Field: terms},
+		})
+	}
+	return clauses
+}
+
+// buildFacetAggs builds one terms aggregation per facet category, keyed by the
+// facet key so the response can be mapped back by category.
+func buildFacetAggs() map[string]any {
+	aggs := make(map[string]any, len(facetFields))
+	for _, f := range facetFields {
+		aggs[f.Key] = map[string]any{
+			"terms": map[string]any{
+				"field": f.Field,
+				"size":  10,
+			},
+		}
+	}
+	return aggs
+}
+
+// statsFromBuckets derives the run-level pass/fail summary from the job_status
 // terms aggregation. A boolean field yields "true"/"false" buckets; any other key
 // is ignored. PassPercent is the percentage of passing runs (0-100, rounded to two
 // decimals) and is 0 when no runs matched, avoiding a divide-by-zero.
 func statsFromBuckets(parsed esSearchResponse) TelemetryStats {
 	var stats TelemetryStats
-	for _, b := range parsed.Aggregations.ByJobStatus.Buckets {
+	for _, b := range parsed.Aggregations[jobStatusFacetKey].Buckets {
 		switch b.KeyAsString {
 		case "true":
 			stats.Pass = b.DocCount
@@ -904,4 +1056,40 @@ func statsFromBuckets(parsed esSearchResponse) TelemetryStats {
 		stats.PassPercent = math.Round(float64(stats.Pass)/float64(total)*10000) / 100
 	}
 	return stats
+}
+
+// facetsFromBuckets converts each facet category's terms aggregation into the
+// FacetOptions surfaced to the UI. A bucket's display value is its key_as_string
+// when present (boolean/numeric fields) and otherwise its string key; keys that
+// are neither are skipped. A category with no buckets is omitted so the response
+// carries only populated facets.
+func facetsFromBuckets(parsed esSearchResponse) map[string][]FacetOption {
+	facets := make(map[string][]FacetOption, len(facetFields))
+	for _, f := range facetFields {
+		agg, ok := parsed.Aggregations[f.Key]
+		if !ok || len(agg.Buckets) == 0 {
+			continue
+		}
+		options := make([]FacetOption, 0, len(agg.Buckets))
+		for _, b := range agg.Buckets {
+			value := b.KeyAsString
+			if value == "" {
+				var s string
+				if err := json.Unmarshal(b.Key, &s); err != nil {
+					// Non-string keys without a key_as_string cannot be rendered as a
+					// filter value; skip them rather than emitting raw JSON.
+					continue
+				}
+				value = s
+			}
+			options = append(options, FacetOption{Value: value, Count: b.DocCount})
+		}
+		if len(options) > 0 {
+			facets[f.Key] = options
+		}
+	}
+	if len(facets) == 0 {
+		return nil
+	}
+	return facets
 }
