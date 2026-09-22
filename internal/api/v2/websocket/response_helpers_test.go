@@ -16,7 +16,7 @@ func TestConvertClusterJobs_OmitsClusterAPIURL(t *testing.T) {
 			ClusterAPIURL:   "https://secret-api.example.com:6443",
 			JobID:           "job-1",
 			PodName:         "pod-1",
-			ContainerImage:  "quay.io/krkn/scenario:latest",
+			ScenarioImage:   "quay.io/krkn/scenario:latest",
 			Phase:           "Succeeded",
 			StartTime:       &now,
 			CompletionTime:  &now,

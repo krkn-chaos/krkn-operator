@@ -88,7 +88,7 @@ type ClusterJobResponse struct {
 	ClusterName     string     `json:"clusterName"`
 	JobID           string     `json:"jobId"`
 	PodName         string     `json:"podName,omitempty"`
-	ContainerImage  string     `json:"containerImage,omitempty"`
+	ScenarioImage   string     `json:"scenarioImage,omitempty"`
 	Phase           string     `json:"phase"`
 	StartTime       *time.Time `json:"startTime,omitempty"`
 	CompletionTime  *time.Time `json:"completionTime,omitempty"`

@@ -507,3 +507,25 @@ func TestBuildUnifiedJobList_SortOrder(t *testing.T) {
 		}
 	}
 }
+
+func TestBuildUnifiedJobList_IncludesResolvedScenarioImage(t *testing.T) {
+	scenarioRuns := []krknv1alpha1.KrknScenarioRun{
+		{
+			ObjectMeta: metav1.ObjectMeta{Name: "scenario-run"},
+			Spec: krknv1alpha1.KrknScenarioRunSpec{
+				Scenario: krknv1alpha1.ScenarioReference{Name: "pod-disruption"},
+			},
+			Status: krknv1alpha1.KrknScenarioRunStatus{
+				ClusterJobs: []krknv1alpha1.ClusterJobStatus{
+					{ScenarioImage: "quay.io/krkn-chaos/krkn-hub:pod-disruption"},
+				},
+			},
+		},
+	}
+
+	jobs := BuildUnifiedJobList(scenarioRuns, nil)
+
+	if got := jobs[0].ScenarioRun.ScenarioImage; got != "quay.io/krkn-chaos/krkn-hub:pod-disruption" {
+		t.Fatalf("expected resolved scenario image, got %q", got)
+	}
+}

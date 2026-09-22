@@ -31,6 +31,12 @@ helm template krkn-operator "$chart_dir" \
   --values "$chart_dir/values-olm-ocp.yaml" \
   --api-versions security.openshift.io/v1/SecurityContextConstraints > "$work_dir/olm-ocp.yaml"
 
+if yq -e 'select(.kind == "Secret" and .metadata.name == "krkn-operator-jwt")' \
+  "$work_dir/olm-ocp.yaml" >/dev/null; then
+  echo "OLM profile must bootstrap the JWT Secret instead of rendering it" >&2
+  exit 1
+fi
+
 if grep -Eq 'scenario-runner|krkn-scenario-runner' "$work_dir/olm-ocp.yaml"; then
   echo "OLM profile must not render static scenario-runner resources" >&2
   exit 1

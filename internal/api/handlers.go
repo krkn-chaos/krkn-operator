@@ -1739,7 +1739,7 @@ func (h *Handler) GetScenarioRunStatus(w http.ResponseWriter, r *http.Request) {
 			ClusterName:     job.ClusterName,
 			JobID:           job.JobID,
 			PodName:         job.PodName,
-			ContainerImage:  job.ContainerImage,
+			ScenarioImage:   job.ScenarioImage,
 			Phase:           job.Phase,
 			Message:         job.Message,
 			StartTime:       convertMetaTime(job.StartTime),
@@ -2279,6 +2279,7 @@ func (h *Handler) ListScenarioRuns(w http.ResponseWriter, r *http.Request) {
 		run := ScenarioRunListItem{
 			ScenarioRunName:  sr.Name,
 			ScenarioName:     sr.Spec.Scenario.Name,
+			ScenarioImage:    scenarioRunImage(sr.Status.ClusterJobs),
 			Phase:            sr.Status.Phase,
 			TotalTargets:     sr.Status.TotalTargets,
 			SuccessfulJobs:   sr.Status.SuccessfulJobs,

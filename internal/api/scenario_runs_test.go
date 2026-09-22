@@ -179,6 +179,43 @@ func TestListScenarioRuns(t *testing.T) {
 	}
 }
 
+func TestListScenarioRuns_IncludesResolvedScenarioImage(t *testing.T) {
+	run := makeScenarioRun("scenario-run", time.Now())
+	run.Status.ClusterJobs = []krknv1alpha1.ClusterJobStatus{
+		{ScenarioImage: "quay.io/krkn-chaos/krkn-hub:pod-disruption"},
+	}
+
+	scheme := runtime.NewScheme()
+	if err := krknv1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatalf("failed to add scheme: %v", err)
+	}
+	handler := NewTestHandler(
+		fakeclient.NewClientBuilder().WithScheme(scheme).WithObjects(run).Build(),
+		fake.NewSimpleClientset(),
+		"default",
+		"localhost:50051",
+	)
+
+	req := adminContext(httptest.NewRequest("GET", "/api/v1/scenarios/run", nil))
+	w := httptest.NewRecorder()
+	handler.ListScenarioRuns(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", w.Code)
+	}
+
+	var response ScenarioRunListResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if len(response.ScenarioRuns) != 1 {
+		t.Fatalf("expected 1 scenario run, got %d", len(response.ScenarioRuns))
+	}
+	if got := response.ScenarioRuns[0].ScenarioImage; got != "quay.io/krkn-chaos/krkn-hub:pod-disruption" {
+		t.Errorf("expected resolved scenario image, got %q", got)
+	}
+}
+
 func TestListScenarioRuns_PhaseFilter(t *testing.T) {
 	scheme := runtime.NewScheme()
 	if err := krknv1alpha1.AddToScheme(scheme); err != nil {

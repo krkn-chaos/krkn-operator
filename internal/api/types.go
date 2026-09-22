@@ -168,7 +168,9 @@ type ScenarioRunRequest struct {
 	Scenario krknv1alpha1.ScenarioReference `json:"scenario"`
 	// ScenarioImage is accepted for backwards compatibility but is ignored.
 	// Images are always resolved server-side from Scenario.
-	ScenarioImage string `json:"scenarioImage,omitempty"`
+	// ScenarioImage is always serialized for config responses. It is empty
+	// until the controller has resolved an executable image for a job.
+	ScenarioImage string `json:"scenarioImage"`
 	// ScenarioName is the legacy scenario identity field. It is translated to
 	// Scenario when a request does not include the new reference object.
 	ScenarioName string `json:"scenarioName,omitempty"`
@@ -373,8 +375,8 @@ type ClusterJobStatusResponse struct {
 	JobID string `json:"jobId"`
 	// PodName is the name of the pod running the scenario
 	PodName string `json:"podName,omitempty"`
-	// ContainerImage is the full container image path being run
-	ContainerImage string `json:"containerImage,omitempty"`
+	// ScenarioImage is the resolved container image path being run
+	ScenarioImage string `json:"scenarioImage,omitempty"`
 	// Phase is the current phase of the job
 	Phase string `json:"phase"`
 	// StartTime is when the job started
@@ -399,6 +401,8 @@ type ScenarioRunListItem struct {
 	ScenarioRunName string `json:"scenarioRunName"`
 	// ScenarioName is the name of the scenario being executed
 	ScenarioName string `json:"scenarioName"`
+	// ScenarioImage is the resolved container image used by the scenario jobs
+	ScenarioImage string `json:"scenarioImage,omitempty"`
 	// Phase is the overall phase of the scenario run
 	Phase string `json:"phase"`
 	// TotalTargets is the total number of target clusters
