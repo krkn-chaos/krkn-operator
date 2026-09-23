@@ -195,3 +195,47 @@ func TestUpdateClusterJobStatuses_ClusterNameEmpty(t *testing.T) {
 		t.Error("Expected CompletionTime to be set")
 	}
 }
+
+func TestShouldRetryJobDefaultsZeroRetries(t *testing.T) {
+	reconciler := &KrknScenarioRunReconciler{}
+	job := &krknv1alpha1.ClusterJobStatus{Phase: "Failed"}
+
+	if !reconciler.shouldRetryJob(job, 0) {
+		t.Fatal("a non-AI scenario with an unset retry limit must retain the default retry")
+	}
+}
+
+func TestUpdateClusterJobStatuses_AIRunDisablesRetries(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = krknv1alpha1.AddToScheme(scheme)
+	_ = corev1.AddToScheme(scheme)
+	now := metav1.Now()
+	failedPod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "failed-pod", Namespace: "default"},
+		Status:     corev1.PodStatus{Phase: corev1.PodFailed},
+	}
+	scenarioRun := &krknv1alpha1.KrknScenarioRun{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "ai-scenario",
+			Namespace: "default",
+			Labels:    map[string]string{"krkn.dev/ai-run": "ai-run"},
+		},
+		Spec: krknv1alpha1.KrknScenarioRunSpec{MaxRetries: 0},
+		Status: krknv1alpha1.KrknScenarioRunStatus{ClusterJobs: []krknv1alpha1.ClusterJobStatus{{
+			ClusterName: "cluster",
+			JobID:       "job-id",
+			PodName:     "failed-pod",
+			Phase:       "Running",
+			StartTime:   &now,
+		}}},
+	}
+	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(scenarioRun, failedPod).Build()
+	reconciler := &KrknScenarioRunReconciler{Client: fakeClient, Scheme: scheme, Namespace: "default"}
+
+	if err := reconciler.updateClusterJobStatuses(context.Background(), scenarioRun); err != nil {
+		t.Fatalf("updateClusterJobStatuses failed: %v", err)
+	}
+	if phase := scenarioRun.Status.ClusterJobs[0].Phase; phase != "MaxRetriesExceeded" {
+		t.Fatalf("failed Krkn-AI scenario must not retry, got phase %q", phase)
+	}
+}

@@ -55,6 +55,12 @@ const (
 	// UpdatedAtAnnotation stores the last update timestamp
 	UpdatedAtAnnotation = "files.krkn.krkn-chaos.dev/updated-at"
 
+	// KrknAIConfigTargetBindingLabel binds a Krkn-AI configuration to exactly one target.
+	KrknAIConfigTargetBindingLabel       = "krkn.krkn-chaos.dev/ai-target-binding"
+	KrknAIConfigTargetRequestAnnotation  = "krkn.krkn-chaos.dev/ai-target-request-id"
+	KrknAIConfigTargetProviderAnnotation = "krkn.krkn-chaos.dev/ai-target-provider"
+	KrknAIConfigTargetClusterAnnotation  = "krkn.krkn-chaos.dev/ai-target-cluster"
+
 	// AppName is the value for AppNameLabel
 	AppName = "krkn-operator"
 	// ComponentFile is the value for AppComponentLabel
@@ -69,11 +75,18 @@ const (
 	// FilePurposeResiliency is the filePurpose value for resiliency scoring metric definitions
 	FilePurposeResiliency = "resiliency-score"
 
+	// FilePurposeKrknAIConfig identifies a persisted Krkn-AI run configuration.
+	FilePurposeKrknAIConfig = "krkn-ai-config"
+
 	// WorkflowFileName is the well-known ConfigMap Data key under which workflow
 	// template graph content is stored. Unlike regular files (whose content key is
 	// the user-facing file name), workflow templates always use this fixed key while
 	// the user-facing name lives in WorkflowNameAnnotation.
 	WorkflowFileName = "workflow.json"
+	// KrknAIConfigFileName is the fixed ConfigMap Data key for a Krkn-AI
+	// configuration. The user-facing configuration name remains an annotation,
+	// so a run can mount this key directly.
+	KrknAIConfigFileName = "krkn-ai.yaml"
 	// StudioLayoutFileName is the well-known ConfigMap Data key under which the
 	// optional studio visual layout for a workflow template is stored.
 	StudioLayoutFileName = "studioLayout.json"
@@ -252,7 +265,7 @@ func ExtractFilePurposeFromLabels(labels map[string]string) string {
 
 // ValidFilePurposes returns all valid filePurpose values
 func ValidFilePurposes() []string {
-	return []string{FilePurposeFile, FilePurposeWorkflow, FilePurposeResiliency}
+	return []string{FilePurposeFile, FilePurposeWorkflow, FilePurposeResiliency, FilePurposeKrknAIConfig}
 }
 
 // IsValidFilePurpose checks if a filePurpose value is valid
