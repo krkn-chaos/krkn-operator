@@ -26,6 +26,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"strings"
@@ -150,9 +151,15 @@ func (c *Client) transport(conn ConnectionParams) (*http.Transport, error) {
 		return nil, err
 	}
 	// Clone the stdlib default transport so we inherit its connection-pool and
-	// timeout defaults, then attach the per-configuration TLS settings.
-	t, _ := http.DefaultTransport.(*http.Transport)
-	transport := t.Clone()
+	// timeout defaults, then attach the per-configuration TLS settings. The type
+	// assertion can fail if http.DefaultTransport has been replaced with a
+	// non-*http.Transport (e.g. by a test or dependency); fall back to a fresh
+	// *http.Transport rather than dereferencing a nil pointer in Clone.
+	base, ok := http.DefaultTransport.(*http.Transport)
+	if !ok {
+		base = &http.Transport{}
+	}
+	transport := base.Clone()
 	transport.TLSClientConfig = tlsConfig
 	c.transports[key] = transport
 	return transport, nil
@@ -184,6 +191,15 @@ type ConnectionParams struct {
 	// clusters where no CA material is available; the default (false) verifies
 	// the server certificate. Prefer CACert over this.
 	InsecureSkipVerify bool
+	// RestrictDestination, when true, subjects this connection to the inline
+	// destination policy (see ssrf.go): the target scheme/port is enforced, the
+	// host is DNS-resolved and every resolved address is rejected if it is
+	// loopback, private, link-local, metadata, multicast, or unspecified, and
+	// redirects are re-validated per hop. It is set for user-supplied inline
+	// connections, which any authenticated user can request, to prevent
+	// server-side request forgery. Admin-created saved configs leave it false
+	// because they legitimately point at trusted in-cluster (private) clusters.
+	RestrictDestination bool
 }
 
 // esSearchResponse mirrors the subset of the Elasticsearch _search response we
@@ -195,6 +211,17 @@ type esSearchResponse struct {
 			Source json.RawMessage `json:"_source"`
 		} `json:"hits"`
 	} `json:"hits"`
+	// Aggregations carries the by_job_status terms aggregation used to summarize
+	// pass/fail across the whole matched window (independent of the hits size cap).
+	Aggregations struct {
+		ByJobStatus struct {
+			Buckets []struct {
+				// KeyAsString is "true"/"false" for the boolean job_status field.
+				KeyAsString string `json:"key_as_string"`
+				DocCount    int    `json:"doc_count"`
+			} `json:"buckets"`
+		} `json:"by_job_status"`
+	} `json:"aggregations"`
 }
 
 // rawTelemetrySource mirrors the subset of a krkn telemetry document _source we
@@ -312,7 +339,15 @@ func (c ConnectionParams) tlsConfig() (*tls.Config, error) {
 
 	cfg := &tls.Config{MinVersion: tls.VersionTLS12}
 	if c.CACert != "" {
-		pool := x509.NewCertPool()
+		// Start from the system roots so the custom CA is additive: a cluster
+		// presenting a publicly trusted chain still verifies even when it is not
+		// part of the supplied bundle. SystemCertPool can fail (e.g. on a minimal
+		// image without a trust store); fall back to an empty pool holding only
+		// the supplied CA rather than failing the request.
+		pool, err := x509.SystemCertPool()
+		if err != nil || pool == nil {
+			pool = x509.NewCertPool()
+		}
 		if !pool.AppendCertsFromPEM([]byte(c.CACert)) {
 			return nil, fmt.Errorf("failed to parse CA certificate: no valid PEM certificates found")
 		}
@@ -350,38 +385,53 @@ func (c ConnectionParams) tlsConfig() (*tls.Config, error) {
 // failing the whole query, so the returned slice may contain fewer documents
 // than the cluster reported hits. On success with no matching hits it returns a
 // non-nil, empty (len 0) slice and a nil error.
-func (c *Client) QueryTelemetry(ctx context.Context, conn ConnectionParams, size int, startDate, endDate string) ([]TelemetryDocument, error) {
+// It also returns a TelemetryStats summary of run-level pass/fail counts derived
+// from a terms aggregation on job_status. The aggregation runs over every document
+// matching the time-range filter, so the summary spans the whole matched window
+// regardless of size (Stats.Pass + Stats.Fail can exceed len(docs)). On any error
+// the returned stats are the zero value.
+func (c *Client) QueryTelemetry(ctx context.Context, conn ConnectionParams, size int, startDate, endDate string) (docs []TelemetryDocument, stats TelemetryStats, err error) {
 	if conn.Index == "" {
-		return nil, fmt.Errorf("telemetry index is not configured for this Elasticsearch config")
+		return nil, TelemetryStats{}, fmt.Errorf("telemetry index is not configured for this Elasticsearch config")
 	}
 
 	base := conn.baseURL()
 	// Never send credentials over plaintext HTTP where they could be observed on
 	// the wire. Require TLS whenever a username/password is configured.
 	if conn.Username != "" && strings.HasPrefix(base, "http://") {
-		return nil, fmt.Errorf("refusing to send credentials over plaintext HTTP; use https")
+		return nil, TelemetryStats{}, fmt.Errorf("refusing to send credentials over plaintext HTTP; use https")
+	}
+
+	// Inline (user-supplied) connections are subject to the destination policy.
+	// Validate before any outbound request so a request that targets a
+	// disallowed address is rejected without probing it. The dial-time guard in
+	// resolveDoer re-checks the resolved address to close the DNS-rebinding gap.
+	if conn.RestrictDestination {
+		if err := validateInlineDestination(ctx, base); err != nil {
+			return nil, TelemetryStats{}, err
+		}
 	}
 
 	doer, err := c.resolveDoer(conn)
 	if err != nil {
-		return nil, err
+		return nil, TelemetryStats{}, err
 	}
 
 	payload, err := buildSearchBody(size, startDate, endDate)
 	if err != nil {
-		return nil, err
+		return nil, TelemetryStats{}, err
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, queryTimeout)
 	defer cancel()
 	req, err := newSearchRequest(ctx, base, conn, payload)
 	if err != nil {
-		return nil, err
+		return nil, TelemetryStats{}, err
 	}
 
 	respBody, err := executeSearch(doer, req)
 	if err != nil {
-		return nil, err
+		return nil, TelemetryStats{}, err
 	}
 
 	return decodeTelemetry(respBody)
@@ -397,6 +447,20 @@ func (c *Client) resolveDoer(conn ConnectionParams) (Doer, error) {
 	transport, err := c.transport(conn)
 	if err != nil {
 		return nil, err
+	}
+	// Restricted (inline) connections get a dedicated, non-pooled transport with
+	// a validating dialer and a redirect policy, so the destination guard applies
+	// to the actual connection and to every redirect hop. It is not shared via
+	// the TLS-keyed pool because that pool is intentionally host-agnostic. Inline
+	// queries are ad-hoc, so forgoing connection reuse here is acceptable.
+	if conn.RestrictDestination {
+		guarded := transport.Clone()
+		guarded.DialContext = guardedDialContext()
+		return &http.Client{
+			Timeout:       queryTimeout,
+			Transport:     guarded,
+			CheckRedirect: guardedCheckRedirect,
+		}, nil
 	}
 	// The http.Client is cheap; the pooled transport it wraps is what carries
 	// (and reuses) the underlying connections across queries.
@@ -458,6 +522,17 @@ func buildSearchBody(size int, startDate, endDate string) ([]byte, error) {
 							"timestamp": timestampRange,
 						},
 					},
+				},
+			},
+		},
+		// Aggregate run-level job_status across the whole matched window so the
+		// pass/fail summary is independent of the hits size limit. A boolean field
+		// yields at most two buckets ("true"/"false").
+		"aggs": map[string]any{
+			"by_job_status": map[string]any{
+				"terms": map[string]any{
+					"field": "job_status",
+					"size":  10,
 				},
 			},
 		},
@@ -530,13 +605,13 @@ func executeSearch(doer Doer, req *http.Request) (body []byte, err error) {
 // TelemetryDocument. Hits whose _source does not match the expected telemetry
 // shape are skipped rather than failing the whole query, so the returned slice
 // may be shorter than the reported hit count; on no hits it is non-nil and empty.
-func decodeTelemetry(respBody []byte) ([]TelemetryDocument, error) {
+func decodeTelemetry(respBody []byte) (docs []TelemetryDocument, stats TelemetryStats, err error) {
 	var parsed esSearchResponse
 	if err := json.Unmarshal(respBody, &parsed); err != nil {
-		return nil, fmt.Errorf("failed to decode Elasticsearch response: %w", err)
+		return nil, TelemetryStats{}, fmt.Errorf("failed to decode Elasticsearch response: %w", err)
 	}
 
-	docs := make([]TelemetryDocument, 0, len(parsed.Hits.Hits))
+	docs = make([]TelemetryDocument, 0, len(parsed.Hits.Hits))
 	for _, hit := range parsed.Hits.Hits {
 		var src rawTelemetrySource
 		if err := json.Unmarshal(hit.Source, &src); err != nil {
@@ -547,5 +622,27 @@ func decodeTelemetry(respBody []byte) ([]TelemetryDocument, error) {
 		docs = append(docs, src.flatten())
 	}
 
-	return docs, nil
+	stats = statsFromBuckets(parsed)
+
+	return docs, stats, nil
+}
+
+// statsFromBuckets derives the run-level pass/fail summary from the by_job_status
+// terms aggregation. A boolean field yields "true"/"false" buckets; any other key
+// is ignored. PassPercent is the percentage of passing runs (0-100, rounded to two
+// decimals) and is 0 when no runs matched, avoiding a divide-by-zero.
+func statsFromBuckets(parsed esSearchResponse) TelemetryStats {
+	var stats TelemetryStats
+	for _, b := range parsed.Aggregations.ByJobStatus.Buckets {
+		switch b.KeyAsString {
+		case "true":
+			stats.Pass = b.DocCount
+		case "false":
+			stats.Fail = b.DocCount
+		}
+	}
+	if total := stats.Pass + stats.Fail; total > 0 {
+		stats.PassPercent = math.Round(float64(stats.Pass)/float64(total)*10000) / 100
+	}
+	return stats
 }

@@ -162,6 +162,11 @@ const docTemplate = `{
         },
         "/clusters": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Get the list of target clusters from a KrknTargetRequest by ID",
                 "produces": [
                     "application/json"
@@ -204,16 +209,389 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                },
+                }
+            }
+        },
+        "/elasticsearch-configs": {
+            "get": {
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ]
+                ],
+                "description": "List all Elasticsearch configs. Credentials are never returned. Available to any authenticated user.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "elasticsearch"
+                ],
+                "summary": "List Elasticsearch configs",
+                "responses": {
+                    "200": {
+                        "description": "Configs",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.ListElasticsearchConfigsResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Authentication required",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Create a new Elasticsearch config, storing credentials as a Kubernetes Secret. Admin only.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "elasticsearch"
+                ],
+                "summary": "Create an Elasticsearch config",
+                "parameters": [
+                    {
+                        "description": "Elasticsearch config to create",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.CreateElasticsearchConfigRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Config created",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.CreateElasticsearchConfigResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request body or parameters",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Authentication required",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Admin privileges required",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Config with the same name already exists",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/elasticsearch-configs/{name}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Get a single Elasticsearch config by name. Credentials are never returned. Admin only.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "elasticsearch"
+                ],
+                "summary": "Get an Elasticsearch config",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Elasticsearch config name",
+                        "name": "name",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Config",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.ElasticsearchConfigResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid config name",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Authentication required",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Admin privileges required",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Config not found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Update an existing Elasticsearch config by name. Admin only.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "elasticsearch"
+                ],
+                "summary": "Update an Elasticsearch config",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Elasticsearch config name",
+                        "name": "name",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Fields to update",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.UpdateElasticsearchConfigRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Config updated",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.UpdateElasticsearchConfigResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request body or config name",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Authentication required",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Admin privileges required",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Config not found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Delete an Elasticsearch config by name. Admin only.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "elasticsearch"
+                ],
+                "summary": "Delete an Elasticsearch config",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Elasticsearch config name",
+                        "name": "name",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Config deleted",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.DeleteElasticsearchConfigResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid config name",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Authentication required",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Admin privileges required",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Config not found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/elasticsearch-query": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Run a telemetry search against a saved Elasticsearch config or an inline connection. Credentials are resolved server-side and never leave the backend. Available to any authenticated user.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "elasticsearch"
+                ],
+                "summary": "Query Elasticsearch telemetry",
+                "parameters": [
+                    {
+                        "description": "Query parameters (exactly one of configName or inline)",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.QueryTelemetryRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Most recent telemetry documents",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.QueryTelemetryResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request body or parameters",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Authentication required",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Elasticsearch config not found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    }
+                }
             }
         },
         "/files": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Get list of all file ConfigMaps (admin only). Supports filtering by filePurpose query parameter.",
                 "produces": [
                     "application/json"
@@ -255,14 +633,14 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                },
+                }
+            },
+            "post": {
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ]
-            },
-            "post": {
+                ],
                 "description": "Create a new file ConfigMap. Users can create files for their own groups or public files. Admins can create files for any group. Cannot create workflow-template files (use POST /api/v1/workflows instead).",
                 "consumes": [
                     "application/json"
@@ -316,16 +694,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/files/available": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Get files accessible to current user (own files, group files, public files). Supports filtering by filePurpose query parameter.",
                 "produces": [
                     "application/json"
@@ -361,16 +739,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/graphruns": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Get list of all graph runs. Regular users see only their own, admins see all.",
                 "produces": [
                     "application/json"
@@ -395,14 +773,14 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                },
+                }
+            },
+            "post": {
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ]
-            },
-            "post": {
+                ],
                 "description": "Create a new graph run to execute a chaos scenario graph",
                 "consumes": [
                     "application/json"
@@ -456,16 +834,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/graphruns/{graphRunName}/config": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Retrieve graph run configuration directly by KrknGraphRun CR name",
                 "produces": [
                     "application/json"
@@ -520,16 +898,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/graphruns/{name}": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Get detailed status and execution information for a specific graph run by name",
                 "produces": [
                     "application/json"
@@ -578,14 +956,14 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                },
+                }
+            },
+            "delete": {
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ]
-            },
-            "delete": {
+                ],
                 "description": "Delete a graph run and all associated scenario runs (cascade delete via owner references)",
                 "produces": [
                     "application/json"
@@ -634,16 +1012,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/health": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Check if the operator API is healthy and responding",
                 "produces": [
                     "application/json"
@@ -662,16 +1040,16 @@ const docTemplate = `{
                             }
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/nodes": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Get list of nodes from a cluster target (supports both KrknOperatorTarget UUID and legacy KrknTargetRequest ID)",
                 "produces": [
                     "application/json"
@@ -725,16 +1103,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/operator/signature-verification": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "GET reports whether image signature verification is enabled. PATCH updates the setting and requires an administrator.",
                 "consumes": [
                     "application/json"
@@ -781,14 +1159,14 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             },
             "patch": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "GET reports whether image signature verification is enabled. PATCH updates the setting and requires an administrator.",
                 "consumes": [
                     "application/json"
@@ -835,16 +1213,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/scenarios": {
             "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Get list of available chaos scenarios from container registry (Quay.io or private registry)",
                 "consumes": [
                     "application/json"
@@ -885,16 +1263,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/scenarios/detail/{scenario_name}": {
             "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Get detailed information about a specific chaos scenario including configuration fields",
                 "consumes": [
                     "application/json"
@@ -948,16 +1326,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/scenarios/globals/{scenario_name}": {
             "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Get global environment configuration fields for a specific scenario",
                 "consumes": [
                     "application/json"
@@ -1011,16 +1389,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/scenarios/run": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Get list of all scenario runs with optional filtering by phase or scenario name",
                 "produces": [
                     "application/json"
@@ -1068,14 +1446,14 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                },
+                }
+            },
+            "post": {
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ]
-            },
-            "post": {
+                ],
                 "description": "Execute a chaos scenario on target clusters with specified configuration",
                 "consumes": [
                     "application/json"
@@ -1129,16 +1507,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/scenarios/run/replay/{jobId}": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Retrieve scenario configuration from a completed job and return payload ready for re-execution via POST /scenarios/run",
                 "produces": [
                     "application/json"
@@ -1187,16 +1565,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/scenarios/run/{jobID}": {
             "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Stop and delete a running or completed scenario run",
                 "produces": [
                     "application/json"
@@ -1245,16 +1623,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/scenarios/run/{scenarioRunName}": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Get current execution status and metrics for a running or completed scenario",
                 "produces": [
                     "application/json"
@@ -1303,16 +1681,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/scenarios/run/{scenarioRunName}/config": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Retrieve scenario configuration directly by KrknScenarioRun CR name",
                 "produces": [
                     "application/json"
@@ -1367,16 +1745,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/targets": {
             "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Create a KrknTargetRequest to trigger cluster discovery by krkn-operator-acm (legacy API)",
                 "consumes": [
                     "application/json"
@@ -1401,16 +1779,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/targets/{uuid}": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Get target request status and cluster information by UUID (legacy KrknTargetRequest API)",
                 "produces": [
                     "application/json"
@@ -1453,14 +1831,14 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                },
+                }
+            },
+            "delete": {
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ]
-            },
-            "delete": {
+                ],
                 "description": "Delete a KrknTargetRequest resource by UUID. Admins can delete any, users can delete their own.",
                 "produces": [
                     "application/json"
@@ -1509,16 +1887,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/v2/jobs": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Returns a merged list of standalone ScenarioRuns and GraphRuns, sorted by creation time descending",
                 "produces": [
                     "application/json"
@@ -1554,16 +1932,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/v2/ws/dashboard/active-runs": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Multiplexed WebSocket for real-time updates across all resources\n\n**Authentication:** JWT token via Sec-WebSocket-Protocol subprotocol\n- JavaScript: ` + "`" + `new WebSocket(url, 'access_token.' + jwtToken)` + "`" + `\n- Header: ` + "`" + `Sec-WebSocket-Protocol: access_token.\u003cjwt_token\u003e` + "`" + `\n\n**Client → Server Messages (subscribe/unsubscribe):**\n` + "`" + `` + "`" + `` + "`" + `json\n{\n\"action\": \"subscribe\",\n\"resource\": \"run\",\n\"ids\": [\"run-abc123\", \"run-xyz789\"]\n}\n` + "`" + `` + "`" + `` + "`" + `\n\n**Resource types:** ` + "`" + `run` + "`" + `, ` + "`" + `graphrun` + "`" + `, ` + "`" + `dashboard` + "`" + `\n\n**Server → Client Messages (updates):**\n` + "`" + `` + "`" + `` + "`" + `json\n{\n\"resource\": \"run\",\n\"id\": \"run-abc123\",\n\"event\": \"updated\",\n\"data\": { ... }\n}\n` + "`" + `` + "`" + `` + "`" + `\n\n**Available endpoints:**\n- ` + "`" + `/api/v2/ws/runs` + "`" + ` - Subscribe to scenario run updates\n- ` + "`" + `/api/v2/ws/graphruns` + "`" + ` - Subscribe to graph run updates\n- ` + "`" + `/api/v2/ws/dashboard/active-runs` + "`" + ` - Subscribe to dashboard updates",
                 "consumes": [
                     "application/json"
@@ -1594,16 +1972,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api_v2_websocket.ErrorMessage"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/v2/ws/graphruns": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Multiplexed WebSocket for real-time updates across all resources\n\n**Authentication:** JWT token via Sec-WebSocket-Protocol subprotocol\n- JavaScript: ` + "`" + `new WebSocket(url, 'access_token.' + jwtToken)` + "`" + `\n- Header: ` + "`" + `Sec-WebSocket-Protocol: access_token.\u003cjwt_token\u003e` + "`" + `\n\n**Client → Server Messages (subscribe/unsubscribe):**\n` + "`" + `` + "`" + `` + "`" + `json\n{\n\"action\": \"subscribe\",\n\"resource\": \"run\",\n\"ids\": [\"run-abc123\", \"run-xyz789\"]\n}\n` + "`" + `` + "`" + `` + "`" + `\n\n**Resource types:** ` + "`" + `run` + "`" + `, ` + "`" + `graphrun` + "`" + `, ` + "`" + `dashboard` + "`" + `\n\n**Server → Client Messages (updates):**\n` + "`" + `` + "`" + `` + "`" + `json\n{\n\"resource\": \"run\",\n\"id\": \"run-abc123\",\n\"event\": \"updated\",\n\"data\": { ... }\n}\n` + "`" + `` + "`" + `` + "`" + `\n\n**Available endpoints:**\n- ` + "`" + `/api/v2/ws/runs` + "`" + ` - Subscribe to scenario run updates\n- ` + "`" + `/api/v2/ws/graphruns` + "`" + ` - Subscribe to graph run updates\n- ` + "`" + `/api/v2/ws/dashboard/active-runs` + "`" + ` - Subscribe to dashboard updates",
                 "consumes": [
                     "application/json"
@@ -1634,16 +2012,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api_v2_websocket.ErrorMessage"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/v2/ws/runs": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Multiplexed WebSocket for real-time updates across all resources\n\n**Authentication:** JWT token via Sec-WebSocket-Protocol subprotocol\n- JavaScript: ` + "`" + `new WebSocket(url, 'access_token.' + jwtToken)` + "`" + `\n- Header: ` + "`" + `Sec-WebSocket-Protocol: access_token.\u003cjwt_token\u003e` + "`" + `\n\n**Client → Server Messages (subscribe/unsubscribe):**\n` + "`" + `` + "`" + `` + "`" + `json\n{\n\"action\": \"subscribe\",\n\"resource\": \"run\",\n\"ids\": [\"run-abc123\", \"run-xyz789\"]\n}\n` + "`" + `` + "`" + `` + "`" + `\n\n**Resource types:** ` + "`" + `run` + "`" + `, ` + "`" + `graphrun` + "`" + `, ` + "`" + `dashboard` + "`" + `\n\n**Server → Client Messages (updates):**\n` + "`" + `` + "`" + `` + "`" + `json\n{\n\"resource\": \"run\",\n\"id\": \"run-abc123\",\n\"event\": \"updated\",\n\"data\": { ... }\n}\n` + "`" + `` + "`" + `` + "`" + `\n\n**Available endpoints:**\n- ` + "`" + `/api/v2/ws/runs` + "`" + ` - Subscribe to scenario run updates\n- ` + "`" + `/api/v2/ws/graphruns` + "`" + ` - Subscribe to graph run updates\n- ` + "`" + `/api/v2/ws/dashboard/active-runs` + "`" + ` - Subscribe to dashboard updates",
                 "consumes": [
                     "application/json"
@@ -1674,16 +2052,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api_v2_websocket.ErrorMessage"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/workflows": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Get list of all workflow templates in the system (admin only).",
                 "produces": [
                     "application/json"
@@ -1717,14 +2095,14 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                },
+                }
+            },
+            "post": {
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ]
-            },
-            "post": {
+                ],
                 "description": "Create a new workflow template. Validates graph structure (DAG, no cycles). Users can create templates for their own groups or public. Admins can create for any group.",
                 "consumes": [
                     "application/json"
@@ -1778,16 +2156,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/workflows/available": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Get workflows accessible to current user (own workflows, group workflows, public workflows). Includes node count excluding metadata nodes.",
                 "produces": [
                     "application/json"
@@ -1821,12 +2199,7 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         }
     },
@@ -1836,8 +2209,7 @@ const docTemplate = `{
             "properties": {
                 "checked-at": {
                     "description": "CheckedAt is the time at which the liveness check was performed.\n+optional",
-                    "type": "string",
-                    "format": "date-time"
+                    "type": "string"
                 },
                 "cluster-api-url": {
                     "description": "ClusterAPIURL is the API server URL of the managed cluster",
@@ -1917,6 +2289,295 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.CreateElasticsearchConfigRequest": {
+            "type": "object",
+            "properties": {
+                "alertsIndex": {
+                    "type": "string"
+                },
+                "caCert": {
+                    "description": "CACert is an optional PEM-encoded CA certificate (or bundle) trusted in\naddition to the host's system root CAs, so a self-signed cluster is reachable\nwith TLS verification still enabled and publicly trusted chains keep working.",
+                    "type": "string"
+                },
+                "grafanaUrl": {
+                    "type": "string"
+                },
+                "host": {
+                    "type": "string"
+                },
+                "insecureSkipTlsVerify": {
+                    "description": "InsecureSkipTLSVerify disables TLS certificate verification entirely. It is\na restricted last resort for self-signed clusters without CA material;\nprefer CACert.",
+                    "type": "boolean"
+                },
+                "metricsIndex": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "password": {
+                    "type": "string"
+                },
+                "port": {
+                    "type": "integer"
+                },
+                "telemetryIndex": {
+                    "type": "string"
+                },
+                "username": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.CreateElasticsearchConfigResponse": {
+            "type": "object",
+            "properties": {
+                "message": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.DeleteElasticsearchConfigResponse": {
+            "type": "object",
+            "properties": {
+                "message": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.ElasticsearchConfigResponse": {
+            "type": "object",
+            "properties": {
+                "alertsIndex": {
+                    "type": "string"
+                },
+                "createdAt": {
+                    "type": "string"
+                },
+                "createdBy": {
+                    "type": "string"
+                },
+                "grafanaUrl": {
+                    "type": "string"
+                },
+                "host": {
+                    "type": "string"
+                },
+                "insecureSkipTlsVerify": {
+                    "description": "InsecureSkipTLSVerify reports whether TLS certificate verification is\ndisabled for this config. Surfaced so the admin edit form can show and\nre-submit the current setting; it is not a secret.",
+                    "type": "boolean"
+                },
+                "metricsIndex": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "port": {
+                    "type": "integer"
+                },
+                "telemetryIndex": {
+                    "type": "string"
+                },
+                "updatedAt": {
+                    "type": "string"
+                },
+                "updatedBy": {
+                    "type": "string"
+                },
+                "username": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.InlineConnection": {
+            "type": "object",
+            "properties": {
+                "host": {
+                    "description": "Host is the Elasticsearch host, optionally scheme-bearing (e.g.\n\"https://es.example.com\"). Required.",
+                    "type": "string"
+                },
+                "password": {
+                    "description": "Password is the basic-auth password. Optional; used only with Username and\nnever persisted server-side.",
+                    "type": "string"
+                },
+                "port": {
+                    "description": "Port is the Elasticsearch port. Optional; must be 0-65535. When 0 the\nquery client applies the default port.",
+                    "type": "integer"
+                },
+                "telemetryIndex": {
+                    "description": "TelemetryIndex is the index queried for telemetry documents. Required.",
+                    "type": "string"
+                },
+                "username": {
+                    "description": "Username is the basic-auth user. Optional; when set the connection must\nresolve to https (credentials are refused over plaintext HTTP).",
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.ListElasticsearchConfigsResponse": {
+            "type": "object",
+            "properties": {
+                "configs": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.ElasticsearchConfigResponse"
+                    }
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
+        "github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.QueryTelemetryRequest": {
+            "type": "object",
+            "properties": {
+                "configName": {
+                    "description": "ConfigName references a saved Elasticsearch config by name; credentials are\nresolved server-side. Mutually exclusive with Inline; exactly one is required.",
+                    "type": "string"
+                },
+                "endDate": {
+                    "type": "string"
+                },
+                "inline": {
+                    "description": "Inline carries an ephemeral connection when no saved config is used.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.InlineConnection"
+                        }
+                    ]
+                },
+                "size": {
+                    "description": "Size is the max documents to return. Optional; 0 defaults to DefaultQuerySize\nand values above MaxQuerySize are clamped. Unit: documents.",
+                    "type": "integer"
+                },
+                "startDate": {
+                    "description": "StartDate and EndDate bound the search by the document timestamp. They are\n\"yyyy-MM-dd\" date strings (as produced by the UI date pickers). Empty\nvalues fall back to a default trailing window in the query client.",
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.QueryTelemetryResponse": {
+            "type": "object",
+            "properties": {
+                "documents": {
+                    "description": "Documents is the size-capped page of matched telemetry runs. Length is\nbounded by the request Size (see DefaultQuerySize/MaxQuerySize).",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.TelemetryDocument"
+                    }
+                },
+                "stats": {
+                    "description": "Stats summarizes pass/fail across the whole matched window, so Stats.Pass +\nStats.Fail can exceed Total (which counts only the returned documents page).",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.TelemetryStats"
+                        }
+                    ]
+                },
+                "total": {
+                    "description": "Total is the number of documents in this returned page (len(Documents)),\nnot the total matched across the window. Unit: documents.",
+                    "type": "integer"
+                }
+            }
+        },
+        "github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.TelemetryDocument": {
+            "type": "object",
+            "properties": {
+                "end_timestamp": {
+                    "description": "EndTimestamp is the scenario end time. Unit: Unix seconds (UTC).",
+                    "type": "integer"
+                },
+                "namespace": {
+                    "description": "Namespace is the target namespace from the run's first scenario.",
+                    "type": "string"
+                },
+                "run_uuid": {
+                    "description": "RunUUID uniquely identifies the telemetry run this document represents.",
+                    "type": "string"
+                },
+                "scenario_type": {
+                    "description": "ScenarioType is the chaos scenario type from the run's first scenario.",
+                    "type": "string"
+                },
+                "start_timestamp": {
+                    "description": "StartTimestamp is the scenario start time. Unit: Unix seconds (UTC).",
+                    "type": "integer"
+                },
+                "status": {
+                    "description": "Status is the run outcome: true = pass, false = fail. It applies the\nper-scenario exit_status downgrade, so it may differ from the run-level\njob_status used by TelemetryStats.",
+                    "type": "boolean"
+                }
+            }
+        },
+        "github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.TelemetryStats": {
+            "type": "object",
+            "properties": {
+                "fail": {
+                    "description": "Fail is the count of runs with job_status false across the whole matched\nwindow (not just the returned page). Unit: runs.",
+                    "type": "integer"
+                },
+                "pass": {
+                    "description": "Pass is the count of runs with job_status true across the whole matched\nwindow (not just the returned page). Unit: runs.",
+                    "type": "integer"
+                },
+                "pass_percent": {
+                    "description": "PassPercent is Pass / (Pass + Fail) * 100 across the matched window.\nRange: 0-100, rounded to 2 decimals; 0 when no runs match.",
+                    "type": "number"
+                }
+            }
+        },
+        "github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.UpdateElasticsearchConfigRequest": {
+            "type": "object",
+            "properties": {
+                "alertsIndex": {
+                    "type": "string"
+                },
+                "caCert": {
+                    "description": "CACert is an optional PEM-encoded CA certificate (or bundle) trusted in\naddition to the host's system root CAs, so a self-signed cluster is reachable\nwith TLS verification still enabled and publicly trusted chains keep working.\nIt is a pointer to make omission (nil, \"leave the stored CA unchanged\")\ndistinguishable from an explicit empty string (\"clear the stored CA\").",
+                    "type": "string"
+                },
+                "grafanaUrl": {
+                    "type": "string"
+                },
+                "host": {
+                    "type": "string"
+                },
+                "insecureSkipTlsVerify": {
+                    "description": "InsecureSkipTLSVerify disables TLS certificate verification entirely. It is\na restricted last resort for self-signed clusters without CA material;\nprefer CACert. A nil pointer leaves the stored setting unchanged; a non-nil\nvalue explicitly sets or clears it.",
+                    "type": "boolean"
+                },
+                "metricsIndex": {
+                    "type": "string"
+                },
+                "password": {
+                    "type": "string"
+                },
+                "port": {
+                    "type": "integer"
+                },
+                "telemetryIndex": {
+                    "type": "string"
+                },
+                "username": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.UpdateElasticsearchConfigResponse": {
+            "type": "object",
+            "properties": {
+                "message": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                }
+            }
+        },
         "github_com_krkn-chaos_krkn-operator_pkg_files.AvailableFilesResponse": {
             "type": "object",
             "properties": {
@@ -1988,6 +2649,10 @@ const docTemplate = `{
         "github_com_krkn-chaos_krkn-operator_pkg_files.FileInfo": {
             "type": "object",
             "properties": {
+                "availableToAll": {
+                    "description": "AvailableToAll indicates whether the file is accessible to all users.",
+                    "type": "boolean"
+                },
                 "createdAt": {
                     "description": "CreatedAt is the timestamp when the file was created (ISO 8601)",
                     "type": "string"
@@ -2011,6 +2676,13 @@ const docTemplate = `{
                 "fileType": {
                     "description": "FileType is an optional file type category (e.g., \"config\", \"script\") - for user categorization",
                     "type": "string"
+                },
+                "groups": {
+                    "description": "Groups is a list of group names that can access this file.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
                 },
                 "updatedAt": {
                     "description": "UpdatedAt is the timestamp when the file was last updated (ISO 8601)",
@@ -2296,7 +2968,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "targetData": {
-                    "description": "TargetData contains a map of operator-name to list of cluster targets",
+                    "description": "TargetData contains a map of operator-name to list of cluster targets,\nincluding the latest optional liveness result for each target.",
                     "type": "object",
                     "additionalProperties": {
                         "type": "array",

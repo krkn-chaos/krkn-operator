@@ -36,7 +36,10 @@ func ValidateCreateRequest(req *CreateElasticsearchConfigRequest) error {
 	return validateTLSSettings(req.Host, req.Username, req.CACert)
 }
 
-// ValidateUpdateRequest validates an UpdateElasticsearchConfigRequest.
+// ValidateUpdateRequest validates an UpdateElasticsearchConfigRequest. A nil
+// CACert means "leave the stored CA unchanged" and is not validated here; a
+// non-nil value (including an explicit empty string that clears the stored CA)
+// is validated as PEM.
 func ValidateUpdateRequest(req *UpdateElasticsearchConfigRequest) error {
 	if req.Host == "" {
 		return fmt.Errorf("host is required")
@@ -44,7 +47,22 @@ func ValidateUpdateRequest(req *UpdateElasticsearchConfigRequest) error {
 	if req.Port < 0 || req.Port > 65535 {
 		return fmt.Errorf("port must be between 0 and 65535")
 	}
-	return validateTLSSettings(req.Host, req.Username, req.CACert)
+	caCert := ""
+	if req.CACert != nil {
+		caCert = *req.CACert
+	}
+	return validateTLSSettings(req.Host, req.Username, caCert)
+}
+
+// ValidateMergedConnection validates a fully merged connection before it is
+// persisted, using the effective username and CA that result after empty update
+// fields fall back to the stored Secret values. An update can omit credentials to
+// keep the existing ones, so the merged (not the request-only) view is what the
+// query client will later enforce; validating it here prevents an update from
+// returning success for a configuration the client would refuse (e.g. a retained
+// username over a newly set http:// host).
+func ValidateMergedConnection(host, username, caCert string) error {
+	return validateTLSSettings(host, username, caCert)
 }
 
 // validateTLSSettings enforces that credentials are never sent over plaintext

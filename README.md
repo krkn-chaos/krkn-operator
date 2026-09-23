@@ -50,7 +50,12 @@ helm uninstall krkn-operator -n krkn-operator-system
 
 ## Telemetry Query API
 
-Query chaos-run telemetry stored in Elasticsearch/OpenSearch through the operator's REST API. Credentials are never sent by the client — the operator resolves them server-side from a previously saved Elasticsearch config, so the request only references that config by name.
+Query chaos-run telemetry stored in Elasticsearch/OpenSearch through the operator's REST API. The request supplies the connection in one of two mutually exclusive ways:
+
+- **Saved config (recommended):** the request references a previously saved Elasticsearch config by name (`configName`), and the operator resolves the credentials server-side from the backing Kubernetes Secret. No credentials are sent by the client.
+- **Inline connection:** the request supplies the connection details, including `username` and `password`, directly in the request body (`inline`). These credentials are used only to service that single request and are **never persisted** — no Secret is created or updated. Inline destinations are subject to the destination policy (loopback, private, and metadata addresses are rejected) to guard against server-side request forgery, and always use default TLS verification against the system trust store (custom CA certificates and insecure-skip-TLS remain admin-only, saved-config settings).
+
+In both modes credentials never leave the backend beyond the connection to the target cluster, and they are never returned in any API response.
 
 **Endpoint:** `POST /api/v1/elasticsearch-query`
 
@@ -83,11 +88,24 @@ Results are sorted newest-first by timestamp before the `size` limit is applied.
       "status": true
     }
   ],
-  "total": 1
+  "total": 1,
+  "stats": {
+    "pass": 42,
+    "fail": 8,
+    "pass_percent": 84.0
+  }
 }
 ```
 
 `total` is the number of documents returned. Hits whose stored shape cannot be parsed are skipped rather than failing the request, so `total` may be smaller than the cluster's raw hit count.
+
+`stats` summarizes run-level pass/fail across the entire matched time window (all documents in range), not just the returned `size`-capped page, so `pass` + `fail` may exceed `total`. Fields:
+
+| Field          | Type   | Description |
+|----------------|--------|-------------|
+| `pass`         | int    | Runs with `job_status` true in the matched window. |
+| `fail`         | int    | Runs with `job_status` false in the matched window. |
+| `pass_percent` | float  | `pass` / (`pass` + `fail`) as a percentage, `0`-`100`, rounded to 2 decimals; `0` when no runs matched. |
 
 **Errors:**
 

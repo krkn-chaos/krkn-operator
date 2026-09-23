@@ -41,6 +41,21 @@ import (
 
 // CreateElasticsearchConfig handles POST /api/v1/elasticsearch-configs
 // Creates a new Elasticsearch config Secret (admin only)
+//
+// @Summary Create an Elasticsearch config
+// @Description Create a new Elasticsearch config, storing credentials as a Kubernetes Secret. Admin only.
+// @Tags elasticsearch
+// @Accept json
+// @Produce json
+// @Param request body elasticsearch.CreateElasticsearchConfigRequest true "Elasticsearch config to create"
+// @Success 201 {object} elasticsearch.CreateElasticsearchConfigResponse "Config created"
+// @Failure 400 {object} ErrorResponse "Invalid request body or parameters"
+// @Failure 401 {object} ErrorResponse "Authentication required"
+// @Failure 403 {object} ErrorResponse "Admin privileges required"
+// @Failure 409 {object} ErrorResponse "Config with the same name already exists"
+// @Failure 500 {object} ErrorResponse "Internal server error"
+// @Security BearerAuth
+// @Router /elasticsearch-configs [post]
 func (h *Handler) CreateElasticsearchConfig(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	logger := log.FromContext(ctx).WithName("create-elasticsearch-config")
@@ -150,6 +165,16 @@ func (h *Handler) CreateElasticsearchConfig(w http.ResponseWriter, r *http.Reque
 
 // ListElasticsearchConfigs handles GET /api/v1/elasticsearch-configs
 // Lists all Elasticsearch configs (any authenticated user)
+//
+// @Summary List Elasticsearch configs
+// @Description List all Elasticsearch configs. Credentials are never returned. Available to any authenticated user.
+// @Tags elasticsearch
+// @Produce json
+// @Success 200 {object} elasticsearch.ListElasticsearchConfigsResponse "Configs"
+// @Failure 401 {object} ErrorResponse "Authentication required"
+// @Failure 500 {object} ErrorResponse "Internal server error"
+// @Security BearerAuth
+// @Router /elasticsearch-configs [get]
 func (h *Handler) ListElasticsearchConfigs(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	logger := log.FromContext(ctx).WithName("list-elasticsearch-configs")
@@ -185,6 +210,20 @@ func (h *Handler) ListElasticsearchConfigs(w http.ResponseWriter, r *http.Reques
 
 // GetElasticsearchConfig handles GET /api/v1/elasticsearch-configs/{name}
 // Returns a single Elasticsearch config (admin only)
+//
+// @Summary Get an Elasticsearch config
+// @Description Get a single Elasticsearch config by name. Credentials are never returned. Admin only.
+// @Tags elasticsearch
+// @Produce json
+// @Param name path string true "Elasticsearch config name"
+// @Success 200 {object} elasticsearch.ElasticsearchConfigResponse "Config"
+// @Failure 400 {object} ErrorResponse "Invalid config name"
+// @Failure 401 {object} ErrorResponse "Authentication required"
+// @Failure 403 {object} ErrorResponse "Admin privileges required"
+// @Failure 404 {object} ErrorResponse "Config not found"
+// @Failure 500 {object} ErrorResponse "Internal server error"
+// @Security BearerAuth
+// @Router /elasticsearch-configs/{name} [get]
 func (h *Handler) GetElasticsearchConfig(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	logger := log.FromContext(ctx).WithName("get-elasticsearch-config")
@@ -229,6 +268,22 @@ func (h *Handler) GetElasticsearchConfig(w http.ResponseWriter, r *http.Request)
 
 // UpdateElasticsearchConfig handles PUT /api/v1/elasticsearch-configs/{name}
 // Updates an Elasticsearch config (admin only)
+//
+// @Summary Update an Elasticsearch config
+// @Description Update an existing Elasticsearch config by name. Admin only.
+// @Tags elasticsearch
+// @Accept json
+// @Produce json
+// @Param name path string true "Elasticsearch config name"
+// @Param request body elasticsearch.UpdateElasticsearchConfigRequest true "Fields to update"
+// @Success 200 {object} elasticsearch.UpdateElasticsearchConfigResponse "Config updated"
+// @Failure 400 {object} ErrorResponse "Invalid request body or config name"
+// @Failure 401 {object} ErrorResponse "Authentication required"
+// @Failure 403 {object} ErrorResponse "Admin privileges required"
+// @Failure 404 {object} ErrorResponse "Config not found"
+// @Failure 500 {object} ErrorResponse "Internal server error"
+// @Security BearerAuth
+// @Router /elasticsearch-configs/{name} [put]
 func (h *Handler) UpdateElasticsearchConfig(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	logger := log.FromContext(ctx).WithName("update-elasticsearch-config")
@@ -311,6 +366,29 @@ func (h *Handler) UpdateElasticsearchConfig(w http.ResponseWriter, r *http.Reque
 		secret.Data = make(map[string][]byte)
 	}
 
+	// Validate the fully merged connection before persisting. Empty update
+	// credentials fall back to the stored Secret values, so the request-only
+	// validation above cannot see a retained username paired with a newly set
+	// http:// host. Compute the effective username/CA and reject a configuration
+	// the query client would refuse, rather than saving it and returning success.
+	mergedUsername := req.Username
+	if mergedUsername == "" {
+		mergedUsername = string(secret.Data[elasticsearch.SecretKeyUsername])
+	}
+	// A nil CACert keeps the stored value; a non-nil one (including an explicit
+	// empty string that clears it) is the effective value.
+	mergedCACert := string(secret.Data[elasticsearch.SecretKeyCACert])
+	if req.CACert != nil {
+		mergedCACert = *req.CACert
+	}
+	if err := elasticsearch.ValidateMergedConnection(req.Host, mergedUsername, mergedCACert); err != nil {
+		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+			Error:   "bad_request",
+			Message: err.Error(),
+		})
+		return
+	}
+
 	// Only overwrite credentials when the caller explicitly supplies them;
 	// an empty string (omitempty) means "keep the existing value".
 	if req.Username != "" {
@@ -319,8 +397,14 @@ func (h *Handler) UpdateElasticsearchConfig(w http.ResponseWriter, r *http.Reque
 	if req.Password != "" {
 		secret.Data[elasticsearch.SecretKeyPassword] = []byte(req.Password)
 	}
-	if req.CACert != "" {
-		secret.Data[elasticsearch.SecretKeyCACert] = []byte(req.CACert)
+	// A nil CACert leaves the stored certificate untouched. A non-nil value with
+	// content replaces it; a non-nil empty string explicitly clears it.
+	if req.CACert != nil {
+		if *req.CACert != "" {
+			secret.Data[elasticsearch.SecretKeyCACert] = []byte(*req.CACert)
+		} else {
+			delete(secret.Data, elasticsearch.SecretKeyCACert)
+		}
 	}
 	// A nil pointer means the caller omitted the field: leave the stored TLS
 	// setting untouched. A non-nil value explicitly sets or clears it.
@@ -351,6 +435,20 @@ func (h *Handler) UpdateElasticsearchConfig(w http.ResponseWriter, r *http.Reque
 
 // DeleteElasticsearchConfig handles DELETE /api/v1/elasticsearch-configs/{name}
 // Deletes an Elasticsearch config (admin only)
+//
+// @Summary Delete an Elasticsearch config
+// @Description Delete an Elasticsearch config by name. Admin only.
+// @Tags elasticsearch
+// @Produce json
+// @Param name path string true "Elasticsearch config name"
+// @Success 200 {object} elasticsearch.DeleteElasticsearchConfigResponse "Config deleted"
+// @Failure 400 {object} ErrorResponse "Invalid config name"
+// @Failure 401 {object} ErrorResponse "Authentication required"
+// @Failure 403 {object} ErrorResponse "Admin privileges required"
+// @Failure 404 {object} ErrorResponse "Config not found"
+// @Failure 500 {object} ErrorResponse "Internal server error"
+// @Security BearerAuth
+// @Router /elasticsearch-configs/{name} [delete]
 func (h *Handler) DeleteElasticsearchConfig(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	logger := log.FromContext(ctx).WithName("delete-elasticsearch-config")
@@ -455,6 +553,21 @@ func (h *Handler) ElasticsearchConfigsRouter(w http.ResponseWriter, r *http.Requ
 // never leave the backend), connects to the cluster, and returns the most recent
 // telemetry documents. Available to any authenticated user, mirroring
 // ListElasticsearchConfigs.
+//
+// @Summary Query Elasticsearch telemetry
+// @Description Run a telemetry search against a saved Elasticsearch config or an inline connection. Credentials are resolved server-side and never leave the backend. Available to any authenticated user.
+// @Tags elasticsearch
+// @Accept json
+// @Produce json
+// @Param request body elasticsearch.QueryTelemetryRequest true "Query parameters (exactly one of configName or inline)"
+// @Success 200 {object} elasticsearch.QueryTelemetryResponse "Most recent telemetry documents"
+// @Failure 400 {object} ErrorResponse "Invalid request body or parameters"
+// @Failure 401 {object} ErrorResponse "Authentication required"
+// @Failure 404 {object} ErrorResponse "Elasticsearch config not found"
+// @Failure 405 {object} ErrorResponse "Method not allowed"
+// @Failure 500 {object} ErrorResponse "Internal server error"
+// @Security BearerAuth
+// @Router /elasticsearch-query [post]
 func (h *Handler) QueryElasticsearchTelemetry(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	logger := log.FromContext(ctx).WithName("query-elasticsearch-telemetry")
@@ -512,8 +625,19 @@ func (h *Handler) QueryElasticsearchTelemetry(w http.ResponseWriter, r *http.Req
 		conn = buildConnectionParams(secret)
 	}
 
-	docs, err := h.esClient.QueryTelemetry(ctx, conn, req.Size, req.StartDate, req.EndDate)
+	docs, stats, err := h.esClient.QueryTelemetry(ctx, conn, req.Size, req.StartDate, req.EndDate)
 	if err != nil {
+		// A rejected inline destination is a client error (the caller asked the
+		// operator to reach an address the destination policy forbids), not an
+		// upstream failure. Return 400 without echoing the specific address.
+		if errors.Is(err, elasticsearch.ErrDestinationNotAllowed) {
+			logger.Info("Rejected telemetry query to a disallowed destination", "source", source)
+			writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+				Error:   "bad_request",
+				Message: "The requested Elasticsearch destination is not permitted",
+			})
+			return
+		}
 		// Log bounded upstream diagnostics server-side for troubleshooting, but
 		// never return raw upstream bodies or internal client errors to the
 		// caller: respond with a stable, sanitized 502 message instead.
@@ -536,6 +660,7 @@ func (h *Handler) QueryElasticsearchTelemetry(w http.ResponseWriter, r *http.Req
 	writeJSON(w, http.StatusOK, elasticsearch.QueryTelemetryResponse{
 		Documents: docs,
 		Total:     len(docs),
+		Stats:     stats,
 	})
 }
 
@@ -593,6 +718,10 @@ func buildInlineConnectionParams(inline *elasticsearch.InlineConnection) elastic
 		Username: inline.Username,
 		Password: inline.Password,
 		Index:    inline.TelemetryIndex,
+		// Inline connections are user-supplied and reachable by any authenticated
+		// user, so they are subject to the destination policy (loopback/private/
+		// metadata/etc. are rejected) to prevent server-side request forgery.
+		RestrictDestination: true,
 	}
 }
 
