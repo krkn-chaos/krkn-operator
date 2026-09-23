@@ -25,7 +25,12 @@ import (
 	"strings"
 	"testing"
 
-	_ "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
+	"github.com/gorilla/websocket"
+	k8sfake "k8s.io/client-go/kubernetes/fake"
+	fakeclient "sigs.k8s.io/controller-runtime/pkg/client/fake"
+
+	v2 "github.com/krkn-chaos/krkn-operator/internal/api/v2"
+	"github.com/krkn-chaos/krkn-operator/pkg/auth"
 )
 
 // TestMaxBodySizeMiddleware verifies that the maxBodySizeMiddleware correctly
@@ -175,4 +180,35 @@ func TestWorkflowsAvailableMethodGuard(t *testing.T) {
 	t.Log("Method guard for /workflows/available is in server.go:183-186")
 	t.Log("Only GET requests are allowed on this endpoint")
 	t.Log("POST/PUT/DELETE/PATCH should return 405 Method Not Allowed")
+}
+
+// TestWebSocketJobsPathRegistered verifies that the jobs WebSocket route is
+// registered in the server's actual HTTP mux. The handler rejects a request
+// without a token with 400; an unregistered route would return 404 instead.
+func TestWebSocketJobsPathRegistered(t *testing.T) {
+	client := fakeclient.NewClientBuilder().Build()
+	secretManager := auth.NewSecretManager(client, "default", TokenDuration, "krkn-operator")
+	server := NewServer(0, client, k8sfake.NewSimpleClientset(), "default", "", secretManager)
+	defer func() {
+		if err := server.Shutdown(); err != nil {
+			t.Errorf("failed to shut down test server: %v", err)
+		}
+	}()
+
+	httpServer := httptest.NewServer(server.server.Handler)
+	defer httpServer.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(httpServer.URL, "http") + v2.WebSocketJobsPath
+	_, response, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err == nil {
+		t.Fatal("expected WebSocket dial to fail without authentication")
+	}
+	if response == nil {
+		t.Fatalf("expected HTTP response from registered WebSocket route: %v", err)
+	}
+	defer response.Body.Close()
+
+	if response.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected registered route to reject missing token with %d, got %d", http.StatusBadRequest, response.StatusCode)
+	}
 }
