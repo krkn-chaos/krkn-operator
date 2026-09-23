@@ -51,10 +51,10 @@ func TestStripCloudEnvVars(t *testing.T) {
 	}
 
 	in := map[string]string{
-		"TIMEOUT":              "300",
+		"TIMEOUT":               "300",
 		"AWS_SECRET_ACCESS_KEY": "plaintext",
-		"CLOUD_TYPE":           "aws",
-		"NODE_NAME":            "worker-1",
+		"CLOUD_TYPE":            "aws",
+		"NODE_NAME":             "worker-1",
 	}
 	out := StripCloudEnvVars(in)
 	if len(out) != 2 {

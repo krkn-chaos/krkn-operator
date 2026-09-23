@@ -63,6 +63,7 @@ type KrknScenarioRunReconciler struct {
 	// signatureVerifier is injectable for controller unit tests; production
 	// reconciliation uses krknctl's verifier when it is nil.
 	signatureVerifier imageSignatureVerifier
+	imageResolver     imageResolver
 }
 
 // +kubebuilder:rbac:groups=krkn.krkn-chaos.dev,resources=krknscenarioruns,verbs=get;list;watch;create;update;patch;delete
@@ -637,7 +638,11 @@ func (r *KrknScenarioRunReconciler) prepareJobResources(
 		cleanup()
 		return nil, err
 	}
-	containerImage, err := buildContainerImageFromReference(scenarioRun.Spec.Scenario, &krknctlCfg, privateRegistry)
+	resolver := r.imageResolver
+	if resolver == nil {
+		resolver = resolveImmutableImage
+	}
+	containerImage, err := resolver(ctx, &krknctlCfg, scenarioRun.Spec.Scenario, privateRegistry)
 	if err != nil {
 		cleanup()
 		return nil, fmt.Errorf("failed to resolve scenario image: %w", err)

@@ -357,6 +357,9 @@ func TestCreateScenarioRun_ResiliencyScore(t *testing.T) {
 				signatureVerifier: func(context.Context, *krknctlconfig.Config, krknv1alpha1.ScenarioReference, *krknctlmodels.RegistryV2, string) (verify.SignatureStatus, error) {
 					return verify.SignatureSigned, nil
 				},
+				imageResolver: func(_ context.Context, _ *krknctlconfig.Config, reference krknv1alpha1.ScenarioReference, _ *krknctlmodels.RegistryV2) (string, error) {
+					return "quay.io/krkn-chaos/krkn-hub-multiarch:" + reference.Name, nil
+				},
 			}
 
 			// Call createScenarioRun

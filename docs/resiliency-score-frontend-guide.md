@@ -35,6 +35,40 @@ X-Resiliency-Mount-Path: /etc/krkn/metrics.yaml  # Optional, default internal me
 - 400 Bad Request se baseline negativa
 - 400 Bad Request se mount path relativo
 
+### 1.1 Resiliency weight per graph node
+
+Ogni nodo dell'oggetto `graph` può specificare il campo opzionale
+`resiliencyWeight`. Il campo è un moltiplicatore positivo per il contributo
+del nodo allo score di resilienza del cluster. Se il campo è omesso, viene
+usato il valore predefinito `1`, anche per i workflow creati con una versione
+precedente dell'API.
+
+```json
+{
+  "graph": {
+    "node-a": {
+      "scenario": {"name": "pod-delete", "private": false},
+      "resiliencyWeight": 2.0
+    },
+    "node-b": {
+      "scenario": {"name": "pod-disruption", "private": false},
+      "depends_on": "node-a"
+    }
+  }
+}
+```
+
+Il campo va inserito dentro il singolo valore del map `graph`, allo stesso
+livello di `scenario`, `env`, `volumes` e `depends_on`; non è un campo del
+`GraphRun` root. Quando il resiliency score è abilitato, il controller calcola
+la media pesata dei punteggi dei nodi completati per ogni cluster:
+
+`sum(node score * resiliencyWeight) / sum(resiliencyWeight)`
+
+Un peso maggiore aumenta l'influenza del nodo sul risultato finale, senza
+modificare il punteggio prodotto dallo scenario stesso. I pesi non validi
+negativi vengono rifiutati con `400 Bad Request`.
+
 ### 2. Response - List GraphRuns (GET /api/v1/graphruns)
 
 **Nuovi campi in `GraphRunListItem`:**
