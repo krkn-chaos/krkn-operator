@@ -16,6 +16,12 @@ images:
   operator:
     image: krkn-chaos.docker.scarf.sh/krkn-chaos/krkn-operator:latest
     pullPolicy: Always
+  aiOrchestrator:
+    image: quay.io/krkn-chaos/krkn-ai-operator:latest
+    pullPolicy: Always
+  aiService:
+    image: quay.io/krkn-chaos/krkn-ai-service:latest
+    pullPolicy: Always
   dataProvider:
     image: krkn-chaos.docker.scarf.sh/krkn-chaos/krkn-operator-data-provider:latest
     pullPolicy: Always
@@ -24,9 +30,37 @@ images:
     pullPolicy: Always
   console:
     image: krkn-chaos.docker.scarf.sh/krkn-chaos/krkn-operator-console:latest
-    pullPolicy: Always
+  pullPolicy: Always
   pullSecrets: []
   # - name: my-registry-secret
+
+
+## Krkn-AI (optional)
+krknAI:
+  # Enables KrknAIRun reconciliation and its artifact service.
+  enabled: false
+## Standalone AI artifact service
+aiService:
+  replicaCount: 1
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 250m
+      memory: 256Mi
+  # Empty generates and retains a dedicated RWO claim. An existing claim is never
+  # created, modified, or deleted by this chart.
+  storage:
+    existingClaim: ""
+    storageClassName: ""
+    size: 1Gi
+  # Empty generates a stable release Secret token.
+  serviceToken: ""
+  networkPolicy:
+    enabled: true
+
+
 
 ## Authentication & Security
 auth:

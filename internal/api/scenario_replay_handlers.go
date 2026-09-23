@@ -224,12 +224,16 @@ func (h *Handler) getScenarioRun(ctx context.Context, name string) (*krknv1alpha
 // The payload is 100% identical to what the wizard would send to POST /scenarios/run
 func (h *Handler) reconstructScenarioRunPayload(ctx context.Context, scenarioRun *krknv1alpha1.KrknScenarioRun) (*ScenarioRunRequest, error) {
 	logger := log.FromContext(ctx)
+	scenario, _, err := scenarioRun.Spec.ResolveScenarioReference()
+	if err != nil {
+		return nil, fmt.Errorf("scenario identity is unavailable: %w", err)
+	}
 
 	payload := &ScenarioRunRequest{
 		// Mandatory fields
 		TargetRequestID: scenarioRun.Spec.TargetRequestID,
 		TargetClusters:  scenarioRun.Spec.TargetClusters,
-		Scenario:        scenarioRun.Spec.Scenario,
+		Scenario:        scenario,
 		// Retain the resolved image for console display and replay compatibility.
 		// The server still resolves the executable image from Scenario on submit.
 		ScenarioImage: scenarioRunImage(scenarioRun.Status.ClusterJobs),

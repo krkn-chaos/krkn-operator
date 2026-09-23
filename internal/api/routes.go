@@ -116,3 +116,8 @@ const (
 	// ElasticsearchQueryPath runs a telemetry search against a saved config
 	ElasticsearchQueryPath = APIBasePath + "/elasticsearch-query"
 )
+
+// Krkn-AI configuration, run, and artifact endpoints.
+const (
+	KrknAIPath = APIBasePath + "/krkn-ai"
+)
