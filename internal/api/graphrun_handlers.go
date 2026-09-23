@@ -35,6 +35,7 @@ import (
 
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
 	"github.com/krkn-chaos/krkn-operator/pkg/auth"
+	"github.com/krkn-chaos/krkn-operator/pkg/cloudcreds"
 	"github.com/krkn-chaos/krkn-operator/pkg/groupauth"
 )
 
@@ -540,6 +541,19 @@ func (h *Handler) CreateGraphRun(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+	}
+
+	// Enforce secrecy server-side for any node (or the graph) that uses a cloudCredentialRef.
+	for nodeID, node := range req.Graph {
+		effectiveRef := strings.TrimSpace(node.CloudCredentialRef)
+		if effectiveRef == "" {
+			effectiveRef = req.CloudCredentialRef
+		}
+		if effectiveRef == "" {
+			continue
+		}
+		node.Env = cloudcreds.StripCloudEnvVars(node.Env)
+		req.Graph[nodeID] = node
 	}
 
 	// Generate unique name for the graph run

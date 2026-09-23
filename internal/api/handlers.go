@@ -54,6 +54,7 @@ import (
 
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
 	"github.com/krkn-chaos/krkn-operator/pkg/auth"
+	"github.com/krkn-chaos/krkn-operator/pkg/cloudcreds"
 	"github.com/krkn-chaos/krkn-operator/pkg/elasticsearch"
 	"github.com/krkn-chaos/krkn-operator/pkg/groupauth"
 	"github.com/krkn-chaos/krkn-operator/pkg/registry"
@@ -1557,6 +1558,9 @@ func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
+		// Enforce secrecy server-side: never persist plaintext cloud secrets in the CRD
+		// when a saved credential will inject them via SecretKeyRef.
+		req.Environment = cloudcreds.StripCloudEnvVars(req.Environment)
 	}
 
 	// Create KrknScenarioRun CR

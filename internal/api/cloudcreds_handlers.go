@@ -259,7 +259,12 @@ func (h *Handler) UpdateCloudCredential(w http.ResponseWriter, r *http.Request) 
 	}
 
 	secret.Annotations = cloudcreds.UpdateAnnotations(secret.Annotations, req.Description, updatedBy)
-	secret.Labels = cloudcreds.BuildLabels(existingProvider, req.Groups, req.AvailableToAll)
+	groups, availableToAll := cloudcreds.ResolveAccessControlForUpdate(
+		secret.Labels,
+		req.Groups,
+		req.AvailableToAll,
+	)
+	secret.Labels = cloudcreds.BuildLabels(existingProvider, groups, availableToAll)
 
 	if secret.Data == nil {
 		secret.Data = make(map[string][]byte)
@@ -359,12 +364,18 @@ func (h *Handler) ListAvailableCloudCredentials(w http.ResponseWriter, r *http.R
 		return
 	}
 
+	accessCtx := h.buildCloudCredentialAccessContext(ctx)
+
 	var credentials []cloudcreds.CloudCredentialResponse
 	for i := range secretList.Items {
-		allowed, err := h.canAccessCloudCredential(ctx, &secretList.Items[i])
+		allowed, err := accessCtx.canAccess(&secretList.Items[i])
 		if err != nil {
 			logger.Error(err, "Failed to check access for cloud credential", "name", secretList.Items[i].Name)
-			continue
+			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+				Error:   "internal_error",
+				Message: "Failed to check cloud credential access",
+			})
+			return
 		}
 		if allowed {
 			credentials = append(credentials, buildCloudCredentialResponse(&secretList.Items[i]))
@@ -443,41 +454,74 @@ func (h *Handler) loadCloudCredentialSecret(ctx context.Context, name string) (*
 	return &secret, nil
 }
 
-// canAccessCloudCredential checks if the current user can access a cloud credential.
-// Returns (allowed, error) so callers can distinguish access denial from internal failures.
-func (h *Handler) canAccessCloudCredential(ctx context.Context, secret *corev1.Secret) (bool, error) {
-	claims := auth.GetClaimsFromContext(ctx)
-	if claims == nil {
+// cloudCredentialAccessContext caches per-request auth state so listing many
+// credentials does not call GetUserGroups once per Secret. Group membership is
+// loaded lazily — available-to-all credentials never need a groups lookup.
+type cloudCredentialAccessContext struct {
+	handler        *Handler
+	ctx            context.Context
+	isAdmin        bool
+	hasClaims      bool
+	userID         string
+	userGroupNames map[string]bool
+	groupsLoaded   bool
+}
+
+func (a *cloudCredentialAccessContext) ensureUserGroups() error {
+	if a.groupsLoaded || a.isAdmin || !a.hasClaims {
+		return nil
+	}
+	userGroups, err := groupauth.GetUserGroups(a.ctx, a.handler.client, a.userID, a.handler.namespace)
+	if err != nil {
+		return fmt.Errorf("failed to check group membership: %w", err)
+	}
+	a.userGroupNames = make(map[string]bool, len(userGroups))
+	for _, ug := range userGroups {
+		a.userGroupNames[ug.Name] = true
+	}
+	a.groupsLoaded = true
+	return nil
+}
+
+func (a *cloudCredentialAccessContext) canAccess(secret *corev1.Secret) (bool, error) {
+	if !a.hasClaims {
 		return false, nil
 	}
-
-	if auth.IsAdmin(ctx) {
+	if a.isAdmin {
 		return true, nil
 	}
-
 	if secret.Labels[cloudcreds.AvailableToAllLabel] == "true" {
 		return true, nil
 	}
-
-	userGroups, err := groupauth.GetUserGroups(ctx, h.client, claims.UserID, h.namespace)
-	if err != nil {
-		return false, fmt.Errorf("failed to check group membership: %w", err)
+	if err := a.ensureUserGroups(); err != nil {
+		return false, err
 	}
-
-	secretGroups := cloudcreds.ExtractGroupsFromLabels(secret.Labels)
-
-	userGroupNames := make(map[string]bool)
-	for _, ug := range userGroups {
-		userGroupNames[ug.Name] = true
-	}
-
-	for _, sg := range secretGroups {
-		if userGroupNames[sg] {
+	for _, sg := range cloudcreds.ExtractGroupsFromLabels(secret.Labels) {
+		if a.userGroupNames[sg] {
 			return true, nil
 		}
 	}
-
 	return false, nil
+}
+
+func (h *Handler) buildCloudCredentialAccessContext(ctx context.Context) *cloudCredentialAccessContext {
+	claims := auth.GetClaimsFromContext(ctx)
+	if claims == nil {
+		return &cloudCredentialAccessContext{handler: h, ctx: ctx}
+	}
+	return &cloudCredentialAccessContext{
+		handler:   h,
+		ctx:       ctx,
+		hasClaims: true,
+		isAdmin:   auth.IsAdmin(ctx),
+		userID:    claims.UserID,
+	}
+}
+
+// canAccessCloudCredential checks if the current user can access a cloud credential.
+// Returns (allowed, error) so callers can distinguish access denial from internal failures.
+func (h *Handler) canAccessCloudCredential(ctx context.Context, secret *corev1.Secret) (bool, error) {
+	return h.buildCloudCredentialAccessContext(ctx).canAccess(secret)
 }
 
 // buildCloudCredentialResponse constructs a CloudCredentialResponse from a Secret.

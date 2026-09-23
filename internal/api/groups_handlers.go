@@ -909,6 +909,7 @@ func buildUserGroupResponse(ctx context.Context, k8sClient client.Client, group 
 	memberCount, _ := groupauth.CountGroupMembers(ctx, k8sClient, group.Name, namespace)
 
 	return UserGroupResponse{
+		ID:                 group.Name,
 		Name:               group.Spec.Name,
 		ID:                 group.Name,
 		Description:        group.Spec.Description,

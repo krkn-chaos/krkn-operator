@@ -31,12 +31,14 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 	fakeclient "sigs.k8s.io/controller-runtime/pkg/client/fake"
 
+	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
 	"github.com/krkn-chaos/krkn-operator/pkg/cloudcreds"
 )
 
 func newCloudCredScheme() *runtime.Scheme {
 	scheme := runtime.NewScheme()
 	_ = corev1.AddToScheme(scheme)
+	_ = krknv1alpha1.AddToScheme(scheme)
 	return scheme
 }
 
@@ -437,6 +439,37 @@ func TestUpdateCloudCredential_Success(t *testing.T) {
 	}
 }
 
+func TestUpdateCloudCredential_PreservesAccessLabelsWhenOmitted(t *testing.T) {
+	existing := newGroupedAWSSecret("aws-team", "default", []string{"team-a"})
+	fakeClient := fakeclient.NewClientBuilder().WithScheme(newCloudCredScheme()).WithObjects(existing).Build()
+	handler := NewTestHandler(fakeClient, fake.NewSimpleClientset(), "default", "localhost:50051")
+
+	// Partial update: rotate region only — no groups / availableToAll in JSON
+	body := cloudcreds.UpdateCloudCredentialRequest{AWSDefaultRegion: "eu-west-1"}
+	b, _ := json.Marshal(body)
+	req := httptest.NewRequest(http.MethodPut, CloudCredentialsPath+"/aws-team", bytes.NewReader(b))
+	req = req.WithContext(createAdminContext())
+	w := httptest.NewRecorder()
+
+	handler.UpdateCloudCredential(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var updated corev1.Secret
+	if err := fakeClient.Get(req.Context(), k8stypes.NamespacedName{Name: "aws-team", Namespace: "default"}, &updated); err != nil {
+		t.Fatalf("get secret: %v", err)
+	}
+	groups := cloudcreds.ExtractGroupsFromLabels(updated.Labels)
+	if len(groups) != 1 || groups[0] != "team-a" {
+		t.Errorf("expected group team-a preserved, got %v", groups)
+	}
+	if updated.Data[cloudcreds.SecretKeyAWSDefaultRegion] == nil || string(updated.Data[cloudcreds.SecretKeyAWSDefaultRegion]) != "eu-west-1" {
+		t.Errorf("expected region updated, got %q", string(updated.Data[cloudcreds.SecretKeyAWSDefaultRegion]))
+	}
+}
+
 func TestUpdateCloudCredential_NotFound(t *testing.T) {
 	fakeClient := fakeclient.NewClientBuilder().WithScheme(newCloudCredScheme()).Build()
 	handler := NewTestHandler(fakeClient, fake.NewSimpleClientset(), "default", "localhost:50051")
@@ -536,7 +569,17 @@ func TestListAvailableCloudCredentials_AvailableToAll(t *testing.T) {
 
 func TestListAvailableCloudCredentials_NonMemberSeesNothing(t *testing.T) {
 	s := newGroupedAWSSecret("aws-team", "default", []string{"team-a"})
-	fakeClient := fakeclient.NewClientBuilder().WithScheme(newCloudCredScheme()).WithObjects(s).Build()
+	outsider := &krknv1alpha1.KrknUser{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "krknuser-outsider-example-com",
+			Namespace: "default",
+		},
+		Spec: krknv1alpha1.KrknUserSpec{
+			UserID: "outsider@example.com",
+			Role:   "user",
+		},
+	}
+	fakeClient := fakeclient.NewClientBuilder().WithScheme(newCloudCredScheme()).WithObjects(s, outsider).Build()
 	handler := NewTestHandler(fakeClient, fake.NewSimpleClientset(), "default", "localhost:50051")
 
 	req := httptest.NewRequest(http.MethodGet, CloudCredentialsAvailablePath, nil)

@@ -763,7 +763,10 @@ type ClusterPermissionSet struct {
 
 // UserGroupResponse represents a user group in API responses
 type UserGroupResponse struct {
-	// Name is the group name
+	// ID is the canonical Kubernetes-safe group identifier (CR name / label suffix).
+	// Clients must use this value for access assignments on Secrets and ConfigMaps.
+	ID string `json:"id"`
+	// Name is the human-readable display name
 	Name string `json:"name"`
 	// ID is the canonical Kubernetes-safe group identifier used by access labels.
 	ID string `json:"id"`

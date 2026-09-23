@@ -61,6 +61,33 @@ func BuildLabels(provider string, groups []string, availableToAll bool) map[stri
 	return labels
 }
 
+// ResolveAccessControlForUpdate returns the groups and availableToAll values that
+// should be written on update. Omitted pointer fields keep the existing Secret
+// access labels so partial updates (e.g. rotating a region) cannot silently
+// revoke group or public access.
+//
+// When either ACL field is present in the request, omitted sibling fields use
+// safe defaults (empty groups / false) so an explicit public or group change
+// fully replaces the prior ACL rather than merging stale labels.
+func ResolveAccessControlForUpdate(
+	existingLabels map[string]string,
+	groups *[]string,
+	availableToAll *bool,
+) (resolvedGroups []string, resolvedAvailableToAll bool) {
+	aclPresent := groups != nil || availableToAll != nil
+	if !aclPresent {
+		return ExtractGroupsFromLabels(existingLabels), existingLabels[AvailableToAllLabel] == "true"
+	}
+
+	if groups != nil {
+		resolvedGroups = append([]string(nil), (*groups)...)
+	}
+	if availableToAll != nil {
+		resolvedAvailableToAll = *availableToAll
+	}
+	return resolvedGroups, resolvedAvailableToAll
+}
+
 // BuildAnnotations creates the annotations map for a cloud credential Secret
 func BuildAnnotations(description, createdBy string) map[string]string {
 	annotations := map[string]string{

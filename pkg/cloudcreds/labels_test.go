@@ -183,3 +183,40 @@ func TestExtractGroupsFromLabels(t *testing.T) {
 		t.Errorf("expected groups [team-a, team-b], got %v", groups)
 	}
 }
+
+func TestResolveAccessControlForUpdate(t *testing.T) {
+	existing := BuildLabels(ProviderAWS, []string{"team-a"}, false)
+
+	t.Run("omitted ACL preserves existing", func(t *testing.T) {
+		groups, available := ResolveAccessControlForUpdate(existing, nil, nil)
+		if available {
+			t.Error("expected availableToAll=false")
+		}
+		if len(groups) != 1 || groups[0] != "team-a" {
+			t.Errorf("expected [team-a], got %v", groups)
+		}
+	})
+
+	t.Run("explicit public clears groups", func(t *testing.T) {
+		trueVal := true
+		groups, available := ResolveAccessControlForUpdate(existing, nil, &trueVal)
+		if !available {
+			t.Error("expected availableToAll=true")
+		}
+		if len(groups) != 0 {
+			t.Errorf("expected empty groups, got %v", groups)
+		}
+	})
+
+	t.Run("explicit groups replace", func(t *testing.T) {
+		replacement := []string{"team-b"}
+		falseVal := false
+		groups, available := ResolveAccessControlForUpdate(existing, &replacement, &falseVal)
+		if available {
+			t.Error("expected availableToAll=false")
+		}
+		if len(groups) != 1 || groups[0] != "team-b" {
+			t.Errorf("expected [team-b], got %v", groups)
+		}
+	})
+}

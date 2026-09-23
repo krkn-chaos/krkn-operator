@@ -120,10 +120,17 @@ type CreateCloudCredentialRequest struct {
 
 // UpdateCloudCredentialRequest represents the request to update a cloud credential config.
 // Provider is immutable and cannot be changed after creation.
+//
+// Access-control fields use pointers so omitted JSON values preserve the
+// existing Secret labels. Sending an explicit value replaces that ACL field;
+// sending neither Groups nor AvailableToAll leaves access control unchanged.
 type UpdateCloudCredentialRequest struct {
-	Description    string   `json:"description,omitempty"`
-	Groups         []string `json:"groups,omitempty"`
-	AvailableToAll bool     `json:"availableToAll,omitempty"`
+	// Description is optional human-readable context for the credential.
+	Description string `json:"description,omitempty"`
+	// Groups replaces group access when non-nil. Omitted preserves existing groups.
+	Groups *[]string `json:"groups,omitempty"`
+	// AvailableToAll replaces public access when non-nil. Omitted preserves the existing flag.
+	AvailableToAll *bool `json:"availableToAll,omitempty"`
 
 	// AWS fields
 	AWSAccessKeyID     string `json:"awsAccessKeyId,omitempty"`
