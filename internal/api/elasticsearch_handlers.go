@@ -484,6 +484,21 @@ func (h *Handler) ElasticsearchConfigsRouter(w http.ResponseWriter, r *http.Requ
 // never leave the backend), connects to the cluster, and returns the most recent
 // telemetry documents. Available to any authenticated user, mirroring
 // ListElasticsearchConfigs.
+//
+// @Summary Query Elasticsearch telemetry
+// @Description Run a telemetry search against a saved Elasticsearch config or an inline connection. Credentials are resolved server-side and never leave the backend. Available to any authenticated user.
+// @Tags elasticsearch
+// @Accept json
+// @Produce json
+// @Param request body elasticsearch.QueryTelemetryRequest true "Query parameters (exactly one of configName or inline)"
+// @Success 200 {object} elasticsearch.QueryTelemetryResponse "Most recent telemetry documents"
+// @Failure 400 {object} ErrorResponse "Invalid request body or parameters"
+// @Failure 401 {object} ErrorResponse "Authentication required"
+// @Failure 404 {object} ErrorResponse "Elasticsearch config not found"
+// @Failure 405 {object} ErrorResponse "Method not allowed"
+// @Failure 500 {object} ErrorResponse "Internal server error"
+// @Security BearerAuth
+// @Router /elasticsearch-query [post]
 func (h *Handler) QueryElasticsearchTelemetry(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	logger := log.FromContext(ctx).WithName("query-elasticsearch-telemetry")

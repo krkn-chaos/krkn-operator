@@ -6,7 +6,6 @@ definitions:
         description: |-
           CheckedAt is the time at which the liveness check was performed.
           +optional
-        format: date-time
         type: string
       cluster-api-url:
         description: ClusterAPIURL is the API server URL of the managed cluster
@@ -89,6 +88,124 @@ definitions:
           is true.
         type: string
     type: object
+  github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.InlineConnection:
+    properties:
+      host:
+        description: |-
+          Host is the Elasticsearch host, optionally scheme-bearing (e.g.
+          "https://es.example.com"). Required.
+        type: string
+      password:
+        description: |-
+          Password is the basic-auth password. Optional; used only with Username and
+          never persisted server-side.
+        type: string
+      port:
+        description: |-
+          Port is the Elasticsearch port. Optional; must be 0-65535. When 0 the
+          query client applies the default port.
+        type: integer
+      telemetryIndex:
+        description: TelemetryIndex is the index queried for telemetry documents.
+          Required.
+        type: string
+      username:
+        description: |-
+          Username is the basic-auth user. Optional; when set the connection must
+          resolve to https (credentials are refused over plaintext HTTP).
+        type: string
+    type: object
+  github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.QueryTelemetryRequest:
+    properties:
+      configName:
+        description: |-
+          ConfigName references a saved Elasticsearch config by name; credentials are
+          resolved server-side. Mutually exclusive with Inline; exactly one is required.
+        type: string
+      endDate:
+        type: string
+      inline:
+        allOf:
+        - $ref: '#/definitions/github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.InlineConnection'
+        description: Inline carries an ephemeral connection when no saved config is
+          used.
+      size:
+        description: |-
+          Size is the max documents to return. Optional; 0 defaults to DefaultQuerySize
+          and values above MaxQuerySize are clamped. Unit: documents.
+        type: integer
+      startDate:
+        description: |-
+          StartDate and EndDate bound the search by the document timestamp. They are
+          "yyyy-MM-dd" date strings (as produced by the UI date pickers). Empty
+          values fall back to a default trailing window in the query client.
+        type: string
+    type: object
+  github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.QueryTelemetryResponse:
+    properties:
+      documents:
+        description: |-
+          Documents is the size-capped page of matched telemetry runs. Length is
+          bounded by the request Size (see DefaultQuerySize/MaxQuerySize).
+        items:
+          $ref: '#/definitions/github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.TelemetryDocument'
+        type: array
+      stats:
+        allOf:
+        - $ref: '#/definitions/github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.TelemetryStats'
+        description: |-
+          Stats summarizes pass/fail across the whole matched window, so Stats.Pass +
+          Stats.Fail can exceed Total (which counts only the returned documents page).
+      total:
+        description: |-
+          Total is the number of documents in this returned page (len(Documents)),
+          not the total matched across the window. Unit: documents.
+        type: integer
+    type: object
+  github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.TelemetryDocument:
+    properties:
+      end_timestamp:
+        description: 'EndTimestamp is the scenario end time. Unit: Unix seconds (UTC).'
+        type: integer
+      namespace:
+        description: Namespace is the target namespace from the run's first scenario.
+        type: string
+      run_uuid:
+        description: RunUUID uniquely identifies the telemetry run this document represents.
+        type: string
+      scenario_type:
+        description: ScenarioType is the chaos scenario type from the run's first
+          scenario.
+        type: string
+      start_timestamp:
+        description: 'StartTimestamp is the scenario start time. Unit: Unix seconds
+          (UTC).'
+        type: integer
+      status:
+        description: |-
+          Status is the run outcome: true = pass, false = fail. It applies the
+          per-scenario exit_status downgrade, so it may differ from the run-level
+          job_status used by TelemetryStats.
+        type: boolean
+    type: object
+  github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.TelemetryStats:
+    properties:
+      fail:
+        description: |-
+          Fail is the count of runs with job_status false across the whole matched
+          window (not just the returned page). Unit: runs.
+        type: integer
+      pass:
+        description: |-
+          Pass is the count of runs with job_status true across the whole matched
+          window (not just the returned page). Unit: runs.
+        type: integer
+      pass_percent:
+        description: |-
+          PassPercent is Pass / (Pass + Fail) * 100 across the matched window.
+          Range: 0-100, rounded to 2 decimals; 0 when no runs match.
+        type: number
+    type: object
   github_com_krkn-chaos_krkn-operator_pkg_files.AvailableFilesResponse:
     properties:
       files:
@@ -143,6 +260,10 @@ definitions:
     type: object
   github_com_krkn-chaos_krkn-operator_pkg_files.FileInfo:
     properties:
+      availableToAll:
+        description: AvailableToAll indicates whether the file is accessible to all
+          users.
+        type: boolean
       createdAt:
         description: CreatedAt is the timestamp when the file was created (ISO 8601)
         type: string
@@ -162,6 +283,11 @@ definitions:
         description: FileType is an optional file type category (e.g., "config", "script")
           - for user categorization
         type: string
+      groups:
+        description: Groups is a list of group names that can access this file.
+        items:
+          type: string
+        type: array
       updatedAt:
         description: UpdatedAt is the timestamp when the file was last updated (ISO
           8601)
@@ -380,8 +506,9 @@ definitions:
           items:
             $ref: '#/definitions/github_com_krkn-chaos_krkn-operator_api_v1alpha1.ClusterTarget'
           type: array
-        description: TargetData contains a map of operator-name to list of cluster
-          targets
+        description: |-
+          TargetData contains a map of operator-name to list of cluster targets,
+          including the latest optional liveness result for each target.
         type: object
     type: object
   internal_api.ErrorResponse:
@@ -1127,6 +1254,52 @@ paths:
       summary: List available clusters
       tags:
       - clusters
+  /elasticsearch-query:
+    post:
+      consumes:
+      - application/json
+      description: Run a telemetry search against a saved Elasticsearch config or
+        an inline connection. Credentials are resolved server-side and never leave
+        the backend. Available to any authenticated user.
+      parameters:
+      - description: Query parameters (exactly one of configName or inline)
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.QueryTelemetryRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Most recent telemetry documents
+          schema:
+            $ref: '#/definitions/github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.QueryTelemetryResponse'
+        "400":
+          description: Invalid request body or parameters
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "401":
+          description: Authentication required
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "404":
+          description: Elasticsearch config not found
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "405":
+          description: Method not allowed
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Query Elasticsearch telemetry
+      tags:
+      - elasticsearch
   /files:
     get:
       description: Get list of all file ConfigMaps (admin only). Supports filtering
