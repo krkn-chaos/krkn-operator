@@ -188,6 +188,9 @@ type ScenarioRunRequest struct {
 	// credentials (ES_PASSWORD, and any ES_* vars not already in Environment) are
 	// injected server-side so the password is never transmitted by the client.
 	ElasticsearchConfigName string `json:"elasticsearchConfigName,omitempty"`
+	// MaxRetries is the maximum number of retries after the initial attempt.
+	// A nil value uses the default of 3; zero disables retries.
+	MaxRetries *int `json:"maxRetries,omitempty"`
 	// RegistryName is retained for old in-memory callers and legacy JSON
 	// requests. New clients select registries through Scenario.
 	RegistryName *string `json:"registryName,omitempty"`
@@ -323,6 +326,8 @@ type ScenarioRunCreateResponse struct {
 	ScenarioRunName string `json:"scenarioRunName"`
 	// TargetClusters is a map of provider-name to list of cluster names
 	TargetClusters map[string][]string `json:"targetClusters"`
+	// MaxRetries is the maximum number of retries for this scenario run.
+	MaxRetries int `json:"maxRetries"`
 	// TotalTargets is the total number of target clusters
 	TotalTargets int `json:"totalTargets"`
 	// OwnerUserID is the email address of the user who created this scenario run
@@ -858,6 +863,9 @@ type GraphRunCreateRequest struct {
 	TargetRequestID string `json:"targetRequestId"`
 	// TargetClusters is a map of provider-name to list of cluster names
 	TargetClusters map[string][]string `json:"targetClusters"`
+	// MaxRetries is the maximum number of retries for each scenario node.
+	// A nil value uses the default of 3; zero disables retries.
+	MaxRetries *int `json:"maxRetries,omitempty"`
 }
 
 // GraphRunListItem represents a single item in the graph runs list
@@ -895,6 +903,7 @@ type GraphRunSpecResponse struct {
 	Graph                   map[string]krknv1alpha1.GraphScenarioNode `json:"graph"`
 	TargetRequestID         string                                    `json:"targetRequestId"`
 	TargetClusters          map[string][]string                       `json:"targetClusters"`
+	MaxRetries              int                                       `json:"maxRetries"`
 	OwnerUserID             string                                    `json:"ownerUserId"`
 	ResiliencyScoreEnabled  bool                                      `json:"resiliencyScoreEnabled,omitempty"`
 	ResiliencyMountPath     string                                    `json:"resiliencyMountPath,omitempty"`

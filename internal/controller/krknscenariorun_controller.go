@@ -342,7 +342,7 @@ func (r *KrknScenarioRunReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 					Phase:         "Pending",
 					StartTime:     &now,
 					RetryCount:    0,
-					MaxRetries:    0,
+					MaxRetries:    scenarioRun.Spec.MaxRetries,
 				})
 				logger.Info("created new cluster job",
 					"cluster", outcome.target.clusterName,
@@ -892,7 +892,7 @@ func (r *KrknScenarioRunReconciler) createClusterJob(
 			Phase:         "Pending",
 			StartTime:     &now,
 			RetryCount:    0,
-			MaxRetries:    0,
+			MaxRetries:    scenarioRun.Spec.MaxRetries,
 		})
 		logger.Info("created new cluster job",
 			"cluster", resources.clusterName,
@@ -1045,13 +1045,6 @@ func (r *KrknScenarioRunReconciler) updateClusterJobStatuses(
 				"failureReason", job.FailureReason)
 
 			maxRetries := job.MaxRetries
-			if maxRetries == 0 {
-				maxRetries = scenarioRun.Spec.MaxRetries
-				if maxRetries == 0 {
-					maxRetries = 3 // Default
-				}
-				job.MaxRetries = maxRetries
-			}
 
 			if r.shouldRetryJob(job, maxRetries) {
 				// Calculate backoff delay
@@ -1217,10 +1210,6 @@ func (r *KrknScenarioRunReconciler) shouldRetryJob(job *krknv1alpha1.ClusterJobS
 	}
 
 	// Check retry count against max
-	if maxRetries == 0 {
-		maxRetries = 3 // Default
-	}
-
 	return job.RetryCount < maxRetries
 }
 

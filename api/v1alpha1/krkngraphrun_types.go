@@ -209,6 +209,12 @@ type KrknGraphRunSpec struct {
 	// +kubebuilder:validation:MinProperties=1
 	TargetClusters map[string][]string `json:"targetClusters"`
 
+	// MaxRetries is the maximum number of retries for each scenario node.
+	// +optional
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:default=3
+	MaxRetries int `json:"maxRetries"`
+
 	// OwnerUserID is the email address of the user who created this graph run
 	// +optional
 	OwnerUserID string `json:"ownerUserId,omitempty"`
