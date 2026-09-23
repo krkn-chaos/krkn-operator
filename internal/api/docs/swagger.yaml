@@ -128,6 +128,56 @@ definitions:
       name:
         type: string
     type: object
+  github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.AffectedPods:
+    properties:
+      recovered:
+        description: Recovered pods carrying recovery timings for pod_disruption scenarios.
+        items:
+          $ref: '#/definitions/github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.RecoveredPod'
+        type: array
+    type: object
+  github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.ClusterMetadata:
+    properties:
+      build_url:
+        type: string
+      cloud_infrastructure:
+        type: string
+      cloud_type:
+        type: string
+      cluster_version:
+        type: string
+      etcd_encryption_enabled:
+        type: boolean
+      fips_enabled:
+        type: boolean
+      ipsec_enabled:
+        type: boolean
+      kubernetes_objects_count:
+        additionalProperties:
+          type: integer
+        description: |-
+          KubernetesObjectsCount maps object kind (e.g. "Pod", "ConfigMap") to the
+          number of that kind present in the cluster at run time.
+        type: object
+      major_version:
+        type: string
+      network_plugins:
+        description: NetworkPlugins lists the cluster network plugins (e.g. "OVNKubernetes").
+        items:
+          type: string
+        type: array
+      node_summary_infos:
+        description: |-
+          NodeSummaryInfos lists one summary per distinct node group (role/shape) in
+          the cluster at run time; nil when the source document carried none.
+        items:
+          $ref: '#/definitions/github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.NodeSummaryInfo'
+        type: array
+      tag:
+        type: string
+      total_node_count:
+        type: integer
+    type: object
   github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.DeleteElasticsearchConfigResponse:
     properties:
       message:
@@ -202,6 +252,24 @@ definitions:
       total:
         type: integer
     type: object
+  github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.NodeSummaryInfo:
+    properties:
+      architecture:
+        type: string
+      count:
+        description: Count is how many nodes fall in this group.
+        type: integer
+      instance_type:
+        type: string
+      kernel_version:
+        type: string
+      kubelet_version:
+        type: string
+      nodes_type:
+        type: string
+      os_version:
+        type: string
+    type: object
   github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.QueryTelemetryRequest:
     properties:
       configName:
@@ -249,11 +317,53 @@ definitions:
           not the total matched across the window. Unit: documents.
         type: integer
     type: object
+  github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.RecoveredPod:
+    properties:
+      namespace:
+        type: string
+      pod_name:
+        type: string
+      pod_readiness_time:
+        description: Times are fractional seconds (e.g. 37.533992528915405).
+        type: number
+      pod_rescheduling_time:
+        type: number
+      total_recovery_time:
+        type: number
+    type: object
+  github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.ScenarioDetail:
+    properties:
+      affected_pods:
+        allOf:
+        - $ref: '#/definitions/github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.AffectedPods'
+        description: |-
+          AffectedPods carries per-pod recovery timings for pod_disruption scenarios;
+          nil when the source document had none.
+      end_timestamp:
+        type: integer
+      exit_status:
+        type: integer
+      parameters:
+        description: |-
+          Parameters is passed through verbatim as raw JSON because its shape
+          varies by scenario type.
+        type: object
+      scenario_type:
+        type: string
+      start_timestamp:
+        type: integer
+    type: object
   github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.TelemetryDocument:
     properties:
       end_timestamp:
         description: 'EndTimestamp is the scenario end time. Unit: Unix seconds (UTC).'
         type: integer
+      metadata:
+        allOf:
+        - $ref: '#/definitions/github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.ClusterMetadata'
+        description: |-
+          Metadata holds run-level cluster/infrastructure detail; nil when the
+          source document carried none of the metadata fields.
       namespace:
         description: Namespace is the target namespace from the run's first scenario.
         type: string
@@ -264,6 +374,12 @@ definitions:
         description: ScenarioType is the chaos scenario type from the run's first
           scenario.
         type: string
+      scenarios:
+        description: Scenarios lists every scenario in the run, each with its raw
+          parameters.
+        items:
+          $ref: '#/definitions/github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.ScenarioDetail'
+        type: array
       start_timestamp:
         description: 'StartTimestamp is the scenario start time. Unit: Unix seconds
           (UTC).'
