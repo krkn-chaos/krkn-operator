@@ -764,24 +764,11 @@ func (r *KrknScenarioRunReconciler) prepareJobResources(
 	}
 
 	// Inject cloud credentials via SecretKeyRef if specified
-	if scenarioRun.Spec.CloudCredentialRef != "" {
-		var credSecret corev1.Secret
-		if err := r.Get(ctx, types.NamespacedName{
-			Name:      scenarioRun.Spec.CloudCredentialRef,
-			Namespace: r.Namespace,
-		}, &credSecret); err != nil {
-			return nil, fmt.Errorf("failed to load cloud credential '%s': %w",
-				scenarioRun.Spec.CloudCredentialRef, err)
-		}
-
-		credEnvVars, credVolumes, credMounts, err := cloudcreds.InjectCredentials(&credSecret)
-		if err != nil {
-			return nil, fmt.Errorf("failed to inject cloud credentials: %w", err)
-		}
-
-		envVars = append(envVars, credEnvVars...)
-		volumes = append(volumes, credVolumes...)
-		volumeMounts = append(volumeMounts, credMounts...)
+	envVars, volumes, volumeMounts, injErr := r.appendCloudCredentialInjection(
+		ctx, scenarioRun.Spec.CloudCredentialRef, envVars, volumes, volumeMounts,
+	)
+	if injErr != nil {
+		return nil, injErr
 	}
 
 	return &preparedJobResources{
@@ -797,6 +784,40 @@ func (r *KrknScenarioRunReconciler) prepareJobResources(
 		createdConfigMaps: createdConfigMaps,
 		createdSecrets:    createdSecrets,
 	}, nil
+}
+
+
+// appendCloudCredentialInjection loads the named cloud-credential Secret and
+// appends SecretKeyRef env vars (plus any volumes/mounts) to the job resources.
+// When cloudCredentialRef is empty, inputs are returned unchanged.
+func (r *KrknScenarioRunReconciler) appendCloudCredentialInjection(
+	ctx context.Context,
+	cloudCredentialRef string,
+	envVars []corev1.EnvVar,
+	volumes []corev1.Volume,
+	volumeMounts []corev1.VolumeMount,
+) ([]corev1.EnvVar, []corev1.Volume, []corev1.VolumeMount, error) {
+	if cloudCredentialRef == "" {
+		return envVars, volumes, volumeMounts, nil
+	}
+
+	var credSecret corev1.Secret
+	if err := r.Get(ctx, types.NamespacedName{
+		Name:      cloudCredentialRef,
+		Namespace: r.Namespace,
+	}, &credSecret); err != nil {
+		return nil, nil, nil, fmt.Errorf("failed to load cloud credential '%s': %w", cloudCredentialRef, err)
+	}
+
+	credEnvVars, credVolumes, credMounts, err := cloudcreds.InjectCredentials(&credSecret)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("failed to inject cloud credentials: %w", err)
+	}
+
+	envVars = append(envVars, credEnvVars...)
+	volumes = append(volumes, credVolumes...)
+	volumeMounts = append(volumeMounts, credMounts...)
+	return envVars, volumes, volumeMounts, nil
 }
 
 // cleanupPreparedResources deletes ConfigMaps and Secrets created during resource preparation.
