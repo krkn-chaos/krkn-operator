@@ -90,6 +90,10 @@ spec:
                         RegistryName is the legacy private registry identity field. Image remains
                         ignored even when this field is present.
                       type: string
+                    resiliencyWeight:
+                      description: ResiliencyWeight controls this node's contribution
+                        to the resiliency score.
+                      type: number
                     scenario:
                       description: |-
                         Scenario identifies the scenario and registry to resolve for this node.

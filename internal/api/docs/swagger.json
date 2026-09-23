@@ -2249,6 +2249,10 @@
                     "description": "RegistryName is the legacy private registry identity field. Image remains\nignored even when this field is present.\n+optional",
                     "type": "string"
                 },
+                "resiliencyWeight": {
+                    "description": "ResiliencyWeight controls this node's contribution to the resiliency score.\n+optional",
+                    "type": "number"
+                },
                 "scenario": {
                     "description": "Scenario identifies the scenario and registry to resolve for this node.\nMetadata-only nodes (whose IDs start with _) may omit this field.\n+optional",
                     "allOf": [

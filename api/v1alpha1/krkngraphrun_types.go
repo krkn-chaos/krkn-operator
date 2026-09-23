@@ -48,6 +48,10 @@ type GraphScenario struct {
 	// Volumes is a map of volume mounts for the scenario
 	// +optional
 	Volumes map[string]string `json:"volumes,omitempty"`
+
+	// ResiliencyWeight controls this scenario's contribution to the resiliency score.
+	// +optional
+	ResiliencyWeight float64 `json:"resiliencyWeight,omitempty"`
 }
 
 // GraphScenarioNode represents a node in the scenario dependency graph
@@ -84,6 +88,10 @@ type GraphScenarioNode struct {
 	// Volumes is a map of volume mounts for the scenario
 	// +optional
 	Volumes map[string]string `json:"volumes,omitempty"`
+
+	// ResiliencyWeight controls this node's contribution to the resiliency score.
+	// +optional
+	ResiliencyWeight float64 `json:"resiliencyWeight,omitempty"`
 
 	// DependsOn is the node ID that this scenario depends on (parent in the graph)
 	// +optional
