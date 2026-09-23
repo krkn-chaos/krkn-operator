@@ -50,7 +50,12 @@ helm uninstall krkn-operator -n krkn-operator-system
 
 ## Telemetry Query API
 
-Query chaos-run telemetry stored in Elasticsearch/OpenSearch through the operator's REST API. Credentials are never sent by the client — the operator resolves them server-side from a previously saved Elasticsearch config, so the request only references that config by name.
+Query chaos-run telemetry stored in Elasticsearch/OpenSearch through the operator's REST API. The request supplies the connection in one of two mutually exclusive ways:
+
+- **Saved config (recommended):** the request references a previously saved Elasticsearch config by name (`configName`), and the operator resolves the credentials server-side from the backing Kubernetes Secret. No credentials are sent by the client.
+- **Inline connection:** the request supplies the connection details, including `username` and `password`, directly in the request body (`inline`). These credentials are used only to service that single request and are **never persisted** — no Secret is created or updated. Inline destinations are subject to the destination policy (loopback, private, and metadata addresses are rejected) to guard against server-side request forgery, and always use default TLS verification against the system trust store (custom CA certificates and insecure-skip-TLS remain admin-only, saved-config settings).
+
+In both modes credentials never leave the backend beyond the connection to the target cluster, and they are never returned in any API response.
 
 **Endpoint:** `POST /api/v1/elasticsearch-query`
 
