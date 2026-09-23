@@ -163,6 +163,9 @@ func (h *Handler) CreateElasticsearchConfig(w http.ResponseWriter, r *http.Reque
 	})
 }
 
+// ListElasticsearchConfigs handles GET /api/v1/elasticsearch-configs
+// Lists all Elasticsearch configs (any authenticated user)
+//
 // @Summary List Elasticsearch configs
 // @Description List all Elasticsearch configs. Credentials are never returned. Available to any authenticated user.
 // @Tags elasticsearch
@@ -172,9 +175,6 @@ func (h *Handler) CreateElasticsearchConfig(w http.ResponseWriter, r *http.Reque
 // @Failure 500 {object} ErrorResponse "Internal server error"
 // @Security BearerAuth
 // @Router /elasticsearch-configs [get]
-//
-// ListElasticsearchConfigs handles GET /api/v1/elasticsearch-configs
-// Lists all Elasticsearch configs (any authenticated user)
 func (h *Handler) ListElasticsearchConfigs(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	logger := log.FromContext(ctx).WithName("list-elasticsearch-configs")
