@@ -41,6 +41,21 @@ import (
 
 // CreateElasticsearchConfig handles POST /api/v1/elasticsearch-configs
 // Creates a new Elasticsearch config Secret (admin only)
+//
+// @Summary Create an Elasticsearch config
+// @Description Create a new Elasticsearch config, storing credentials as a Kubernetes Secret. Admin only.
+// @Tags elasticsearch
+// @Accept json
+// @Produce json
+// @Param request body elasticsearch.CreateElasticsearchConfigRequest true "Elasticsearch config to create"
+// @Success 201 {object} elasticsearch.CreateElasticsearchConfigResponse "Config created"
+// @Failure 400 {object} ErrorResponse "Invalid request body or parameters"
+// @Failure 401 {object} ErrorResponse "Authentication required"
+// @Failure 403 {object} ErrorResponse "Admin privileges required"
+// @Failure 409 {object} ErrorResponse "Config with the same name already exists"
+// @Failure 500 {object} ErrorResponse "Internal server error"
+// @Security BearerAuth
+// @Router /elasticsearch-configs [post]
 func (h *Handler) CreateElasticsearchConfig(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	logger := log.FromContext(ctx).WithName("create-elasticsearch-config")
@@ -148,6 +163,16 @@ func (h *Handler) CreateElasticsearchConfig(w http.ResponseWriter, r *http.Reque
 	})
 }
 
+// @Summary List Elasticsearch configs
+// @Description List all Elasticsearch configs. Credentials are never returned. Available to any authenticated user.
+// @Tags elasticsearch
+// @Produce json
+// @Success 200 {object} elasticsearch.ListElasticsearchConfigsResponse "Configs"
+// @Failure 401 {object} ErrorResponse "Authentication required"
+// @Failure 500 {object} ErrorResponse "Internal server error"
+// @Security BearerAuth
+// @Router /elasticsearch-configs [get]
+//
 // ListElasticsearchConfigs handles GET /api/v1/elasticsearch-configs
 // Lists all Elasticsearch configs (any authenticated user)
 func (h *Handler) ListElasticsearchConfigs(w http.ResponseWriter, r *http.Request) {
@@ -185,6 +210,20 @@ func (h *Handler) ListElasticsearchConfigs(w http.ResponseWriter, r *http.Reques
 
 // GetElasticsearchConfig handles GET /api/v1/elasticsearch-configs/{name}
 // Returns a single Elasticsearch config (admin only)
+//
+// @Summary Get an Elasticsearch config
+// @Description Get a single Elasticsearch config by name. Credentials are never returned. Admin only.
+// @Tags elasticsearch
+// @Produce json
+// @Param name path string true "Elasticsearch config name"
+// @Success 200 {object} elasticsearch.ElasticsearchConfigResponse "Config"
+// @Failure 400 {object} ErrorResponse "Invalid config name"
+// @Failure 401 {object} ErrorResponse "Authentication required"
+// @Failure 403 {object} ErrorResponse "Admin privileges required"
+// @Failure 404 {object} ErrorResponse "Config not found"
+// @Failure 500 {object} ErrorResponse "Internal server error"
+// @Security BearerAuth
+// @Router /elasticsearch-configs/{name} [get]
 func (h *Handler) GetElasticsearchConfig(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	logger := log.FromContext(ctx).WithName("get-elasticsearch-config")
@@ -229,6 +268,22 @@ func (h *Handler) GetElasticsearchConfig(w http.ResponseWriter, r *http.Request)
 
 // UpdateElasticsearchConfig handles PUT /api/v1/elasticsearch-configs/{name}
 // Updates an Elasticsearch config (admin only)
+//
+// @Summary Update an Elasticsearch config
+// @Description Update an existing Elasticsearch config by name. Admin only.
+// @Tags elasticsearch
+// @Accept json
+// @Produce json
+// @Param name path string true "Elasticsearch config name"
+// @Param request body elasticsearch.UpdateElasticsearchConfigRequest true "Fields to update"
+// @Success 200 {object} elasticsearch.UpdateElasticsearchConfigResponse "Config updated"
+// @Failure 400 {object} ErrorResponse "Invalid request body or config name"
+// @Failure 401 {object} ErrorResponse "Authentication required"
+// @Failure 403 {object} ErrorResponse "Admin privileges required"
+// @Failure 404 {object} ErrorResponse "Config not found"
+// @Failure 500 {object} ErrorResponse "Internal server error"
+// @Security BearerAuth
+// @Router /elasticsearch-configs/{name} [put]
 func (h *Handler) UpdateElasticsearchConfig(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	logger := log.FromContext(ctx).WithName("update-elasticsearch-config")
@@ -380,6 +435,20 @@ func (h *Handler) UpdateElasticsearchConfig(w http.ResponseWriter, r *http.Reque
 
 // DeleteElasticsearchConfig handles DELETE /api/v1/elasticsearch-configs/{name}
 // Deletes an Elasticsearch config (admin only)
+//
+// @Summary Delete an Elasticsearch config
+// @Description Delete an Elasticsearch config by name. Admin only.
+// @Tags elasticsearch
+// @Produce json
+// @Param name path string true "Elasticsearch config name"
+// @Success 200 {object} elasticsearch.DeleteElasticsearchConfigResponse "Config deleted"
+// @Failure 400 {object} ErrorResponse "Invalid config name"
+// @Failure 401 {object} ErrorResponse "Authentication required"
+// @Failure 403 {object} ErrorResponse "Admin privileges required"
+// @Failure 404 {object} ErrorResponse "Config not found"
+// @Failure 500 {object} ErrorResponse "Internal server error"
+// @Security BearerAuth
+// @Router /elasticsearch-configs/{name} [delete]
 func (h *Handler) DeleteElasticsearchConfig(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	logger := log.FromContext(ctx).WithName("delete-elasticsearch-config")
