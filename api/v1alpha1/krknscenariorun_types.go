@@ -80,7 +80,7 @@ type ClusterJobStatus struct {
 	RetryCount int `json:"retryCount,omitempty"`
 	// MaxRetries is the maximum number of retries allowed for this job
 	// +optional
-	MaxRetries int `json:"maxRetries,omitempty"`
+	MaxRetries int `json:"maxRetries"`
 	// CancelRequested indicates if the user has requested cancellation
 	// +optional
 	CancelRequested bool `json:"cancelRequested,omitempty"`
@@ -183,8 +183,9 @@ type KrknScenarioRunSpec struct {
 
 	// MaxRetries is the maximum number of times to retry failed jobs
 	// +optional
+	// +kubebuilder:validation:Minimum=0
 	// +kubebuilder:default=3
-	MaxRetries int `json:"maxRetries,omitempty"`
+	MaxRetries int `json:"maxRetries"`
 
 	// RetryBackoff determines the backoff strategy for retries (exponential or fixed)
 	// +optional
