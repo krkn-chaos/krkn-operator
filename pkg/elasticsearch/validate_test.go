@@ -16,10 +16,15 @@ limitations under the License.
 
 package elasticsearch
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // strPtr returns a pointer to s, for the tri-state CACert field in update tests.
 func strPtr(s string) *string { return &s }
+
+func boolPtr(b bool) *bool { return &b }
 
 func TestValidateCreateRequest(t *testing.T) {
 	tests := []struct {
@@ -37,6 +42,34 @@ func TestValidateCreateRequest(t *testing.T) {
 			name:    "valid full request",
 			req:     CreateElasticsearchConfigRequest{Name: "prod-es", Host: "https://es.example.com", Port: 9200, Username: "elastic", Password: "secret"},
 			wantErr: false,
+		},
+		{
+			name:    "valid public access",
+			req:     CreateElasticsearchConfigRequest{Name: "public-es", Host: "https://es.example.com", AvailableToAll: boolPtr(true)},
+			wantErr: false,
+		},
+		{
+			name:    "group and public access are mutually exclusive",
+			req:     CreateElasticsearchConfigRequest{Name: "private-es", Host: "https://es.example.com", Groups: []string{"platform"}, AvailableToAll: boolPtr(true)},
+			wantErr: true,
+			errMsg:  "an Elasticsearch config cannot be both public and assigned to a group",
+		},
+		{
+			name:    "multiple groups are allowed",
+			req:     CreateElasticsearchConfigRequest{Name: "private-es", Host: "https://es.example.com", Groups: []string{"platform", "security"}},
+			wantErr: false,
+		},
+		{
+			name:    "group name cannot sanitize to empty",
+			req:     CreateElasticsearchConfigRequest{Name: "private-es", Host: "https://es.example.com", Groups: []string{"!!!"}},
+			wantErr: true,
+			errMsg:  `group name "!!!" is invalid`,
+		},
+		{
+			name:    "group name cannot exceed label limit",
+			req:     CreateElasticsearchConfigRequest{Name: "private-es", Host: "https://es.example.com", Groups: []string{strings.Repeat("a", 64)}},
+			wantErr: true,
+			errMsg:  `group name "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" exceeds the 63-character label limit`,
 		},
 		{
 			name:    "missing name",
@@ -126,6 +159,11 @@ func TestValidateUpdateRequest(t *testing.T) {
 		{
 			name:    "valid full request",
 			req:     UpdateElasticsearchConfigRequest{Host: "https://es.example.com", Port: 9300, Username: "elastic", Password: "new-secret"},
+			wantErr: false,
+		},
+		{
+			name:    "valid group access",
+			req:     UpdateElasticsearchConfigRequest{Host: "https://es.example.com", Groups: []string{"platform"}},
 			wantErr: false,
 		},
 		{

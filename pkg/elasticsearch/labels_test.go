@@ -23,7 +23,7 @@ import (
 )
 
 func TestBuildLabels(t *testing.T) {
-	got := BuildLabels()
+	got := BuildLabels(nil, false)
 
 	if got[AppNameLabel] != AppName {
 		t.Errorf("AppNameLabel = %q, want %q", got[AppNameLabel], AppName)
@@ -31,8 +31,26 @@ func TestBuildLabels(t *testing.T) {
 	if got[AppComponentLabel] != ComponentElasticsearchConfig {
 		t.Errorf("AppComponentLabel = %q, want %q", got[AppComponentLabel], ComponentElasticsearchConfig)
 	}
-	if len(got) != 2 {
-		t.Errorf("BuildLabels() returned %d labels, want 2", len(got))
+	if got[AvailableToAllLabel] != "false" {
+		t.Errorf("AvailableToAllLabel = %q, want false", got[AvailableToAllLabel])
+	}
+	if len(got) != 3 {
+		t.Errorf("BuildLabels() returned %d labels, want 3", len(got))
+	}
+}
+
+func TestBuildLabelsAccessControl(t *testing.T) {
+	got := BuildLabels([]string{"platform"}, false)
+	if got[AvailableToAllLabel] != "false" {
+		t.Error("group config should be explicitly marked unavailable to all")
+	}
+	if got["group.krkn.krkn-chaos.dev/platform"] != "true" {
+		t.Error("expected group label")
+	}
+
+	public := BuildLabels(nil, true)
+	if public[AvailableToAllLabel] != "true" {
+		t.Error("expected public config label")
 	}
 }
 
@@ -44,13 +62,11 @@ func TestBuildAnnotations(t *testing.T) {
 		telemetryIndex string
 		metricsIndex   string
 		alertsIndex    string
-		grafanaURL     string
 		createdBy      string
 		// keys that should be absent when empty
 		expectNoTelemetry bool
 		expectNoMetrics   bool
 		expectNoAlerts    bool
-		expectNoGrafana   bool
 	}{
 		{
 			name:           "all fields populated",
@@ -59,7 +75,6 @@ func TestBuildAnnotations(t *testing.T) {
 			telemetryIndex: "krkn-telemetry",
 			metricsIndex:   "krkn-metrics",
 			alertsIndex:    "krkn-alerts",
-			grafanaURL:     "https://grafana.example.com",
 			createdBy:      "admin@example.com",
 		},
 		{
@@ -69,12 +84,10 @@ func TestBuildAnnotations(t *testing.T) {
 			telemetryIndex:    "",
 			metricsIndex:      "",
 			alertsIndex:       "",
-			grafanaURL:        "",
 			createdBy:         "user@example.com",
 			expectNoTelemetry: true,
 			expectNoMetrics:   true,
 			expectNoAlerts:    true,
-			expectNoGrafana:   true,
 		},
 		{
 			name:            "default port",
@@ -83,17 +96,15 @@ func TestBuildAnnotations(t *testing.T) {
 			telemetryIndex:  "telemetry",
 			metricsIndex:    "",
 			alertsIndex:     "",
-			grafanaURL:      "",
 			createdBy:       "admin",
 			expectNoMetrics: true,
 			expectNoAlerts:  true,
-			expectNoGrafana: true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := BuildAnnotations(tt.host, tt.port, tt.telemetryIndex, tt.metricsIndex, tt.alertsIndex, tt.grafanaURL, tt.createdBy)
+			got := BuildAnnotations(tt.host, tt.port, tt.telemetryIndex, tt.metricsIndex, tt.alertsIndex, tt.createdBy)
 
 			if got[HostAnnotation] != tt.host {
 				t.Errorf("HostAnnotation = %q, want %q", got[HostAnnotation], tt.host)
@@ -127,7 +138,6 @@ func TestBuildAnnotations(t *testing.T) {
 			checkOptional(TelemetryIndexAnnotation, tt.telemetryIndex, tt.expectNoTelemetry)
 			checkOptional(MetricsIndexAnnotation, tt.metricsIndex, tt.expectNoMetrics)
 			checkOptional(AlertsIndexAnnotation, tt.alertsIndex, tt.expectNoAlerts)
-			checkOptional(GrafanaURLAnnotation, tt.grafanaURL, tt.expectNoGrafana)
 		})
 	}
 }
@@ -149,12 +159,10 @@ func TestUpdateAnnotations(t *testing.T) {
 		telemetryIndex    string
 		metricsIndex      string
 		alertsIndex       string
-		grafanaURL        string
 		updatedBy         string
 		expectNoTelemetry bool
 		expectNoMetrics   bool
 		expectNoAlerts    bool
-		expectNoGrafana   bool
 	}{
 		{
 			name:           "update all fields",
@@ -163,7 +171,6 @@ func TestUpdateAnnotations(t *testing.T) {
 			telemetryIndex: "new-telemetry",
 			metricsIndex:   "new-metrics",
 			alertsIndex:    "new-alerts",
-			grafanaURL:     "https://grafana.example.com",
 			updatedBy:      "user@example.com",
 		},
 		{
@@ -173,18 +180,16 @@ func TestUpdateAnnotations(t *testing.T) {
 			telemetryIndex:    "",
 			metricsIndex:      "",
 			alertsIndex:       "",
-			grafanaURL:        "",
 			updatedBy:         "user@example.com",
 			expectNoTelemetry: true,
 			expectNoMetrics:   true,
 			expectNoAlerts:    true,
-			expectNoGrafana:   true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := UpdateAnnotations(existing, tt.host, tt.port, tt.telemetryIndex, tt.metricsIndex, tt.alertsIndex, tt.grafanaURL, tt.updatedBy)
+			got := UpdateAnnotations(existing, tt.host, tt.port, tt.telemetryIndex, tt.metricsIndex, tt.alertsIndex, tt.updatedBy)
 
 			if got[HostAnnotation] != tt.host {
 				t.Errorf("HostAnnotation = %q, want %q", got[HostAnnotation], tt.host)
@@ -223,7 +228,6 @@ func TestUpdateAnnotations(t *testing.T) {
 			checkOptional(TelemetryIndexAnnotation, tt.telemetryIndex, tt.expectNoTelemetry)
 			checkOptional(MetricsIndexAnnotation, tt.metricsIndex, tt.expectNoMetrics)
 			checkOptional(AlertsIndexAnnotation, tt.alertsIndex, tt.expectNoAlerts)
-			checkOptional(GrafanaURLAnnotation, tt.grafanaURL, tt.expectNoGrafana)
 		})
 	}
 }

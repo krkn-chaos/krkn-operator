@@ -263,6 +263,9 @@ func main() {
 		setupLog.Error(err, "unable to create Kubernetes clientset")
 		os.Exit(1)
 	}
+	if err := api.RemoveElasticsearchGrafanaURLAnnotations(context.Background(), clientset, krknNamespace); err != nil {
+		setupLog.Error(err, "unable to remove retired Grafana URL annotations")
+	}
 
 	if err = (&controller.KrknScenarioRunReconciler{
 		Client:    mgr.GetClient(),

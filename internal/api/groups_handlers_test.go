@@ -30,6 +30,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	fakeclient "sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -188,6 +189,9 @@ func TestGetUserGroup_Success(t *testing.T) {
 	if response.Name != "dev-team" {
 		t.Errorf("Expected group name 'dev-team', got '%s'", response.Name)
 	}
+	if response.ID != "dev-team" {
+		t.Errorf("Expected group ID 'dev-team', got '%s'", response.ID)
+	}
 }
 
 func TestGetUserGroup_NotFound(t *testing.T) {
@@ -218,7 +222,7 @@ func TestCreateUserGroup_Success(t *testing.T) {
 	handler := NewTestHandler(fakeClient, fakeClientset, "default", "localhost:50051")
 
 	createReq := CreateUserGroupRequest{
-		Name:        "dev-team",
+		Name:        "Platform Team",
 		Description: "Development team",
 		ClusterPermissions: map[string]ClusterPermissionSet{
 			"https://api.cluster1.com": {
@@ -243,8 +247,15 @@ func TestCreateUserGroup_Success(t *testing.T) {
 		t.Fatalf("Failed to unmarshal response: %v", err)
 	}
 
-	if response.Name != "dev-team" {
-		t.Errorf("Expected group name 'dev-team', got '%s'", response.Name)
+	if response.Name != "Platform Team" {
+		t.Errorf("Expected group name 'Platform Team', got '%s'", response.Name)
+	}
+	var storedGroup krknv1alpha1.KrknUserGroup
+	if err := fakeClient.Get(context.Background(), types.NamespacedName{Name: "platform-team", Namespace: "default"}, &storedGroup); err != nil {
+		t.Fatalf("Failed to get created group: %v", err)
+	}
+	if storedGroup.Spec.Name != "Platform Team" {
+		t.Errorf("Expected display name 'Platform Team', got '%s'", storedGroup.Spec.Name)
 	}
 }
 

@@ -2295,12 +2295,18 @@ const docTemplate = `{
                 "alertsIndex": {
                     "type": "string"
                 },
+                "availableToAll": {
+                    "type": "boolean"
+                },
                 "caCert": {
-                    "description": "CACert is an optional PEM-encoded CA certificate (or bundle) trusted in\naddition to the host's system root CAs, so a self-signed cluster is reachable\nwith TLS verification still enabled and publicly trusted chains keep working.",
+                    "description": "CACert is an optional PEM-encoded CA certificate (or bundle) used to trust\na self-signed cluster while keeping TLS verification enabled.",
                     "type": "string"
                 },
-                "grafanaUrl": {
-                    "type": "string"
+                "groups": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
                 },
                 "host": {
                     "type": "string"
@@ -2354,14 +2360,20 @@ const docTemplate = `{
                 "alertsIndex": {
                     "type": "string"
                 },
+                "availableToAll": {
+                    "type": "boolean"
+                },
                 "createdAt": {
                     "type": "string"
                 },
                 "createdBy": {
                     "type": "string"
                 },
-                "grafanaUrl": {
-                    "type": "string"
+                "groups": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
                 },
                 "host": {
                     "type": "string"
@@ -2536,12 +2548,18 @@ const docTemplate = `{
                 "alertsIndex": {
                     "type": "string"
                 },
+                "availableToAll": {
+                    "type": "boolean"
+                },
                 "caCert": {
                     "description": "CACert is an optional PEM-encoded CA certificate (or bundle) trusted in\naddition to the host's system root CAs, so a self-signed cluster is reachable\nwith TLS verification still enabled and publicly trusted chains keep working.\nIt is a pointer to make omission (nil, \"leave the stored CA unchanged\")\ndistinguishable from an explicit empty string (\"clear the stored CA\").",
                     "type": "string"
                 },
-                "grafanaUrl": {
-                    "type": "string"
+                "groups": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
                 },
                 "host": {
                     "type": "string"
@@ -3613,7 +3631,7 @@ const docTemplate = `{
                     ]
                 },
                 "scenarioImage": {
-                    "description": "ScenarioImage is accepted for backwards compatibility but is ignored.\nImages are always resolved server-side from Scenario.",
+                    "description": "ScenarioImage is accepted for backwards compatibility but is ignored.\nImages are always resolved server-side from Scenario.\nScenarioImage is always serialized for config responses. It is empty\nuntil the controller has resolved an executable image for a job.",
                     "type": "string"
                 },
                 "scenarioName": {

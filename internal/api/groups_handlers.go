@@ -910,6 +910,7 @@ func buildUserGroupResponse(ctx context.Context, k8sClient client.Client, group 
 
 	return UserGroupResponse{
 		Name:               group.Spec.Name,
+		ID:                 group.Name,
 		Description:        group.Spec.Description,
 		ClusterPermissions: clusterPerms,
 		MemberCount:        memberCount,

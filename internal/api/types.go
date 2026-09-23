@@ -752,6 +752,8 @@ type ClusterPermissionSet struct {
 type UserGroupResponse struct {
 	// Name is the group name
 	Name string `json:"name"`
+	// ID is the canonical Kubernetes-safe group identifier used by access labels.
+	ID string `json:"id"`
 	// Description is the group description (optional)
 	Description string `json:"description,omitempty"`
 	// ClusterPermissions is a map of clusterAPIURL to permitted actions
