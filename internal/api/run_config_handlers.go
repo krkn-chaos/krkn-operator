@@ -236,6 +236,7 @@ func (h *Handler) GetGraphRunConfig(w http.ResponseWriter, r *http.Request) {
 		Graph:           graphRun.Spec.Graph,
 		TargetRequestID: graphRun.Spec.TargetRequestID,
 		TargetClusters:  graphRun.Spec.TargetClusters,
+		MaxRetries:      intPtr(graphRun.Spec.MaxRetries),
 	}
 
 	logger.Info("Graph run config retrieved successfully",

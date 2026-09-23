@@ -1585,6 +1585,14 @@ func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
 	if req.CustomRunName != "" {
 		labels["krkn.krkn-chaos.dev/custom-run-name"] = sanitizeRunNameLabel(req.CustomRunName)
 	}
+	maxRetries, err := resolveMaxRetries(req.MaxRetries)
+	if err != nil {
+		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+			Error:   "bad_request",
+			Message: err.Error(),
+		})
+		return
+	}
 
 	scenarioRun := &krknv1alpha1.KrknScenarioRun{
 		ObjectMeta: metav1.ObjectMeta{
@@ -1601,6 +1609,7 @@ func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
 			Environment:            req.Environment,
 			CustomRunName:          req.CustomRunName,
 			ResiliencyScoreEnabled: req.ResiliencyScoreEnabled,
+			MaxRetries:      maxRetries,
 		},
 	}
 
@@ -1668,6 +1677,7 @@ func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
 	response := ScenarioRunCreateResponse{
 		ScenarioRunName: scenarioRunName,
 		TargetClusters:  req.TargetClusters,
+		MaxRetries:      maxRetries,
 		TotalTargets:    totalTargets,
 		OwnerUserID:     ownerUserID,
 		CustomRunName:   req.CustomRunName,

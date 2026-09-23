@@ -300,6 +300,34 @@ For terminal API details and troubleshooting see [QUICKSTART_TERMINAL_API.md](QU
 
 ## API compatibility notes
 
+### Retry limits
+
+Scenario and graph creation requests accept an optional `maxRetries` integer. It
+is the number of retries after the initial attempt and defaults to `3` when the
+field is omitted. Set it to `0` to disable retries. Negative values are invalid
+and return HTTP `400` with an error code of `bad_request`.
+
+For scenario runs, `POST /api/v1/scenarios/run` returns the applied limit as
+`maxRetries`. For graph runs, `POST /api/v1/graphruns` returns it in the run
+specification as `spec.maxRetries`; job status responses also expose the limit
+as `maxRetries` alongside `retryCount`.
+
+The replay endpoints preserve the configured retry value, including `0`:
+
+- `GET /api/v1/scenarios/run/{scenarioRunName}/config`
+- `GET /api/v1/graphruns/{graphRunName}/config`
+
+Example scenario request:
+
+```json
+{
+  "targetRequestId": "target-request-id",
+  "targetClusters": {"provider": ["cluster"]},
+  "scenario": {"name": "pod-delete", "private": false},
+  "maxRetries": 0
+}
+```
+
 Scenario run requests identify the scenario rather than supplying an executable
 image. The operator resolves the image from the scenario name and selected
 registry:

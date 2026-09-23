@@ -122,6 +122,12 @@ spec:
                   Maps node ID to scenario node definition with dependencies
                   This is compatible with krknctl ScenarioSet for 1:1 JSON compatibility
                 type: object
+              maxRetries:
+                default: 3
+                description: MaxRetries is the maximum number of retries for each
+                  scenario node.
+                minimum: 0
+                type: integer
               ownerUserId:
                 description: OwnerUserID is the email address of the user who created
                   this graph run

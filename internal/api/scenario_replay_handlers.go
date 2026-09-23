@@ -35,6 +35,8 @@ import (
 	"github.com/krkn-chaos/krkn-operator/pkg/groupauth"
 )
 
+func intPtr(value int) *int { return &value }
+
 // GetScenarioReplay handles GET /api/v1/scenarios/run/replay/{jobId}
 // Retrieves a completed scenario job and reconstructs the payload for replay
 //
@@ -237,9 +239,7 @@ func (h *Handler) reconstructScenarioRunPayload(ctx context.Context, scenarioRun
 		// Optional fields
 		Environment:    scenarioRun.Spec.Environment,
 		KubeconfigPath: scenarioRun.Spec.KubeconfigPath,
-
-		// Note: MaxRetries, RetryBackoff, RetryDelay are NOT in ScenarioRunRequest
-		// They are controller-level settings, not wizard-level inputs
+		MaxRetries:     intPtr(scenarioRun.Spec.MaxRetries),
 	}
 
 	// Reconstruct FileReferences from saved files
