@@ -257,6 +257,17 @@ func (h *Handler) CreateGraphRun(w http.ResponseWriter, r *http.Request) {
 	resiliencyEnabled := parseBoolHeader(r.Header.Get("X-Resiliency-Score"))
 	var resiliencyBaseline *float64
 	var resiliencyMountPath string
+	maxRetries := 3
+	if req.MaxRetries != nil {
+		if *req.MaxRetries < 0 {
+			writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+				Error:   "bad_request",
+				Message: "maxRetries must be non-negative",
+			})
+			return
+		}
+		maxRetries = *req.MaxRetries
+	}
 
 	if resiliencyEnabled {
 		// Baseline is REQUIRED when resiliency score is enabled
@@ -500,6 +511,7 @@ func (h *Handler) CreateGraphRun(w http.ResponseWriter, r *http.Request) {
 			ResiliencyScoreEnabled:  resiliencyEnabled,
 			ResiliencyMountPath:     resiliencyMountPath,
 			ResiliencyScoreBaseline: resiliencyBaseline,
+			MaxRetries:              maxRetries,
 		},
 	}
 
@@ -526,6 +538,7 @@ func (h *Handler) CreateGraphRun(w http.ResponseWriter, r *http.Request) {
 			Graph:                   graphRun.Spec.Graph,
 			TargetRequestID:         graphRun.Spec.TargetRequestID,
 			TargetClusters:          graphRun.Spec.TargetClusters,
+			MaxRetries:              graphRun.Spec.MaxRetries,
 			OwnerUserID:             graphRun.Spec.OwnerUserID,
 			ResiliencyScoreEnabled:  graphRun.Spec.ResiliencyScoreEnabled,
 			ResiliencyMountPath:     graphRun.Spec.ResiliencyMountPath,

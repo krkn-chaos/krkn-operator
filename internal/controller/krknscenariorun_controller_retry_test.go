@@ -30,6 +30,33 @@ import (
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
 )
 
+func TestShouldRetryJobHonorsConfiguredRetryLimit(t *testing.T) {
+	reconciler := &KrknScenarioRunReconciler{}
+
+	tests := []struct {
+		name       string
+		retryCount int
+		maxRetries int
+		want       bool
+	}{
+		{name: "zero disables retries", retryCount: 0, maxRetries: 0, want: false},
+		{name: "one allows first retry", retryCount: 0, maxRetries: 1, want: true},
+		{name: "limit reached", retryCount: 1, maxRetries: 1, want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			job := &krknv1alpha1.ClusterJobStatus{
+				Phase:      "Failed",
+				RetryCount: tt.retryCount,
+			}
+			if got := reconciler.shouldRetryJob(job, tt.maxRetries); got != tt.want {
+				t.Fatalf("shouldRetryJob() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestUpdateClusterJobStatuses_ProviderNameEmpty(t *testing.T) {
 	scheme := runtime.NewScheme()
 	_ = krknv1alpha1.AddToScheme(scheme)
