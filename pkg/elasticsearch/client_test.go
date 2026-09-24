@@ -72,10 +72,10 @@ func TestQueryTelemetry(t *testing.T) {
 					t.Errorf("got scenario_type %q, want pod_disruption_scenarios", d.ScenarioType)
 				}
 				if d.StartTimestamp != 1735689600 {
-					t.Errorf("got start_timestamp %d, want 1735689600", d.StartTimestamp)
+					t.Errorf("got start_timestamp %f, want 1735689600", d.StartTimestamp)
 				}
 				if d.EndTimestamp != 1735689900 {
-					t.Errorf("got end_timestamp %d, want 1735689900", d.EndTimestamp)
+					t.Errorf("got end_timestamp %f, want 1735689900", d.EndTimestamp)
 				}
 				if d.Namespace != "openshift-kube-apiserver" {
 					t.Errorf("got namespace %q, want openshift-kube-apiserver", d.Namespace)
@@ -617,6 +617,12 @@ func TestRawTelemetrySourceFlatten(t *testing.T) {
 					{ScenarioType: "application_outages_scenarios", StartTimestamp: 10, EndTimestamp: 20, Parameters: json.RawMessage(`{"application_outage":{"namespace":"openshift-console"}}`)},
 					{ScenarioType: "pod", StartTimestamp: 30, EndTimestamp: 40, Parameters: json.RawMessage(`{"config":{"kill":1},"id":"kill-pods"}`)},
 				}},
+		},
+		{
+			name:   "fractional timestamps from Python time.time()",
+			source: `{"run_uuid":"frac","job_status":true,"scenarios":[{"scenario_type":"pod","start_timestamp":1735689600.123456,"end_timestamp":1735689900.987654,"exit_status":0,"parameters":[{"config":{"namespace_pattern":"default"}}]}]}`,
+			want: TelemetryDocument{RunUUID: "frac", ScenarioType: "pod", StartTimestamp: 1735689600.123456, EndTimestamp: 1735689900.987654, Namespace: "default", Status: true,
+				Scenarios: []ScenarioDetail{{ScenarioType: "pod", StartTimestamp: 1735689600.123456, EndTimestamp: 1735689900.987654, Parameters: json.RawMessage(`[{"config":{"namespace_pattern":"default"}}]`)}}},
 		},
 	}
 	for _, tt := range tests {
