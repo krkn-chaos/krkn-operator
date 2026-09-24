@@ -198,6 +198,34 @@ type KrknScenarioRunSpec struct {
 	RetryDelay string `json:"retryDelay,omitempty"`
 }
 
+// ReportStatus tracks the status of report generation for a scenario run
+type ReportStatus struct {
+	// Generated indicates if reports have been successfully generated
+	Generated bool `json:"generated"`
+
+	// HTMLAvailable indicates if HTML report exists
+	HTMLAvailable bool `json:"htmlAvailable"`
+
+	// PDFAvailable indicates if PDF report exists
+	PDFAvailable bool `json:"pdfAvailable"`
+
+	// GeneratedAt is when reports were created
+	// +optional
+	GeneratedAt *metav1.Time `json:"generatedAt,omitempty"`
+
+	// Location is the name of the ConfigMap where reports are stored (e.g., krkn-report-{scenarioRunName})
+	// +optional
+	Location string `json:"location,omitempty"`
+
+	// FileSize is total size of generated reports in bytes
+	// +optional
+	FileSize int64 `json:"fileSize,omitempty"`
+
+	// Message contains error details if generation failed
+	// +optional
+	Message string `json:"message,omitempty"`
+}
+
 // KrknScenarioRunStatus defines the observed state of KrknScenarioRun
 type KrknScenarioRunStatus struct {
 	// Phase is the overall phase of the scenario run
@@ -230,6 +258,10 @@ type KrknScenarioRunStatus struct {
 	// Populated only when the parent KrknGraphRun has Spec.ResiliencyScoreEnabled set to true.
 	// +optional
 	ResiliencyScores []ClusterResiliencyScore `json:"resiliencyScores,omitempty"`
+
+	// ReportStatus tracks report generation status
+	// +optional
+	ReportStatus *ReportStatus `json:"reportStatus,omitempty"`
 
 	// Conditions represent the latest available observations of the scenario run's state
 	// +optional

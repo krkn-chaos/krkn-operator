@@ -314,6 +314,39 @@ spec:
                 - PartiallyFailed
                 - Failed
                 type: string
+              reportStatus:
+                description: ReportStatus tracks report generation status
+                properties:
+                  fileSize:
+                    description: FileSize is total size of generated reports in bytes
+                    format: int64
+                    type: integer
+                  generated:
+                    description: Generated indicates if reports have been successfully
+                      generated
+                    type: boolean
+                  generatedAt:
+                    description: GeneratedAt is when reports were created
+                    format: date-time
+                    type: string
+                  htmlAvailable:
+                    description: HTMLAvailable indicates if HTML report exists
+                    type: boolean
+                  location:
+                    description: Location is the name of the ConfigMap where reports
+                      are stored (e.g., krkn-report-{scenarioRunName})
+                    type: string
+                  message:
+                    description: Message contains error details if generation failed
+                    type: string
+                  pdfAvailable:
+                    description: PDFAvailable indicates if PDF report exists
+                    type: boolean
+                required:
+                - generated
+                - htmlAvailable
+                - pdfAvailable
+                type: object
               resiliencyScores:
                 description: |-
                   ResiliencyScores contains per-cluster resiliency scores for this scenario run.

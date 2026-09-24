@@ -2791,6 +2791,265 @@ func (h *Handler) GetSingleJob(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, response)
 }
 
+// GetReportStatus handles GET /api/v1/scenarios/run/{runId}/reports/status.
+//
+// It returns 200 while report generation is pending or successful, 400 for a
+// malformed path, 403 when the caller cannot view the run, 404 when the run is
+// absent, and 500 when report generation failed or the Kubernetes API is
+// unavailable.
+//
+// @Summary Get scenario run report status
+// @Description Get HTML/PDF report generation status for a scenario run.
+// @Tags scenario-runs
+// @Produce json
+// @Param runId path string true "Scenario run name"
+// @Success 200 {object} map[string]interface{} "Report status"
+// @Failure 400 {object} ErrorResponse "Malformed report status path"
+// @Failure 403 {object} ErrorResponse "Access denied"
+// @Failure 404 {object} ErrorResponse "Scenario run not found"
+// @Failure 500 {object} ErrorResponse "Report generation or Kubernetes API failure"
+// @Security BearerAuth
+// @Router /scenarios/run/{runId}/reports/status [get]
+func (h *Handler) GetReportStatus(w http.ResponseWriter, r *http.Request) {
+	path := strings.Replace(r.URL.Path, "/api/v2/", "/api/v1/", 1)
+
+	// Extract runId from path: /api/v1/scenarios/run/{runId}/reports/status
+	prefix := "/api/v1/scenarios/run/"
+	if !strings.HasPrefix(path, prefix) {
+		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+			Error:   "bad_request",
+			Message: "Invalid path format",
+		})
+		return
+	}
+
+	remaining := strings.TrimPrefix(path, prefix)
+	parts := strings.Split(remaining, "/")
+	if len(parts) != 3 || parts[1] != "reports" || parts[2] != "status" || parts[0] == "" {
+		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+			Error:   "bad_request",
+			Message: "Invalid path format",
+		})
+		return
+	}
+
+	runID := parts[0]
+	ctx := r.Context()
+
+	// Find scenario run by name
+	var scenarioRun krknv1alpha1.KrknScenarioRun
+	if err := h.client.Get(ctx, types.NamespacedName{
+		Name:      runID,
+		Namespace: h.namespace,
+	}, &scenarioRun); err != nil {
+		if apierrors.IsNotFound(err) {
+			writeJSONError(w, http.StatusNotFound, ErrorResponse{Error: "not_found", Message: "Scenario run not found"})
+		} else {
+			log.FromContext(ctx).Error(err, "Failed to load scenario run for report status", "runID", runID)
+			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{Error: "internal_error", Message: "Failed to load scenario run"})
+		}
+		return
+	}
+
+	// Check permission to view this run
+	if !h.checkScenarioRunAccess(w, r, &scenarioRun) {
+		return
+	}
+
+	// Build response from reportStatus
+	response := map[string]interface{}{
+		"generated":     false,
+		"htmlAvailable": false,
+		"pdfAvailable":  false,
+		"fileSize":      int64(0),
+	}
+
+	if scenarioRun.Status.ReportStatus != nil {
+		if scenarioRun.Status.ReportStatus.Message != "" && !scenarioRun.Status.ReportStatus.Generated {
+			response["generated"] = false
+			response["message"] = scenarioRun.Status.ReportStatus.Message
+			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{Error: "report_generation_failed", Message: scenarioRun.Status.ReportStatus.Message})
+			return
+		}
+		response["generated"] = scenarioRun.Status.ReportStatus.Generated
+		response["htmlAvailable"] = scenarioRun.Status.ReportStatus.HTMLAvailable
+		response["pdfAvailable"] = scenarioRun.Status.ReportStatus.PDFAvailable
+		response["fileSize"] = scenarioRun.Status.ReportStatus.FileSize
+		if scenarioRun.Status.ReportStatus.GeneratedAt != nil {
+			response["generatedAt"] = scenarioRun.Status.ReportStatus.GeneratedAt.Format(time.RFC3339)
+		}
+		if scenarioRun.Status.ReportStatus.Location != "" {
+			response["location"] = scenarioRun.Status.ReportStatus.Location
+		}
+		if scenarioRun.Status.ReportStatus.Message != "" {
+			response["message"] = scenarioRun.Status.ReportStatus.Message
+		}
+	}
+
+	writeJSON(w, http.StatusOK, response)
+}
+
+// DownloadReport handles GET /api/v1/scenarios/run/{runId}/reports/summary.html
+// or /api/v1/scenarios/run/{runId}/reports/summary.pdf.
+//
+// It returns 400 for malformed paths or formats, 403 when the caller cannot
+// view the run, 404 when the run or requested report is absent, and 500 when
+// the Kubernetes API or stored report data cannot be read.
+//
+// @Summary Download a scenario run report
+// @Description Download the generated HTML or PDF report for a scenario run.
+// @Tags scenario-runs
+// @Produce text/html
+// @Produce application/pdf
+// @Param runId path string true "Scenario run name"
+// @Param format path string true "Report format" Enums(html, pdf)
+// @Success 200 {file} binary "Generated report"
+// @Failure 400 {object} ErrorResponse "Malformed report path or format"
+// @Failure 403 {object} ErrorResponse "Access denied"
+// @Failure 404 {object} ErrorResponse "Scenario run or report not found"
+// @Failure 500 {object} ErrorResponse "Report storage failure"
+// @Security BearerAuth
+// @Router /scenarios/run/{runId}/reports/summary.{format} [get]
+func (h *Handler) DownloadReport(w http.ResponseWriter, r *http.Request) {
+	path := strings.Replace(r.URL.Path, "/api/v2/", "/api/v1/", 1)
+
+	// Extract runId and format from path: /api/v1/scenarios/run/{runId}/reports/summary.{html|pdf}
+	prefix := "/api/v1/scenarios/run/"
+	if !strings.HasPrefix(path, prefix) {
+		writeJSONError(w, http.StatusBadRequest, ErrorResponse{Error: "bad_request", Message: "Invalid path format"})
+		return
+	}
+
+	remaining := strings.TrimPrefix(path, prefix)
+	parts := strings.Split(remaining, "/")
+	if len(parts) != 3 || parts[0] == "" || parts[1] != "reports" {
+		writeJSONError(w, http.StatusBadRequest, ErrorResponse{Error: "bad_request", Message: "Invalid path format"})
+		return
+	}
+
+	runID := parts[0]
+	filename := parts[len(parts)-1] // summary.html or summary.pdf
+
+	// Validate filename format
+	if !strings.HasPrefix(filename, "summary.") {
+		writeJSONError(w, http.StatusBadRequest, ErrorResponse{Error: "bad_request", Message: "Invalid filename"})
+		return
+	}
+
+	format := strings.TrimPrefix(filename, "summary.")
+	if format != "html" && format != "pdf" {
+		writeJSONError(w, http.StatusBadRequest, ErrorResponse{Error: "bad_request", Message: "Invalid format"})
+		return
+	}
+
+	ctx := r.Context()
+
+	// Find scenario run by name
+	var scenarioRun krknv1alpha1.KrknScenarioRun
+	if err := h.client.Get(ctx, types.NamespacedName{
+		Name:      runID,
+		Namespace: h.namespace,
+	}, &scenarioRun); err != nil {
+		if apierrors.IsNotFound(err) {
+			writeJSONError(w, http.StatusNotFound, ErrorResponse{Error: "not_found", Message: "Scenario run not found"})
+		} else {
+			log.FromContext(ctx).Error(err, "Failed to load scenario run for report download", "runID", runID)
+			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{Error: "internal_error", Message: "Failed to load scenario run"})
+		}
+		return
+	}
+
+	// Check permission to view this run
+	if !h.checkScenarioRunAccess(w, r, &scenarioRun) {
+		return
+	}
+
+	// Check if reports are available
+	if scenarioRun.Status.ReportStatus == nil || !scenarioRun.Status.ReportStatus.Generated {
+		if scenarioRun.Status.ReportStatus != nil && scenarioRun.Status.ReportStatus.Message != "" {
+			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{Error: "report_generation_failed", Message: scenarioRun.Status.ReportStatus.Message})
+			return
+		}
+		writeJSONError(w, http.StatusNotFound, ErrorResponse{Error: "not_found", Message: "Reports not yet generated"})
+		return
+	}
+
+	if format == "html" && !scenarioRun.Status.ReportStatus.HTMLAvailable {
+		writeJSONError(w, http.StatusNotFound, ErrorResponse{Error: "not_found", Message: "HTML report not available"})
+		return
+	}
+
+	if format == "pdf" && !scenarioRun.Status.ReportStatus.PDFAvailable {
+		writeJSONError(w, http.StatusNotFound, ErrorResponse{Error: "not_found", Message: "PDF report not available"})
+		return
+	}
+
+	cmName := scenarioRun.Status.ReportStatus.Location
+
+	// Read report from ConfigMap before authorizing the download. Reports are
+	// generated by a specific cluster job, so a run-wide permission check is not
+	// sufficient for the report contents.
+	var configMap corev1.ConfigMap
+	if err := h.client.Get(ctx, types.NamespacedName{Name: cmName, Namespace: h.namespace}, &configMap); err != nil {
+		log.FromContext(ctx).Error(err, "Failed to get report ConfigMap", "configMapName", cmName)
+		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{Error: "internal_error", Message: "Failed to read report"})
+		return
+	}
+
+	reportJobID := configMap.Annotations["krkn.krkn-chaos.dev/report-job-id"]
+	if reportJobID != "" {
+		var reportJob *krknv1alpha1.ClusterJobStatus
+		for i := range scenarioRun.Status.ClusterJobs {
+			if scenarioRun.Status.ClusterJobs[i].JobID == reportJobID {
+				reportJob = &scenarioRun.Status.ClusterJobs[i]
+				break
+			}
+		}
+		if reportJob == nil {
+			if !auth.IsAdmin(ctx) {
+				writeJSONError(w, http.StatusForbidden, ErrorResponse{Error: "forbidden", Message: "Access denied. Report source job not found"})
+				return
+			}
+		} else if !h.checkJobAccess(w, r, reportJob, groupauth.ActionView, "view") {
+			return
+		}
+	} else if !auth.IsAdmin(ctx) {
+		// Reports created before job attribution was added cannot be safely
+		// authorized for a non-admin user because their source cluster is unknown.
+		writeJSONError(w, http.StatusForbidden, ErrorResponse{Error: "forbidden", Message: "Access denied. Report source is unavailable"})
+		return
+	}
+
+	var fileData []byte
+	if format == "html" {
+		if data, ok := configMap.Data["summary.html"]; ok {
+			fileData = []byte(data)
+		}
+	} else if format == "pdf" {
+		if data, ok := configMap.BinaryData["summary.pdf"]; ok {
+			fileData = data
+		}
+	}
+
+	if fileData == nil {
+		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{Error: "internal_error", Message: "Report data not found in ConfigMap"})
+		return
+	}
+
+	// Set appropriate content type and headers
+	if format == "html" {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	} else {
+		w.Header().Set("Content-Type", "application/pdf")
+	}
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%s-%s.%s", runID, "summary", format))
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(fileData)))
+
+	if _, err := w.Write(fileData); err != nil {
+		log.FromContext(ctx).Error(err, "Failed to write report data")
+	}
+}
+
 func (h *Handler) ScenariosRunRouter(w http.ResponseWriter, r *http.Request) {
 	path := strings.Replace(r.URL.Path, "/api/v2/", "/api/v1/", 1)
 
@@ -2855,6 +3114,26 @@ func (h *Handler) ScenariosRunRouter(w http.ResponseWriter, r *http.Request) {
 					Error:   "method_not_allowed",
 					Message: "Method not allowed",
 				})
+			}
+			return
+		}
+
+		// Check for /reports/status pattern
+		if strings.HasSuffix(path, "/reports/status") {
+			if r.Method == http.MethodGet {
+				h.GetReportStatus(w, r)
+			} else {
+				http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			}
+			return
+		}
+
+		// Check for /reports/summary.html or /reports/summary.pdf pattern
+		if strings.Contains(path, "/reports/summary.") {
+			if r.Method == http.MethodGet {
+				h.DownloadReport(w, r)
+			} else {
+				http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			}
 			return
 		}
