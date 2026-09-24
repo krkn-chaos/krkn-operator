@@ -190,7 +190,8 @@ type ClusterMetadata struct {
 	// NetworkPlugins lists the cluster network plugins (e.g. "OVNKubernetes").
 	NetworkPlugins []string `json:"network_plugins,omitempty"`
 	// TotalNodeCount is the number of nodes in the cluster at run time.
-	TotalNodeCount int `json:"total_node_count,omitempty"`
+	// Pointer distinguishes absent (nil) from explicit zero.
+	TotalNodeCount *int `json:"total_node_count,omitempty"`
 	// CloudInfrastructure identifies the cloud provider (e.g. "AWS", "GCP").
 	CloudInfrastructure string `json:"cloud_infrastructure,omitempty"`
 	// CloudType identifies deployment model (e.g. "self-managed", "managed").
@@ -202,13 +203,16 @@ type ClusterMetadata struct {
 	// BuildURL is the URL of the build used for the cluster.
 	BuildURL string `json:"build_url,omitempty"`
 	// FIPSEnabled indicates whether FIPS mode is enabled in the cluster.
-	FIPSEnabled bool `json:"fips_enabled,omitempty"`
+	// Pointer distinguishes absent (nil) from explicit false.
+	FIPSEnabled *bool `json:"fips_enabled,omitempty"`
 	// Tag is an arbitrary label applied to the telemetry run.
 	Tag string `json:"tag,omitempty"`
 	// EtcdEncryptionEnabled indicates whether etcd encryption is enabled.
-	EtcdEncryptionEnabled bool `json:"etcd_encryption_enabled,omitempty"`
+	// Pointer distinguishes absent (nil) from explicit false.
+	EtcdEncryptionEnabled *bool `json:"etcd_encryption_enabled,omitempty"`
 	// IPSecEnabled indicates whether IPSec is enabled in the cluster.
-	IPSecEnabled bool `json:"ipsec_enabled,omitempty"`
+	// Pointer distinguishes absent (nil) from explicit false.
+	IPSecEnabled *bool `json:"ipsec_enabled,omitempty"`
 	// NodeSummaryInfos lists one summary per distinct node group (role/shape) in
 	// the cluster at run time; nil when the source document carried none.
 	NodeSummaryInfos []NodeSummaryInfo `json:"node_summary_infos,omitempty"`

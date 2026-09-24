@@ -27,6 +27,16 @@ import (
 	"testing"
 )
 
+// boolPtr returns a pointer to the given bool value.
+func boolPtr(b bool) *bool {
+	return &b
+}
+
+// intPtr returns a pointer to the given int value.
+func intPtr(i int) *int {
+	return &i
+}
+
 func TestQueryTelemetry(t *testing.T) {
 	// The aggregation counts span the whole matched window, so they can (and here
 	// do) exceed the two hits returned in the size-capped page.
@@ -601,13 +611,16 @@ func TestRawTelemetrySourceFlatten(t *testing.T) {
 				Metadata: &ClusterMetadata{
 					KubernetesObjectsCount: map[string]int{"Pod": 701, "ConfigMap": 1064},
 					NetworkPlugins:         []string{"OVNKubernetes"},
-					TotalNodeCount:         9,
+					TotalNodeCount:         intPtr(9),
 					CloudInfrastructure:    "AWS",
 					CloudType:              "self-managed",
 					ClusterVersion:         "4.19.0",
 					MajorVersion:           "4.19",
 					BuildURL:               "https://example/1",
+					FIPSEnabled:            boolPtr(false),
 					Tag:                    "cr",
+					EtcdEncryptionEnabled:  boolPtr(false),
+					IPSecEnabled:           boolPtr(false),
 					NodeSummaryInfos: []NodeSummaryInfo{
 						{Count: 3, NodesType: "master", Architecture: "amd64", InstanceType: "m5.2xlarge", KernelVersion: "5.14.0-570.51.1.el9_6.x86_64", KubeletVersion: "v1.33.5", OSVersion: "Red Hat Enterprise Linux CoreOS 9.6.20250930-0 (Plow)"},
 						{Count: 3, NodesType: "worker", Architecture: "amd64", InstanceType: "m5.xlarge", KernelVersion: "5.14.0-570.51.1.el9_6.x86_64", KubeletVersion: "v1.33.5", OSVersion: "Red Hat Enterprise Linux CoreOS 9.6.20250930-0 (Plow)"},
