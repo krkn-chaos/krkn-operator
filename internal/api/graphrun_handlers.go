@@ -657,6 +657,8 @@ func convertClusterResiliencyScores(scores []krknv1alpha1.ClusterResiliencyScore
 		result[i] = ClusterResiliencyScoreResponse{
 			ClusterName: score.ClusterName,
 			Score:       score.Score,
+			Status:      score.Status,
+			Message:     score.Message,
 		}
 	}
 	return result

@@ -28,12 +28,23 @@ import (
 
 var scenarioNamePattern = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$`)
 
-// ClusterResiliencyScore represents the resiliency score for a specific cluster
+// ClusterResiliencyScore represents the resiliency score for a specific cluster.
 type ClusterResiliencyScore struct {
 	// ClusterName is the name of the cluster this score applies to
 	ClusterName string `json:"clusterName"`
 	// Score is the calculated resiliency score for this cluster (0-100)
 	Score float64 `json:"score"`
+	// Status indicates the state of this cluster's score calculation.
+	//
+	// Values:
+	//   - "calculated": score was successfully extracted from pod logs
+	//   - "error":      score extraction failed (see Message for details)
+	//
+	// +kubebuilder:validation:Enum=calculated;error
+	Status string `json:"status"`
+	// Message provides human-readable context about the score or error
+	// +optional
+	Message string `json:"message,omitempty"`
 }
 
 // FileMount represents a file to be mounted in the scenario pod
@@ -196,6 +207,17 @@ type KrknScenarioRunSpec struct {
 	// +optional
 	// +kubebuilder:default="10s"
 	RetryDelay string `json:"retryDelay,omitempty"`
+
+	// ResiliencyScoreEnabled enables resiliency score calculation for this scenario run.
+	// When enabled:
+	// 1. RESILIENCY_SCORE=true environment variable is set in all scenario pods
+	// 2. Upon completion, the controller parses pod logs for KRKN_RESILIENCY_REPORT_JSON markers
+	//    and populates Status.ResiliencyScores
+	//
+	// For standalone runs (not part of a GraphRun), this field controls scoring directly.
+	// For GraphRun-created ScenarioRuns, the GraphRun reconciler handles scoring regardless of this field.
+	// +optional
+	ResiliencyScoreEnabled bool `json:"resiliencyScoreEnabled,omitempty"`
 }
 
 // ReportStatus tracks the status of report generation for a scenario run
@@ -255,7 +277,8 @@ type KrknScenarioRunStatus struct {
 	// ResiliencyScores contains per-cluster resiliency scores for this scenario run.
 	// Each entry represents the score calculated from the pod logs of a specific cluster.
 	// When a scenario runs on multiple clusters, this array will contain one entry per cluster.
-	// Populated only when the parent KrknGraphRun has Spec.ResiliencyScoreEnabled set to true.
+	// Populated when Spec.ResiliencyScoreEnabled is true (standalone runs) or when the
+	// parent KrknGraphRun has Spec.ResiliencyScoreEnabled set to true (graph runs).
 	// +optional
 	ResiliencyScores []ClusterResiliencyScore `json:"resiliencyScores,omitempty"`
 

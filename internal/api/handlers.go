@@ -1559,13 +1559,14 @@ func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
 			Labels:    labels,
 		},
 		Spec: krknv1alpha1.KrknScenarioRunSpec{
-			TargetRequestID: req.TargetRequestID,
-			OwnerUserID:     ownerUserID,
-			TargetClusters:  req.TargetClusters,
-			Scenario:        req.Scenario,
-			KubeconfigPath:  req.KubeconfigPath,
-			Environment:     req.Environment,
-			CustomRunName:   req.CustomRunName,
+			TargetRequestID:        req.TargetRequestID,
+			OwnerUserID:            ownerUserID,
+			TargetClusters:         req.TargetClusters,
+			Scenario:               req.Scenario,
+			KubeconfigPath:         req.KubeconfigPath,
+			Environment:            req.Environment,
+			CustomRunName:          req.CustomRunName,
+			ResiliencyScoreEnabled: req.ResiliencyScoreEnabled,
 		},
 	}
 
@@ -1742,19 +1743,20 @@ func (h *Handler) GetScenarioRunStatus(w http.ResponseWriter, r *http.Request) {
 				// Case 1: No jobs have ClusterAPIURL (run just created, controller hasn't processed yet)
 				// Allow access and return 201 Created with empty jobs array
 				response := ScenarioRunStatusResponse{
-					ScenarioRunName:  scenarioRunName,
-					ScenarioName:     scenarioRun.Spec.Scenario.Name,
-					Phase:            scenarioRun.Status.Phase,
-					TotalTargets:     scenarioRun.Status.TotalTargets,
-					SuccessfulJobs:   scenarioRun.Status.SuccessfulJobs,
-					FailedJobs:       scenarioRun.Status.FailedJobs,
-					RunningJobs:      scenarioRun.Status.RunningJobs,
-					ClusterJobs:      []ClusterJobStatusResponse{},
-					OwnerUserID:      scenarioRun.Spec.OwnerUserID,
-					RegistryName:     scenarioRun.Spec.Scenario.RegistryName,
-					GraphRunName:     scenarioRun.Labels["krkn.dev/graph-run"],
-					GraphNodeID:      scenarioRun.Labels["krkn.dev/graph-node"],
-					ResiliencyScores: convertClusterResiliencyScores(scenarioRun.Status.ResiliencyScores),
+					ScenarioRunName:        scenarioRunName,
+					ScenarioName:           scenarioRun.Spec.Scenario.Name,
+					Phase:                  scenarioRun.Status.Phase,
+					TotalTargets:           scenarioRun.Status.TotalTargets,
+					SuccessfulJobs:         scenarioRun.Status.SuccessfulJobs,
+					FailedJobs:             scenarioRun.Status.FailedJobs,
+					RunningJobs:            scenarioRun.Status.RunningJobs,
+					ClusterJobs:            []ClusterJobStatusResponse{},
+					OwnerUserID:            scenarioRun.Spec.OwnerUserID,
+					RegistryName:           scenarioRun.Spec.Scenario.RegistryName,
+					GraphRunName:           scenarioRun.Labels["krkn.dev/graph-run"],
+					GraphNodeID:            scenarioRun.Labels["krkn.dev/graph-node"],
+					ResiliencyScoreEnabled: scenarioRun.Spec.ResiliencyScoreEnabled,
+					ResiliencyScores:       convertClusterResiliencyScores(scenarioRun.Status.ResiliencyScores),
 				}
 				writeJSON(w, http.StatusCreated, response)
 				return
@@ -1791,21 +1793,22 @@ func (h *Handler) GetScenarioRunStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	response := ScenarioRunStatusResponse{
-		ScenarioRunName:  scenarioRunName,
-		ScenarioName:     scenarioRun.Spec.Scenario.Name,
-		Phase:            scenarioRun.Status.Phase,
-		TotalTargets:     scenarioRun.Status.TotalTargets,
-		SuccessfulJobs:   scenarioRun.Status.SuccessfulJobs,
-		FailedJobs:       scenarioRun.Status.FailedJobs,
-		RunningJobs:      scenarioRun.Status.RunningJobs,
-		ClusterJobs:      clusterJobs,
-		OwnerUserID:      scenarioRun.Spec.OwnerUserID,
-		RegistryName:     scenarioRun.Spec.Scenario.RegistryName,
-		GraphRunName:     scenarioRun.Labels["krkn.dev/graph-run"],
-		GraphNodeID:      scenarioRun.Labels["krkn.dev/graph-node"],
-		CustomRunName:    scenarioRun.Spec.CustomRunName,
-		ResiliencyScore:  averageResiliencyScore(scenarioRun.Status.ResiliencyScores),
-		ResiliencyScores: convertClusterResiliencyScores(scenarioRun.Status.ResiliencyScores),
+		ScenarioRunName:        scenarioRunName,
+		ScenarioName:           scenarioRun.Spec.Scenario.Name,
+		Phase:                  scenarioRun.Status.Phase,
+		TotalTargets:           scenarioRun.Status.TotalTargets,
+		SuccessfulJobs:         scenarioRun.Status.SuccessfulJobs,
+		FailedJobs:             scenarioRun.Status.FailedJobs,
+		RunningJobs:            scenarioRun.Status.RunningJobs,
+		ClusterJobs:            clusterJobs,
+		OwnerUserID:            scenarioRun.Spec.OwnerUserID,
+		RegistryName:           scenarioRun.Spec.Scenario.RegistryName,
+		GraphRunName:           scenarioRun.Labels["krkn.dev/graph-run"],
+		GraphNodeID:            scenarioRun.Labels["krkn.dev/graph-node"],
+		CustomRunName:          scenarioRun.Spec.CustomRunName,
+		ResiliencyScoreEnabled: scenarioRun.Spec.ResiliencyScoreEnabled,
+		ResiliencyScore:        averageResiliencyScore(scenarioRun.Status.ResiliencyScores),
+		ResiliencyScores:       convertClusterResiliencyScores(scenarioRun.Status.ResiliencyScores),
 	}
 
 	writeJSON(w, http.StatusOK, response)
@@ -2316,21 +2319,22 @@ func (h *Handler) ListScenarioRuns(w http.ResponseWriter, r *http.Request) {
 		}
 
 		run := ScenarioRunListItem{
-			ScenarioRunName:  sr.Name,
-			ScenarioName:     sr.Spec.Scenario.Name,
-			ScenarioImage:    scenarioRunImage(sr.Status.ClusterJobs),
-			Phase:            sr.Status.Phase,
-			TotalTargets:     sr.Status.TotalTargets,
-			SuccessfulJobs:   sr.Status.SuccessfulJobs,
-			FailedJobs:       sr.Status.FailedJobs,
-			RunningJobs:      sr.Status.RunningJobs,
-			CreatedAt:        sr.CreationTimestamp.Time,
-			OwnerUserID:      sr.Spec.OwnerUserID,
-			GraphRunName:     sr.Labels["krkn.dev/graph-run"],
-			GraphNodeID:      sr.Labels["krkn.dev/graph-node"],
-			CustomRunName:    sr.Spec.CustomRunName,
-			ResiliencyScore:  averageResiliencyScore(sr.Status.ResiliencyScores),
-			ResiliencyScores: convertClusterResiliencyScores(sr.Status.ResiliencyScores),
+			ScenarioRunName:        sr.Name,
+			ScenarioName:           sr.Spec.Scenario.Name,
+			ScenarioImage:          scenarioRunImage(sr.Status.ClusterJobs),
+			Phase:                  sr.Status.Phase,
+			TotalTargets:           sr.Status.TotalTargets,
+			SuccessfulJobs:         sr.Status.SuccessfulJobs,
+			FailedJobs:             sr.Status.FailedJobs,
+			RunningJobs:            sr.Status.RunningJobs,
+			CreatedAt:              sr.CreationTimestamp.Time,
+			OwnerUserID:            sr.Spec.OwnerUserID,
+			GraphRunName:           sr.Labels["krkn.dev/graph-run"],
+			GraphNodeID:            sr.Labels["krkn.dev/graph-node"],
+			CustomRunName:          sr.Spec.CustomRunName,
+			ResiliencyScoreEnabled: sr.Spec.ResiliencyScoreEnabled,
+			ResiliencyScore:        averageResiliencyScore(sr.Status.ResiliencyScores),
+			ResiliencyScores:       convertClusterResiliencyScores(sr.Status.ResiliencyScores),
 		}
 
 		runs = append(runs, run)
@@ -3168,17 +3172,21 @@ func convertMetaTime(mt *metav1.Time) *time.Time {
 	return &t
 }
 
-// averageResiliencyScore returns the average score from per-cluster resiliency scores,
-// or nil if the slice is empty.
+// averageResiliencyScore returns the average score from successfully calculated
+// per-cluster resiliency scores, or nil if none have been calculated yet.
 func averageResiliencyScore(scores []krknv1alpha1.ClusterResiliencyScore) *float64 {
-	if len(scores) == 0 {
+	var sum float64
+	var count int
+	for _, s := range scores {
+		if s.Status == "calculated" {
+			sum += s.Score
+			count++
+		}
+	}
+	if count == 0 {
 		return nil
 	}
-	var sum float64
-	for _, s := range scores {
-		sum += s.Score
-	}
-	avg := sum / float64(len(scores))
+	avg := sum / float64(count)
 	return &avg
 }
 

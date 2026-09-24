@@ -191,6 +191,12 @@ type ScenarioRunRequest struct {
 	// RegistryName is retained for old in-memory callers and legacy JSON
 	// requests. New clients select registries through Scenario.
 	RegistryName *string `json:"registryName,omitempty"`
+	// ResiliencyScoreEnabled enables resiliency score calculation for this scenario run.
+	// When true, RESILIENCY_SCORE=true is set in scenario pods and the controller
+	// calculates scores from pod logs upon completion.
+	ResiliencyScoreEnabled bool `json:"resiliencyScoreEnabled,omitempty"`
+	// Private registry configuration (optional)
+	ScenariosRequest
 }
 
 // TargetJobResult represents the result of creating a job for a specific target
@@ -359,6 +365,8 @@ type ScenarioRunStatusResponse struct {
 	GraphNodeID string `json:"graphNodeId,omitempty"`
 	// CustomRunName is the user-provided label for this run
 	CustomRunName string `json:"customRunName,omitempty"`
+	// ResiliencyScoreEnabled indicates whether resiliency scoring is enabled for this run
+	ResiliencyScoreEnabled bool `json:"resiliencyScoreEnabled,omitempty"`
 	// ResiliencyScore is the individual resiliency score for this scenario run node
 	ResiliencyScore *float64 `json:"resiliencyScore,omitempty"`
 	// ResiliencyScores contains per-cluster resiliency scores
@@ -423,6 +431,8 @@ type ScenarioRunListItem struct {
 	GraphNodeID string `json:"graphNodeId,omitempty"`
 	// CustomRunName is the user-provided label for this run
 	CustomRunName string `json:"customRunName,omitempty"`
+	// ResiliencyScoreEnabled indicates whether resiliency scoring is enabled for this run
+	ResiliencyScoreEnabled bool `json:"resiliencyScoreEnabled,omitempty"`
 	// ResiliencyScore is the individual resiliency score for this scenario run node
 	ResiliencyScore *float64 `json:"resiliencyScore,omitempty"`
 	// ResiliencyScores contains per-cluster resiliency scores
@@ -939,6 +949,8 @@ type NodeStatusResponse struct {
 type ClusterResiliencyScoreResponse struct {
 	ClusterName string  `json:"clusterName"`
 	Score       float64 `json:"score"`
+	Status      string  `json:"status"`
+	Message     string  `json:"message,omitempty"`
 }
 
 // GraphClusterScoreResponse represents the aggregated resiliency score for a cluster in a graph run
