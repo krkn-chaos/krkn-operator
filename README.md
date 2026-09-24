@@ -251,6 +251,22 @@ with `PATCH` and a required boolean body, for example
 `{"enabled":false}`. Image verification remains observable when enforcement
 is disabled; only the enforcement result is ignored.
 
+## Backup and Restore
+
+Admin users can back up and restore operator configuration (users, groups, targets, providers, credentials) for disaster recovery and cross-cluster migration using the web console.
+
+**To download a backup:** Click "Download Backup" in the Backup & Restore card.
+
+**To restore from a backup:** Click "Upload & Restore" in the Backup & Restore card, select your backup archive, and confirm. The console will monitor restore progress in real time.
+
+**Important:** Restore runs asynchronously. Poll the restore job until it completes, then refresh the page if the restored settings are not visible.
+
+**Limits:**
+- Maximum upload size: 100 MB
+- Maximum active restore: 1
+- Maximum tracked job records: 1000
+- Backup history: Not persisted — status is lost on operator restart
+
 ## License
 
 Copyright 2025 krkn-chaos

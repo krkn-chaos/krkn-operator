@@ -436,9 +436,21 @@ func NewConfigStoreInitializer(c client.Client, namespace string) *ConfigStoreIn
 func (c *ConfigStoreInitializer) Start(ctx context.Context) error {
 	logger := ctrl.Log.WithName("configstore-init")
 
+	changed, err := provider.BackfillLegacyProviderConfigLabel(ctx, c.client, c.namespace)
+	if err != nil {
+		// A migration failure should be visible but must not prevent the
+		// operator from starting; the next startup will retry it.
+		logger.Error(err, "failed to backfill legacy provider ConfigMap label")
+	} else if changed {
+		logger.Info("backfilled legacy provider ConfigMap label",
+			"name", provider.LegacyProviderConfigMapName,
+			"namespace", c.namespace,
+		)
+	}
+
 	// Get ConfigMap (cache is now ready)
 	cm := &corev1.ConfigMap{}
-	err := c.client.Get(ctx, types.NamespacedName{
+	err = c.client.Get(ctx, types.NamespacedName{
 		Name:      "krkn-operator-config",
 		Namespace: c.namespace,
 	}, cm)

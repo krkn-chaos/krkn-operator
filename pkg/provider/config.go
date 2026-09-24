@@ -26,6 +26,8 @@ import (
 	"fmt"
 
 	"github.com/google/uuid"
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/retry"
@@ -37,7 +39,54 @@ import (
 const (
 	// UUIDLabel is the label key for the UUID
 	UUIDLabel = "krkn.krkn-chaos.dev/uuid"
+	// ProviderConfigLabel identifies ConfigMaps containing saved provider settings.
+	ProviderConfigLabel = "krkn.krkn-chaos.dev/provider-config"
+	// ProviderConfigLabelValue is the value used for ProviderConfigLabel.
+	ProviderConfigLabelValue = "true"
+	// LegacyProviderConfigMapName is the ConfigMap name used by older
+	// versions of krkn-operator for provider configuration.
+	LegacyProviderConfigMapName = "krkn-operator-config"
 )
+
+// BackfillLegacyProviderConfigLabel labels the provider ConfigMap created by
+// older operator versions. It is safe to call repeatedly and leaves the
+// ConfigMap data and existing labels unchanged.
+func BackfillLegacyProviderConfigLabel(ctx context.Context, c client.Client, namespace string) (bool, error) {
+	changed := false
+
+	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		configMap := &corev1.ConfigMap{}
+		err := c.Get(ctx, types.NamespacedName{
+			Name:      LegacyProviderConfigMapName,
+			Namespace: namespace,
+		}, configMap)
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+
+		if configMap.Labels != nil && configMap.Labels[ProviderConfigLabel] == ProviderConfigLabelValue {
+			return nil
+		}
+		if configMap.Labels == nil {
+			configMap.Labels = make(map[string]string)
+		}
+		configMap.Labels[ProviderConfigLabel] = ProviderConfigLabelValue
+
+		if err := c.Update(ctx, configMap); err != nil {
+			return err
+		}
+		changed = true
+		return nil
+	})
+	if err != nil {
+		return false, fmt.Errorf("failed to label legacy provider ConfigMap %s/%s: %w", namespace, LegacyProviderConfigMapName, err)
+	}
+
+	return changed, nil
+}
 
 // CreateProviderConfigRequest creates a new KrknOperatorTargetProviderConfig CR
 // and generates a unique UUID for tracking. The UUID is set in both spec.uuid
