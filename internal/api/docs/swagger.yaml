@@ -88,50 +88,9 @@ definitions:
           is true.
         type: string
     type: object
-  github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.CreateElasticsearchConfigRequest:
-    properties:
-      alertsIndex:
-        type: string
-      caCert:
-        description: |-
-          CACert is an optional PEM-encoded CA certificate (or bundle) trusted in
-          addition to the host's system root CAs, so a self-signed cluster is reachable
-          with TLS verification still enabled and publicly trusted chains keep working.
-        type: string
-      grafanaUrl:
-        type: string
-      host:
-        type: string
-      insecureSkipTlsVerify:
-        description: |-
-          InsecureSkipTLSVerify disables TLS certificate verification entirely. It is
-          a restricted last resort for self-signed clusters without CA material;
-          prefer CACert.
-        type: boolean
-      metricsIndex:
-        type: string
-      name:
-        type: string
-      password:
-        type: string
-      port:
-        type: integer
-      telemetryIndex:
-        type: string
-      username:
-        type: string
-    type: object
-  github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.CreateElasticsearchConfigResponse:
-    properties:
-      message:
-        type: string
-      name:
-        type: string
-    type: object
   github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.AffectedPods:
     properties:
       recovered:
-        description: Recovered pods carrying recovery timings for pod_disruption scenarios.
         items:
           $ref: '#/definitions/github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.RecoveredPod'
         type: array
@@ -177,6 +136,46 @@ definitions:
         type: string
       total_node_count:
         type: integer
+    type: object
+  github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.CreateElasticsearchConfigRequest:
+    properties:
+      alertsIndex:
+        type: string
+      caCert:
+        description: |-
+          CACert is an optional PEM-encoded CA certificate (or bundle) trusted in
+          addition to the host's system root CAs, so a self-signed cluster is reachable
+          with TLS verification still enabled and publicly trusted chains keep working.
+        type: string
+      grafanaUrl:
+        type: string
+      host:
+        type: string
+      insecureSkipTlsVerify:
+        description: |-
+          InsecureSkipTLSVerify disables TLS certificate verification entirely. It is
+          a restricted last resort for self-signed clusters without CA material;
+          prefer CACert.
+        type: boolean
+      metricsIndex:
+        type: string
+      name:
+        type: string
+      password:
+        type: string
+      port:
+        type: integer
+      telemetryIndex:
+        type: string
+      username:
+        type: string
+    type: object
+  github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.CreateElasticsearchConfigResponse:
+    properties:
+      message:
+        type: string
+      name:
+        type: string
     type: object
   github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.DeleteElasticsearchConfigResponse:
     properties:
@@ -257,7 +256,6 @@ definitions:
       architecture:
         type: string
       count:
-        description: Count is how many nodes fall in this group.
         type: integer
       instance_type:
         type: string
@@ -324,7 +322,6 @@ definitions:
       pod_name:
         type: string
       pod_readiness_time:
-        description: Times are fractional seconds (e.g. 37.533992528915405).
         type: number
       pod_rescheduling_time:
         type: number
@@ -344,10 +341,9 @@ definitions:
       exit_status:
         type: integer
       parameters:
-        description: |-
-          Parameters is passed through verbatim as raw JSON because its shape
-          varies by scenario type.
-        type: object
+        items:
+          type: integer
+        type: array
       scenario_type:
         type: string
       start_timestamp:
@@ -1205,6 +1201,8 @@ definitions:
         description: |-
           ScenarioImage is accepted for backwards compatibility but is ignored.
           Images are always resolved server-side from Scenario.
+          ScenarioImage is always serialized for config responses. It is empty
+          until the controller has resolved an executable image for a job.
         type: string
       scenarioName:
         description: |-

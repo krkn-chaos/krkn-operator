@@ -22,10 +22,10 @@ func TestToKrknctlScenarioSetUsesScenarioReference(t *testing.T) {
 	parent := "scenario1"
 	graph := map[string]GraphScenarioNode{
 		"scenario1": {
-			Scenario:  publicScenario("scenario-1"),
-			Comment:   "First scenario",
-			Env:       map[string]string{"KEY1": "value1"},
-			Volumes:   map[string]string{"/host": "/container"},
+			Scenario: publicScenario("scenario-1"),
+			Comment:  "First scenario",
+			Env:      map[string]string{"KEY1": "value1"},
+			Volumes:  map[string]string{"/host": "/container"},
 		},
 		"scenario2": {Scenario: publicScenario("scenario-2"), DependsOn: &parent},
 	}

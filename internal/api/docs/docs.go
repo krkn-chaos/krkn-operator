@@ -2289,6 +2289,73 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.AffectedPods": {
+            "type": "object",
+            "properties": {
+                "recovered": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.RecoveredPod"
+                    }
+                }
+            }
+        },
+        "github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.ClusterMetadata": {
+            "type": "object",
+            "properties": {
+                "build_url": {
+                    "type": "string"
+                },
+                "cloud_infrastructure": {
+                    "type": "string"
+                },
+                "cloud_type": {
+                    "type": "string"
+                },
+                "cluster_version": {
+                    "type": "string"
+                },
+                "etcd_encryption_enabled": {
+                    "type": "boolean"
+                },
+                "fips_enabled": {
+                    "type": "boolean"
+                },
+                "ipsec_enabled": {
+                    "type": "boolean"
+                },
+                "kubernetes_objects_count": {
+                    "description": "KubernetesObjectsCount maps object kind (e.g. \"Pod\", \"ConfigMap\") to the\nnumber of that kind present in the cluster at run time.",
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "integer"
+                    }
+                },
+                "major_version": {
+                    "type": "string"
+                },
+                "network_plugins": {
+                    "description": "NetworkPlugins lists the cluster network plugins (e.g. \"OVNKubernetes\").",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "node_summary_infos": {
+                    "description": "NodeSummaryInfos lists one summary per distinct node group (role/shape) in\nthe cluster at run time; nil when the source document carried none.",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.NodeSummaryInfo"
+                    }
+                },
+                "tag": {
+                    "type": "string"
+                },
+                "total_node_count": {
+                    "type": "integer"
+                }
+            }
+        },
         "github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.CreateElasticsearchConfigRequest": {
             "type": "object",
             "properties": {
@@ -2432,6 +2499,32 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.NodeSummaryInfo": {
+            "type": "object",
+            "properties": {
+                "architecture": {
+                    "type": "string"
+                },
+                "count": {
+                    "type": "integer"
+                },
+                "instance_type": {
+                    "type": "string"
+                },
+                "kernel_version": {
+                    "type": "string"
+                },
+                "kubelet_version": {
+                    "type": "string"
+                },
+                "nodes_type": {
+                    "type": "string"
+                },
+                "os_version": {
+                    "type": "string"
+                }
+            }
+        },
         "github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.QueryTelemetryRequest": {
             "type": "object",
             "properties": {
@@ -2484,12 +2577,71 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.RecoveredPod": {
+            "type": "object",
+            "properties": {
+                "namespace": {
+                    "type": "string"
+                },
+                "pod_name": {
+                    "type": "string"
+                },
+                "pod_readiness_time": {
+                    "type": "number"
+                },
+                "pod_rescheduling_time": {
+                    "type": "number"
+                },
+                "total_recovery_time": {
+                    "type": "number"
+                }
+            }
+        },
+        "github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.ScenarioDetail": {
+            "type": "object",
+            "properties": {
+                "affected_pods": {
+                    "description": "AffectedPods carries per-pod recovery timings for pod_disruption scenarios;\nnil when the source document had none.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.AffectedPods"
+                        }
+                    ]
+                },
+                "end_timestamp": {
+                    "type": "integer"
+                },
+                "exit_status": {
+                    "type": "integer"
+                },
+                "parameters": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                },
+                "scenario_type": {
+                    "type": "string"
+                },
+                "start_timestamp": {
+                    "type": "integer"
+                }
+            }
+        },
         "github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.TelemetryDocument": {
             "type": "object",
             "properties": {
                 "end_timestamp": {
                     "description": "EndTimestamp is the scenario end time. Unit: Unix seconds (UTC).",
                     "type": "integer"
+                },
+                "metadata": {
+                    "description": "Metadata holds run-level cluster/infrastructure detail; nil when the\nsource document carried none of the metadata fields.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.ClusterMetadata"
+                        }
+                    ]
                 },
                 "namespace": {
                     "description": "Namespace is the target namespace from the run's first scenario.",
@@ -2502,6 +2654,13 @@ const docTemplate = `{
                 "scenario_type": {
                     "description": "ScenarioType is the chaos scenario type from the run's first scenario.",
                     "type": "string"
+                },
+                "scenarios": {
+                    "description": "Scenarios lists every scenario in the run, each with its raw parameters.",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.ScenarioDetail"
+                    }
                 },
                 "start_timestamp": {
                     "description": "StartTimestamp is the scenario start time. Unit: Unix seconds (UTC).",
@@ -3613,7 +3772,7 @@ const docTemplate = `{
                     ]
                 },
                 "scenarioImage": {
-                    "description": "ScenarioImage is accepted for backwards compatibility but is ignored.\nImages are always resolved server-side from Scenario.",
+                    "description": "ScenarioImage is accepted for backwards compatibility but is ignored.\nImages are always resolved server-side from Scenario.\nScenarioImage is always serialized for config responses. It is empty\nuntil the controller has resolved an executable image for a job.",
                     "type": "string"
                 },
                 "scenarioName": {
