@@ -54,6 +54,7 @@ import (
 
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
 	"github.com/krkn-chaos/krkn-operator/pkg/auth"
+	"github.com/krkn-chaos/krkn-operator/pkg/cloudcreds"
 	"github.com/krkn-chaos/krkn-operator/pkg/elasticsearch"
 	"github.com/krkn-chaos/krkn-operator/pkg/groupauth"
 	"github.com/krkn-chaos/krkn-operator/pkg/registry"
@@ -1529,6 +1530,39 @@ func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Validate cloud credential access if specified
+	req.CloudCredentialRef = strings.TrimSpace(req.CloudCredentialRef)
+	if req.CloudCredentialRef != "" {
+		credSecret, err := h.loadCloudCredentialSecret(ctx, req.CloudCredentialRef)
+		if err != nil {
+			logger.Error(err, "Failed to load cloud credential for run", "name", req.CloudCredentialRef)
+			writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+				Error:   "bad_request",
+				Message: fmt.Sprintf("Cloud credential '%s' not found or inaccessible", req.CloudCredentialRef),
+			})
+			return
+		}
+		allowed, accessErr := h.canAccessCloudCredential(ctx, credSecret)
+		if accessErr != nil {
+			logger.Error(accessErr, "Failed to check cloud credential access", "name", req.CloudCredentialRef)
+			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+				Error:   "internal_error",
+				Message: "Failed to verify cloud credential access",
+			})
+			return
+		}
+		if !allowed {
+			writeJSONError(w, http.StatusForbidden, ErrorResponse{
+				Error:   "forbidden",
+				Message: fmt.Sprintf("Access denied to cloud credential '%s'", req.CloudCredentialRef),
+			})
+			return
+		}
+		// Enforce secrecy server-side: never persist plaintext cloud secrets in the CRD
+		// when a saved credential will inject them via SecretKeyRef.
+		req.Environment = cloudcreds.StripCloudEnvVars(req.Environment)
+	}
+
 	// Create KrknScenarioRun CR
 	// Extract user claims for ownership tracking (defensive check for tests)
 	claims := auth.GetClaimsFromContext(ctx)
@@ -1570,6 +1604,10 @@ func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 
+	// Set cloud credential reference on CRD spec (controller handles SecretKeyRef injection)
+	if req.CloudCredentialRef != "" {
+		scenarioRun.Spec.CloudCredentialRef = req.CloudCredentialRef
+	}
 	// Convert FileMount from API type to CRD type (merged from inline Files and translated FileReferences)
 	if len(allFiles) > 0 {
 		scenarioRun.Spec.Files = make([]krknv1alpha1.FileMount, len(allFiles))

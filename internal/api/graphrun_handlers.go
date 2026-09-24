@@ -35,6 +35,7 @@ import (
 
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
 	"github.com/krkn-chaos/krkn-operator/pkg/auth"
+	"github.com/krkn-chaos/krkn-operator/pkg/cloudcreds"
 	"github.com/krkn-chaos/krkn-operator/pkg/groupauth"
 )
 
@@ -483,6 +484,78 @@ func (h *Handler) CreateGraphRun(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Validate cloud credential access if specified (graph-level and per-node)
+	req.CloudCredentialRef = strings.TrimSpace(req.CloudCredentialRef)
+	if req.CloudCredentialRef != "" {
+		credSecret, err := h.loadCloudCredentialSecret(ctx, req.CloudCredentialRef)
+		if err != nil {
+			logger.Error(err, "Failed to load cloud credential for graph run", "name", req.CloudCredentialRef)
+			writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+				Error:   "bad_request",
+				Message: fmt.Sprintf("Cloud credential '%s' not found or inaccessible", req.CloudCredentialRef),
+			})
+			return
+		}
+		allowed, accessErr := h.canAccessCloudCredential(ctx, credSecret)
+		if accessErr != nil {
+			logger.Error(accessErr, "Failed to check cloud credential access", "name", req.CloudCredentialRef)
+			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+				Error:   "internal_error",
+				Message: "Failed to verify cloud credential access",
+			})
+			return
+		}
+		if !allowed {
+			writeJSONError(w, http.StatusForbidden, ErrorResponse{
+				Error:   "forbidden",
+				Message: fmt.Sprintf("Access denied to cloud credential '%s'", req.CloudCredentialRef),
+			})
+			return
+		}
+	}
+	for nodeID, node := range req.Graph {
+		if node.CloudCredentialRef != "" && node.CloudCredentialRef != req.CloudCredentialRef {
+			credSecret, err := h.loadCloudCredentialSecret(ctx, node.CloudCredentialRef)
+			if err != nil {
+				logger.Error(err, "Failed to load cloud credential for graph node", "nodeID", nodeID, "name", node.CloudCredentialRef)
+				writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+					Error:   "bad_request",
+					Message: fmt.Sprintf("Cloud credential '%s' for node '%s' not found or inaccessible", node.CloudCredentialRef, nodeID),
+				})
+				return
+			}
+			allowed, accessErr := h.canAccessCloudCredential(ctx, credSecret)
+			if accessErr != nil {
+				logger.Error(accessErr, "Failed to check cloud credential access", "nodeID", nodeID, "name", node.CloudCredentialRef)
+				writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+					Error:   "internal_error",
+					Message: "Failed to verify cloud credential access",
+				})
+				return
+			}
+			if !allowed {
+				writeJSONError(w, http.StatusForbidden, ErrorResponse{
+					Error:   "forbidden",
+					Message: fmt.Sprintf("Access denied to cloud credential '%s' for node '%s'", node.CloudCredentialRef, nodeID),
+				})
+				return
+			}
+		}
+	}
+
+	// Enforce secrecy server-side for any node (or the graph) that uses a cloudCredentialRef.
+	for nodeID, node := range req.Graph {
+		effectiveRef := strings.TrimSpace(node.CloudCredentialRef)
+		if effectiveRef == "" {
+			effectiveRef = req.CloudCredentialRef
+		}
+		if effectiveRef == "" {
+			continue
+		}
+		node.Env = cloudcreds.StripCloudEnvVars(node.Env)
+		req.Graph[nodeID] = node
+	}
+
 	// Generate unique name for the graph run
 	graphRunName := fmt.Sprintf("graphrun-%s", uuid.New().String()[:8])
 
@@ -497,6 +570,7 @@ func (h *Handler) CreateGraphRun(w http.ResponseWriter, r *http.Request) {
 			TargetRequestID:         req.TargetRequestID,
 			TargetClusters:          req.TargetClusters,
 			OwnerUserID:             userClaims.UserID,
+			CloudCredentialRef:      req.CloudCredentialRef,
 			ResiliencyScoreEnabled:  resiliencyEnabled,
 			ResiliencyMountPath:     resiliencyMountPath,
 			ResiliencyScoreBaseline: resiliencyBaseline,

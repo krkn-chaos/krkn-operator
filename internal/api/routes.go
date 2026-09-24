@@ -124,3 +124,9 @@ const (
 	// RestorePath is the endpoint for uploading backups to restore and querying restore job status.
 	RestorePath = APIBasePath + "/restore"
 )
+
+// Cloud credential endpoints
+const (
+	CloudCredentialsPath          = APIBasePath + "/cloud-credentials"
+	CloudCredentialsAvailablePath = CloudCredentialsPath + "/available"
+)
