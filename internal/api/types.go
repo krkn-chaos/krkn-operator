@@ -197,6 +197,9 @@ type ScenarioRunRequest struct {
 	ResiliencyScoreEnabled bool `json:"resiliencyScoreEnabled,omitempty"`
 	// Private registry configuration (optional)
 	ScenariosRequest
+	// CloudCredentialRef, if set, names a saved cloud credential Secret whose
+	// reference is set on the CRD spec for controller-level SecretKeyRef injection.
+	CloudCredentialRef string `json:"cloudCredentialRef,omitempty"`
 }
 
 // TargetJobResult represents the result of creating a job for a specific target
@@ -868,6 +871,8 @@ type GraphRunCreateRequest struct {
 	TargetRequestID string `json:"targetRequestId"`
 	// TargetClusters is a map of provider-name to list of cluster names
 	TargetClusters map[string][]string `json:"targetClusters"`
+	// CloudCredentialRef is the default cloud credential for all nodes (optional)
+	CloudCredentialRef string `json:"cloudCredentialRef,omitempty"`
 }
 
 // GraphRunListItem represents a single item in the graph runs list
