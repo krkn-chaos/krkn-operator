@@ -247,10 +247,10 @@ type rawTelemetrySource struct {
 	IPSecEnabled           bool              `json:"ipsec_enabled"`
 	NodeSummaryInfos       []NodeSummaryInfo `json:"node_summary_infos"`
 	Scenarios              []struct {
-		ScenarioType   string `json:"scenario_type"`
-		StartTimestamp int64  `json:"start_timestamp"`
-		EndTimestamp   int64  `json:"end_timestamp"`
-		ExitStatus     int    `json:"exit_status"`
+		ScenarioType   string  `json:"scenario_type"`
+		StartTimestamp float64 `json:"start_timestamp"`
+		EndTimestamp   float64 `json:"end_timestamp"`
+		ExitStatus     int     `json:"exit_status"`
 		// Parameters shape varies by scenario type (object keyed by scenario
 		// name, whose value may be an object or an array), so it is kept raw and
 		// searched for a namespace rather than decoded into a fixed struct.

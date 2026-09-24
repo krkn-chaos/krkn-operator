@@ -188,17 +188,27 @@ type ClusterMetadata struct {
 	// number of that kind present in the cluster at run time.
 	KubernetesObjectsCount map[string]int `json:"kubernetes_objects_count,omitempty"`
 	// NetworkPlugins lists the cluster network plugins (e.g. "OVNKubernetes").
-	NetworkPlugins        []string `json:"network_plugins,omitempty"`
-	TotalNodeCount        int      `json:"total_node_count,omitempty"`
-	CloudInfrastructure   string   `json:"cloud_infrastructure,omitempty"`
-	CloudType             string   `json:"cloud_type,omitempty"`
-	ClusterVersion        string   `json:"cluster_version,omitempty"`
-	MajorVersion          string   `json:"major_version,omitempty"`
-	BuildURL              string   `json:"build_url,omitempty"`
-	FIPSEnabled           bool     `json:"fips_enabled,omitempty"`
-	Tag                   string   `json:"tag,omitempty"`
-	EtcdEncryptionEnabled bool     `json:"etcd_encryption_enabled,omitempty"`
-	IPSecEnabled          bool     `json:"ipsec_enabled,omitempty"`
+	NetworkPlugins []string `json:"network_plugins,omitempty"`
+	// TotalNodeCount is the number of nodes in the cluster at run time.
+	TotalNodeCount int `json:"total_node_count,omitempty"`
+	// CloudInfrastructure identifies the cloud provider (e.g. "AWS", "GCP").
+	CloudInfrastructure string `json:"cloud_infrastructure,omitempty"`
+	// CloudType identifies deployment model (e.g. "self-managed", "managed").
+	CloudType string `json:"cloud_type,omitempty"`
+	// ClusterVersion is the full cluster version string.
+	ClusterVersion string `json:"cluster_version,omitempty"`
+	// MajorVersion is the major version number extracted from ClusterVersion.
+	MajorVersion string `json:"major_version,omitempty"`
+	// BuildURL is the URL of the build used for the cluster.
+	BuildURL string `json:"build_url,omitempty"`
+	// FIPSEnabled indicates whether FIPS mode is enabled in the cluster.
+	FIPSEnabled bool `json:"fips_enabled,omitempty"`
+	// Tag is an arbitrary label applied to the telemetry run.
+	Tag string `json:"tag,omitempty"`
+	// EtcdEncryptionEnabled indicates whether etcd encryption is enabled.
+	EtcdEncryptionEnabled bool `json:"etcd_encryption_enabled,omitempty"`
+	// IPSecEnabled indicates whether IPSec is enabled in the cluster.
+	IPSecEnabled bool `json:"ipsec_enabled,omitempty"`
 	// NodeSummaryInfos lists one summary per distinct node group (role/shape) in
 	// the cluster at run time; nil when the source document carried none.
 	NodeSummaryInfos []NodeSummaryInfo `json:"node_summary_infos,omitempty"`
@@ -209,29 +219,42 @@ type ClusterMetadata struct {
 // the remaining fields describe that group. All fields come from an element of
 // the telemetry document's node_summary_infos array.
 type NodeSummaryInfo struct {
-	Count          int    `json:"count"`
-	NodesType      string `json:"nodes_type"`
-	Architecture   string `json:"architecture"`
-	InstanceType   string `json:"instance_type"`
-	KernelVersion  string `json:"kernel_version"`
+	// Count is the number of nodes in this group.
+	Count int `json:"count"`
+	// NodesType is the role of nodes in this group (e.g. "master", "worker").
+	NodesType string `json:"nodes_type"`
+	// Architecture is the CPU architecture (e.g. "amd64", "arm64").
+	Architecture string `json:"architecture"`
+	// InstanceType is the cloud instance type (e.g. "m5.2xlarge").
+	InstanceType string `json:"instance_type"`
+	// KernelVersion is the kernel version running on nodes in this group.
+	KernelVersion string `json:"kernel_version"`
+	// KubeletVersion is the kubelet version running on nodes in this group.
 	KubeletVersion string `json:"kubelet_version"`
-	OSVersion      string `json:"os_version"`
+	// OSVersion is the operating system version running on nodes in this group.
+	OSVersion string `json:"os_version"`
 }
 
 // RecoveredPod holds the recovery timings krkn records for a single pod that came
 // back after a pod_disruption scenario. Times are fractional seconds (e.g.
 // 37.533992528915405), so they are represented as float64.
 type RecoveredPod struct {
-	PodName             string  `json:"pod_name"`
-	Namespace           string  `json:"namespace"`
-	TotalRecoveryTime   float64 `json:"total_recovery_time"`
-	PodReadinessTime    float64 `json:"pod_readiness_time"`
+	// PodName is the name of the pod that recovered.
+	PodName string `json:"pod_name"`
+	// Namespace is the namespace containing the recovered pod.
+	Namespace string `json:"namespace"`
+	// TotalRecoveryTime is the total time taken for pod recovery. Unit: seconds.
+	TotalRecoveryTime float64 `json:"total_recovery_time"`
+	// PodReadinessTime is the time taken for the pod to become ready. Unit: seconds.
+	PodReadinessTime float64 `json:"pod_readiness_time"`
+	// PodReschedulingTime is the time taken for pod rescheduling. Unit: seconds.
 	PodReschedulingTime float64 `json:"pod_rescheduling_time"`
 }
 
 // AffectedPods groups the pods a scenario disrupted. Only the recovered pods,
 // which carry recovery timings, are surfaced for the pod-recovery chart.
 type AffectedPods struct {
+	// Recovered is the list of pods that recovered with their timing metrics.
 	Recovered []RecoveredPod `json:"recovered,omitempty"`
 }
 
@@ -240,11 +263,16 @@ type AffectedPods struct {
 // varies by scenario type (e.g. an application_outage block vs a pod-scenario
 // config/id object), so a fixed struct cannot represent it.
 type ScenarioDetail struct {
-	ScenarioType   string          `json:"scenario_type"`
-	StartTimestamp int64           `json:"start_timestamp"`
-	EndTimestamp   int64           `json:"end_timestamp"`
-	ExitStatus     int             `json:"exit_status"`
-	Parameters     json.RawMessage `json:"parameters,omitempty"`
+	// ScenarioType is the type of chaos scenario executed (e.g. "pod_disruption_scenarios").
+	ScenarioType string `json:"scenario_type"`
+	// StartTimestamp is the scenario start time. Unit: Unix seconds (UTC), with fractional precision.
+	StartTimestamp float64 `json:"start_timestamp"`
+	// EndTimestamp is the scenario end time. Unit: Unix seconds (UTC), with fractional precision.
+	EndTimestamp float64 `json:"end_timestamp"`
+	// ExitStatus is the scenario exit code; 0 indicates success, non-zero indicates failure.
+	ExitStatus int `json:"exit_status"`
+	// Parameters holds scenario-specific configuration as unconstrained JSON (object, array, or other).
+	Parameters json.RawMessage `json:"parameters,omitempty" swaggertype:"object"`
 	// AffectedPods carries per-pod recovery timings for pod_disruption scenarios;
 	// nil when the source document had none.
 	AffectedPods *AffectedPods `json:"affected_pods,omitempty"`
@@ -260,10 +288,10 @@ type TelemetryDocument struct {
 	RunUUID string `json:"run_uuid"`
 	// ScenarioType is the chaos scenario type from the run's first scenario.
 	ScenarioType string `json:"scenario_type"`
-	// StartTimestamp is the scenario start time. Unit: Unix seconds (UTC).
-	StartTimestamp int64 `json:"start_timestamp"`
-	// EndTimestamp is the scenario end time. Unit: Unix seconds (UTC).
-	EndTimestamp int64 `json:"end_timestamp"`
+	// StartTimestamp is the scenario start time. Unit: Unix seconds (UTC), with fractional precision.
+	StartTimestamp float64 `json:"start_timestamp"`
+	// EndTimestamp is the scenario end time. Unit: Unix seconds (UTC), with fractional precision.
+	EndTimestamp float64 `json:"end_timestamp"`
 	// Namespace is the target namespace from the run's first scenario.
 	Namespace string `json:"namespace"`
 	// Status is the run outcome: true = pass, false = fail. It applies the
