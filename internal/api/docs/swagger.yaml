@@ -376,10 +376,6 @@ definitions:
         description: FilePurpose is an optional system-level classification (e.g.,
           "workflow-template")
         type: string
-      fileType:
-        description: FileType is an optional file type category (e.g., "config", "script")
-          - for user categorization
-        type: string
       groups:
         description: Groups is a list of group names that can access this file
         items:
@@ -422,10 +418,6 @@ definitions:
         type: string
       filePurpose:
         description: FilePurpose is the system-level classification (e.g., "workflow-template")
-        type: string
-      fileType:
-        description: FileType is an optional file type category (e.g., "config", "script")
-          - for user categorization
         type: string
       groups:
         description: Groups is a list of group names that can access this file.
@@ -471,10 +463,6 @@ definitions:
         type: string
       filePurpose:
         description: FilePurpose is the system-level classification (e.g., "workflow-template")
-        type: string
-      fileType:
-        description: FileType is an optional file type category (e.g., "config", "script")
-          - for user categorization
         type: string
       groups:
         description: Groups is a list of group names that can access this file
@@ -522,10 +510,6 @@ definitions:
       description:
         description: Description is an optional description of the workflow
         type: string
-      fileType:
-        description: FileType is an optional user-defined category (e.g., "pod-chaos",
-          "network-chaos")
-        type: string
       graph:
         additionalProperties:
           $ref: '#/definitions/github_com_krkn-chaos_krkn-operator_api_v1alpha1.GraphScenarioNode'
@@ -572,9 +556,6 @@ definitions:
       description:
         description: Description is an optional description of the workflow
         type: string
-      fileType:
-        description: FileType is the user-defined category
-        type: string
       nodeCount:
         description: NodeCount is the number of nodes in the workflow graph
         type: integer
@@ -599,9 +580,6 @@ definitions:
         type: string
       description:
         description: Description is an optional description of the workflow
-        type: string
-      fileType:
-        description: FileType is the user-defined category
         type: string
       graph:
         additionalProperties:

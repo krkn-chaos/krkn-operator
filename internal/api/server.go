@@ -257,10 +257,6 @@ func NewServer(port int, client client.Client, clientset kubernetes.Interface, n
 	mux.Handle(FilesPath+"/", authMw.RequireAuth(http.HandlerFunc(handler.FilesRouter)))
 	mux.Handle(FilesAvailablePath, authMw.RequireAuth(http.HandlerFunc(handler.ListAvailableFiles)))
 
-	// File type management endpoints - all users can list/get, admin can CRUD
-	mux.Handle(FileTypesPath, authMw.RequireAuth(http.HandlerFunc(handler.FileTypesRouter)))
-	mux.Handle(FileTypesPath+"/", authMw.RequireAuth(http.HandlerFunc(handler.FileTypesRouter)))
-
 	// Workflow management endpoints - CRUD: authenticated users, list all: admin only, available: all users
 	// Register /available before generic /workflows to avoid path collision
 	mux.Handle(WorkflowsAvailablePath, authMw.RequireAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

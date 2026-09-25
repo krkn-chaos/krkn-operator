@@ -28,7 +28,6 @@ rules:
   - krkn.krkn-chaos.dev
   resources:
   - krkncategories
-  - krknfiletypes
   - krkngraphruns
   - krknoperatortargets
   - krknscenarioruns

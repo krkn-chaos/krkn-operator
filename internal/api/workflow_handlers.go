@@ -125,7 +125,6 @@ func (h *Handler) CreateWorkflow(w http.ResponseWriter, r *http.Request) {
 		StudioLayout:   studioLayoutJSON,       // Studio visual layout (optional)
 		WorkflowName:   req.WorkflowName,       // User-defined workflow name
 		Description:    req.Description,
-		FileType:       req.FileType,              // User categorization (optional)
 		Groups:         req.Groups,                // RBAC groups
 		AvailableToAll: req.AvailableToAll,        // Public flag
 		FilePurpose:    files.FilePurposeWorkflow, // System marker
@@ -425,7 +424,6 @@ func (h *Handler) UpdateWorkflow(w http.ResponseWriter, r *http.Request) {
 		StudioLayout:   studioLayoutJSON,
 		WorkflowName:   workflowNamePtr, // Always set for workflow updates
 		Description:    req.Description,
-		FileType:       req.FileType,
 		Groups:         req.Groups,
 		AvailableToAll: req.AvailableToAll,
 		FilePurpose:    files.FilePurposeWorkflow,
@@ -531,7 +529,6 @@ func convertFileResponseToWorkflow(fileResp files.FileResponse) (workflows.Workf
 		Description:    fileResp.Description,
 		Graph:          graph,
 		StudioLayout:   studioLayout,
-		FileType:       fileResp.FileType,
 		Groups:         fileResp.Groups,
 		AvailableToAll: fileResp.AvailableToAll,
 		CreatedAt:      fileResp.CreatedAt,
@@ -569,7 +566,6 @@ func convertConfigMapToWorkflowInfo(cm *corev1.ConfigMap) workflows.WorkflowInfo
 		WorkflowID:   fileInfo.FileID,
 		WorkflowName: workflowName,
 		Description:  fileInfo.Description,
-		FileType:     fileInfo.FileType,
 		NodeCount:    nodeCount,
 	}
 }
@@ -605,16 +601,8 @@ func (h *Handler) createFileInternal(ctx context.Context, req files.CreateFileRe
 	configMapName := fmt.Sprintf("file-%s", fileID)
 	createdBy := claims.UserID
 
-	// Auto-create file type if specified and doesn't exist
-	if req.FileType != "" {
-		if err := h.ensureFileTypeExists(ctx, req.FileType, createdBy); err != nil {
-			logger.Error(err, "Failed to ensure file type exists", "fileType", req.FileType)
-			// Continue anyway - file type is optional metadata
-		}
-	}
-
 	// Build labels and annotations
-	labels := files.BuildFileLabels(fileID, req.FileType, req.Groups, req.AvailableToAll, req.FilePurpose, logicalName)
+	labels := files.BuildFileLabels(fileID, req.Groups, req.AvailableToAll, req.FilePurpose, logicalName)
 	annotations := files.BuildFileAnnotations(req.Description, createdBy, req.WorkflowName)
 
 	// Build ConfigMap data
@@ -838,16 +826,8 @@ func (h *Handler) updateFileInternal(ctx context.Context, fileID string, req fil
 	// Get current user for audit trail
 	updatedBy := claims.UserID
 
-	// Auto-create file type if specified and doesn't exist
-	if req.FileType != "" {
-		if err := h.ensureFileTypeExists(ctx, req.FileType, updatedBy); err != nil {
-			logger.Error(err, "Failed to ensure file type exists", "fileType", req.FileType)
-			// Continue anyway - file type is optional metadata
-		}
-	}
-
 	// Update labels and annotations (preserve existing file ID)
-	configMap.Labels = files.BuildFileLabels(fileID, req.FileType, req.Groups, req.AvailableToAll, req.FilePurpose, newLogicalName)
+	configMap.Labels = files.BuildFileLabels(fileID, req.Groups, req.AvailableToAll, req.FilePurpose, newLogicalName)
 	configMap.Annotations = files.UpdateFileAnnotations(
 		configMap.Annotations,
 		req.Description,

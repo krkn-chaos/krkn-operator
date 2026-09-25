@@ -1,11 +1,4 @@
 - apiVersion: krkn.krkn-chaos.dev/v1alpha1
-  kind: KrknFileType
-  metadata:
-    name: configuration
-  spec:
-    name: configuration
-    color: '#4A90E2'
-- apiVersion: krkn.krkn-chaos.dev/v1alpha1
   kind: KrknGraphRun
   metadata:
     name: example-graph-run

@@ -162,6 +162,11 @@ const docTemplate = `{
         },
         "/backup": {
             "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Create and download a backup archive of all operator configuration (admin-only)",
                 "produces": [
                     "application/gzip"
@@ -195,16 +200,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/clusters": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Get the list of target clusters from a KrknTargetRequest by ID",
                 "produces": [
                     "application/json"
@@ -247,16 +252,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/elasticsearch-configs": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "List all Elasticsearch configs. Credentials are never returned. Available to any authenticated user.",
                 "produces": [
                     "application/json"
@@ -284,14 +289,14 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                },
+                }
+            },
+            "post": {
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ]
-            },
-            "post": {
+                ],
                 "description": "Create a new Elasticsearch config, storing credentials as a Kubernetes Secret. Admin only.",
                 "consumes": [
                     "application/json"
@@ -351,16 +356,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/elasticsearch-configs/{name}": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Get a single Elasticsearch config by name. Credentials are never returned. Admin only.",
                 "produces": [
                     "application/json"
@@ -415,14 +420,14 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                },
+                }
+            },
+            "put": {
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ]
-            },
-            "put": {
+                ],
                 "description": "Update an existing Elasticsearch config by name. Admin only.",
                 "consumes": [
                     "application/json"
@@ -489,14 +494,14 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                },
+                }
+            },
+            "delete": {
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ]
-            },
-            "delete": {
+                ],
                 "description": "Delete an Elasticsearch config by name. Admin only.",
                 "produces": [
                     "application/json"
@@ -551,16 +556,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/elasticsearch-query": {
             "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Run a telemetry search against a saved Elasticsearch config or an inline connection. Credentials are resolved server-side and never leave the backend. Available to any authenticated user.",
                 "consumes": [
                     "application/json"
@@ -620,16 +625,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/files": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Get list of all file ConfigMaps (admin only). Supports filtering by filePurpose query parameter.",
                 "produces": [
                     "application/json"
@@ -671,14 +676,14 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                },
+                }
+            },
+            "post": {
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ]
-            },
-            "post": {
+                ],
                 "description": "Create a new file ConfigMap. Users can create files for their own groups or public files. Admins can create files for any group. Cannot create workflow-template files (use POST /api/v1/workflows instead).",
                 "consumes": [
                     "application/json"
@@ -732,16 +737,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/files/available": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Get files accessible to current user (own files, group files, public files). Supports filtering by filePurpose query parameter.",
                 "produces": [
                     "application/json"
@@ -777,16 +782,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/graphruns": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Get list of all graph runs. Regular users see only their own, admins see all.",
                 "produces": [
                     "application/json"
@@ -811,14 +816,14 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                },
+                }
+            },
+            "post": {
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ]
-            },
-            "post": {
+                ],
                 "description": "Create a new graph run to execute a chaos scenario graph",
                 "consumes": [
                     "application/json"
@@ -872,16 +877,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/graphruns/{graphRunName}/config": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Retrieve graph run configuration directly by KrknGraphRun CR name",
                 "produces": [
                     "application/json"
@@ -936,16 +941,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/graphruns/{name}": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Get detailed status and execution information for a specific graph run by name",
                 "produces": [
                     "application/json"
@@ -994,14 +999,14 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                },
+                }
+            },
+            "delete": {
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ]
-            },
-            "delete": {
+                ],
                 "description": "Delete a graph run and all associated scenario runs (cascade delete via owner references)",
                 "produces": [
                     "application/json"
@@ -1050,16 +1055,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/health": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Check if the operator API is healthy and responding",
                 "produces": [
                     "application/json"
@@ -1078,16 +1083,16 @@ const docTemplate = `{
                             }
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/nodes": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Get list of nodes from a cluster target (supports both KrknOperatorTarget UUID and legacy KrknTargetRequest ID)",
                 "produces": [
                     "application/json"
@@ -1141,16 +1146,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/operator/signature-verification": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "GET reports whether image signature verification is enabled. PATCH updates the setting and requires an administrator.",
                 "consumes": [
                     "application/json"
@@ -1197,14 +1202,14 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             },
             "patch": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "GET reports whether image signature verification is enabled. PATCH updates the setting and requires an administrator.",
                 "consumes": [
                     "application/json"
@@ -1251,16 +1256,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/restore": {
             "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Upload a backup archive and restore all operator configuration (admin-only). Restore runs asynchronously and rechecks restored target connectivity when complete.",
                 "consumes": [
                     "multipart/form-data"
@@ -1312,16 +1317,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/restore/{jobID}": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Get the status of a restore operation by job ID (admin-only)",
                 "produces": [
                     "application/json"
@@ -1364,16 +1369,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/scenarios": {
             "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Get list of available chaos scenarios from container registry (Quay.io or private registry)",
                 "consumes": [
                     "application/json"
@@ -1414,16 +1419,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/scenarios/detail/{scenario_name}": {
             "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Get detailed information about a specific chaos scenario including configuration fields",
                 "consumes": [
                     "application/json"
@@ -1477,16 +1482,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/scenarios/globals/{scenario_name}": {
             "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Get global environment configuration fields for a specific scenario",
                 "consumes": [
                     "application/json"
@@ -1540,16 +1545,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/scenarios/run": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Get list of all scenario runs with optional filtering by phase or scenario name",
                 "produces": [
                     "application/json"
@@ -1597,14 +1602,14 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                },
+                }
+            },
+            "post": {
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ]
-            },
-            "post": {
+                ],
                 "description": "Execute a chaos scenario on target clusters with specified configuration",
                 "consumes": [
                     "application/json"
@@ -1658,16 +1663,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/scenarios/run/replay/{jobId}": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Retrieve scenario configuration from a completed job and return payload ready for re-execution via POST /scenarios/run",
                 "produces": [
                     "application/json"
@@ -1716,16 +1721,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/scenarios/run/{jobID}": {
             "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Stop and delete a running or completed scenario run",
                 "produces": [
                     "application/json"
@@ -1774,16 +1779,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/scenarios/run/{runId}/reports/status": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Get HTML/PDF report generation status for a scenario run.",
                 "produces": [
                     "application/json"
@@ -1833,16 +1838,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/scenarios/run/{runId}/reports/summary.{format}": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Download the generated HTML or PDF report for a scenario run.",
                 "produces": [
                     "text/html",
@@ -1903,16 +1908,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/scenarios/run/{scenarioRunName}": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Get current execution status and metrics for a running or completed scenario",
                 "produces": [
                     "application/json"
@@ -1961,16 +1966,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/scenarios/run/{scenarioRunName}/config": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Retrieve scenario configuration directly by KrknScenarioRun CR name",
                 "produces": [
                     "application/json"
@@ -2025,16 +2030,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/targets": {
             "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Create a KrknTargetRequest to trigger cluster discovery by krkn-operator-acm (legacy API)",
                 "consumes": [
                     "application/json"
@@ -2059,16 +2064,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/targets/{uuid}": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Get target request status and cluster information by UUID (legacy KrknTargetRequest API)",
                 "produces": [
                     "application/json"
@@ -2111,14 +2116,14 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                },
+                }
+            },
+            "delete": {
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ]
-            },
-            "delete": {
+                ],
                 "description": "Delete a KrknTargetRequest resource by UUID. Admins can delete any, users can delete their own.",
                 "produces": [
                     "application/json"
@@ -2167,16 +2172,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/v2/categories": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "List public categories, categories in the caller's groups, and categories created by the caller. Admins can list all categories.",
                 "produces": [
                     "application/json"
@@ -2204,14 +2209,14 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                },
+                }
+            },
+            "post": {
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ]
-            },
-            "post": {
+                ],
                 "description": "Create a public category or a category visible to one of the caller's groups. If no group is specified, the category is public. Admins may select any existing group.",
                 "consumes": [
                     "application/json"
@@ -2271,16 +2276,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/v2/categories/{name}": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Get a public category, a category in the caller's groups, or a category created by the caller. Admins can get all categories.",
                 "produces": [
                     "application/json"
@@ -2335,14 +2340,14 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                },
+                }
+            },
+            "put": {
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ]
-            },
-            "put": {
+                ],
                 "description": "Update a category's color and optionally its visibility. Category creators and admins may update it.",
                 "consumes": [
                     "application/json"
@@ -2415,14 +2420,14 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                },
+                }
+            },
+            "delete": {
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ]
-            },
-            "delete": {
+                ],
                 "description": "Delete a category created by the caller. Admins may delete any category.",
                 "produces": [
                     "application/json"
@@ -2480,16 +2485,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/v2/jobs": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Returns a merged list of standalone ScenarioRuns and GraphRuns, sorted by creation time descending",
                 "produces": [
                     "application/json"
@@ -2525,16 +2530,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/v2/ws/dashboard/active-runs": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Multiplexed WebSocket for real-time updates across all resources\n\n**Authentication:** JWT token via Sec-WebSocket-Protocol subprotocol\n- JavaScript: ` + "`" + `new WebSocket(url, 'access_token.' + jwtToken)` + "`" + `\n- Header: ` + "`" + `Sec-WebSocket-Protocol: access_token.\u003cjwt_token\u003e` + "`" + `\n\n**Client → Server Messages (subscribe/unsubscribe):**\n` + "`" + `` + "`" + `` + "`" + `json\n{\n\"action\": \"subscribe\",\n\"resource\": \"run\",\n\"ids\": [\"run-abc123\", \"run-xyz789\"]\n}\n` + "`" + `` + "`" + `` + "`" + `\n\n**Resource types:** ` + "`" + `run` + "`" + `, ` + "`" + `graphrun` + "`" + `, ` + "`" + `dashboard` + "`" + `\n\n**Server → Client Messages (updates):**\n` + "`" + `` + "`" + `` + "`" + `json\n{\n\"resource\": \"run\",\n\"id\": \"run-abc123\",\n\"event\": \"updated\",\n\"data\": { ... }\n}\n` + "`" + `` + "`" + `` + "`" + `\n\n**Available endpoints:**\n- ` + "`" + `/api/v2/ws/runs` + "`" + ` - Subscribe to scenario run updates\n- ` + "`" + `/api/v2/ws/graphruns` + "`" + ` - Subscribe to graph run updates\n- ` + "`" + `/api/v2/ws/jobs` + "`" + ` - Subscribe to unified jobs list (paginated scenario runs + graph runs)\n- ` + "`" + `/api/v2/ws/dashboard/active-runs` + "`" + ` - Subscribe to dashboard updates",
                 "consumes": [
                     "application/json"
@@ -2565,16 +2570,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api_v2_websocket.ErrorMessage"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/v2/ws/graphruns": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Multiplexed WebSocket for real-time updates across all resources\n\n**Authentication:** JWT token via Sec-WebSocket-Protocol subprotocol\n- JavaScript: ` + "`" + `new WebSocket(url, 'access_token.' + jwtToken)` + "`" + `\n- Header: ` + "`" + `Sec-WebSocket-Protocol: access_token.\u003cjwt_token\u003e` + "`" + `\n\n**Client → Server Messages (subscribe/unsubscribe):**\n` + "`" + `` + "`" + `` + "`" + `json\n{\n\"action\": \"subscribe\",\n\"resource\": \"run\",\n\"ids\": [\"run-abc123\", \"run-xyz789\"]\n}\n` + "`" + `` + "`" + `` + "`" + `\n\n**Resource types:** ` + "`" + `run` + "`" + `, ` + "`" + `graphrun` + "`" + `, ` + "`" + `dashboard` + "`" + `\n\n**Server → Client Messages (updates):**\n` + "`" + `` + "`" + `` + "`" + `json\n{\n\"resource\": \"run\",\n\"id\": \"run-abc123\",\n\"event\": \"updated\",\n\"data\": { ... }\n}\n` + "`" + `` + "`" + `` + "`" + `\n\n**Available endpoints:**\n- ` + "`" + `/api/v2/ws/runs` + "`" + ` - Subscribe to scenario run updates\n- ` + "`" + `/api/v2/ws/graphruns` + "`" + ` - Subscribe to graph run updates\n- ` + "`" + `/api/v2/ws/jobs` + "`" + ` - Subscribe to unified jobs list (paginated scenario runs + graph runs)\n- ` + "`" + `/api/v2/ws/dashboard/active-runs` + "`" + ` - Subscribe to dashboard updates",
                 "consumes": [
                     "application/json"
@@ -2605,16 +2610,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api_v2_websocket.ErrorMessage"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/v2/ws/jobs": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Multiplexed WebSocket for real-time updates across all resources\n\n**Authentication:** JWT token via Sec-WebSocket-Protocol subprotocol\n- JavaScript: ` + "`" + `new WebSocket(url, 'access_token.' + jwtToken)` + "`" + `\n- Header: ` + "`" + `Sec-WebSocket-Protocol: access_token.\u003cjwt_token\u003e` + "`" + `\n\n**Client → Server Messages (subscribe/unsubscribe):**\n` + "`" + `` + "`" + `` + "`" + `json\n{\n\"action\": \"subscribe\",\n\"resource\": \"run\",\n\"ids\": [\"run-abc123\", \"run-xyz789\"]\n}\n` + "`" + `` + "`" + `` + "`" + `\n\n**Resource types:** ` + "`" + `run` + "`" + `, ` + "`" + `graphrun` + "`" + `, ` + "`" + `dashboard` + "`" + `\n\n**Server → Client Messages (updates):**\n` + "`" + `` + "`" + `` + "`" + `json\n{\n\"resource\": \"run\",\n\"id\": \"run-abc123\",\n\"event\": \"updated\",\n\"data\": { ... }\n}\n` + "`" + `` + "`" + `` + "`" + `\n\n**Available endpoints:**\n- ` + "`" + `/api/v2/ws/runs` + "`" + ` - Subscribe to scenario run updates\n- ` + "`" + `/api/v2/ws/graphruns` + "`" + ` - Subscribe to graph run updates\n- ` + "`" + `/api/v2/ws/jobs` + "`" + ` - Subscribe to unified jobs list (paginated scenario runs + graph runs)\n- ` + "`" + `/api/v2/ws/dashboard/active-runs` + "`" + ` - Subscribe to dashboard updates",
                 "consumes": [
                     "application/json"
@@ -2645,16 +2650,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api_v2_websocket.ErrorMessage"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/v2/ws/runs": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Multiplexed WebSocket for real-time updates across all resources\n\n**Authentication:** JWT token via Sec-WebSocket-Protocol subprotocol\n- JavaScript: ` + "`" + `new WebSocket(url, 'access_token.' + jwtToken)` + "`" + `\n- Header: ` + "`" + `Sec-WebSocket-Protocol: access_token.\u003cjwt_token\u003e` + "`" + `\n\n**Client → Server Messages (subscribe/unsubscribe):**\n` + "`" + `` + "`" + `` + "`" + `json\n{\n\"action\": \"subscribe\",\n\"resource\": \"run\",\n\"ids\": [\"run-abc123\", \"run-xyz789\"]\n}\n` + "`" + `` + "`" + `` + "`" + `\n\n**Resource types:** ` + "`" + `run` + "`" + `, ` + "`" + `graphrun` + "`" + `, ` + "`" + `dashboard` + "`" + `\n\n**Server → Client Messages (updates):**\n` + "`" + `` + "`" + `` + "`" + `json\n{\n\"resource\": \"run\",\n\"id\": \"run-abc123\",\n\"event\": \"updated\",\n\"data\": { ... }\n}\n` + "`" + `` + "`" + `` + "`" + `\n\n**Available endpoints:**\n- ` + "`" + `/api/v2/ws/runs` + "`" + ` - Subscribe to scenario run updates\n- ` + "`" + `/api/v2/ws/graphruns` + "`" + ` - Subscribe to graph run updates\n- ` + "`" + `/api/v2/ws/jobs` + "`" + ` - Subscribe to unified jobs list (paginated scenario runs + graph runs)\n- ` + "`" + `/api/v2/ws/dashboard/active-runs` + "`" + ` - Subscribe to dashboard updates",
                 "consumes": [
                     "application/json"
@@ -2685,16 +2690,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api_v2_websocket.ErrorMessage"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/workflows": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Get list of all workflow templates in the system (admin only).",
                 "produces": [
                     "application/json"
@@ -2728,14 +2733,14 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                },
+                }
+            },
+            "post": {
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ]
-            },
-            "post": {
+                ],
                 "description": "Create a new workflow template. Validates graph structure (DAG, no cycles). Users can create templates for their own groups or public. Admins can create for any group.",
                 "consumes": [
                     "application/json"
@@ -2789,16 +2794,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         },
         "/workflows/available": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Get workflows accessible to current user (own workflows, group workflows, public workflows). Includes node count excluding metadata nodes.",
                 "produces": [
                     "application/json"
@@ -2832,12 +2837,7 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
+                }
             }
         }
     },
@@ -3273,10 +3273,6 @@ const docTemplate = `{
                     "description": "FilePurpose is an optional system-level classification (e.g., \"workflow-template\")",
                     "type": "string"
                 },
-                "fileType": {
-                    "description": "FileType is an optional file type category (e.g., \"config\", \"script\") - for user categorization",
-                    "type": "string"
-                },
                 "groups": {
                     "description": "Groups is a list of group names that can access this file",
                     "type": "array",
@@ -3331,10 +3327,6 @@ const docTemplate = `{
                 },
                 "filePurpose": {
                     "description": "FilePurpose is the system-level classification (e.g., \"workflow-template\")",
-                    "type": "string"
-                },
-                "fileType": {
-                    "description": "FileType is an optional file type category (e.g., \"config\", \"script\") - for user categorization",
                     "type": "string"
                 },
                 "groups": {
@@ -3396,10 +3388,6 @@ const docTemplate = `{
                 },
                 "filePurpose": {
                     "description": "FilePurpose is the system-level classification (e.g., \"workflow-template\")",
-                    "type": "string"
-                },
-                "fileType": {
-                    "description": "FileType is an optional file type category (e.g., \"config\", \"script\") - for user categorization",
                     "type": "string"
                 },
                 "groups": {
@@ -3466,10 +3454,6 @@ const docTemplate = `{
                     "description": "Description is an optional description of the workflow",
                     "type": "string"
                 },
-                "fileType": {
-                    "description": "FileType is an optional user-defined category (e.g., \"pod-chaos\", \"network-chaos\")",
-                    "type": "string"
-                },
                 "graph": {
                     "description": "Graph is the workflow graph definition (map of node ID to GraphScenarioNode)",
                     "type": "object",
@@ -3531,10 +3515,6 @@ const docTemplate = `{
                     "description": "Description is an optional description of the workflow",
                     "type": "string"
                 },
-                "fileType": {
-                    "description": "FileType is the user-defined category",
-                    "type": "string"
-                },
                 "nodeCount": {
                     "description": "NodeCount is the number of nodes in the workflow graph",
                     "type": "integer"
@@ -3566,10 +3546,6 @@ const docTemplate = `{
                 },
                 "description": {
                     "description": "Description is an optional description of the workflow",
-                    "type": "string"
-                },
-                "fileType": {
-                    "description": "FileType is the user-defined category",
                     "type": "string"
                 },
                 "graph": {
