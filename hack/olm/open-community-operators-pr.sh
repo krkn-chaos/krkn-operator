@@ -43,7 +43,11 @@ work_dir=$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/community-operators.XXXXXX
 trap 'rm -rf "$work_dir"' EXIT
 
 gh repo clone "$COMMUNITY_OPERATORS_FORK" "$work_dir/catalog" >/dev/null
-git -C "$work_dir/catalog" remote add upstream "https://github.com/$catalog_repository.git"
+if git -C "$work_dir/catalog" remote get-url upstream >/dev/null 2>&1; then
+  git -C "$work_dir/catalog" remote set-url upstream "https://github.com/$catalog_repository.git"
+else
+  git -C "$work_dir/catalog" remote add upstream "https://github.com/$catalog_repository.git"
+fi
 git -C "$work_dir/catalog" remote set-url origin "https://github.com/$COMMUNITY_OPERATORS_FORK.git"
 git -C "$work_dir/catalog" fetch --quiet upstream main
 git -C "$work_dir/catalog" checkout --quiet -B "automation/krkn-operator-$version" upstream/main
