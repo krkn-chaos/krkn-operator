@@ -62,7 +62,7 @@ export CONSOLE_IMAGE="$console_image"
 export EXAMPLES_FILE="$repo_root/config/olm/examples.yaml"
 export MIN_KUBE_VERSION="$min_kube_version"
 
-icon_file=${ICON_FILE:-$repo_root/config/olm/assets/krkn.svg}
+icon_file=${ICON_FILE:-$repo_root/config/olm/assets/krkn.png}
 if [[ -f "$icon_file" ]]; then
   case "${icon_file##*.}" in
     svg) icon_mediatype=image/svg+xml ;;

@@ -323,3 +323,15 @@ jobs:
               --push \
               "$output_dir"
           done
+
+      - name: Open community operators catalog PR
+        env:
+          GH_TOKEN: ${{ secrets.COMMUNITY_OPERATORS_TOKEN }}
+          COMMUNITY_OPERATORS_FORK: ${{ vars.COMMUNITY_OPERATORS_FORK }}
+        run: |
+          test -n "$COMMUNITY_OPERATORS_FORK" || {
+            echo "Repository variable COMMUNITY_OPERATORS_FORK is not configured" >&2
+            exit 1
+          }
+          chmod +x hack/olm/open-community-operators-pr.sh
+          hack/olm/open-community-operators-pr.sh "${RELEASE_TAG#v}" dist/bundle-ocp
