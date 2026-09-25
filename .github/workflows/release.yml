@@ -312,6 +312,31 @@ jobs:
               "$output_dir"
           done
 
+      - name: Upload OCP bundle for catalog submission
+        uses: actions/upload-artifact@v4
+        with:
+          name: olm-bundle-ocp-${{ github.ref_name }}
+          path: dist/bundle-ocp
+          if-no-files-found: error
+
+  submit-community-catalog:
+    name: Open community operators catalog PR
+    needs: publish-olm-bundles
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    env:
+      RELEASE_TAG: ${{ github.ref_name }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download OCP bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: olm-bundle-ocp-${{ github.ref_name }}
+          path: dist/bundle-ocp
+
       - name: Open community operators catalog PR
         env:
           GH_TOKEN: ${{ secrets.COMMUNITY_OPERATORS_TOKEN }}
