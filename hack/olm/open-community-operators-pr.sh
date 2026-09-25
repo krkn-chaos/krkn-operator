@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Prepare a rendered OCP bundle, update the configured community-operators fork,
+# and open the corresponding upstream catalog pull request. Requires GH_TOKEN
+# and COMMUNITY_OPERATORS_FORK in the environment.
+
 usage() {
   echo "usage: $0 <version> <rendered-ocp-bundle>" >&2
   exit 2
@@ -22,6 +26,12 @@ bundle_dir=$2
 : "${COMMUNITY_OPERATORS_FORK:?COMMUNITY_OPERATORS_FORK must be configured (for example, <owner>/community-operators-prod)}"
 : "${GH_TOKEN:?GH_TOKEN must be configured with permission to push to COMMUNITY_OPERATORS_FORK and open upstream PRs}"
 
+# The release runner is clean: configure both the Git identity used for the
+# generated commit and gh's credential helper used by standalone git commands.
+git config --global user.name "github-actions[bot]"
+git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+gh auth setup-git
+
 catalog_repository=${COMMUNITY_OPERATORS_REPOSITORY:-redhat-openshift-ecosystem/community-operators-prod}
 fork_owner=${COMMUNITY_OPERATORS_FORK%%/*}
 [[ "$COMMUNITY_OPERATORS_FORK" == */* && -n "$fork_owner" ]] || {
@@ -34,6 +44,7 @@ trap 'rm -rf "$work_dir"' EXIT
 
 gh repo clone "$COMMUNITY_OPERATORS_FORK" "$work_dir/catalog" >/dev/null
 git -C "$work_dir/catalog" remote add upstream "https://github.com/$catalog_repository.git"
+git -C "$work_dir/catalog" remote set-url origin "https://github.com/$COMMUNITY_OPERATORS_FORK.git"
 git -C "$work_dir/catalog" fetch --quiet upstream main
 git -C "$work_dir/catalog" checkout --quiet -B "automation/krkn-operator-$version" upstream/main
 
