@@ -63,6 +63,7 @@ rules:
 - apiGroups:
   - krkn.krkn-chaos.dev
   resources:
+  - krkncategories
   - krknfiletypes
   - krkngraphruns
   - krknoperatortargetproviderconfigs
@@ -134,6 +135,7 @@ rules:
 - apiGroups:
   - krkn.krkn-chaos.dev
   resources:
+  - krkncategories
   - krknfiletypes
   - krkngraphruns
   - krknoperatortargetproviderconfigs

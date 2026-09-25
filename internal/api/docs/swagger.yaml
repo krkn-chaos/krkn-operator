@@ -28,6 +28,11 @@ definitions:
           Comment is an optional comment describing the scenario
           +optional
         type: string
+      cloudCredentialRef:
+        description: |-
+          CloudCredentialRef overrides the graph-level cloud credential for this specific node
+          +optional
+        type: string
       depends_on:
         description: |-
           DependsOn is the node ID that this scenario depends on (parent in the graph)
@@ -627,12 +632,46 @@ definitions:
         description: WorkflowName is a human-readable name for the workflow
         type: string
     type: object
+  internal_api.CategoryListResponse:
+    properties:
+      categories:
+        items:
+          $ref: '#/definitions/internal_api.CategoryResponse'
+        type: array
+      total:
+        type: integer
+    type: object
+  internal_api.CategoryResponse:
+    properties:
+      availableToAll:
+        description: AvailableToAll is true for public categories. Categories created
+          without a group default to public.
+        type: boolean
+      color:
+        type: string
+      createdBy:
+        description: CreatedBy identifies the user allowed to update or delete the
+          category, unless the caller is an admin.
+        type: string
+      groups:
+        description: Groups contains the single group allowed to view the category,
+          when group-scoped.
+        items:
+          type: string
+        type: array
+      name:
+        type: string
+    type: object
   internal_api.ClusterResiliencyScoreResponse:
     properties:
       clusterName:
         type: string
+      message:
+        type: string
       score:
         type: number
+      status:
+        type: string
     type: object
   internal_api.ClustersResponse:
     properties:
@@ -649,6 +688,22 @@ definitions:
           TargetData contains a map of operator-name to list of cluster targets,
           including the latest optional liveness result for each target.
         type: object
+    type: object
+  internal_api.CreateCategoryRequest:
+    properties:
+      availableToAll:
+        description: AvailableToAll makes the category public. It cannot be combined
+          with Groups.
+        type: boolean
+      color:
+        type: string
+      groups:
+        description: Groups may contain one group. Omit it to create a public category.
+        items:
+          type: string
+        type: array
+      name:
+        type: string
     type: object
   internal_api.ErrorResponse:
     properties:
@@ -691,6 +746,10 @@ definitions:
     type: object
   internal_api.GraphRunCreateRequest:
     properties:
+      cloudCredentialRef:
+        description: CloudCredentialRef is the default cloud credential for all nodes
+          (optional)
+        type: string
       graph:
         additionalProperties:
           $ref: '#/definitions/github_com_krkn-chaos_krkn-operator_api_v1alpha1.GraphScenarioNode'
@@ -964,6 +1023,17 @@ definitions:
         description: UserID is the registered user's email
         type: string
     type: object
+  internal_api.RestoreResponse:
+    properties:
+      jobId:
+        type: string
+      message:
+        type: string
+      startedAt:
+        type: string
+      status:
+        type: string
+    type: object
   internal_api.ScenarioDetailResponse:
     properties:
       description:
@@ -1015,6 +1085,10 @@ definitions:
         description: ResiliencyScore is the individual resiliency score for this scenario
           run node
         type: number
+      resiliencyScoreEnabled:
+        description: ResiliencyScoreEnabled indicates whether resiliency scoring is
+          enabled for this run
+        type: boolean
       resiliencyScores:
         description: ResiliencyScores contains per-cluster resiliency scores
         items:
@@ -1054,6 +1128,11 @@ definitions:
     type: object
   internal_api.ScenarioRunRequest:
     properties:
+      cloudCredentialRef:
+        description: |-
+          CloudCredentialRef, if set, names a saved cloud credential Secret whose
+          reference is set on the CRD spec for controller-level SecretKeyRef injection.
+        type: string
       customRunName:
         description: CustomRunName is a user-provided label for the run (optional)
         type: string
@@ -1087,9 +1166,15 @@ definitions:
         type: string
       registryName:
         description: |-
-          RegistryName is retained for old in-memory callers and legacy JSON
-          requests. New clients select registries through Scenario.
+          RegistryName is the name of a saved registry (optional)
+          If omitted, defaults to quay.io public registry
         type: string
+      resiliencyScoreEnabled:
+        description: |-
+          ResiliencyScoreEnabled enables resiliency score calculation for this scenario run.
+          When true, RESILIENCY_SCORE=true is set in scenario pods and the controller
+          calculates scores from pod logs upon completion.
+        type: boolean
       scenario:
         allOf:
         - $ref: '#/definitions/github_com_krkn-chaos_krkn-operator_api_v1alpha1.ScenarioReference'
@@ -1196,6 +1281,19 @@ definitions:
         - $ref: '#/definitions/internal_api.JobStatsSummary'
         description: Stats contains aggregate job statistics across all runs
     type: object
+  internal_api.UpdateCategoryRequest:
+    properties:
+      availableToAll:
+        type: boolean
+      color:
+        type: string
+      groups:
+        description: Groups and AvailableToAll must be sent together to change visibility.
+          When omitted, the current visibility is preserved.
+        items:
+          type: string
+        type: array
+    type: object
   internal_api_v2_websocket.ErrorMessage:
     properties:
       error:
@@ -1256,7 +1354,7 @@ info:
 
     **API Versions:**
     - **v1** - REST API with polling (deprecated but maintained)
-    - **v2** - REST API (same as v1) + WebSocket real-time updates
+    - **v2** - REST API with v2-specific resources + WebSocket real-time updates
 
     **WebSocket Authentication (v2):**
     WebSocket endpoints use JWT via subprotocol header:
@@ -1366,6 +1464,34 @@ paths:
       summary: Register first admin user
       tags:
       - authentication
+  /backup:
+    post:
+      description: Create and download a backup archive of all operator configuration
+        (admin-only)
+      produces:
+      - application/gzip
+      responses:
+        "200":
+          description: Backup archive (tar.gz)
+          schema:
+            type: file
+        "403":
+          description: Forbidden - admin access required
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "405":
+          description: Method not allowed
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Download operator configuration backup
+      tags:
+      - backup
   /clusters:
     get:
       description: Get the list of target clusters from a KrknTargetRequest by ID
@@ -2052,6 +2178,80 @@ paths:
       summary: Get or update image signature verification
       tags:
       - operator
+  /restore:
+    post:
+      consumes:
+      - multipart/form-data
+      description: Upload a backup archive and restore all operator configuration
+        (admin-only). Restore runs asynchronously and rechecks restored target connectivity
+        when complete.
+      parameters:
+      - description: Backup archive (tar.gz)
+        in: formData
+        name: backup
+        required: true
+        type: file
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: Restore started
+          schema:
+            $ref: '#/definitions/internal_api.RestoreResponse'
+        "400":
+          description: Invalid request or missing file
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "403":
+          description: Forbidden - admin access required
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "405":
+          description: Method not allowed
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Restore operator configuration from uploaded backup
+      tags:
+      - backup
+  /restore/{jobID}:
+    get:
+      description: Get the status of a restore operation by job ID (admin-only)
+      parameters:
+      - description: Restore job ID
+        in: path
+        name: jobID
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Restore status
+          schema:
+            $ref: '#/definitions/internal_api.RestoreResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "403":
+          description: Forbidden - admin access required
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "404":
+          description: Job not found
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get restore job status
+      tags:
+      - backup
   /scenarios:
     post:
       consumes:
@@ -2279,6 +2479,90 @@ paths:
       summary: Delete scenario run
       tags:
       - scenarios
+  /scenarios/run/{runId}/reports/status:
+    get:
+      description: Get HTML/PDF report generation status for a scenario run.
+      parameters:
+      - description: Scenario run name
+        in: path
+        name: runId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Report status
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Malformed report status path
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "403":
+          description: Access denied
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "404":
+          description: Scenario run not found
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "500":
+          description: Report generation or Kubernetes API failure
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get scenario run report status
+      tags:
+      - scenario-runs
+  /scenarios/run/{runId}/reports/summary.{format}:
+    get:
+      description: Download the generated HTML or PDF report for a scenario run.
+      parameters:
+      - description: Scenario run name
+        in: path
+        name: runId
+        required: true
+        type: string
+      - description: Report format
+        enum:
+        - html
+        - pdf
+        in: path
+        name: format
+        required: true
+        type: string
+      produces:
+      - text/html
+      - application/pdf
+      responses:
+        "200":
+          description: Generated report
+          schema:
+            type: file
+        "400":
+          description: Malformed report path or format
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "403":
+          description: Access denied
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "404":
+          description: Scenario run or report not found
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "500":
+          description: Report storage failure
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Download a scenario run report
+      tags:
+      - scenario-runs
   /scenarios/run/{scenarioRunName}:
     get:
       description: Get current execution status and metrics for a running or completed
@@ -2490,6 +2774,213 @@ paths:
       summary: Get target by UUID
       tags:
       - targets
+  /v2/categories:
+    get:
+      description: List public categories, categories in the caller's groups, and
+        categories created by the caller. Admins can list all categories.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Categories
+          schema:
+            $ref: '#/definitions/internal_api.CategoryListResponse'
+        "401":
+          description: Authentication required
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: List categories
+      tags:
+      - categories
+    post:
+      consumes:
+      - application/json
+      description: Create a public category or a category visible to one of the caller's
+        groups. If no group is specified, the category is public. Admins may select
+        any existing group.
+      parameters:
+      - description: Category definition
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_api.CreateCategoryRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created category
+          schema:
+            $ref: '#/definitions/internal_api.CategoryResponse'
+        "400":
+          description: Invalid category
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "401":
+          description: Authentication required
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "403":
+          description: The caller does not belong to the selected group
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "409":
+          description: Category already exists
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Create a category
+      tags:
+      - categories
+  /v2/categories/{name}:
+    delete:
+      description: Delete a category created by the caller. Admins may delete any
+        category.
+      parameters:
+      - description: Category name
+        in: path
+        name: name
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Deletion result
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Invalid category name
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "401":
+          description: Authentication required
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "403":
+          description: Only the category creator or an admin may delete it
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "404":
+          description: Category not found
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Delete a category
+      tags:
+      - categories
+    get:
+      description: Get a public category, a category in the caller's groups, or a
+        category created by the caller. Admins can get all categories.
+      parameters:
+      - description: Category name
+        in: path
+        name: name
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Category
+          schema:
+            $ref: '#/definitions/internal_api.CategoryResponse'
+        "400":
+          description: Invalid category name
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "401":
+          description: Authentication required
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "403":
+          description: The caller cannot access this category
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "404":
+          description: Category not found
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get a category
+      tags:
+      - categories
+    put:
+      consumes:
+      - application/json
+      description: Update a category's color and optionally its visibility. Category
+        creators and admins may update it.
+      parameters:
+      - description: Category name
+        in: path
+        name: name
+        required: true
+        type: string
+      - description: Mutable category fields
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_api.UpdateCategoryRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Updated category
+          schema:
+            $ref: '#/definitions/internal_api.CategoryResponse'
+        "400":
+          description: Invalid category
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "401":
+          description: Authentication required
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "403":
+          description: Only the category creator or an admin may update it
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "404":
+          description: Category not found
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "409":
+          description: Category changed concurrently
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Update a category
+      tags:
+      - categories
   /v2/jobs:
     get:
       description: Returns a merged list of standalone ScenarioRuns and GraphRuns,
@@ -2554,6 +3045,7 @@ paths:
         **Available endpoints:**
         - `/api/v2/ws/runs` - Subscribe to scenario run updates
         - `/api/v2/ws/graphruns` - Subscribe to graph run updates
+        - `/api/v2/ws/jobs` - Subscribe to unified jobs list (paginated scenario runs + graph runs)
         - `/api/v2/ws/dashboard/active-runs` - Subscribe to dashboard updates
       produces:
       - application/json
@@ -2610,6 +3102,64 @@ paths:
         **Available endpoints:**
         - `/api/v2/ws/runs` - Subscribe to scenario run updates
         - `/api/v2/ws/graphruns` - Subscribe to graph run updates
+        - `/api/v2/ws/jobs` - Subscribe to unified jobs list (paginated scenario runs + graph runs)
+        - `/api/v2/ws/dashboard/active-runs` - Subscribe to dashboard updates
+      produces:
+      - application/json
+      responses:
+        "101":
+          description: Switching protocols - WebSocket upgrade successful
+          schema:
+            $ref: '#/definitions/internal_api_v2_websocket.ServerMessage'
+        "401":
+          description: Unauthorized - missing or invalid JWT token
+          schema:
+            $ref: '#/definitions/internal_api_v2_websocket.ErrorMessage'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/internal_api_v2_websocket.ErrorMessage'
+      security:
+      - BearerAuth: []
+      summary: WebSocket real-time updates
+      tags:
+      - websocket
+  /v2/ws/jobs:
+    get:
+      consumes:
+      - application/json
+      description: |-
+        Multiplexed WebSocket for real-time updates across all resources
+
+        **Authentication:** JWT token via Sec-WebSocket-Protocol subprotocol
+        - JavaScript: `new WebSocket(url, 'access_token.' + jwtToken)`
+        - Header: `Sec-WebSocket-Protocol: access_token.<jwt_token>`
+
+        **Client → Server Messages (subscribe/unsubscribe):**
+        ```json
+        {
+        "action": "subscribe",
+        "resource": "run",
+        "ids": ["run-abc123", "run-xyz789"]
+        }
+        ```
+
+        **Resource types:** `run`, `graphrun`, `dashboard`
+
+        **Server → Client Messages (updates):**
+        ```json
+        {
+        "resource": "run",
+        "id": "run-abc123",
+        "event": "updated",
+        "data": { ... }
+        }
+        ```
+
+        **Available endpoints:**
+        - `/api/v2/ws/runs` - Subscribe to scenario run updates
+        - `/api/v2/ws/graphruns` - Subscribe to graph run updates
+        - `/api/v2/ws/jobs` - Subscribe to unified jobs list (paginated scenario runs + graph runs)
         - `/api/v2/ws/dashboard/active-runs` - Subscribe to dashboard updates
       produces:
       - application/json
@@ -2666,6 +3216,7 @@ paths:
         **Available endpoints:**
         - `/api/v2/ws/runs` - Subscribe to scenario run updates
         - `/api/v2/ws/graphruns` - Subscribe to graph run updates
+        - `/api/v2/ws/jobs` - Subscribe to unified jobs list (paginated scenario runs + graph runs)
         - `/api/v2/ws/dashboard/active-runs` - Subscribe to dashboard updates
       produces:
       - application/json

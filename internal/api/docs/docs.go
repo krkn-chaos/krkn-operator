@@ -160,13 +160,51 @@ const docTemplate = `{
                 }
             }
         },
-        "/clusters": {
-            "get": {
+        "/backup": {
+            "post": {
+                "description": "Create and download a backup archive of all operator configuration (admin-only)",
+                "produces": [
+                    "application/gzip"
+                ],
+                "tags": [
+                    "backup"
+                ],
+                "summary": "Download operator configuration backup",
+                "responses": {
+                    "200": {
+                        "description": "Backup archive (tar.gz)",
+                        "schema": {
+                            "type": "file"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden - admin access required",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    }
+                },
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ],
+                ]
+            }
+        },
+        "/clusters": {
+            "get": {
                 "description": "Get the list of target clusters from a KrknTargetRequest by ID",
                 "produces": [
                     "application/json"
@@ -209,16 +247,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                }
-            }
-        },
-        "/elasticsearch-configs": {
-            "get": {
+                },
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ],
+                ]
+            }
+        },
+        "/elasticsearch-configs": {
+            "get": {
                 "description": "List all Elasticsearch configs. Credentials are never returned. Available to any authenticated user.",
                 "produces": [
                     "application/json"
@@ -246,14 +284,14 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                }
-            },
-            "post": {
+                },
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ],
+                ]
+            },
+            "post": {
                 "description": "Create a new Elasticsearch config, storing credentials as a Kubernetes Secret. Admin only.",
                 "consumes": [
                     "application/json"
@@ -313,16 +351,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                }
-            }
-        },
-        "/elasticsearch-configs/{name}": {
-            "get": {
+                },
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ],
+                ]
+            }
+        },
+        "/elasticsearch-configs/{name}": {
+            "get": {
                 "description": "Get a single Elasticsearch config by name. Credentials are never returned. Admin only.",
                 "produces": [
                     "application/json"
@@ -377,14 +415,14 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                }
-            },
-            "put": {
+                },
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ],
+                ]
+            },
+            "put": {
                 "description": "Update an existing Elasticsearch config by name. Admin only.",
                 "consumes": [
                     "application/json"
@@ -451,14 +489,14 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                }
-            },
-            "delete": {
+                },
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ],
+                ]
+            },
+            "delete": {
                 "description": "Delete an Elasticsearch config by name. Admin only.",
                 "produces": [
                     "application/json"
@@ -513,16 +551,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                }
-            }
-        },
-        "/elasticsearch-query": {
-            "post": {
+                },
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ],
+                ]
+            }
+        },
+        "/elasticsearch-query": {
+            "post": {
                 "description": "Run a telemetry search against a saved Elasticsearch config or an inline connection. Credentials are resolved server-side and never leave the backend. Available to any authenticated user.",
                 "consumes": [
                     "application/json"
@@ -582,16 +620,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                }
-            }
-        },
-        "/files": {
-            "get": {
+                },
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ],
+                ]
+            }
+        },
+        "/files": {
+            "get": {
                 "description": "Get list of all file ConfigMaps (admin only). Supports filtering by filePurpose query parameter.",
                 "produces": [
                     "application/json"
@@ -633,14 +671,14 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                }
-            },
-            "post": {
+                },
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ],
+                ]
+            },
+            "post": {
                 "description": "Create a new file ConfigMap. Users can create files for their own groups or public files. Admins can create files for any group. Cannot create workflow-template files (use POST /api/v1/workflows instead).",
                 "consumes": [
                     "application/json"
@@ -694,16 +732,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                }
-            }
-        },
-        "/files/available": {
-            "get": {
+                },
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ],
+                ]
+            }
+        },
+        "/files/available": {
+            "get": {
                 "description": "Get files accessible to current user (own files, group files, public files). Supports filtering by filePurpose query parameter.",
                 "produces": [
                     "application/json"
@@ -739,16 +777,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                }
-            }
-        },
-        "/graphruns": {
-            "get": {
+                },
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ],
+                ]
+            }
+        },
+        "/graphruns": {
+            "get": {
                 "description": "Get list of all graph runs. Regular users see only their own, admins see all.",
                 "produces": [
                     "application/json"
@@ -773,14 +811,14 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                }
-            },
-            "post": {
+                },
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ],
+                ]
+            },
+            "post": {
                 "description": "Create a new graph run to execute a chaos scenario graph",
                 "consumes": [
                     "application/json"
@@ -834,16 +872,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                }
-            }
-        },
-        "/graphruns/{graphRunName}/config": {
-            "get": {
+                },
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ],
+                ]
+            }
+        },
+        "/graphruns/{graphRunName}/config": {
+            "get": {
                 "description": "Retrieve graph run configuration directly by KrknGraphRun CR name",
                 "produces": [
                     "application/json"
@@ -898,16 +936,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                }
-            }
-        },
-        "/graphruns/{name}": {
-            "get": {
+                },
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ],
+                ]
+            }
+        },
+        "/graphruns/{name}": {
+            "get": {
                 "description": "Get detailed status and execution information for a specific graph run by name",
                 "produces": [
                     "application/json"
@@ -956,14 +994,14 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                }
-            },
-            "delete": {
+                },
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ],
+                ]
+            },
+            "delete": {
                 "description": "Delete a graph run and all associated scenario runs (cascade delete via owner references)",
                 "produces": [
                     "application/json"
@@ -1012,16 +1050,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                }
-            }
-        },
-        "/health": {
-            "get": {
+                },
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ],
+                ]
+            }
+        },
+        "/health": {
+            "get": {
                 "description": "Check if the operator API is healthy and responding",
                 "produces": [
                     "application/json"
@@ -1040,16 +1078,16 @@ const docTemplate = `{
                             }
                         }
                     }
-                }
-            }
-        },
-        "/nodes": {
-            "get": {
+                },
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ],
+                ]
+            }
+        },
+        "/nodes": {
+            "get": {
                 "description": "Get list of nodes from a cluster target (supports both KrknOperatorTarget UUID and legacy KrknTargetRequest ID)",
                 "produces": [
                     "application/json"
@@ -1103,16 +1141,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
             }
         },
         "/operator/signature-verification": {
             "get": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
                 "description": "GET reports whether image signature verification is enabled. PATCH updates the setting and requires an administrator.",
                 "consumes": [
                     "application/json"
@@ -1159,14 +1197,14 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
             },
             "patch": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
                 "description": "GET reports whether image signature verification is enabled. PATCH updates the setting and requires an administrator.",
                 "consumes": [
                     "application/json"
@@ -1213,16 +1251,129 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/restore": {
+            "post": {
+                "description": "Upload a backup archive and restore all operator configuration (admin-only). Restore runs asynchronously and rechecks restored target connectivity when complete.",
+                "consumes": [
+                    "multipart/form-data"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "backup"
+                ],
+                "summary": "Restore operator configuration from uploaded backup",
+                "parameters": [
+                    {
+                        "type": "file",
+                        "description": "Backup archive (tar.gz)",
+                        "name": "backup",
+                        "in": "formData",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "202": {
+                        "description": "Restore started",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.RestoreResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request or missing file",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden - admin access required",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/restore/{jobID}": {
+            "get": {
+                "description": "Get the status of a restore operation by job ID (admin-only)",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "backup"
+                ],
+                "summary": "Get restore job status",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Restore job ID",
+                        "name": "jobID",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Restore status",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.RestoreResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden - admin access required",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Job not found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
             }
         },
         "/scenarios": {
             "post": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
                 "description": "Get list of available chaos scenarios from container registry (Quay.io or private registry)",
                 "consumes": [
                     "application/json"
@@ -1263,16 +1414,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                }
-            }
-        },
-        "/scenarios/detail/{scenario_name}": {
-            "post": {
+                },
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ],
+                ]
+            }
+        },
+        "/scenarios/detail/{scenario_name}": {
+            "post": {
                 "description": "Get detailed information about a specific chaos scenario including configuration fields",
                 "consumes": [
                     "application/json"
@@ -1326,16 +1477,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                }
-            }
-        },
-        "/scenarios/globals/{scenario_name}": {
-            "post": {
+                },
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ],
+                ]
+            }
+        },
+        "/scenarios/globals/{scenario_name}": {
+            "post": {
                 "description": "Get global environment configuration fields for a specific scenario",
                 "consumes": [
                     "application/json"
@@ -1389,16 +1540,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                }
-            }
-        },
-        "/scenarios/run": {
-            "get": {
+                },
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ],
+                ]
+            }
+        },
+        "/scenarios/run": {
+            "get": {
                 "description": "Get list of all scenario runs with optional filtering by phase or scenario name",
                 "produces": [
                     "application/json"
@@ -1446,14 +1597,14 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                }
-            },
-            "post": {
+                },
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ],
+                ]
+            },
+            "post": {
                 "description": "Execute a chaos scenario on target clusters with specified configuration",
                 "consumes": [
                     "application/json"
@@ -1507,16 +1658,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                }
-            }
-        },
-        "/scenarios/run/replay/{jobId}": {
-            "get": {
+                },
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ],
+                ]
+            }
+        },
+        "/scenarios/run/replay/{jobId}": {
+            "get": {
                 "description": "Retrieve scenario configuration from a completed job and return payload ready for re-execution via POST /scenarios/run",
                 "produces": [
                     "application/json"
@@ -1565,16 +1716,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                }
-            }
-        },
-        "/scenarios/run/{jobID}": {
-            "delete": {
+                },
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ],
+                ]
+            }
+        },
+        "/scenarios/run/{jobID}": {
+            "delete": {
                 "description": "Stop and delete a running or completed scenario run",
                 "produces": [
                     "application/json"
@@ -1623,16 +1774,145 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                }
-            }
-        },
-        "/scenarios/run/{scenarioRunName}": {
-            "get": {
+                },
                 "security": [
                     {
                         "BearerAuth": []
                     }
+                ]
+            }
+        },
+        "/scenarios/run/{runId}/reports/status": {
+            "get": {
+                "description": "Get HTML/PDF report generation status for a scenario run.",
+                "produces": [
+                    "application/json"
                 ],
+                "tags": [
+                    "scenario-runs"
+                ],
+                "summary": "Get scenario run report status",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Scenario run name",
+                        "name": "runId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Report status",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Malformed report status path",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Access denied",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Scenario run not found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Report generation or Kubernetes API failure",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/scenarios/run/{runId}/reports/summary.{format}": {
+            "get": {
+                "description": "Download the generated HTML or PDF report for a scenario run.",
+                "produces": [
+                    "text/html",
+                    "application/pdf"
+                ],
+                "tags": [
+                    "scenario-runs"
+                ],
+                "summary": "Download a scenario run report",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Scenario run name",
+                        "name": "runId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "enum": [
+                            "html",
+                            "pdf"
+                        ],
+                        "type": "string",
+                        "description": "Report format",
+                        "name": "format",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Generated report",
+                        "schema": {
+                            "type": "file"
+                        }
+                    },
+                    "400": {
+                        "description": "Malformed report path or format",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Access denied",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Scenario run or report not found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Report storage failure",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/scenarios/run/{scenarioRunName}": {
+            "get": {
                 "description": "Get current execution status and metrics for a running or completed scenario",
                 "produces": [
                     "application/json"
@@ -1681,16 +1961,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                }
-            }
-        },
-        "/scenarios/run/{scenarioRunName}/config": {
-            "get": {
+                },
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ],
+                ]
+            }
+        },
+        "/scenarios/run/{scenarioRunName}/config": {
+            "get": {
                 "description": "Retrieve scenario configuration directly by KrknScenarioRun CR name",
                 "produces": [
                     "application/json"
@@ -1745,16 +2025,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                }
-            }
-        },
-        "/targets": {
-            "post": {
+                },
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ],
+                ]
+            }
+        },
+        "/targets": {
+            "post": {
                 "description": "Create a KrknTargetRequest to trigger cluster discovery by krkn-operator-acm (legacy API)",
                 "consumes": [
                     "application/json"
@@ -1779,16 +2059,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                }
-            }
-        },
-        "/targets/{uuid}": {
-            "get": {
+                },
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ],
+                ]
+            }
+        },
+        "/targets/{uuid}": {
+            "get": {
                 "description": "Get target request status and cluster information by UUID (legacy KrknTargetRequest API)",
                 "produces": [
                     "application/json"
@@ -1831,14 +2111,14 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                }
-            },
-            "delete": {
+                },
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ],
+                ]
+            },
+            "delete": {
                 "description": "Delete a KrknTargetRequest resource by UUID. Admins can delete any, users can delete their own.",
                 "produces": [
                     "application/json"
@@ -1887,16 +2167,329 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                }
-            }
-        },
-        "/v2/jobs": {
-            "get": {
+                },
                 "security": [
                     {
                         "BearerAuth": []
                     }
+                ]
+            }
+        },
+        "/v2/categories": {
+            "get": {
+                "description": "List public categories, categories in the caller's groups, and categories created by the caller. Admins can list all categories.",
+                "produces": [
+                    "application/json"
                 ],
+                "tags": [
+                    "categories"
+                ],
+                "summary": "List categories",
+                "responses": {
+                    "200": {
+                        "description": "Categories",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.CategoryListResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Authentication required",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            },
+            "post": {
+                "description": "Create a public category or a category visible to one of the caller's groups. If no group is specified, the category is public. Admins may select any existing group.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "categories"
+                ],
+                "summary": "Create a category",
+                "parameters": [
+                    {
+                        "description": "Category definition",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.CreateCategoryRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created category",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.CategoryResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid category",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Authentication required",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "The caller does not belong to the selected group",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Category already exists",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/v2/categories/{name}": {
+            "get": {
+                "description": "Get a public category, a category in the caller's groups, or a category created by the caller. Admins can get all categories.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "categories"
+                ],
+                "summary": "Get a category",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Category name",
+                        "name": "name",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Category",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.CategoryResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid category name",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Authentication required",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "The caller cannot access this category",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Category not found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            },
+            "put": {
+                "description": "Update a category's color and optionally its visibility. Category creators and admins may update it.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "categories"
+                ],
+                "summary": "Update a category",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Category name",
+                        "name": "name",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Mutable category fields",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.UpdateCategoryRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Updated category",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.CategoryResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid category",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Authentication required",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Only the category creator or an admin may update it",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Category not found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Category changed concurrently",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            },
+            "delete": {
+                "description": "Delete a category created by the caller. Admins may delete any category.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "categories"
+                ],
+                "summary": "Delete a category",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Category name",
+                        "name": "name",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Deletion result",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid category name",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Authentication required",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Only the category creator or an admin may delete it",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Category not found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/v2/jobs": {
+            "get": {
                 "description": "Returns a merged list of standalone ScenarioRuns and GraphRuns, sorted by creation time descending",
                 "produces": [
                     "application/json"
@@ -1932,17 +2525,17 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
             }
         },
         "/v2/ws/dashboard/active-runs": {
             "get": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "Multiplexed WebSocket for real-time updates across all resources\n\n**Authentication:** JWT token via Sec-WebSocket-Protocol subprotocol\n- JavaScript: ` + "`" + `new WebSocket(url, 'access_token.' + jwtToken)` + "`" + `\n- Header: ` + "`" + `Sec-WebSocket-Protocol: access_token.\u003cjwt_token\u003e` + "`" + `\n\n**Client → Server Messages (subscribe/unsubscribe):**\n` + "`" + `` + "`" + `` + "`" + `json\n{\n\"action\": \"subscribe\",\n\"resource\": \"run\",\n\"ids\": [\"run-abc123\", \"run-xyz789\"]\n}\n` + "`" + `` + "`" + `` + "`" + `\n\n**Resource types:** ` + "`" + `run` + "`" + `, ` + "`" + `graphrun` + "`" + `, ` + "`" + `dashboard` + "`" + `\n\n**Server → Client Messages (updates):**\n` + "`" + `` + "`" + `` + "`" + `json\n{\n\"resource\": \"run\",\n\"id\": \"run-abc123\",\n\"event\": \"updated\",\n\"data\": { ... }\n}\n` + "`" + `` + "`" + `` + "`" + `\n\n**Available endpoints:**\n- ` + "`" + `/api/v2/ws/runs` + "`" + ` - Subscribe to scenario run updates\n- ` + "`" + `/api/v2/ws/graphruns` + "`" + ` - Subscribe to graph run updates\n- ` + "`" + `/api/v2/ws/dashboard/active-runs` + "`" + ` - Subscribe to dashboard updates",
+                "description": "Multiplexed WebSocket for real-time updates across all resources\n\n**Authentication:** JWT token via Sec-WebSocket-Protocol subprotocol\n- JavaScript: ` + "`" + `new WebSocket(url, 'access_token.' + jwtToken)` + "`" + `\n- Header: ` + "`" + `Sec-WebSocket-Protocol: access_token.\u003cjwt_token\u003e` + "`" + `\n\n**Client → Server Messages (subscribe/unsubscribe):**\n` + "`" + `` + "`" + `` + "`" + `json\n{\n\"action\": \"subscribe\",\n\"resource\": \"run\",\n\"ids\": [\"run-abc123\", \"run-xyz789\"]\n}\n` + "`" + `` + "`" + `` + "`" + `\n\n**Resource types:** ` + "`" + `run` + "`" + `, ` + "`" + `graphrun` + "`" + `, ` + "`" + `dashboard` + "`" + `\n\n**Server → Client Messages (updates):**\n` + "`" + `` + "`" + `` + "`" + `json\n{\n\"resource\": \"run\",\n\"id\": \"run-abc123\",\n\"event\": \"updated\",\n\"data\": { ... }\n}\n` + "`" + `` + "`" + `` + "`" + `\n\n**Available endpoints:**\n- ` + "`" + `/api/v2/ws/runs` + "`" + ` - Subscribe to scenario run updates\n- ` + "`" + `/api/v2/ws/graphruns` + "`" + ` - Subscribe to graph run updates\n- ` + "`" + `/api/v2/ws/jobs` + "`" + ` - Subscribe to unified jobs list (paginated scenario runs + graph runs)\n- ` + "`" + `/api/v2/ws/dashboard/active-runs` + "`" + ` - Subscribe to dashboard updates",
                 "consumes": [
                     "application/json"
                 ],
@@ -1972,17 +2565,17 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api_v2_websocket.ErrorMessage"
                         }
                     }
-                }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
             }
         },
         "/v2/ws/graphruns": {
             "get": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "Multiplexed WebSocket for real-time updates across all resources\n\n**Authentication:** JWT token via Sec-WebSocket-Protocol subprotocol\n- JavaScript: ` + "`" + `new WebSocket(url, 'access_token.' + jwtToken)` + "`" + `\n- Header: ` + "`" + `Sec-WebSocket-Protocol: access_token.\u003cjwt_token\u003e` + "`" + `\n\n**Client → Server Messages (subscribe/unsubscribe):**\n` + "`" + `` + "`" + `` + "`" + `json\n{\n\"action\": \"subscribe\",\n\"resource\": \"run\",\n\"ids\": [\"run-abc123\", \"run-xyz789\"]\n}\n` + "`" + `` + "`" + `` + "`" + `\n\n**Resource types:** ` + "`" + `run` + "`" + `, ` + "`" + `graphrun` + "`" + `, ` + "`" + `dashboard` + "`" + `\n\n**Server → Client Messages (updates):**\n` + "`" + `` + "`" + `` + "`" + `json\n{\n\"resource\": \"run\",\n\"id\": \"run-abc123\",\n\"event\": \"updated\",\n\"data\": { ... }\n}\n` + "`" + `` + "`" + `` + "`" + `\n\n**Available endpoints:**\n- ` + "`" + `/api/v2/ws/runs` + "`" + ` - Subscribe to scenario run updates\n- ` + "`" + `/api/v2/ws/graphruns` + "`" + ` - Subscribe to graph run updates\n- ` + "`" + `/api/v2/ws/dashboard/active-runs` + "`" + ` - Subscribe to dashboard updates",
+                "description": "Multiplexed WebSocket for real-time updates across all resources\n\n**Authentication:** JWT token via Sec-WebSocket-Protocol subprotocol\n- JavaScript: ` + "`" + `new WebSocket(url, 'access_token.' + jwtToken)` + "`" + `\n- Header: ` + "`" + `Sec-WebSocket-Protocol: access_token.\u003cjwt_token\u003e` + "`" + `\n\n**Client → Server Messages (subscribe/unsubscribe):**\n` + "`" + `` + "`" + `` + "`" + `json\n{\n\"action\": \"subscribe\",\n\"resource\": \"run\",\n\"ids\": [\"run-abc123\", \"run-xyz789\"]\n}\n` + "`" + `` + "`" + `` + "`" + `\n\n**Resource types:** ` + "`" + `run` + "`" + `, ` + "`" + `graphrun` + "`" + `, ` + "`" + `dashboard` + "`" + `\n\n**Server → Client Messages (updates):**\n` + "`" + `` + "`" + `` + "`" + `json\n{\n\"resource\": \"run\",\n\"id\": \"run-abc123\",\n\"event\": \"updated\",\n\"data\": { ... }\n}\n` + "`" + `` + "`" + `` + "`" + `\n\n**Available endpoints:**\n- ` + "`" + `/api/v2/ws/runs` + "`" + ` - Subscribe to scenario run updates\n- ` + "`" + `/api/v2/ws/graphruns` + "`" + ` - Subscribe to graph run updates\n- ` + "`" + `/api/v2/ws/jobs` + "`" + ` - Subscribe to unified jobs list (paginated scenario runs + graph runs)\n- ` + "`" + `/api/v2/ws/dashboard/active-runs` + "`" + ` - Subscribe to dashboard updates",
                 "consumes": [
                     "application/json"
                 ],
@@ -2012,17 +2605,57 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api_v2_websocket.ErrorMessage"
                         }
                     }
-                }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/v2/ws/jobs": {
+            "get": {
+                "description": "Multiplexed WebSocket for real-time updates across all resources\n\n**Authentication:** JWT token via Sec-WebSocket-Protocol subprotocol\n- JavaScript: ` + "`" + `new WebSocket(url, 'access_token.' + jwtToken)` + "`" + `\n- Header: ` + "`" + `Sec-WebSocket-Protocol: access_token.\u003cjwt_token\u003e` + "`" + `\n\n**Client → Server Messages (subscribe/unsubscribe):**\n` + "`" + `` + "`" + `` + "`" + `json\n{\n\"action\": \"subscribe\",\n\"resource\": \"run\",\n\"ids\": [\"run-abc123\", \"run-xyz789\"]\n}\n` + "`" + `` + "`" + `` + "`" + `\n\n**Resource types:** ` + "`" + `run` + "`" + `, ` + "`" + `graphrun` + "`" + `, ` + "`" + `dashboard` + "`" + `\n\n**Server → Client Messages (updates):**\n` + "`" + `` + "`" + `` + "`" + `json\n{\n\"resource\": \"run\",\n\"id\": \"run-abc123\",\n\"event\": \"updated\",\n\"data\": { ... }\n}\n` + "`" + `` + "`" + `` + "`" + `\n\n**Available endpoints:**\n- ` + "`" + `/api/v2/ws/runs` + "`" + ` - Subscribe to scenario run updates\n- ` + "`" + `/api/v2/ws/graphruns` + "`" + ` - Subscribe to graph run updates\n- ` + "`" + `/api/v2/ws/jobs` + "`" + ` - Subscribe to unified jobs list (paginated scenario runs + graph runs)\n- ` + "`" + `/api/v2/ws/dashboard/active-runs` + "`" + ` - Subscribe to dashboard updates",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "websocket"
+                ],
+                "summary": "WebSocket real-time updates",
+                "responses": {
+                    "101": {
+                        "description": "Switching protocols - WebSocket upgrade successful",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_v2_websocket.ServerMessage"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized - missing or invalid JWT token",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_v2_websocket.ErrorMessage"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_v2_websocket.ErrorMessage"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
             }
         },
         "/v2/ws/runs": {
             "get": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "Multiplexed WebSocket for real-time updates across all resources\n\n**Authentication:** JWT token via Sec-WebSocket-Protocol subprotocol\n- JavaScript: ` + "`" + `new WebSocket(url, 'access_token.' + jwtToken)` + "`" + `\n- Header: ` + "`" + `Sec-WebSocket-Protocol: access_token.\u003cjwt_token\u003e` + "`" + `\n\n**Client → Server Messages (subscribe/unsubscribe):**\n` + "`" + `` + "`" + `` + "`" + `json\n{\n\"action\": \"subscribe\",\n\"resource\": \"run\",\n\"ids\": [\"run-abc123\", \"run-xyz789\"]\n}\n` + "`" + `` + "`" + `` + "`" + `\n\n**Resource types:** ` + "`" + `run` + "`" + `, ` + "`" + `graphrun` + "`" + `, ` + "`" + `dashboard` + "`" + `\n\n**Server → Client Messages (updates):**\n` + "`" + `` + "`" + `` + "`" + `json\n{\n\"resource\": \"run\",\n\"id\": \"run-abc123\",\n\"event\": \"updated\",\n\"data\": { ... }\n}\n` + "`" + `` + "`" + `` + "`" + `\n\n**Available endpoints:**\n- ` + "`" + `/api/v2/ws/runs` + "`" + ` - Subscribe to scenario run updates\n- ` + "`" + `/api/v2/ws/graphruns` + "`" + ` - Subscribe to graph run updates\n- ` + "`" + `/api/v2/ws/dashboard/active-runs` + "`" + ` - Subscribe to dashboard updates",
+                "description": "Multiplexed WebSocket for real-time updates across all resources\n\n**Authentication:** JWT token via Sec-WebSocket-Protocol subprotocol\n- JavaScript: ` + "`" + `new WebSocket(url, 'access_token.' + jwtToken)` + "`" + `\n- Header: ` + "`" + `Sec-WebSocket-Protocol: access_token.\u003cjwt_token\u003e` + "`" + `\n\n**Client → Server Messages (subscribe/unsubscribe):**\n` + "`" + `` + "`" + `` + "`" + `json\n{\n\"action\": \"subscribe\",\n\"resource\": \"run\",\n\"ids\": [\"run-abc123\", \"run-xyz789\"]\n}\n` + "`" + `` + "`" + `` + "`" + `\n\n**Resource types:** ` + "`" + `run` + "`" + `, ` + "`" + `graphrun` + "`" + `, ` + "`" + `dashboard` + "`" + `\n\n**Server → Client Messages (updates):**\n` + "`" + `` + "`" + `` + "`" + `json\n{\n\"resource\": \"run\",\n\"id\": \"run-abc123\",\n\"event\": \"updated\",\n\"data\": { ... }\n}\n` + "`" + `` + "`" + `` + "`" + `\n\n**Available endpoints:**\n- ` + "`" + `/api/v2/ws/runs` + "`" + ` - Subscribe to scenario run updates\n- ` + "`" + `/api/v2/ws/graphruns` + "`" + ` - Subscribe to graph run updates\n- ` + "`" + `/api/v2/ws/jobs` + "`" + ` - Subscribe to unified jobs list (paginated scenario runs + graph runs)\n- ` + "`" + `/api/v2/ws/dashboard/active-runs` + "`" + ` - Subscribe to dashboard updates",
                 "consumes": [
                     "application/json"
                 ],
@@ -2052,16 +2685,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api_v2_websocket.ErrorMessage"
                         }
                     }
-                }
-            }
-        },
-        "/workflows": {
-            "get": {
+                },
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ],
+                ]
+            }
+        },
+        "/workflows": {
+            "get": {
                 "description": "Get list of all workflow templates in the system (admin only).",
                 "produces": [
                     "application/json"
@@ -2095,14 +2728,14 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                }
-            },
-            "post": {
+                },
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ],
+                ]
+            },
+            "post": {
                 "description": "Create a new workflow template. Validates graph structure (DAG, no cycles). Users can create templates for their own groups or public. Admins can create for any group.",
                 "consumes": [
                     "application/json"
@@ -2156,16 +2789,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                }
-            }
-        },
-        "/workflows/available": {
-            "get": {
+                },
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ],
+                ]
+            }
+        },
+        "/workflows/available": {
+            "get": {
                 "description": "Get workflows accessible to current user (own workflows, group workflows, public workflows). Includes node count excluding metadata nodes.",
                 "produces": [
                     "application/json"
@@ -2199,7 +2832,12 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     }
-                }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
             }
         }
     },
@@ -2230,6 +2868,10 @@ const docTemplate = `{
             "properties": {
                 "_comment": {
                     "description": "Comment is an optional comment describing the scenario\n+optional",
+                    "type": "string"
+                },
+                "cloudCredentialRef": {
+                    "description": "CloudCredentialRef overrides the graph-level cloud credential for this specific node\n+optional",
                     "type": "string"
                 },
                 "depends_on": {
@@ -2967,14 +3609,60 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_api.CategoryListResponse": {
+            "type": "object",
+            "properties": {
+                "categories": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_api.CategoryResponse"
+                    }
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
+        "internal_api.CategoryResponse": {
+            "type": "object",
+            "properties": {
+                "availableToAll": {
+                    "description": "AvailableToAll is true for public categories. Categories created without a group default to public.",
+                    "type": "boolean"
+                },
+                "color": {
+                    "type": "string"
+                },
+                "createdBy": {
+                    "description": "CreatedBy identifies the user allowed to update or delete the category, unless the caller is an admin.",
+                    "type": "string"
+                },
+                "groups": {
+                    "description": "Groups contains the single group allowed to view the category, when group-scoped.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "name": {
+                    "type": "string"
+                }
+            }
+        },
         "internal_api.ClusterResiliencyScoreResponse": {
             "type": "object",
             "properties": {
                 "clusterName": {
                     "type": "string"
                 },
+                "message": {
+                    "type": "string"
+                },
                 "score": {
                     "type": "number"
+                },
+                "status": {
+                    "type": "string"
                 }
             }
         },
@@ -2994,6 +3682,28 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_krkn-chaos_krkn-operator_api_v1alpha1.ClusterTarget"
                         }
                     }
+                }
+            }
+        },
+        "internal_api.CreateCategoryRequest": {
+            "type": "object",
+            "properties": {
+                "availableToAll": {
+                    "description": "AvailableToAll makes the category public. It cannot be combined with Groups.",
+                    "type": "boolean"
+                },
+                "color": {
+                    "type": "string"
+                },
+                "groups": {
+                    "description": "Groups may contain one group. Omit it to create a public category.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "name": {
+                    "type": "string"
                 }
             }
         },
@@ -3058,6 +3768,10 @@ const docTemplate = `{
         "internal_api.GraphRunCreateRequest": {
             "type": "object",
             "properties": {
+                "cloudCredentialRef": {
+                    "description": "CloudCredentialRef is the default cloud credential for all nodes (optional)",
+                    "type": "string"
+                },
                 "graph": {
                     "description": "Graph is the dependency graph of scenarios to execute",
                     "type": "object",
@@ -3462,6 +4176,23 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_api.RestoreResponse": {
+            "type": "object",
+            "properties": {
+                "jobId": {
+                    "type": "string"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "startedAt": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                }
+            }
+        },
         "internal_api.ScenarioDetailResponse": {
             "type": "object",
             "properties": {
@@ -3529,6 +4260,10 @@ const docTemplate = `{
                     "description": "ResiliencyScore is the individual resiliency score for this scenario run node",
                     "type": "number"
                 },
+                "resiliencyScoreEnabled": {
+                    "description": "ResiliencyScoreEnabled indicates whether resiliency scoring is enabled for this run",
+                    "type": "boolean"
+                },
                 "resiliencyScores": {
                     "description": "ResiliencyScores contains per-cluster resiliency scores",
                     "type": "array",
@@ -3585,6 +4320,10 @@ const docTemplate = `{
         "internal_api.ScenarioRunRequest": {
             "type": "object",
             "properties": {
+                "cloudCredentialRef": {
+                    "description": "CloudCredentialRef, if set, names a saved cloud credential Secret whose\nreference is set on the CRD spec for controller-level SecretKeyRef injection.",
+                    "type": "string"
+                },
                 "customRunName": {
                     "description": "CustomRunName is a user-provided label for the run (optional)",
                     "type": "string"
@@ -3619,8 +4358,12 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "registryName": {
-                    "description": "RegistryName is retained for old in-memory callers and legacy JSON\nrequests. New clients select registries through Scenario.",
+                    "description": "RegistryName is the name of a saved registry (optional)\nIf omitted, defaults to quay.io public registry",
                     "type": "string"
+                },
+                "resiliencyScoreEnabled": {
+                    "description": "ResiliencyScoreEnabled enables resiliency score calculation for this scenario run.\nWhen true, RESILIENCY_SCORE=true is set in scenario pods and the controller\ncalculates scores from pod logs upon completion.",
+                    "type": "boolean"
                 },
                 "scenario": {
                     "description": "Scenario identifies the scenario and registry to resolve. The operator\nresolves the executable image through krknctl; callers cannot provide one.",
@@ -3771,6 +4514,24 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_api.UpdateCategoryRequest": {
+            "type": "object",
+            "properties": {
+                "availableToAll": {
+                    "type": "boolean"
+                },
+                "color": {
+                    "type": "string"
+                },
+                "groups": {
+                    "description": "Groups and AvailableToAll must be sent together to change visibility. When omitted, the current visibility is preserved.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
         "internal_api_v2_websocket.ErrorMessage": {
             "type": "object",
             "properties": {
@@ -3867,7 +4628,7 @@ var SwaggerInfo = &swag.Spec{
 	BasePath:         "/api/v1",
 	Schemes:          []string{},
 	Title:            "Krkn Operator API",
-	Description:      "REST and WebSocket API for Krkn chaos engineering operator.\n\n**API Versions:**\n- **v1** - REST API with polling (deprecated but maintained)\n- **v2** - REST API (same as v1) + WebSocket real-time updates\n\n**WebSocket Authentication (v2):**\nWebSocket endpoints use JWT via subprotocol header:\n- JavaScript: `new WebSocket(url, 'access_token.' + jwtToken)`\n- Header: `Sec-WebSocket-Protocol: access_token.<jwt_token>`\n\n**Migration Path:**\n1. v1 REST → v2 REST (no changes, just update base path)\n2. v2 REST → v2 WebSocket (replace polling with multiplexed WebSocket)",
+	Description:      "REST and WebSocket API for Krkn chaos engineering operator.\n\n**API Versions:**\n- **v1** - REST API with polling (deprecated but maintained)\n- **v2** - REST API with v2-specific resources + WebSocket real-time updates\n\n**WebSocket Authentication (v2):**\nWebSocket endpoints use JWT via subprotocol header:\n- JavaScript: `new WebSocket(url, 'access_token.' + jwtToken)`\n- Header: `Sec-WebSocket-Protocol: access_token.<jwt_token>`\n\n**Migration Path:**\n1. v1 REST → v2 REST (no changes, just update base path)\n2. v2 REST → v2 WebSocket (replace polling with multiplexed WebSocket)",
 	InfoInstanceName: "swagger",
 	SwaggerTemplate:  docTemplate,
 	LeftDelim:        "{{",

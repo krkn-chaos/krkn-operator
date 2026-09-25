@@ -25,7 +25,7 @@ Assisted-by: Claude Sonnet 4.5 (claude-sonnet-4-5@20250929)
 // @description
 // @description **API Versions:**
 // @description - **v1** - REST API with polling (deprecated but maintained)
-// @description - **v2** - REST API (same as v1) + WebSocket real-time updates
+// @description - **v2** - REST API with v2-specific resources + WebSocket real-time updates
 // @description
 // @description **WebSocket Authentication (v2):**
 // @description WebSocket endpoints use JWT via subprotocol header:
@@ -315,10 +315,10 @@ func NewServer(port int, client client.Client, clientset kubernetes.Interface, n
 	mux.Handle(RestorePath+"/", authMw.RequireAuth(http.HandlerFunc(handler.GetRestoreStatus)))
 
 	// ==================== API v2 Endpoints ====================
-	// v2 REST endpoints reuse v1 handlers (backward compatible)
+	// Existing v2 REST resources reuse v1 handlers; v2-specific resources use dedicated handlers.
 	// v2 WebSocket endpoints provide real-time multiplexed updates
 
-	// v2 REST endpoints (same as v1, for gradual migration)
+	// v2 REST endpoints for gradual migration and v2-specific resources.
 	mux.HandleFunc(v2.ScenariosRunPath+"/", func(w http.ResponseWriter, r *http.Request) {
 		// Check if this is a WebSocket logs request (same as v1)
 		if strings.Contains(r.URL.Path, "/jobs/") && strings.HasSuffix(r.URL.Path, "/logs") {
@@ -335,6 +335,8 @@ func NewServer(port int, client client.Client, clientset kubernetes.Interface, n
 	mux.Handle(v2.DashboardActiveRunsPath, authMw.RequireAuth(http.HandlerFunc(handler.GetActiveRunsOverview)))
 	mux.Handle(v2.JobsPath, authMw.RequireAuth(http.HandlerFunc(handler.ListJobs)))
 	mux.Handle(v2.JobsPath+"/", authMw.RequireAuth(http.HandlerFunc(handler.ListJobs)))
+	mux.Handle(v2.CategoriesPath, authMw.RequireAuth(http.HandlerFunc(handler.CategoriesRouter)))
+	mux.Handle(v2.CategoriesPath+"/", authMw.RequireAuth(http.HandlerFunc(handler.CategoriesRouter)))
 
 	// v2 WebSocket endpoints (NEW - real-time multiplexed updates)
 	// WebSocket authentication is handled internally via Sec-WebSocket-Protocol header

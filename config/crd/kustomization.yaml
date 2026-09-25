@@ -8,3 +8,4 @@ resources:
 - bases/krkn.krkn-chaos.dev_krknusers.yaml
 - bases/krkn.krkn-chaos.dev_krknusergroups.yaml
 - bases/krkn.krkn-chaos.dev_krknfiletypes.yaml
+- bases/krkn.krkn-chaos.dev_krkncategories.yaml

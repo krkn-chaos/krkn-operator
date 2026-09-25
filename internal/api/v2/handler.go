@@ -16,8 +16,8 @@ limitations under the License.
 Assisted-by: Claude Sonnet 4.5 (claude-sonnet-4-5@20250929)
 */
 
-// Package v2 provides WebSocket-based real-time API endpoints.
-// REST endpoints reuse v1 handlers for backward compatibility.
+// Package v2 provides API v2 route definitions and WebSocket-based real-time
+// endpoints. Existing v2 REST routes may reuse v1 handlers.
 package v2
 
 import (
@@ -29,7 +29,7 @@ import (
 )
 
 // Handler manages v2 WebSocket endpoints
-// v2 REST endpoints are handled directly by v1 handlers in server.go (no wrapper needed)
+// REST and WebSocket endpoints are registered by the API server.
 type Handler struct {
 	// WsHandler handles WebSocket connections (public for server.go routing)
 	WsHandler *v2ws.Handler
