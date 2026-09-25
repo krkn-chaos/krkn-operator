@@ -92,40 +92,33 @@ package_entries=$(yq -r '[.entries[] | select(.schema == "olm.package" and .name
 export ICON_BASE64="$icon_base64"
 export ICON_MEDIATYPE="$icon_mediatype"
 
-catalog_files=()
-while IFS= read -r catalog_file; do
-  catalog_files+=("$catalog_file")
-done < <(find "$work_dir/catalog/catalogs" -type f \
-  -path '*/krkn-operator/catalog.yaml' | sort -V)
+catalog_template="$package_dir/catalog-templates/basic.yaml"
+[[ -f "$catalog_template" ]] || {
+  echo "operator catalog template not found: $catalog_template" >&2
+  exit 1
+}
 
-if [[ ${#catalog_files[@]} -gt 0 ]]; then
-  for catalog_file in "${catalog_files[@]}"; do
-    yq -i \
-      'with(select(.schema == "olm.package" and .name == "krkn-operator");
-         .icon = {
-           "base64data": strenv(ICON_BASE64),
-           "mediatype": strenv(ICON_MEDIATYPE)
-         })' \
-      "$catalog_file"
-    [[ "$(yq -r 'select(.schema == "olm.package" and .name == "krkn-operator") | .icon.mediatype // ""' "$catalog_file")" == "$icon_mediatype" ]] || {
-      echo "failed to update package icon in $catalog_file" >&2
-      exit 1
-    }
-  done
-else
-  catalog_template="$work_dir/catalog/catalog-templates/basic.yaml"
-  [[ -f "$catalog_template" ]] || {
-    echo "no supported krkn-operator FBC catalog found" >&2
-    exit 1
-  }
-  yq -i \
-    '(.entries[] | select(.schema == "olm.package" and .name == "krkn-operator") | .icon) = {
-       "base64data": strenv(ICON_BASE64),
-       "mediatype": strenv(ICON_MEDIATYPE)
-     }' \
-    "$catalog_template"
-  catalog_files+=("$catalog_template")
-fi
+package_entries=$(yq -r \
+  '[.entries[] | select(.schema == "olm.package" and .name == "krkn-operator")] | length' \
+  "$catalog_template")
+[[ "$package_entries" == "1" ]] || {
+  echo "expected exactly one krkn-operator olm.package entry in $catalog_template, found $package_entries" >&2
+  exit 1
+}
+
+yq -i \
+  '(.entries[] | select(.schema == "olm.package" and .name == "krkn-operator") | .icon) = {
+     "base64data": strenv(ICON_BASE64),
+     "mediatype": strenv(ICON_MEDIATYPE)
+   }' \
+  "$catalog_template"
+
+[[ "$(yq -r \
+  '.entries[] | select(.schema == "olm.package" and .name == "krkn-operator") | .icon.mediatype // ""' \
+  "$catalog_template")" == "$icon_mediatype" ]] || {
+  echo "failed to update package icon in $catalog_template" >&2
+  exit 1
+}
 
 cat > "$version_dir/release-config.yaml" <<EOF
 ---
@@ -136,7 +129,7 @@ catalog_templates:
     replaces: krkn-operator.v$previous_version
 EOF
 
-git -C "$work_dir/catalog" add "operators/krkn-operator/$version" "${catalog_files[@]}"
+git -C "$work_dir/catalog" add "operators/krkn-operator/$version" "$catalog_template"
 git -C "$work_dir/catalog" commit -m "operator: update krkn-operator bundle to $version"
 git -C "$work_dir/catalog" push --force-with-lease origin "automation/krkn-operator-$version"
 
