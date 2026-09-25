@@ -41,6 +41,15 @@ On OpenShift, use the `-ocp` repository. Route, Ingress, and Gateway resources
 are intentionally not created by the bundle; expose the console using the
 cluster administrator's preferred TLS and networking configuration.
 
+When a release tag is pushed, the release workflow also prepares the OpenShift
+Community Operators catalog submission and opens the catalog pull request. It
+requires the `COMMUNITY_OPERATORS_FORK` repository variable (for example,
+`<team-or-user>/community-operators-prod`) and a
+`COMMUNITY_OPERATORS_TOKEN` secret with permission to push to that fork and
+open pull requests against `redhat-openshift-ecosystem/community-operators-prod`.
+OperatorHub remains responsible for validating and merging the catalog pull
+request.
+
 📖 For configuration, usage, compatibility, and advanced installation options, see the official documentation.📖 For configuration, usage, compatibility, and advanced installation options, see the **[official documentation](https://krkn-chaos.gateway.scarf.sh/krkn-operator/docs?source=github)**.
 
 **Uninstall:**
