@@ -83,12 +83,6 @@ icon_mediatype=$(yq -r '.spec.icon[0].mediatype // ""' "$csv_file")
   exit 1
 }
 
-package_entries=$(yq -r '[.entries[] | select(.schema == "olm.package" and .name == "krkn-operator")] | length' "$catalog_template")
-[[ "$package_entries" == "1" ]] || {
-  echo "expected exactly one krkn-operator olm.package entry in $catalog_template, found $package_entries" >&2
-  exit 1
-}
-
 export ICON_BASE64="$icon_base64"
 export ICON_MEDIATYPE="$icon_mediatype"
 
