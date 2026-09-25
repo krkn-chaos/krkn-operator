@@ -69,12 +69,6 @@ mkdir -p "$version_dir"
 cp -R "$bundle_dir/manifests" "$version_dir/manifests"
 cp -R "$bundle_dir/metadata" "$version_dir/metadata"
 
-catalog_template="$work_dir/catalog/catalog-templates/basic.yaml"
-[[ -f "$catalog_template" ]] || {
-  echo "catalog template not found: catalog-templates/basic.yaml" >&2
-  exit 1
-}
-
 csv_file=$(find "$bundle_dir/manifests" -maxdepth 1 -type f \
   -name '*.clusterserviceversion.yaml' -print -quit)
 [[ -n "$csv_file" ]] || {
@@ -89,20 +83,36 @@ icon_mediatype=$(yq -r '.spec.icon[0].mediatype // ""' "$csv_file")
   exit 1
 }
 
-package_entries=$(yq -r '[.entries[] | select(.schema == "olm.package" and .name == "krkn-operator")] | length' "$catalog_template")
+export ICON_BASE64="$icon_base64"
+export ICON_MEDIATYPE="$icon_mediatype"
+
+catalog_template="$package_dir/catalog-templates/basic.yaml"
+[[ -f "$catalog_template" ]] || {
+  echo "operator catalog template not found: $catalog_template" >&2
+  exit 1
+}
+
+package_entries=$(yq -r \
+  '[.entries[] | select(.schema == "olm.package" and .name == "krkn-operator")] | length' \
+  "$catalog_template")
 [[ "$package_entries" == "1" ]] || {
   echo "expected exactly one krkn-operator olm.package entry in $catalog_template, found $package_entries" >&2
   exit 1
 }
 
-export ICON_BASE64="$icon_base64"
-export ICON_MEDIATYPE="$icon_mediatype"
 yq -i \
   '(.entries[] | select(.schema == "olm.package" and .name == "krkn-operator") | .icon) = {
      "base64data": strenv(ICON_BASE64),
      "mediatype": strenv(ICON_MEDIATYPE)
    }' \
   "$catalog_template"
+
+[[ "$(yq -r \
+  '.entries[] | select(.schema == "olm.package" and .name == "krkn-operator") | .icon.mediatype // ""' \
+  "$catalog_template")" == "$icon_mediatype" ]] || {
+  echo "failed to update package icon in $catalog_template" >&2
+  exit 1
+}
 
 cat > "$version_dir/release-config.yaml" <<EOF
 ---
