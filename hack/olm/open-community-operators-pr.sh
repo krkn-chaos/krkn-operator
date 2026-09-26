@@ -65,9 +65,8 @@ catalog_template="$package_dir/catalog-templates/basic.yaml"
   exit 1
 }
 
-previous_bundle=$(yq -r \
-  '.entries[] | select(.schema == "olm.channel" and .name == "stable-ocp") | .entries[-1].name // ""' \
-  "$catalog_template")
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+previous_bundle=$(bash "$script_dir/channel-head.sh" "$catalog_template" krkn-operator stable-ocp)
 [[ "$previous_bundle" =~ ^krkn-operator\.v[0-9]+\.[0-9]+\.[0-9]+([-.+][0-9A-Za-z.-]+)?$ ]] || {
   echo "unable to determine the previous stable-ocp bundle from $catalog_template: $previous_bundle" >&2
   exit 1
