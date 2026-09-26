@@ -94,7 +94,50 @@ Results are sorted newest-first by timestamp before the `size` limit is applied.
       "start_timestamp": 1735689600,
       "end_timestamp": 1735689900,
       "namespace": "openshift-kube-apiserver",
-      "status": true
+      "status": true,
+      "metadata": {
+        "kubernetes_objects_count": {"Pod": 701, "ConfigMap": 1064},
+        "network_plugins": ["OVNKubernetes"],
+        "total_node_count": 9,
+        "cloud_infrastructure": "AWS",
+        "cloud_type": "self-managed",
+        "cluster_version": "4.19.0",
+        "major_version": "4.19",
+        "build_url": "https://example/1",
+        "fips_enabled": false,
+        "tag": "cr",
+        "etcd_encryption_enabled": false,
+        "ipsec_enabled": false,
+        "node_summary_infos": [
+          {
+            "count": 3,
+            "nodes_type": "master",
+            "architecture": "amd64",
+            "instance_type": "m5.2xlarge",
+            "kernel_version": "5.14.0-570.51.1.el9_6.x86_64",
+            "kubelet_version": "v1.33.5",
+            "os_version": "Red Hat Enterprise Linux CoreOS 9.6.20250930-0 (Plow)"
+          }
+        ]
+      },
+      "scenarios": [
+        {
+          "scenario_type": "pod_disruption_scenarios",
+          "start_timestamp": 1735689600,
+          "end_timestamp": 1735689900,
+          "exit_status": 0,
+          "parameters": {"kill_count": 1},
+          "affected_pods": [
+            {
+              "pod_name": "kube-apiserver-master-0",
+              "namespace": "openshift-kube-apiserver",
+              "total_recovery_time": 45.2,
+              "pod_readiness_time": 42.1,
+              "pod_rescheduling_time": 3.1
+            }
+          ]
+        }
+      ]
     }
   ],
   "total": 1,
@@ -105,6 +148,21 @@ Results are sorted newest-first by timestamp before the `size` limit is applied.
   }
 }
 ```
+
+Each document includes run-level cluster/infrastructure metadata (`metadata`) and complete scenario details (`scenarios`). Optional fields are omitted when absent in source data.
+
+**Document fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `run_uuid` | string | Unique identifier for this telemetry run. |
+| `scenario_type` | string | Scenario type from run's first scenario (for table view compatibility). |
+| `start_timestamp` | int64 | Start time from run's first scenario (Unix seconds, UTC). |
+| `end_timestamp` | int64 | End time from run's first scenario (Unix seconds, UTC). |
+| `namespace` | string | Namespace from run's first scenario. |
+| `status` | bool | Run-level pass/fail status. |
+| `metadata` | object | Run-level cluster/infrastructure details: object counts, network plugins, node summaries, cloud type, versions, security settings. Omitted when source document had no metadata. |
+| `scenarios` | array | All scenarios executed in run. Each includes type, timestamps, exit status, raw parameters, and optional affected pod recovery timings. |
 
 `total` is the number of documents returned. Hits whose stored shape cannot be parsed are skipped rather than failing the request, so `total` may be smaller than the cluster's raw hit count.
 

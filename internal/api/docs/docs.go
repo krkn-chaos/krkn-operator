@@ -2289,6 +2289,84 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.AffectedPods": {
+            "type": "object",
+            "properties": {
+                "recovered": {
+                    "description": "Recovered is the list of pods that recovered with their timing metrics.",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.RecoveredPod"
+                    }
+                }
+            }
+        },
+        "github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.ClusterMetadata": {
+            "type": "object",
+            "properties": {
+                "build_url": {
+                    "description": "BuildURL is the URL of the build used for the cluster.",
+                    "type": "string"
+                },
+                "cloud_infrastructure": {
+                    "description": "CloudInfrastructure identifies the cloud provider (e.g. \"AWS\", \"GCP\").",
+                    "type": "string"
+                },
+                "cloud_type": {
+                    "description": "CloudType identifies deployment model (e.g. \"self-managed\", \"managed\").",
+                    "type": "string"
+                },
+                "cluster_version": {
+                    "description": "ClusterVersion is the full cluster version string.",
+                    "type": "string"
+                },
+                "etcd_encryption_enabled": {
+                    "description": "EtcdEncryptionEnabled indicates whether etcd encryption is enabled.",
+                    "type": "boolean"
+                },
+                "fips_enabled": {
+                    "description": "FIPSEnabled indicates whether FIPS mode is enabled in the cluster.",
+                    "type": "boolean"
+                },
+                "ipsec_enabled": {
+                    "description": "IPSecEnabled indicates whether IPSec is enabled in the cluster.",
+                    "type": "boolean"
+                },
+                "kubernetes_objects_count": {
+                    "description": "KubernetesObjectsCount maps object kind (e.g. \"Pod\", \"ConfigMap\") to the\nnumber of that kind present in the cluster at run time.",
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "integer"
+                    }
+                },
+                "major_version": {
+                    "description": "MajorVersion is the major version number extracted from ClusterVersion.",
+                    "type": "string"
+                },
+                "network_plugins": {
+                    "description": "NetworkPlugins lists the cluster network plugins (e.g. \"OVNKubernetes\").",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "node_summary_infos": {
+                    "description": "NodeSummaryInfos lists one summary per distinct node group (role/shape) in\nthe cluster at run time; nil when the source document carried none.",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.NodeSummaryInfo"
+                    }
+                },
+                "tag": {
+                    "description": "Tag is an arbitrary label applied to the telemetry run.",
+                    "type": "string"
+                },
+                "total_node_count": {
+                    "description": "TotalNodeCount is the number of nodes in the cluster at run time.",
+                    "type": "integer"
+                }
+            }
+        },
         "github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.CreateElasticsearchConfigRequest": {
             "type": "object",
             "properties": {
@@ -2444,6 +2522,39 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.NodeSummaryInfo": {
+            "type": "object",
+            "properties": {
+                "architecture": {
+                    "description": "Architecture is the CPU architecture (e.g. \"amd64\", \"arm64\").",
+                    "type": "string"
+                },
+                "count": {
+                    "description": "Count is the number of nodes in this group.",
+                    "type": "integer"
+                },
+                "instance_type": {
+                    "description": "InstanceType is the cloud instance type (e.g. \"m5.2xlarge\").",
+                    "type": "string"
+                },
+                "kernel_version": {
+                    "description": "KernelVersion is the kernel version running on nodes in this group.",
+                    "type": "string"
+                },
+                "kubelet_version": {
+                    "description": "KubeletVersion is the kubelet version running on nodes in this group.",
+                    "type": "string"
+                },
+                "nodes_type": {
+                    "description": "NodesType is the role of nodes in this group (e.g. \"master\", \"worker\").",
+                    "type": "string"
+                },
+                "os_version": {
+                    "description": "OSVersion is the operating system version running on nodes in this group.",
+                    "type": "string"
+                }
+            }
+        },
         "github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.QueryTelemetryRequest": {
             "type": "object",
             "properties": {
@@ -2496,12 +2607,78 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.RecoveredPod": {
+            "type": "object",
+            "properties": {
+                "namespace": {
+                    "description": "Namespace is the namespace containing the recovered pod.",
+                    "type": "string"
+                },
+                "pod_name": {
+                    "description": "PodName is the name of the pod that recovered.",
+                    "type": "string"
+                },
+                "pod_readiness_time": {
+                    "description": "PodReadinessTime is the time taken for the pod to become ready. Unit: seconds.",
+                    "type": "number"
+                },
+                "pod_rescheduling_time": {
+                    "description": "PodReschedulingTime is the time taken for pod rescheduling. Unit: seconds.",
+                    "type": "number"
+                },
+                "total_recovery_time": {
+                    "description": "TotalRecoveryTime is the total time taken for pod recovery. Unit: seconds.",
+                    "type": "number"
+                }
+            }
+        },
+        "github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.ScenarioDetail": {
+            "type": "object",
+            "properties": {
+                "affected_pods": {
+                    "description": "AffectedPods carries per-pod recovery timings for pod_disruption scenarios;\nnil when the source document had none.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.AffectedPods"
+                        }
+                    ]
+                },
+                "end_timestamp": {
+                    "description": "EndTimestamp is the scenario end time. Unit: Unix seconds (UTC), with fractional precision.",
+                    "type": "number"
+                },
+                "exit_status": {
+                    "description": "ExitStatus is the scenario exit code; 0 indicates success, non-zero indicates failure.",
+                    "type": "integer"
+                },
+                "parameters": {
+                    "description": "Parameters holds scenario-specific configuration as unconstrained JSON (object, array, or other).",
+                    "type": "object"
+                },
+                "scenario_type": {
+                    "description": "ScenarioType is the type of chaos scenario executed (e.g. \"pod_disruption_scenarios\").",
+                    "type": "string"
+                },
+                "start_timestamp": {
+                    "description": "StartTimestamp is the scenario start time. Unit: Unix seconds (UTC), with fractional precision.",
+                    "type": "number"
+                }
+            }
+        },
         "github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.TelemetryDocument": {
             "type": "object",
             "properties": {
                 "end_timestamp": {
-                    "description": "EndTimestamp is the scenario end time. Unit: Unix seconds (UTC).",
-                    "type": "integer"
+                    "description": "EndTimestamp is the scenario end time. Unit: Unix seconds (UTC), with fractional precision.",
+                    "type": "number"
+                },
+                "metadata": {
+                    "description": "Metadata holds run-level cluster/infrastructure detail; nil when the\nsource document carried none of the metadata fields.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.ClusterMetadata"
+                        }
+                    ]
                 },
                 "namespace": {
                     "description": "Namespace is the target namespace from the run's first scenario.",
@@ -2515,9 +2692,16 @@ const docTemplate = `{
                     "description": "ScenarioType is the chaos scenario type from the run's first scenario.",
                     "type": "string"
                 },
+                "scenarios": {
+                    "description": "Scenarios lists every scenario in the run, each with its raw parameters.",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.ScenarioDetail"
+                    }
+                },
                 "start_timestamp": {
-                    "description": "StartTimestamp is the scenario start time. Unit: Unix seconds (UTC).",
-                    "type": "integer"
+                    "description": "StartTimestamp is the scenario start time. Unit: Unix seconds (UTC), with fractional precision.",
+                    "type": "number"
                 },
                 "status": {
                     "description": "Status is the run outcome: true = pass, false = fail. It applies the\nper-scenario exit_status downgrade, so it may differ from the run-level\njob_status used by TelemetryStats.",

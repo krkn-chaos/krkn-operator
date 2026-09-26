@@ -231,15 +231,31 @@ type esSearchResponse struct {
 type rawTelemetrySource struct {
 	RunUUID   string `json:"run_uuid"`
 	JobStatus bool   `json:"job_status"`
-	Scenarios []struct {
-		ScenarioType   string `json:"scenario_type"`
-		StartTimestamp int64  `json:"start_timestamp"`
-		EndTimestamp   int64  `json:"end_timestamp"`
-		ExitStatus     int    `json:"exit_status"`
+	// Run-level cluster/infrastructure metadata. Pointer fields (bool, int)
+	// distinguish absent (nil) from explicit false/zero.
+	KubernetesObjectsCount map[string]int    `json:"kubernetes_objects_count"`
+	NetworkPlugins         []string          `json:"network_plugins"`
+	TotalNodeCount         *int              `json:"total_node_count"`
+	CloudInfrastructure    string            `json:"cloud_infrastructure"`
+	CloudType              string            `json:"cloud_type"`
+	ClusterVersion         string            `json:"cluster_version"`
+	MajorVersion           string            `json:"major_version"`
+	BuildURL               string            `json:"build_url"`
+	FIPSEnabled            *bool             `json:"fips_enabled"`
+	Tag                    string            `json:"tag"`
+	EtcdEncryptionEnabled  *bool             `json:"etcd_encryption_enabled"`
+	IPSecEnabled           *bool             `json:"ipsec_enabled"`
+	NodeSummaryInfos       []NodeSummaryInfo `json:"node_summary_infos"`
+	Scenarios              []struct {
+		ScenarioType   string  `json:"scenario_type"`
+		StartTimestamp float64 `json:"start_timestamp"`
+		EndTimestamp   float64 `json:"end_timestamp"`
+		ExitStatus     int     `json:"exit_status"`
 		// Parameters shape varies by scenario type (object keyed by scenario
 		// name, whose value may be an object or an array), so it is kept raw and
 		// searched for a namespace rather than decoded into a fixed struct.
-		Parameters json.RawMessage `json:"parameters"`
+		Parameters   json.RawMessage `json:"parameters"`
+		AffectedPods *AffectedPods   `json:"affected_pods"`
 	} `json:"scenarios"`
 }
 
@@ -247,8 +263,9 @@ type rawTelemetrySource struct {
 // surfaced to the UI, deriving scenario-level columns from the first scenario.
 func (s rawTelemetrySource) flatten() TelemetryDocument {
 	doc := TelemetryDocument{
-		RunUUID: s.RunUUID,
-		Status:  s.JobStatus,
+		RunUUID:  s.RunUUID,
+		Status:   s.JobStatus,
+		Metadata: s.metadata(),
 	}
 	if len(s.Scenarios) > 0 {
 		sc := s.Scenarios[0]
@@ -261,8 +278,159 @@ func (s rawTelemetrySource) flatten() TelemetryDocument {
 			doc.Status = false
 		}
 		doc.Namespace = namespaceFromParameters(sc.Parameters)
+
+		// Surface every scenario with its raw parameters for the expanded row.
+		// Redact sensitive keys (passwords, tokens, etc.) before exposing to clients.
+		doc.Scenarios = make([]ScenarioDetail, 0, len(s.Scenarios))
+		for _, scn := range s.Scenarios {
+			doc.Scenarios = append(doc.Scenarios, ScenarioDetail{
+				ScenarioType:   scn.ScenarioType,
+				StartTimestamp: scn.StartTimestamp,
+				EndTimestamp:   scn.EndTimestamp,
+				ExitStatus:     scn.ExitStatus,
+				Parameters:     redactSensitiveParameters(scn.Parameters),
+				AffectedPods:   scn.AffectedPods,
+			})
+		}
 	}
 	return doc
+}
+
+// metadata builds the run-level ClusterMetadata from the raw source, returning
+// nil when the source carried none of the metadata fields so the JSON response
+// omits an empty object. Pointer fields (bool, int) preserve the distinction
+// between absent (nil) and explicit false/zero.
+func (s rawTelemetrySource) metadata() *ClusterMetadata {
+	empty := len(s.KubernetesObjectsCount) == 0 &&
+		len(s.NetworkPlugins) == 0 &&
+		s.TotalNodeCount == nil &&
+		s.CloudInfrastructure == "" &&
+		s.CloudType == "" &&
+		s.ClusterVersion == "" &&
+		s.MajorVersion == "" &&
+		s.BuildURL == "" &&
+		s.FIPSEnabled == nil &&
+		s.Tag == "" &&
+		s.EtcdEncryptionEnabled == nil &&
+		s.IPSecEnabled == nil &&
+		len(s.NodeSummaryInfos) == 0
+	if empty {
+		return nil
+	}
+	return &ClusterMetadata{
+		KubernetesObjectsCount: s.KubernetesObjectsCount,
+		NetworkPlugins:         s.NetworkPlugins,
+		TotalNodeCount:         s.TotalNodeCount,
+		CloudInfrastructure:    s.CloudInfrastructure,
+		CloudType:              s.CloudType,
+		ClusterVersion:         s.ClusterVersion,
+		MajorVersion:           s.MajorVersion,
+		BuildURL:               s.BuildURL,
+		FIPSEnabled:            s.FIPSEnabled,
+		Tag:                    s.Tag,
+		EtcdEncryptionEnabled:  s.EtcdEncryptionEnabled,
+		IPSecEnabled:           s.IPSecEnabled,
+		NodeSummaryInfos:       s.NodeSummaryInfos,
+	}
+}
+
+// sensitiveKeys lists parameter keys that may contain secrets and must be
+// redacted before exposing scenario parameters to API clients. Keys are matched
+// case-insensitively to catch variations in casing conventions.
+var sensitiveKeys = map[string]bool{
+	"password":            true,
+	"passwd":              true,
+	"token":               true,
+	"api_key":             true,
+	"apikey":              true,
+	"secret":              true,
+	"secret_key":          true,
+	"access_key":          true,
+	"private_key":         true,
+	"credential":          true,
+	"credentials":         true,
+	"aws_secret_access_key": true,
+	"aws_access_key_id":     true,
+	"os_password":           true,
+	"azure_client_secret":   true,
+	"azure_client_id":       true,
+	"gcp_service_account":   true,
+	"auth_token":            true,
+	"bearer_token":          true,
+	"session_token":         true,
+	"cookie":                true,
+}
+
+// redactSensitiveParameters walks a scenario parameters JSON blob and replaces
+// values for sensitive keys with "***REDACTED***". Returns the redacted JSON or
+// the original raw message if redaction fails (so a malformed parameters blob
+// doesn't crash the query). Preserves the original JSON if no redaction occurred.
+func redactSensitiveParameters(raw json.RawMessage) json.RawMessage {
+	if len(raw) == 0 {
+		return raw
+	}
+	var v any
+	if err := json.Unmarshal(raw, &v); err != nil {
+		// Return original if unmarshal fails (malformed JSON)
+		return raw
+	}
+	redacted, changed := redactValueWithTracking(v)
+	if !changed {
+		// Return original JSON unchanged to preserve key ordering
+		return raw
+	}
+	result, err := json.Marshal(redacted)
+	if err != nil {
+		// Return original if re-marshal fails
+		return raw
+	}
+	return result
+}
+
+// redactValueWithTracking recursively walks a decoded JSON value and replaces
+// values for sensitive keys with "***REDACTED***". Returns the redacted value
+// and a boolean indicating whether any redaction occurred.
+func redactValueWithTracking(v any) (any, bool) {
+	switch val := v.(type) {
+	case map[string]any:
+		result := make(map[string]any, len(val))
+		changed := false
+		for k, nested := range val {
+			// Check if this key is sensitive (case-insensitive)
+			if isSensitiveKey(k) {
+				result[k] = "***REDACTED***"
+				changed = true
+			} else {
+				redacted, nestedChanged := redactValueWithTracking(nested)
+				result[k] = redacted
+				if nestedChanged {
+					changed = true
+				}
+			}
+		}
+		return result, changed
+	case []any:
+		result := make([]any, len(val))
+		changed := false
+		for i, elem := range val {
+			redacted, elemChanged := redactValueWithTracking(elem)
+			result[i] = redacted
+			if elemChanged {
+				changed = true
+			}
+		}
+		return result, changed
+	default:
+		// Scalar values (string, number, bool, null) are returned as-is
+		return val, false
+	}
+}
+
+// isSensitiveKey checks if a parameter key name matches a sensitive pattern.
+// Matching is case-insensitive to catch variations like "Password", "PASSWORD".
+func isSensitiveKey(key string) bool {
+	lower := strings.ToLower(key)
+	return sensitiveKeys[lower]
 }
 
 // namespaceFromParameters extracts the target namespace from a scenario's raw
