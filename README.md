@@ -254,6 +254,31 @@ registry:
 For a saved private registry, set `private` to `true` and include its
 `registryName`. Direct image references are not accepted.
 
+### Graph node resiliency weights
+
+Graph runs accept an optional `resiliencyWeight` on each node in the `graph`
+object. It is a positive multiplier for that scenario's contribution to the
+cluster resiliency score; omitted or legacy nodes use `1`.
+
+```json
+{
+  "graph": {
+    "pod-delete": {
+      "scenario": {"name": "pod-delete", "private": false},
+      "resiliencyWeight": 2.0
+    },
+    "pod-disruption": {
+      "scenario": {"name": "pod-disruption", "private": false},
+      "depends_on": "pod-delete"
+    }
+  }
+}
+```
+
+When resiliency scoring is enabled, the final score for a cluster is the
+weighted average of the completed node scores:
+`sum(node score * resiliencyWeight) / sum(resiliencyWeight)`.
+
 Authenticated users can read the image-signature verification setting at
 `GET /api/v1/operator/signature-verification`. Administrators can update it
 with `PATCH` and a required boolean body, for example

@@ -34,11 +34,12 @@ func ToKrknctlScenarioSet(graph map[string]GraphScenarioNode) krknctlmodels.Scen
 	for nodeID, node := range graph {
 		result[nodeID] = krknctlmodels.ScenarioNode{
 			Scenario: krknctlmodels.Scenario{
-				Comment: node.Comment,
-				Image:   "",
-				Name:    node.Scenario.Name,
-				Env:     node.Env,
-				Volumes: node.Volumes,
+				Comment:          node.Comment,
+				Image:            "",
+				Name:             node.Scenario.Name,
+				Env:              node.Env,
+				Volumes:          node.Volumes,
+				ResiliencyWeight: node.ResiliencyWeight,
 			},
 			Parent: node.DependsOn,
 		}
@@ -52,12 +53,13 @@ func FromKrknctlScenarioSet(scenarioSet krknctlmodels.ScenarioSet) map[string]Gr
 	result := make(map[string]GraphScenarioNode)
 	for nodeID, node := range scenarioSet {
 		result[nodeID] = GraphScenarioNode{
-			Comment:   node.Comment,
-			Scenario:  publicScenarioReference(node.Name),
-			Name:      node.Name,
-			Env:       node.Env,
-			Volumes:   node.Volumes,
-			DependsOn: node.Parent,
+			Comment:          node.Comment,
+			Scenario:         publicScenarioReference(node.Name),
+			Name:             node.Name,
+			Env:              node.Env,
+			Volumes:          node.Volumes,
+			ResiliencyWeight: node.ResiliencyWeight,
+			DependsOn:        node.Parent,
 		}
 	}
 	return result

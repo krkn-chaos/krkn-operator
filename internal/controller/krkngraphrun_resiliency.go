@@ -61,6 +61,7 @@ func (r *KrknGraphRunReconciler) calculateResiliencyScore(
 		providerName string
 		clusterName  string
 		nodeScores   map[string]float64
+		nodeWeights  map[string]float64
 	}
 	foundReports := false
 	// Key: "providerName/clusterName" to avoid collisions across providers
@@ -135,10 +136,12 @@ func (r *KrknGraphRunReconciler) calculateResiliencyScore(
 					providerName: jobStatus.ProviderName,
 					clusterName:  jobStatus.ClusterName,
 					nodeScores:   make(map[string]float64),
+					nodeWeights:  make(map[string]float64),
 				}
 				clusterAggs[aggKey] = agg
 			}
 			agg.nodeScores[nodeStatus.NodeID] = report.OverallReport.ResiliencyScore
+			agg.nodeWeights[nodeStatus.NodeID] = graphRun.Spec.Graph[nodeStatus.NodeID].ResiliencyWeight
 		}
 
 		// Persist per-cluster scores on the ScenarioRun (best-effort)
@@ -166,11 +169,7 @@ func (r *KrknGraphRunReconciler) calculateResiliencyScore(
 	var graphClusterScores []krknv1alpha1.GraphClusterScore
 
 	for _, agg := range clusterAggs {
-		var sum float64
-		for _, score := range agg.nodeScores {
-			sum += score
-		}
-		avgScore := sum / float64(len(agg.nodeScores))
+		avgScore := weightedScoreAverage(agg.nodeScores, agg.nodeWeights)
 
 		status := "no-baseline"
 		var message string
@@ -239,6 +238,24 @@ func (r *KrknGraphRunReconciler) calculateResiliencyScore(
 		"clusterCount", len(graphClusterScores))
 
 	return nil
+}
+
+// weightedScoreAverage returns the weighted average of node resiliency scores.
+// A zero weight preserves the default used by legacy graph nodes.
+func weightedScoreAverage(scores, weights map[string]float64) float64 {
+	var weightedSum, weightTotal float64
+	for nodeID, score := range scores {
+		weight := weights[nodeID]
+		if weight <= 0 {
+			weight = 1
+		}
+		weightedSum += score * weight
+		weightTotal += weight
+	}
+	if weightTotal == 0 {
+		return 0
+	}
+	return weightedSum / weightTotal
 }
 
 // fetchPodLogs fetches logs from a specific pod with exponential backoff retry.

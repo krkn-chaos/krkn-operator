@@ -58,6 +58,11 @@ definitions:
           ignored even when this field is present.
           +optional
         type: string
+      resiliencyWeight:
+        description: |-
+          ResiliencyWeight controls this node's contribution to the resiliency score.
+          +optional
+        type: number
       scenario:
         allOf:
         - $ref: '#/definitions/github_com_krkn-chaos_krkn-operator_api_v1alpha1.ScenarioReference'

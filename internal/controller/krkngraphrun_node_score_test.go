@@ -200,3 +200,21 @@ func TestScenarioRunStatus_ResiliencyScoresField(t *testing.T) {
 
 	assert.Empty(t, scenarioRunNoScore.Status.ResiliencyScores)
 }
+
+func TestWeightedScoreAverage(t *testing.T) {
+	score := weightedScoreAverage(
+		map[string]float64{"high-priority": 80, "normal": 100},
+		map[string]float64{"high-priority": 3, "normal": 1},
+	)
+
+	assert.Equal(t, 85.0, score)
+}
+
+func TestWeightedScoreAverageDefaultsLegacyWeight(t *testing.T) {
+	score := weightedScoreAverage(
+		map[string]float64{"legacy": 80, "weighted": 100},
+		map[string]float64{"weighted": 3},
+	)
+
+	assert.Equal(t, 95.0, score)
+}
