@@ -1,0 +1,69 @@
+# Sample KrknUserGroup configurations for testing group-based permissions
+# These groups can be used with the generated test users for scale testing
+
+---
+apiVersion: krkn.krkn-chaos.dev/v1alpha1
+kind: KrknUserGroup
+metadata:
+  name: qa-team
+  namespace: krkn-operator-system
+spec:
+  name: qa-team
+  description: "QA team with view and run permissions on development clusters"
+  clusterPermissions:
+    "https://api.dev-cluster-1.example.com:6443":
+      actions:
+        - view
+        - run
+    "https://api.dev-cluster-2.example.com:6443":
+      actions:
+        - view
+        - run
+        - cancel
+
+---
+apiVersion: krkn.krkn-chaos.dev/v1alpha1
+kind: KrknUserGroup
+metadata:
+  name: developers
+  namespace: krkn-operator-system
+spec:
+  name: developers
+  description: "Developer team with limited permissions"
+  clusterPermissions:
+    "https://api.dev-cluster-1.example.com:6443":
+      actions:
+        - view
+
+---
+apiVersion: krkn.krkn-chaos.dev/v1alpha1
+kind: KrknUserGroup
+metadata:
+  name: sre-team
+  namespace: krkn-operator-system
+spec:
+  name: sre-team
+  description: "SRE team with full permissions on all clusters"
+  clusterPermissions:
+    "https://api.dev-cluster-1.example.com:6443":
+      actions:
+        - view
+        - run
+        - cancel
+    "https://api.dev-cluster-2.example.com:6443":
+      actions:
+        - view
+        - run
+        - cancel
+    "https://api.prod-cluster.example.com:6443":
+      actions:
+        - view
+        - run
+        - cancel
+
+---
+# User assignments (automatically applied by generate-users.sh):
+# - qa-team: test-user-3 through test-user-7
+# - developers: test-user-8 through test-user-12
+# - sre-team: test-user-13 through test-user-15
+# - Admins (test-user-1, test-user-2): no group assignment needed
