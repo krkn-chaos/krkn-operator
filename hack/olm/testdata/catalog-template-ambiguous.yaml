@@ -1,13 +1,9 @@
 ---
 schema: olm.template.basic
 entries:
-  - defaultChannel: stable-ocp
-    name: krkn-operator
-    schema: olm.package
   - entries:
-      - name: krkn-operator.v1.1.0
-        replaces: krkn-operator.v1.0.6
       - name: krkn-operator.v1.0.6
+      - name: krkn-operator.v1.1.0
     name: stable-ocp
     package: krkn-operator
     schema: olm.channel
