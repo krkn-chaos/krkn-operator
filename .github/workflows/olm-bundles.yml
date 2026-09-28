@@ -49,6 +49,9 @@ jobs:
     - name: Test catalog channel head selection
       run: bash hack/olm/test-channel-head.sh
 
+    - name: Test release channel selection
+      run: bash hack/olm/test-release-channel.sh
+
     - name: Test chart exposure templates
       run: |
         chmod +x hack/olm/test-chart-exposure.sh

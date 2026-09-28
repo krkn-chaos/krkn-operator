@@ -26,7 +26,10 @@ OpenShift:
 - `quay.io/krkn-chaos/krkn-operator-bundle:<version>` — Kubernetes bundle;
 - `quay.io/krkn-chaos/krkn-operator-bundle-ocp:<version>` — OpenShift bundle.
 
-The bundles use the `stable-kubernetes` and `stable-ocp` channels respectively.
+The `1.0.x` bundles use the `stable-kubernetes` and `stable-ocp` channels
+respectively. Later release lines use versioned channels, such as
+`stable-kubernetes-1.1` and `stable-ocp-1.1`, so maintenance releases on one
+line do not replace bundles from another line.
 The OLM bundle declares Kubernetes `1.19.0` as its minimum version, matching the
 published compatibility matrix.
 For a disposable cluster with OLM installed, a published bundle can be tested
