@@ -19,6 +19,7 @@ output_basename=$(basename "$3")
 }
 
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
+source "$repo_root/hack/olm/release-channel.sh"
 profile=$1
 version=$2
 output_parent=$(dirname "$3")
@@ -46,6 +47,8 @@ case "$profile" in
     usage
     ;;
 esac
+
+channel=$(release_channel_for_version "$channel" "$version")
 
 command -v helm >/dev/null || { echo "helm is required" >&2; exit 1; }
 command -v operator-sdk >/dev/null || { echo "operator-sdk is required" >&2; exit 1; }
