@@ -76,6 +76,17 @@ jobs:
           echo "All owned CRDs must have a description" >&2
           exit 1
         fi
+        if test "$(yq '[.spec.customresourcedefinitions.owned[] | select((.displayName // "") == "")] | length' "$csv_file")" -ne 0; then
+          echo "All owned CRDs must have a displayName" >&2
+          exit 1
+        fi
+        while IFS= read -r crd_file; do
+          test "$(yq -r '.kind // ""' "$crd_file")" = CustomResourceDefinition || continue
+          test -n "$(yq -r '.metadata.annotations."alm-examples" // ""' "$crd_file")" || {
+            echo "CRD is missing its alm-examples annotation: $crd_file" >&2
+            exit 1
+          }
+        done < <(find "$output_dir/manifests" -type f -name '*.yaml' -print)
         while IFS= read -r yaml_file; do
           test "$(head -n 1 "$yaml_file")" = "---"
           if awk 'length($0) > 180 { exit 1 }' "$yaml_file"; then

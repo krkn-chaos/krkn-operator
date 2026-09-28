@@ -319,6 +319,13 @@ jobs:
           path: dist/bundle-ocp
           if-no-files-found: error
 
+      - name: Upload Kubernetes bundle for OperatorHub submission
+        uses: actions/upload-artifact@v4
+        with:
+          name: olm-bundle-kubernetes-${{ github.ref_name }}
+          path: dist/bundle-kubernetes
+          if-no-files-found: error
+
   submit-community-catalog:
     name: Open community operators catalog PR
     needs: publish-olm-bundles
@@ -348,3 +355,34 @@ jobs:
           }
           chmod +x hack/olm/open-community-operators-pr.sh
           hack/olm/open-community-operators-pr.sh "${RELEASE_TAG#v}" dist/bundle-ocp
+
+  submit-operatorhub-catalog:
+    name: Open OperatorHub catalog PR
+    needs: publish-olm-bundles
+    if: vars.KUBERNETES_OPERATORS_FORK != ''
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    env:
+      RELEASE_TAG: ${{ github.ref_name }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download Kubernetes bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: olm-bundle-kubernetes-${{ github.ref_name }}
+          path: dist/bundle-kubernetes
+
+      - name: Open OperatorHub catalog PR
+        env:
+          GH_TOKEN: ${{ secrets.KUBERNETES_OPERATORS_TOKEN }}
+          KUBERNETES_OPERATORS_FORK: ${{ vars.KUBERNETES_OPERATORS_FORK }}
+        run: |
+          test -n "$KUBERNETES_OPERATORS_FORK" || {
+            echo "Repository variable KUBERNETES_OPERATORS_FORK is not configured" >&2
+            exit 1
+          }
+          chmod +x hack/olm/open-kubernetes-operators-pr.sh
+          hack/olm/open-kubernetes-operators-pr.sh "${RELEASE_TAG#v}" dist/bundle-kubernetes

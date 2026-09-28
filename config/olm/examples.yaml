@@ -1,4 +1,11 @@
 - apiVersion: krkn.krkn-chaos.dev/v1alpha1
+  kind: KrknCategory
+  metadata:
+    name: example-category
+  spec:
+    color: '#4C9AFF'
+
+- apiVersion: krkn.krkn-chaos.dev/v1alpha1
   kind: KrknGraphRun
   metadata:
     name: example-graph-run
