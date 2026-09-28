@@ -471,6 +471,8 @@ type UnifiedJobItem struct {
 	Name string `json:"name"`
 	// CreatedAt is the creation timestamp (used for sorting)
 	CreatedAt time.Time `json:"createdAt"`
+	// Categories contains visible category names associated with the run.
+	Categories []string `json:"categories,omitempty"`
 	// ScenarioRun contains the scenario run data (when Type == "scenarioRun")
 	ScenarioRun *ScenarioRunListItem `json:"scenarioRun,omitempty"`
 	// GraphRun contains the graph run data (when Type == "graphRun")

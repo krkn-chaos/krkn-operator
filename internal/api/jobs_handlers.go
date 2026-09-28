@@ -17,9 +17,11 @@ limitations under the License.
 package api
 
 import (
+	"context"
 	"net/http"
 	"sort"
 	"strconv"
+	"strings"
 
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
 	"github.com/krkn-chaos/krkn-operator/internal/api/jobstats"
@@ -44,7 +46,7 @@ func getDefaultPageSize() int {
 // Returns a unified, paginated list of standalone ScenarioRuns and GraphRuns sorted by creation time (newest first).
 //
 // @Summary List all jobs (unified view)
-// @Description Returns a merged list of standalone ScenarioRuns and GraphRuns, sorted by creation time descending
+// @Description Returns a merged list of standalone ScenarioRuns and GraphRuns, sorted by creation time descending. Each item includes category names visible to the caller.
 // @Tags jobs
 // @Produce json
 // @Param page query int false "Page number (1-based). Omit for all results."
@@ -85,6 +87,14 @@ func (h *Handler) ListJobs(w http.ResponseWriter, r *http.Request) {
 
 	// Build unified list
 	jobs := BuildUnifiedJobList(filteredScenarioRuns, filteredGraphRuns)
+	if err := h.filterJobCategoriesByVisibility(ctx, jobs); err != nil {
+		logger.Error(err, "Failed to determine category visibility for jobs")
+		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+			Error:   "internal_error",
+			Message: "Failed to determine category visibility",
+		})
+		return
+	}
 
 	// Compute aggregate stats from the full list before pagination
 	stats := ComputeJobStats(jobs)
@@ -113,6 +123,42 @@ func (h *Handler) ListJobs(w http.ResponseWriter, r *http.Request) {
 
 	logger.Info("Listed jobs", "total", response.Pagination.Total, "page", response.Pagination.Page, "returned", len(response.Jobs))
 	writeJSON(w, http.StatusOK, response)
+}
+
+func (h *Handler) filterJobCategoriesByVisibility(ctx context.Context, jobs []UnifiedJobItem) error {
+	visibleCategories, err := h.VisibleCategoryNames(ctx)
+	if err != nil {
+		return err
+	}
+
+	for i := range jobs {
+		visibleNames := jobs[i].Categories[:0]
+		for _, name := range jobs[i].Categories {
+			if _, ok := visibleCategories[name]; ok {
+				visibleNames = append(visibleNames, name)
+			}
+		}
+		if len(visibleNames) == 0 {
+			jobs[i].Categories = nil
+		} else {
+			sort.Strings(visibleNames)
+			jobs[i].Categories = visibleNames
+		}
+	}
+
+	return nil
+}
+
+func runCategoryNames(labels map[string]string) []string {
+	var names []string
+	for key, value := range labels {
+		if value != "true" || !strings.HasPrefix(key, krknv1alpha1.CategoryEntityLabelPrefix) {
+			continue
+		}
+		names = append(names, strings.TrimPrefix(key, krknv1alpha1.CategoryEntityLabelPrefix))
+	}
+	sort.Strings(names)
+	return names
 }
 
 // ComputeJobStats computes aggregate job statistics from the full unified job list.
@@ -154,6 +200,7 @@ func BuildUnifiedJobList(scenarioRuns []krknv1alpha1.KrknScenarioRun, graphRuns 
 			Type:        "scenarioRun",
 			Name:        sr.Name,
 			CreatedAt:   sr.CreationTimestamp.Time,
+			Categories:  runCategoryNames(sr.Labels),
 			ScenarioRun: &item,
 		})
 	}
@@ -181,10 +228,11 @@ func BuildUnifiedJobList(scenarioRuns []krknv1alpha1.KrknScenarioRun, graphRuns 
 			ResiliencyScores:        convertGraphClusterScores(gr.Status.ResiliencyScores),
 		}
 		jobs = append(jobs, UnifiedJobItem{
-			Type:      "graphRun",
-			Name:      gr.Name,
-			CreatedAt: gr.CreationTimestamp.Time,
-			GraphRun:  &item,
+			Type:       "graphRun",
+			Name:       gr.Name,
+			CreatedAt:  gr.CreationTimestamp.Time,
+			Categories: runCategoryNames(gr.Labels),
+			GraphRun:   &item,
 		})
 	}
 

@@ -1,8 +1,11 @@
 package websocket
 
 import (
+	"context"
+	"fmt"
 	"math"
 	"sort"
+	"strings"
 	"time"
 
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
@@ -10,12 +13,29 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+type categoryVisibilityChecker interface {
+	VisibleCategoryNames(context.Context) (map[string]struct{}, error)
+}
+
+func visibleCategoryNames(ctx context.Context, checker AuthorizationChecker) (map[string]struct{}, error) {
+	categoryChecker, ok := checker.(categoryVisibilityChecker)
+	if !ok {
+		return map[string]struct{}{}, nil
+	}
+	visible, err := categoryChecker.VisibleCategoryNames(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("get visible category names: %w", err)
+	}
+	return visible, nil
+}
+
 // WSUnifiedJobItem represents a single item in the unified jobs list for WebSocket responses.
 // Uses the same typed envelope as REST UnifiedJobItem for frontend compatibility.
 type WSUnifiedJobItem struct {
 	Type        string                     `json:"type"` // "scenarioRun" or "graphRun"
 	Name        string                     `json:"name"`
 	CreatedAt   string                     `json:"createdAt"` // RFC3339 timestamp
+	Categories  []string                   `json:"categories,omitempty"`
 	ScenarioRun *ScenarioRunStatusResponse `json:"scenarioRun,omitempty"`
 	GraphRun    *GraphRunResponse          `json:"graphRun,omitempty"`
 }
@@ -84,6 +104,7 @@ func buildUnifiedJobList(scenarioRuns []krknv1alpha1.KrknScenarioRun, graphRuns 
 			Type:        "scenarioRun",
 			Name:        sr.Name,
 			CreatedAt:   sr.CreationTimestamp.Format(time.RFC3339),
+			Categories:  runCategoryNames(sr.Labels),
 			ScenarioRun: &resp,
 		})
 	}
@@ -92,10 +113,11 @@ func buildUnifiedJobList(scenarioRuns []krknv1alpha1.KrknScenarioRun, graphRuns 
 		gr := &graphRuns[i]
 		resp := buildGraphRunResponse(gr)
 		jobs = append(jobs, WSUnifiedJobItem{
-			Type:      "graphRun",
-			Name:      gr.Name,
-			CreatedAt: gr.CreationTimestamp.Format(time.RFC3339),
-			GraphRun:  &resp,
+			Type:       "graphRun",
+			Name:       gr.Name,
+			CreatedAt:  gr.CreationTimestamp.Format(time.RFC3339),
+			Categories: runCategoryNames(gr.Labels),
+			GraphRun:   &resp,
 		})
 	}
 
@@ -104,6 +126,63 @@ func buildUnifiedJobList(scenarioRuns []krknv1alpha1.KrknScenarioRun, graphRuns 
 	})
 
 	return jobs
+}
+
+func runCategoryNames(labels map[string]string) []string {
+	names := make([]string, 0, len(labels))
+	for key, value := range labels {
+		if value != "true" || !strings.HasPrefix(key, krknv1alpha1.CategoryEntityLabelPrefix) {
+			continue
+		}
+		names = append(names, strings.TrimPrefix(key, krknv1alpha1.CategoryEntityLabelPrefix))
+	}
+	sort.Strings(names)
+	return names
+}
+
+func filterJobCategoriesByVisibility(jobs []WSUnifiedJobItem, visible map[string]struct{}) {
+	for i := range jobs {
+		visibleNames := jobs[i].Categories[:0]
+		for _, name := range jobs[i].Categories {
+			if _, ok := visible[name]; ok {
+				visibleNames = append(visibleNames, name)
+			}
+		}
+		if len(visibleNames) == 0 {
+			jobs[i].Categories = nil
+		} else {
+			jobs[i].Categories = visibleNames
+		}
+	}
+}
+
+// filterJobsByCategories returns jobs that match at least one requested category.
+// An empty selection leaves the job list unchanged.
+func filterJobsByCategories(jobs []WSUnifiedJobItem, categories []string) []WSUnifiedJobItem {
+	if len(categories) == 0 {
+		return jobs
+	}
+
+	selected := make(map[string]struct{}, len(categories))
+	for _, category := range categories {
+		if category != "" {
+			selected[category] = struct{}{}
+		}
+	}
+	if len(selected) == 0 {
+		return jobs
+	}
+
+	filtered := jobs[:0]
+	for _, job := range jobs {
+		for _, category := range job.Categories {
+			if _, ok := selected[category]; ok {
+				filtered = append(filtered, job)
+				break
+			}
+		}
+	}
+	return filtered
 }
 
 // paginateJobItems returns a page of items and pagination metadata.

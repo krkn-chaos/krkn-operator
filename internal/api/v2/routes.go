@@ -27,7 +27,7 @@ const (
 	APIBasePath = "/api/" + APIVersion
 )
 
-// REST endpoints (reuse v1 handlers for backward compatibility)
+// REST endpoints. Existing v2 run and dashboard routes reuse v1 handlers.
 const (
 	// Scenarios endpoints (same as v1)
 	ScenariosPath        = APIBasePath + "/scenarios"
@@ -39,6 +39,9 @@ const (
 
 	// Jobs endpoint (unified paginated view of ScenarioRuns + GraphRuns)
 	JobsPath = APIBasePath + "/jobs"
+
+	// Categories endpoint for category definitions used to label Krkn entities.
+	CategoriesPath = APIBasePath + "/categories"
 
 	// Dashboard endpoints (same as v1)
 	DashboardPath           = APIBasePath + "/dashboard"

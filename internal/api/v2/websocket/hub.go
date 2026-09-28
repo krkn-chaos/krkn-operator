@@ -27,9 +27,11 @@ import (
 
 // PaginationClientState tracks per-client pagination state for a resource type.
 type PaginationClientState struct {
-	Page     int
-	Limit    int
-	LastHash uint64 // fingerprint of last sent page content
+	Page           int
+	Limit          int
+	Categories     []string
+	SubscriptionID string
+	LastHash       uint64 // fingerprint of last sent page content
 }
 
 // Client represents a connected WebSocket client

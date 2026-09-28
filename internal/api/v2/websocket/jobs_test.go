@@ -43,10 +43,12 @@ func TestHandleClientMessage_JobsSubscribe(t *testing.T) {
 	page := 2
 	limit := 5
 	msg := &ClientMessage{
-		Action:   "subscribe",
-		Resource: "jobs",
-		Page:     &page,
-		Limit:    &limit,
+		Action:         "subscribe",
+		Resource:       "jobs",
+		Page:           &page,
+		Limit:          &limit,
+		Categories:     []string{"resilience", "network"},
+		SubscriptionID: "jobs-sub-2",
 	}
 
 	handler.handleClientMessage(client, msg)
@@ -68,6 +70,12 @@ func TestHandleClientMessage_JobsSubscribe(t *testing.T) {
 	}
 	if ps.Limit != 5 {
 		t.Errorf("expected limit 5, got %d", ps.Limit)
+	}
+	if ps.SubscriptionID != "jobs-sub-2" {
+		t.Errorf("expected subscription ID jobs-sub-2, got %q", ps.SubscriptionID)
+	}
+	if len(ps.Categories) != 2 || ps.Categories[0] != "resilience" || ps.Categories[1] != "network" {
+		t.Errorf("expected category filters to be stored, got %v", ps.Categories)
 	}
 }
 
@@ -486,5 +494,90 @@ func TestPaginateJobItems(t *testing.T) {
 	}
 	if meta.Total != 10 {
 		t.Errorf("expected total 10 even beyond range, got %d", meta.Total)
+	}
+}
+
+func TestFilterJobsByCategoriesMatchesAnySelectedCategory(t *testing.T) {
+	jobs := []WSUnifiedJobItem{
+		{Name: "resilience-run", Categories: []string{"resilience"}},
+		{Name: "network-run", Categories: []string{"network"}},
+		{Name: "uncategorized-run"},
+	}
+
+	filtered := filterJobsByCategories(jobs, []string{"resilience", "network"})
+	if len(filtered) != 2 || filtered[0].Name != "resilience-run" || filtered[1].Name != "network-run" {
+		t.Fatalf("expected runs matching either category, got %#v", filtered)
+	}
+
+	if got := filterJobsByCategories(jobs, nil); len(got) != len(jobs) {
+		t.Fatalf("empty category filter should keep all jobs, got %d of %d", len(got), len(jobs))
+	}
+}
+
+type categoryVisibilityMock struct {
+	mockAuthzChecker
+	visible map[string]struct{}
+}
+
+func (m *categoryVisibilityMock) VisibleCategoryNames(context.Context) (map[string]struct{}, error) {
+	return m.visible, nil
+}
+
+func TestBroadcastJobsPageUpdateEchoesSubscriptionAndAppliesCategories(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = krknv1alpha1.AddToScheme(scheme)
+	scenarioRuns := []krknv1alpha1.KrknScenarioRun{
+		{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "resilience-run", Namespace: "default",
+				CreationTimestamp: metav1.NewTime(time.Now()),
+				Labels:            map[string]string{krknv1alpha1.CategoryEntityLabelPrefix + "resilience": "true"},
+			},
+			Status: krknv1alpha1.KrknScenarioRunStatus{Phase: "Succeeded"},
+		},
+		{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "network-run", Namespace: "default",
+				CreationTimestamp: metav1.NewTime(time.Now().Add(-time.Minute)),
+				Labels:            map[string]string{krknv1alpha1.CategoryEntityLabelPrefix + "network": "true"},
+			},
+			Status: krknv1alpha1.KrknScenarioRunStatus{Phase: "Succeeded"},
+		},
+	}
+	fakeClient := fakeclient.NewClientBuilder().WithScheme(scheme).WithObjects(&scenarioRuns[0], &scenarioRuns[1]).Build()
+	hub := NewHub()
+	go hub.Run()
+	client := &Client{
+		userID: "test-user", isAdmin: true, send: make(chan []byte, 16),
+		subscriptions: map[string]map[string]bool{"jobs": {"*": true}},
+		paginationState: map[string]*PaginationClientState{
+			"jobs": {Page: 1, Limit: 10, Categories: []string{"resilience"}, SubscriptionID: "jobs-sub-current"},
+		},
+	}
+	hub.register <- client
+	time.Sleep(10 * time.Millisecond)
+
+	broadcaster := NewBroadcaster(hub, &categoryVisibilityMock{visible: map[string]struct{}{"resilience": {}, "network": {}}}, fakeClient, "default")
+	broadcaster.BroadcastJobsPageUpdate(context.Background())
+
+	select {
+	case data := <-client.send:
+		var message struct {
+			SubscriptionID string `json:"subscriptionId"`
+			Data           struct {
+				Jobs []WSUnifiedJobItem `json:"jobs"`
+			} `json:"data"`
+		}
+		if err := json.Unmarshal(data, &message); err != nil {
+			t.Fatalf("decode jobs snapshot: %v", err)
+		}
+		if message.SubscriptionID != "jobs-sub-current" {
+			t.Errorf("expected current subscription ID, got %q", message.SubscriptionID)
+		}
+		if len(message.Data.Jobs) != 1 || message.Data.Jobs[0].Name != "resilience-run" {
+			t.Errorf("expected only category-matching jobs, got %#v", message.Data.Jobs)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for jobs snapshot")
 	}
 }
