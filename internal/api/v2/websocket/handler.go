@@ -79,7 +79,7 @@ func NewHandler(hub *Hub, k8sClient k8sclient.Client, namespace string, authz Au
 		pingInterval:   54 * time.Second,
 		pongWait:       60 * time.Second,
 		writeWait:      10 * time.Second,
-		maxMessageSize: 512,
+		maxMessageSize: 16 * 1024,
 	}
 }
 
