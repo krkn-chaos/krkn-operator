@@ -100,6 +100,22 @@ helm template krkn-operator "$repo_root/charts/krkn-operator" \
 mkdir -p "$render_dir/krkn-operator/crds"
 cp "$repo_root"/charts/krkn-operator/crds/*.yaml "$render_dir/krkn-operator/crds/"
 
+# Feed examples to Operator SDK before bundle generation as well as applying
+# them to the final CRDs below. This keeps generation quiet and ensures the
+# generated CSV sees the same examples that OperatorHub displays.
+while IFS= read -r crd_file; do
+  [[ "$(yq -r '.kind // ""' "$crd_file")" == "CustomResourceDefinition" ]] || continue
+  crd_kind=$(yq -r '.spec.names.kind // ""' "$crd_file")
+  [[ -n "$crd_kind" ]] || continue
+  export CRD_KIND="$crd_kind"
+  crd_example_json=$(yq -o=json -I=2 '[.[] | select(.kind == strenv(CRD_KIND))]' "$EXAMPLES_FILE")
+  export CRD_EXAMPLE_JSON="$crd_example_json"
+  yq -i \
+    '.metadata.annotations = (.metadata.annotations // {}) |
+     .metadata.annotations."alm-examples" = strenv(CRD_EXAMPLE_JSON)' \
+    "$crd_file"
+done < <(find "$render_dir/krkn-operator/crds" -type f -name '*.yaml' -print)
+
 rm -rf "$output_dir"
 mkdir -p "$output_dir"
 
@@ -212,9 +228,23 @@ for crd_file in "$output_dir"/manifests/*.yaml; do
   crd_description=$(yq -r '.spec.versions[0].schema.openAPIV3Schema.description // ""' "$crd_file")
   [[ -n "$crd_name" && -n "$crd_kind" ]] || continue
 
+  case "$crd_kind" in
+    KrknCategory) crd_display_name="Krkn Category" ;;
+    KrknGraphRun) crd_display_name="Krkn Graph Run" ;;
+    KrknOperatorTargetProviderConfig) crd_display_name="Krkn Operator Target Provider Config" ;;
+    KrknOperatorTargetProvider) crd_display_name="Krkn Operator Target Provider" ;;
+    KrknOperatorTarget) crd_display_name="Krkn Operator Target" ;;
+    KrknScenarioRun) crd_display_name="Krkn Scenario Run" ;;
+    KrknTargetRequest) crd_display_name="Krkn Target Request" ;;
+    KrknUserGroup) crd_display_name="Krkn User Group" ;;
+    KrknUser) crd_display_name="Krkn User" ;;
+    *) crd_display_name="$crd_kind" ;;
+  esac
+
   export CRD_NAME="$crd_name"
   export CRD_KIND="$crd_kind"
   export CRD_DESCRIPTION="$crd_description"
+  export CRD_DISPLAY_NAME="$crd_display_name"
   export CRD_EXAMPLE_JSON="$(yq -o=json -I=2 '[.[] | select(.kind == strenv(CRD_KIND))]' "$EXAMPLES_FILE")"
 
   yq -i \
@@ -224,7 +254,9 @@ for crd_file in "$output_dir"/manifests/*.yaml; do
 
   yq -i \
     '(.spec.customresourcedefinitions.owned[] |
-      select(.name == strenv(CRD_NAME))).description = strenv(CRD_DESCRIPTION)' \
+      select(.name == strenv(CRD_NAME)) | .displayName) = strenv(CRD_DISPLAY_NAME) |
+     (.spec.customresourcedefinitions.owned[] |
+      select(.name == strenv(CRD_NAME)) | .description) = strenv(CRD_DESCRIPTION)' \
     "$csv_file"
 done
 
