@@ -29,7 +29,10 @@ OpenShift:
 The `1.0.x` bundles use the `stable-kubernetes` and `stable-ocp` channels
 respectively. Later release lines use versioned channels, such as
 `stable-kubernetes-1.1` and `stable-ocp-1.1`, so maintenance releases on one
-line do not replace bundles from another line.
+line do not replace bundles from another line. A prerelease does not change the
+package default channel; the first stable release of a newer line promotes its
+versioned channel as the default, while maintenance releases on older lines do
+not change it back.
 The OLM bundle declares Kubernetes `1.19.0` as its minimum version, matching the
 published compatibility matrix.
 For a disposable cluster with OLM installed, a published bundle can be tested

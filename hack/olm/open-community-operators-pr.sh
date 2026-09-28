@@ -15,6 +15,7 @@ version=$1
 bundle_dir=$2
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 source "$script_dir/release-channel.sh"
+source "$script_dir/catalog-channel.sh"
 channel_name=$(release_channel_for_version stable-ocp "$version")
 
 [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-.+][0-9A-Za-z.-]+)?$ ]] || {
@@ -68,23 +69,17 @@ catalog_template="$package_dir/catalog-templates/basic.yaml"
   exit 1
 }
 
-export OLM_PACKAGE_NAME=krkn-operator OLM_CHANNEL_NAME="$channel_name"
-channel_count=$(yq -r '[.entries[] | select(.schema == "olm.channel" and .package == strenv(OLM_PACKAGE_NAME) and .name == strenv(OLM_CHANNEL_NAME))] | length' "$catalog_template")
-if [[ "$channel_count" == 0 ]]; then
-  yq -i '.entries += [{"entries": [], "name": strenv(OLM_CHANNEL_NAME), "package": strenv(OLM_PACKAGE_NAME), "schema": "olm.channel"}]' "$catalog_template"
-elif [[ "$channel_count" != 1 ]]; then
-  echo "expected at most one krkn-operator/$channel_name channel entry, found $channel_count" >&2
-  exit 1
-fi
-
-channel_entries=$(yq -r '[.entries[] | select(.schema == "olm.channel" and .package == strenv(OLM_PACKAGE_NAME) and .name == strenv(OLM_CHANNEL_NAME) and (.entries | length > 0))] | length' "$catalog_template")
+ensure_catalog_channel "$catalog_template" krkn-operator "$channel_name"
 previous_bundle=""
-if [[ "$channel_entries" == 1 ]]; then
+if channel_has_entries "$catalog_template" krkn-operator "$channel_name"; then
   previous_bundle=$(bash "$script_dir/channel-head.sh" "$catalog_template" krkn-operator "$channel_name")
   [[ "$previous_bundle" =~ ^krkn-operator\.v[0-9]+\.[0-9]+\.[0-9]+([-.+][0-9A-Za-z.-]+)?$ ]] || {
     echo "unable to determine the previous $channel_name bundle from $catalog_template: $previous_bundle" >&2
     exit 1
   }
+fi
+if [[ "$channel_name" != stable-ocp && "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+  update_default_channel "$catalog_template" krkn-operator "$channel_name"
 fi
 
 mkdir -p "$version_dir"
@@ -130,16 +125,7 @@ yq -i \
   exit 1
 }
 
-cat > "$version_dir/release-config.yaml" <<EOF
----
-catalog_templates:
-  - template_name: basic.yaml
-    channels:
-      - $channel_name
-EOF
-if [[ -n "$previous_bundle" ]]; then
-  printf '    replaces: %s\n' "$previous_bundle" >>"$version_dir/release-config.yaml"
-fi
+write_release_config "$version_dir" "$channel_name" "$previous_bundle"
 
 git -C "$work_dir/catalog" add "operators/krkn-operator/$version" "$catalog_template"
 git -C "$work_dir/catalog" commit -m "operator: update krkn-operator bundle to $version"
