@@ -208,7 +208,7 @@ type KrknScenarioRunStatus struct {
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 // +kubebuilder:resource:shortName=ksr
 
-// KrknScenarioRun is the Schema for the krknscenrarioruns API
+// KrknScenarioRun is the Schema for the krknscenarioruns API.
 type KrknScenarioRun struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`

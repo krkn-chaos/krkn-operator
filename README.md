@@ -65,6 +65,11 @@ open pull requests against `redhat-openshift-ecosystem/community-operators-prod`
 OperatorHub remains responsible for validating and merging the catalog pull
 request.
 
+The same release workflow also prepares a Kubernetes bundle and opens a PR
+against `k8s-operatorhub/community-operators` when the
+`KUBERNETES_OPERATORS_FORK` repository variable and
+`KUBERNETES_OPERATORS_TOKEN` secret are configured.
+
 📖 For configuration, usage, compatibility, and advanced installation options, see the official documentation.📖 For configuration, usage, compatibility, and advanced installation options, see the **[official documentation](https://krkn-chaos.gateway.scarf.sh/krkn-operator/docs?source=github)**.
 
 ## Ecosystem
