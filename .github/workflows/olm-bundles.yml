@@ -57,6 +57,12 @@ jobs:
         chmod +x hack/olm/test-chart-exposure.sh
         hack/olm/test-chart-exposure.sh
 
+    - name: Test Kubernetes catalog submission validation
+      run: bash hack/olm/test-open-kubernetes-operators-pr.sh
+
+    - name: Test catalog submission helper
+      run: bash hack/olm/test-catalog-submit.sh
+
     - name: Render and validate bundle
       run: |
         chmod +x hack/olm/render-bundle.sh
