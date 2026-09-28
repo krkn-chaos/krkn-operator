@@ -1,7 +1,7 @@
 {
     "swagger": "2.0",
     "info": {
-        "description": "REST and WebSocket API for Krkn chaos engineering operator.\n\n**API Versions:**\n- **v1** - REST API with polling (deprecated but maintained)\n- **v2** - REST API (same as v1) + WebSocket real-time updates\n\n**WebSocket Authentication (v2):**\nWebSocket endpoints use JWT via subprotocol header:\n- JavaScript: `new WebSocket(url, 'access_token.' + jwtToken)`\n- Header: `Sec-WebSocket-Protocol: access_token.\u003cjwt_token\u003e`\n\n**Migration Path:**\n1. v1 REST → v2 REST (no changes, just update base path)\n2. v2 REST → v2 WebSocket (replace polling with multiplexed WebSocket)",
+        "description": "REST and WebSocket API for Krkn chaos engineering operator.\n\n**API Versions:**\n- **v1** - REST API with polling (deprecated but maintained)\n- **v2** - REST API with v2-specific resources + WebSocket real-time updates\n\n**WebSocket Authentication (v2):**\nWebSocket endpoints use JWT via subprotocol header:\n- JavaScript: `new WebSocket(url, 'access_token.' + jwtToken)`\n- Header: `Sec-WebSocket-Protocol: access_token.\u003cjwt_token\u003e`\n\n**Migration Path:**\n1. v1 REST → v2 REST (no changes, just update base path)\n2. v2 REST → v2 WebSocket (replace polling with multiplexed WebSocket)",
         "title": "Krkn Operator API",
         "termsOfService": "https://krkn-chaos.dev/terms",
         "contact": {
@@ -141,6 +141,49 @@
                     },
                     "409": {
                         "description": "User already exists",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/backup": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Create and download a backup archive of all operator configuration (admin-only)",
+                "produces": [
+                    "application/gzip"
+                ],
+                "tags": [
+                    "backup"
+                ],
+                "summary": "Download operator configuration backup",
+                "responses": {
+                    "200": {
+                        "description": "Backup archive (tar.gz)",
+                        "schema": {
+                            "type": "file"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden - admin access required",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
                         "schema": {
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
@@ -1210,6 +1253,119 @@
                 }
             }
         },
+        "/restore": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Upload a backup archive and restore all operator configuration (admin-only). Restore runs asynchronously and rechecks restored target connectivity when complete.",
+                "consumes": [
+                    "multipart/form-data"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "backup"
+                ],
+                "summary": "Restore operator configuration from uploaded backup",
+                "parameters": [
+                    {
+                        "type": "file",
+                        "description": "Backup archive (tar.gz)",
+                        "name": "backup",
+                        "in": "formData",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "202": {
+                        "description": "Restore started",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.RestoreResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request or missing file",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden - admin access required",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/restore/{jobID}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Get the status of a restore operation by job ID (admin-only)",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "backup"
+                ],
+                "summary": "Get restore job status",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Restore job ID",
+                        "name": "jobID",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Restore status",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.RestoreResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden - admin access required",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Job not found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/scenarios": {
             "post": {
                 "security": [
@@ -1620,6 +1776,135 @@
                 }
             }
         },
+        "/scenarios/run/{runId}/reports/status": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Get HTML/PDF report generation status for a scenario run.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "scenario-runs"
+                ],
+                "summary": "Get scenario run report status",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Scenario run name",
+                        "name": "runId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Report status",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Malformed report status path",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Access denied",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Scenario run not found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Report generation or Kubernetes API failure",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/scenarios/run/{runId}/reports/summary.{format}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Download the generated HTML or PDF report for a scenario run.",
+                "produces": [
+                    "text/html",
+                    "application/pdf"
+                ],
+                "tags": [
+                    "scenario-runs"
+                ],
+                "summary": "Download a scenario run report",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Scenario run name",
+                        "name": "runId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "enum": [
+                            "html",
+                            "pdf"
+                        ],
+                        "type": "string",
+                        "description": "Report format",
+                        "name": "format",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Generated report",
+                        "schema": {
+                            "type": "file"
+                        }
+                    },
+                    "400": {
+                        "description": "Malformed report path or format",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Access denied",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Scenario run or report not found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Report storage failure",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/scenarios/run/{scenarioRunName}": {
             "get": {
                 "security": [
@@ -1884,6 +2169,493 @@
                 }
             }
         },
+        "/v2/categories": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "List public categories, categories in the caller's groups, and categories created by the caller. Admins can list all categories.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "categories"
+                ],
+                "summary": "List categories",
+                "responses": {
+                    "200": {
+                        "description": "Categories",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.CategoryListResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Authentication required",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Create a public category or a category visible to one of the caller's groups. If no group is specified, the category is public. Admins may select any existing group.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "categories"
+                ],
+                "summary": "Create a category",
+                "parameters": [
+                    {
+                        "description": "Category definition",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.CreateCategoryRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created category",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.CategoryResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid category",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Authentication required",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "The caller does not belong to the selected group",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Category already exists",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/v2/categories/{category}/entities/{entityType}/{entityName}": {
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Add one category label to a scenario or graph run. Existing category and metadata labels are preserved.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "categories"
+                ],
+                "summary": "Associate a run with a category",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Category name",
+                        "name": "category",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "enum": [
+                            "scenario-runs",
+                            "graph-runs"
+                        ],
+                        "type": "string",
+                        "description": "Run type",
+                        "name": "entityType",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Run name",
+                        "name": "entityName",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Association created or already present",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.CategoryEntityAssociationResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid category, run name, or run type",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Authentication required",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "The caller cannot access the category or run",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Category or run not found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Run changed concurrently",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Remove one category label from a scenario or graph run. Other category and metadata labels are preserved.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "categories"
+                ],
+                "summary": "Remove a run from a category",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Category name",
+                        "name": "category",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "enum": [
+                            "scenario-runs",
+                            "graph-runs"
+                        ],
+                        "type": "string",
+                        "description": "Run type",
+                        "name": "entityType",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Run name",
+                        "name": "entityName",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Association removed or already absent",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.CategoryEntityAssociationResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid category, run name, or run type",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Authentication required",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "The caller cannot access the category or run",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Category or run not found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Run changed concurrently",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/v2/categories/{name}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Get a public category, a category in the caller's groups, or a category created by the caller. Admins can get all categories.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "categories"
+                ],
+                "summary": "Get a category",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Category name",
+                        "name": "name",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Category",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.CategoryResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid category name",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Authentication required",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "The caller cannot access this category",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Category not found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Update a category's color and optionally its visibility. Category creators and admins may update it.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "categories"
+                ],
+                "summary": "Update a category",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Category name",
+                        "name": "name",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Mutable category fields",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.UpdateCategoryRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Updated category",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.CategoryResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid category",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Authentication required",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Only the category creator or an admin may update it",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Category not found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Category changed concurrently",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Delete a category created by the caller. Admins may delete any category. The category label is removed from all associated KrknScenarioRun and KrknGraphRun resources before the category is deleted.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "categories"
+                ],
+                "summary": "Delete a category",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Category name",
+                        "name": "name",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Deletion result",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid category name",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Authentication required",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Only the category creator or an admin may delete it",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Category not found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/v2/jobs": {
             "get": {
                 "security": [
@@ -1891,7 +2663,7 @@
                         "BearerAuth": []
                     }
                 ],
-                "description": "Returns a merged list of standalone ScenarioRuns and GraphRuns, sorted by creation time descending",
+                "description": "Returns a merged list of standalone ScenarioRuns and GraphRuns, sorted by creation time descending. Each item includes category names visible to the caller.",
                 "produces": [
                     "application/json"
                 ],
@@ -1936,7 +2708,7 @@
                         "BearerAuth": []
                     }
                 ],
-                "description": "Multiplexed WebSocket for real-time updates across all resources\n\n**Authentication:** JWT token via Sec-WebSocket-Protocol subprotocol\n- JavaScript: `new WebSocket(url, 'access_token.' + jwtToken)`\n- Header: `Sec-WebSocket-Protocol: access_token.\u003cjwt_token\u003e`\n\n**Client → Server Messages (subscribe/unsubscribe):**\n```json\n{\n\"action\": \"subscribe\",\n\"resource\": \"run\",\n\"ids\": [\"run-abc123\", \"run-xyz789\"]\n}\n```\n\n**Resource types:** `run`, `graphrun`, `dashboard`\n\n**Server → Client Messages (updates):**\n```json\n{\n\"resource\": \"run\",\n\"id\": \"run-abc123\",\n\"event\": \"updated\",\n\"data\": { ... }\n}\n```\n\n**Available endpoints:**\n- `/api/v2/ws/runs` - Subscribe to scenario run updates\n- `/api/v2/ws/graphruns` - Subscribe to graph run updates\n- `/api/v2/ws/dashboard/active-runs` - Subscribe to dashboard updates",
+                "description": "Multiplexed WebSocket for real-time updates across all resources\n\n**Authentication:** JWT token via Sec-WebSocket-Protocol subprotocol\n- JavaScript: `new WebSocket(url, 'access_token.' + jwtToken)`\n- Header: `Sec-WebSocket-Protocol: access_token.\u003cjwt_token\u003e`\n\n**Client → Server Messages (subscribe/unsubscribe):**\n```json\n{\n\"action\": \"subscribe\",\n\"resource\": \"run\",\n\"ids\": [\"run-abc123\", \"run-xyz789\"]\n}\n```\n\n**Resource types:** `run`, `graphrun`, `dashboard`\n\n**Server → Client Messages (updates):**\n```json\n{\n\"resource\": \"run\",\n\"id\": \"run-abc123\",\n\"event\": \"updated\",\n\"data\": { ... }\n}\n```\n\n**Available endpoints:**\n- `/api/v2/ws/runs` - Subscribe to scenario run updates\n- `/api/v2/ws/graphruns` - Subscribe to graph run updates\n- `/api/v2/ws/jobs` - Subscribe to unified jobs list (paginated scenario runs + graph runs)\n- `/api/v2/ws/dashboard/active-runs` - Subscribe to dashboard updates",
                 "consumes": [
                     "application/json"
                 ],
@@ -1976,7 +2748,47 @@
                         "BearerAuth": []
                     }
                 ],
-                "description": "Multiplexed WebSocket for real-time updates across all resources\n\n**Authentication:** JWT token via Sec-WebSocket-Protocol subprotocol\n- JavaScript: `new WebSocket(url, 'access_token.' + jwtToken)`\n- Header: `Sec-WebSocket-Protocol: access_token.\u003cjwt_token\u003e`\n\n**Client → Server Messages (subscribe/unsubscribe):**\n```json\n{\n\"action\": \"subscribe\",\n\"resource\": \"run\",\n\"ids\": [\"run-abc123\", \"run-xyz789\"]\n}\n```\n\n**Resource types:** `run`, `graphrun`, `dashboard`\n\n**Server → Client Messages (updates):**\n```json\n{\n\"resource\": \"run\",\n\"id\": \"run-abc123\",\n\"event\": \"updated\",\n\"data\": { ... }\n}\n```\n\n**Available endpoints:**\n- `/api/v2/ws/runs` - Subscribe to scenario run updates\n- `/api/v2/ws/graphruns` - Subscribe to graph run updates\n- `/api/v2/ws/dashboard/active-runs` - Subscribe to dashboard updates",
+                "description": "Multiplexed WebSocket for real-time updates across all resources\n\n**Authentication:** JWT token via Sec-WebSocket-Protocol subprotocol\n- JavaScript: `new WebSocket(url, 'access_token.' + jwtToken)`\n- Header: `Sec-WebSocket-Protocol: access_token.\u003cjwt_token\u003e`\n\n**Client → Server Messages (subscribe/unsubscribe):**\n```json\n{\n\"action\": \"subscribe\",\n\"resource\": \"run\",\n\"ids\": [\"run-abc123\", \"run-xyz789\"]\n}\n```\n\n**Resource types:** `run`, `graphrun`, `dashboard`\n\n**Server → Client Messages (updates):**\n```json\n{\n\"resource\": \"run\",\n\"id\": \"run-abc123\",\n\"event\": \"updated\",\n\"data\": { ... }\n}\n```\n\n**Available endpoints:**\n- `/api/v2/ws/runs` - Subscribe to scenario run updates\n- `/api/v2/ws/graphruns` - Subscribe to graph run updates\n- `/api/v2/ws/jobs` - Subscribe to unified jobs list (paginated scenario runs + graph runs)\n- `/api/v2/ws/dashboard/active-runs` - Subscribe to dashboard updates",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "websocket"
+                ],
+                "summary": "WebSocket real-time updates",
+                "responses": {
+                    "101": {
+                        "description": "Switching protocols - WebSocket upgrade successful",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_v2_websocket.ServerMessage"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized - missing or invalid JWT token",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_v2_websocket.ErrorMessage"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_v2_websocket.ErrorMessage"
+                        }
+                    }
+                }
+            }
+        },
+        "/v2/ws/jobs": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Multiplexed WebSocket for real-time updates across all resources\n\n**Authentication:** JWT token via Sec-WebSocket-Protocol subprotocol\n- JavaScript: `new WebSocket(url, 'access_token.' + jwtToken)`\n- Header: `Sec-WebSocket-Protocol: access_token.\u003cjwt_token\u003e`\n\n**Client → Server Messages (subscribe/unsubscribe):**\n```json\n{\n\"action\": \"subscribe\",\n\"resource\": \"run\",\n\"ids\": [\"run-abc123\", \"run-xyz789\"]\n}\n```\n\n**Resource types:** `run`, `graphrun`, `dashboard`\n\n**Server → Client Messages (updates):**\n```json\n{\n\"resource\": \"run\",\n\"id\": \"run-abc123\",\n\"event\": \"updated\",\n\"data\": { ... }\n}\n```\n\n**Available endpoints:**\n- `/api/v2/ws/runs` - Subscribe to scenario run updates\n- `/api/v2/ws/graphruns` - Subscribe to graph run updates\n- `/api/v2/ws/jobs` - Subscribe to unified jobs list (paginated scenario runs + graph runs)\n- `/api/v2/ws/dashboard/active-runs` - Subscribe to dashboard updates",
                 "consumes": [
                     "application/json"
                 ],
@@ -2016,7 +2828,7 @@
                         "BearerAuth": []
                     }
                 ],
-                "description": "Multiplexed WebSocket for real-time updates across all resources\n\n**Authentication:** JWT token via Sec-WebSocket-Protocol subprotocol\n- JavaScript: `new WebSocket(url, 'access_token.' + jwtToken)`\n- Header: `Sec-WebSocket-Protocol: access_token.\u003cjwt_token\u003e`\n\n**Client → Server Messages (subscribe/unsubscribe):**\n```json\n{\n\"action\": \"subscribe\",\n\"resource\": \"run\",\n\"ids\": [\"run-abc123\", \"run-xyz789\"]\n}\n```\n\n**Resource types:** `run`, `graphrun`, `dashboard`\n\n**Server → Client Messages (updates):**\n```json\n{\n\"resource\": \"run\",\n\"id\": \"run-abc123\",\n\"event\": \"updated\",\n\"data\": { ... }\n}\n```\n\n**Available endpoints:**\n- `/api/v2/ws/runs` - Subscribe to scenario run updates\n- `/api/v2/ws/graphruns` - Subscribe to graph run updates\n- `/api/v2/ws/dashboard/active-runs` - Subscribe to dashboard updates",
+                "description": "Multiplexed WebSocket for real-time updates across all resources\n\n**Authentication:** JWT token via Sec-WebSocket-Protocol subprotocol\n- JavaScript: `new WebSocket(url, 'access_token.' + jwtToken)`\n- Header: `Sec-WebSocket-Protocol: access_token.\u003cjwt_token\u003e`\n\n**Client → Server Messages (subscribe/unsubscribe):**\n```json\n{\n\"action\": \"subscribe\",\n\"resource\": \"run\",\n\"ids\": [\"run-abc123\", \"run-xyz789\"]\n}\n```\n\n**Resource types:** `run`, `graphrun`, `dashboard`\n\n**Server → Client Messages (updates):**\n```json\n{\n\"resource\": \"run\",\n\"id\": \"run-abc123\",\n\"event\": \"updated\",\n\"data\": { ... }\n}\n```\n\n**Available endpoints:**\n- `/api/v2/ws/runs` - Subscribe to scenario run updates\n- `/api/v2/ws/graphruns` - Subscribe to graph run updates\n- `/api/v2/ws/jobs` - Subscribe to unified jobs list (paginated scenario runs + graph runs)\n- `/api/v2/ws/dashboard/active-runs` - Subscribe to dashboard updates",
                 "consumes": [
                     "application/json"
                 ],
@@ -2224,6 +3036,10 @@
             "properties": {
                 "_comment": {
                     "description": "Comment is an optional comment describing the scenario\n+optional",
+                    "type": "string"
+                },
+                "cloudCredentialRef": {
+                    "description": "CloudCredentialRef overrides the graph-level cloud credential for this specific node\n+optional",
                     "type": "string"
                 },
                 "depends_on": {
@@ -2625,10 +3441,6 @@
                     "description": "FilePurpose is an optional system-level classification (e.g., \"workflow-template\")",
                     "type": "string"
                 },
-                "fileType": {
-                    "description": "FileType is an optional file type category (e.g., \"config\", \"script\") - for user categorization",
-                    "type": "string"
-                },
                 "groups": {
                     "description": "Groups is a list of group names that can access this file",
                     "type": "array",
@@ -2683,10 +3495,6 @@
                 },
                 "filePurpose": {
                     "description": "FilePurpose is the system-level classification (e.g., \"workflow-template\")",
-                    "type": "string"
-                },
-                "fileType": {
-                    "description": "FileType is an optional file type category (e.g., \"config\", \"script\") - for user categorization",
                     "type": "string"
                 },
                 "groups": {
@@ -2748,10 +3556,6 @@
                 },
                 "filePurpose": {
                     "description": "FilePurpose is the system-level classification (e.g., \"workflow-template\")",
-                    "type": "string"
-                },
-                "fileType": {
-                    "description": "FileType is an optional file type category (e.g., \"config\", \"script\") - for user categorization",
                     "type": "string"
                 },
                 "groups": {
@@ -2818,10 +3622,6 @@
                     "description": "Description is an optional description of the workflow",
                     "type": "string"
                 },
-                "fileType": {
-                    "description": "FileType is an optional user-defined category (e.g., \"pod-chaos\", \"network-chaos\")",
-                    "type": "string"
-                },
                 "graph": {
                     "description": "Graph is the workflow graph definition (map of node ID to GraphScenarioNode)",
                     "type": "object",
@@ -2883,10 +3683,6 @@
                     "description": "Description is an optional description of the workflow",
                     "type": "string"
                 },
-                "fileType": {
-                    "description": "FileType is the user-defined category",
-                    "type": "string"
-                },
                 "nodeCount": {
                     "description": "NodeCount is the number of nodes in the workflow graph",
                     "type": "integer"
@@ -2918,10 +3714,6 @@
                 },
                 "description": {
                     "description": "Description is an optional description of the workflow",
-                    "type": "string"
-                },
-                "fileType": {
-                    "description": "FileType is the user-defined category",
                     "type": "string"
                 },
                 "graph": {
@@ -2961,14 +3753,77 @@
                 }
             }
         },
+        "internal_api.CategoryEntityAssociationResponse": {
+            "type": "object",
+            "properties": {
+                "associated": {
+                    "type": "boolean"
+                },
+                "category": {
+                    "type": "string"
+                },
+                "entityName": {
+                    "type": "string"
+                },
+                "entityType": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_api.CategoryListResponse": {
+            "type": "object",
+            "properties": {
+                "categories": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_api.CategoryResponse"
+                    }
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
+        "internal_api.CategoryResponse": {
+            "type": "object",
+            "properties": {
+                "availableToAll": {
+                    "description": "AvailableToAll is true for public categories. Categories created without a group default to public.",
+                    "type": "boolean"
+                },
+                "color": {
+                    "type": "string"
+                },
+                "createdBy": {
+                    "description": "CreatedBy identifies the user allowed to update or delete the category, unless the caller is an admin.",
+                    "type": "string"
+                },
+                "groups": {
+                    "description": "Groups contains the single group allowed to view the category, when group-scoped.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "name": {
+                    "type": "string"
+                }
+            }
+        },
         "internal_api.ClusterResiliencyScoreResponse": {
             "type": "object",
             "properties": {
                 "clusterName": {
                     "type": "string"
                 },
+                "message": {
+                    "type": "string"
+                },
                 "score": {
                     "type": "number"
+                },
+                "status": {
+                    "type": "string"
                 }
             }
         },
@@ -2988,6 +3843,28 @@
                             "$ref": "#/definitions/github_com_krkn-chaos_krkn-operator_api_v1alpha1.ClusterTarget"
                         }
                     }
+                }
+            }
+        },
+        "internal_api.CreateCategoryRequest": {
+            "type": "object",
+            "properties": {
+                "availableToAll": {
+                    "description": "AvailableToAll makes the category public. It cannot be combined with Groups.",
+                    "type": "boolean"
+                },
+                "color": {
+                    "type": "string"
+                },
+                "groups": {
+                    "description": "Groups may contain one group. Omit it to create a public category.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "name": {
+                    "type": "string"
                 }
             }
         },
@@ -3052,6 +3929,10 @@
         "internal_api.GraphRunCreateRequest": {
             "type": "object",
             "properties": {
+                "cloudCredentialRef": {
+                    "description": "CloudCredentialRef is the default cloud credential for all nodes (optional)",
+                    "type": "string"
+                },
                 "graph": {
                     "description": "Graph is the dependency graph of scenarios to execute",
                     "type": "object",
@@ -3456,6 +4337,23 @@
                 }
             }
         },
+        "internal_api.RestoreResponse": {
+            "type": "object",
+            "properties": {
+                "jobId": {
+                    "type": "string"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "startedAt": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                }
+            }
+        },
         "internal_api.ScenarioDetailResponse": {
             "type": "object",
             "properties": {
@@ -3523,6 +4421,10 @@
                     "description": "ResiliencyScore is the individual resiliency score for this scenario run node",
                     "type": "number"
                 },
+                "resiliencyScoreEnabled": {
+                    "description": "ResiliencyScoreEnabled indicates whether resiliency scoring is enabled for this run",
+                    "type": "boolean"
+                },
                 "resiliencyScores": {
                     "description": "ResiliencyScores contains per-cluster resiliency scores",
                     "type": "array",
@@ -3579,6 +4481,10 @@
         "internal_api.ScenarioRunRequest": {
             "type": "object",
             "properties": {
+                "cloudCredentialRef": {
+                    "description": "CloudCredentialRef, if set, names a saved cloud credential Secret whose\nreference is set on the CRD spec for controller-level SecretKeyRef injection.",
+                    "type": "string"
+                },
                 "customRunName": {
                     "description": "CustomRunName is a user-provided label for the run (optional)",
                     "type": "string"
@@ -3613,8 +4519,12 @@
                     "type": "string"
                 },
                 "registryName": {
-                    "description": "RegistryName is retained for old in-memory callers and legacy JSON\nrequests. New clients select registries through Scenario.",
+                    "description": "RegistryName is the name of a saved registry (optional)\nIf omitted, defaults to quay.io public registry",
                     "type": "string"
+                },
+                "resiliencyScoreEnabled": {
+                    "description": "ResiliencyScoreEnabled enables resiliency score calculation for this scenario run.\nWhen true, RESILIENCY_SCORE=true is set in scenario pods and the controller\ncalculates scores from pod logs upon completion.",
+                    "type": "boolean"
                 },
                 "scenario": {
                     "description": "Scenario identifies the scenario and registry to resolve. The operator\nresolves the executable image through krknctl; callers cannot provide one.",
@@ -3707,6 +4617,13 @@
         "internal_api.UnifiedJobItem": {
             "type": "object",
             "properties": {
+                "categories": {
+                    "description": "Categories contains visible category names associated with the run.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "createdAt": {
                     "description": "CreatedAt is the creation timestamp (used for sorting)",
                     "type": "string"
@@ -3762,6 +4679,24 @@
                             "$ref": "#/definitions/internal_api.JobStatsSummary"
                         }
                     ]
+                }
+            }
+        },
+        "internal_api.UpdateCategoryRequest": {
+            "type": "object",
+            "properties": {
+                "availableToAll": {
+                    "type": "boolean"
+                },
+                "color": {
+                    "type": "string"
+                },
+                "groups": {
+                    "description": "Groups and AvailableToAll must be sent together to change visibility. When omitted, the current visibility is preserved.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
                 }
             }
         },

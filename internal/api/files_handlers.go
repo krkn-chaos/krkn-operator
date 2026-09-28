@@ -80,7 +80,6 @@ func (h *Handler) CreateFile(w http.ResponseWriter, r *http.Request) {
 	if err := validateCreateFileRequest(ctx, h.client, &req, h.namespace, isAdmin, claims.UserID); err != nil {
 		logger.Info("File validation failed",
 			"fileName", req.FileName,
-			"fileType", req.FileType,
 			"groups", req.Groups,
 			"availableToAll", req.AvailableToAll,
 			"error", err.Error())
@@ -143,15 +142,8 @@ func (h *Handler) CreateFile(w http.ResponseWriter, r *http.Request) {
 	// Get current user for audit trail
 	createdBy := claims.UserID
 
-	// Auto-create file type if specified and doesn't exist
-	if req.FileType != "" {
-		if err := h.ensureFileTypeExists(ctx, req.FileType, createdBy); err != nil {
-			logger.Error(err, "Failed to ensure file type exists", "fileType", req.FileType)
-		}
-	}
-
 	// Build labels and annotations
-	labels := files.BuildFileLabels(fileID, req.FileType, req.Groups, req.AvailableToAll, req.FilePurpose, logicalName)
+	labels := files.BuildFileLabels(fileID, req.Groups, req.AvailableToAll, req.FilePurpose, logicalName)
 	annotations := files.BuildFileAnnotations(
 		req.Description,
 		createdBy,
@@ -362,7 +354,6 @@ func (h *Handler) UpdateFile(w http.ResponseWriter, r *http.Request) {
 		logger.Info("File update validation failed",
 			"fileID", fileID,
 			"fileName", req.FileName,
-			"fileType", req.FileType,
 			"groups", req.Groups,
 			"availableToAll", req.AvailableToAll,
 			"error", err.Error())
@@ -466,15 +457,8 @@ func (h *Handler) UpdateFile(w http.ResponseWriter, r *http.Request) {
 	// Get current user for audit trail
 	updatedBy := claims.UserID
 
-	// Auto-create file type if specified and doesn't exist
-	if req.FileType != "" {
-		if err := h.ensureFileTypeExists(ctx, req.FileType, updatedBy); err != nil {
-			logger.Error(err, "Failed to ensure file type exists", "fileType", req.FileType)
-		}
-	}
-
 	// Update labels and annotations (preserve existing file ID)
-	configMap.Labels = files.BuildFileLabels(fileID, req.FileType, req.Groups, req.AvailableToAll, req.FilePurpose, newLogicalName)
+	configMap.Labels = files.BuildFileLabels(fileID, req.Groups, req.AvailableToAll, req.FilePurpose, newLogicalName)
 	configMap.Annotations = files.UpdateFileAnnotations(
 		configMap.Annotations,
 		req.Description,
@@ -903,7 +887,6 @@ func buildFileResponse(configMap *corev1.ConfigMap) files.FileResponse {
 		StudioLayout:   studioLayout,
 		WorkflowName:   logicalName,
 		Description:    configMap.Annotations[files.DescriptionAnnotation],
-		FileType:       files.ExtractFileTypeFromLabels(configMap.Labels),
 		FilePurpose:    files.ExtractFilePurposeFromLabels(configMap.Labels),
 		Groups:         files.ExtractGroupsFromLabels(configMap.Labels),
 		AvailableToAll: configMap.Labels[files.AvailableToAllLabel] == "true",
@@ -920,7 +903,6 @@ func buildFileInfo(configMap *corev1.ConfigMap) files.FileInfo {
 		FileID:         files.ExtractFileIDFromLabels(configMap.Labels),
 		FileName:       configMap.Annotations[files.WorkflowNameAnnotation],
 		Description:    configMap.Annotations[files.DescriptionAnnotation],
-		FileType:       files.ExtractFileTypeFromLabels(configMap.Labels),
 		FilePurpose:    files.ExtractFilePurposeFromLabels(configMap.Labels),
 		Groups:         files.ExtractGroupsFromLabels(configMap.Labels),
 		AvailableToAll: configMap.Labels[files.AvailableToAllLabel] == "true",
@@ -1070,45 +1052,4 @@ func validateCreateFileRequest(ctx context.Context, k8sClient client.Client, req
 // validateUpdateFileRequest validates an UpdateFileRequest
 func validateUpdateFileRequest(ctx context.Context, k8sClient client.Client, req *files.UpdateFileRequest, namespace string, isAdmin bool, userID string) error {
 	return validateFileFields(ctx, k8sClient, req.FileName, req.Content, req.Groups, req.AvailableToAll, namespace, isAdmin, userID)
-}
-
-// ensureFileTypeExists creates a KrknFileType if it doesn't exist (auto-creation pattern).
-// This allows users to use file types without having to create them explicitly first.
-// If the type already exists, this is a no-op.
-func (h *Handler) ensureFileTypeExists(ctx context.Context, typeName, createdBy string) error {
-	logger := log.FromContext(ctx).WithName("ensure-file-type")
-
-	var fileType krknv1alpha1.KrknFileType
-	err := h.client.Get(ctx, client.ObjectKey{
-		Name:      typeName,
-		Namespace: h.namespace,
-	}, &fileType)
-
-	if err == nil {
-		// Already exists
-		return nil
-	}
-
-	if !apierrors.IsNotFound(err) {
-		return fmt.Errorf("failed to check file type existence: %w", err)
-	}
-
-	// Create new file type with defaults (empty color = UI will use defaults)
-	newType := &krknv1alpha1.KrknFileType{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      typeName,
-			Namespace: h.namespace,
-		},
-		Spec: krknv1alpha1.KrknFileTypeSpec{
-			Name:  typeName,
-			Color: "", // Empty = use UI default
-		},
-	}
-
-	if err := h.client.Create(ctx, newType); err != nil {
-		return fmt.Errorf("failed to auto-create file type: %w", err)
-	}
-
-	logger.Info("Auto-created file type", "typeName", typeName, "createdBy", createdBy)
-	return nil
 }

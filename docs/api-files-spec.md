@@ -38,7 +38,6 @@ Creates a new file and returns its auto-generated UUID.
   "fileName": "app.conf",
   "content": "{\"server\": \"localhost\", \"port\": 8080}",
   "description": "Application configuration",
-  "fileType": "config",
   "groups": ["dev-team"],
   "availableToAll": false
 }
@@ -71,7 +70,6 @@ Lists all files (admin only).
       "fileName": "app.conf",
       "content": "{\"server\": \"localhost\", \"port\": 8080}",
       "description": "Application configuration",
-      "fileType": "config",
       "groups": ["dev-team"],
       "availableToAll": false,
       "createdAt": "2025-01-15T10:30:00Z",
@@ -97,8 +95,7 @@ Lists files accessible to the current user (based on group membership or public 
     {
       "fileId": "550e8400-e29b-41d4-a716-446655440001",
       "fileName": "app.conf",
-      "description": "Application configuration",
-      "fileType": "config"
+      "description": "Application configuration"
     }
   ]
 }
@@ -117,7 +114,6 @@ Retrieves a single file by UUID.
   "fileName": "app.conf",
   "content": "{\"server\": \"localhost\", \"port\": 8080}",
   "description": "Application configuration",
-  "fileType": "config",
   "groups": ["dev-team"],
   "availableToAll": false,
   "createdAt": "2025-01-15T10:30:00Z",
@@ -141,7 +137,6 @@ Updates an existing file.
   "fileName": "app.conf",
   "content": "{\"server\": \"production\", \"port\": 9090}",
   "description": "Updated application configuration",
-  "fileType": "config",
   "groups": ["ops-team"],
   "availableToAll": false
 }
@@ -193,7 +188,6 @@ metadata:
     app.kubernetes.io/component: file
     files.krkn.krkn-chaos.dev/file-id: "550e8400-e29b-41d4-a716-446655440001"
     files.krkn.krkn-chaos.dev/available-to-all: "true"
-    file-type.krkn.krkn-chaos.dev/config: "true"
     group.krkn.krkn-chaos.dev/dev-team: "true"
   annotations:
     files.krkn.krkn-chaos.dev/description: "Application configuration"
@@ -213,10 +207,6 @@ data:
 - **Label Values**: Max 63 characters
   - UUID: 36 characters (standard UUID format with hyphens)
 
-### File Type Auto-Creation
-
-When a file references a `fileType` that doesn't exist, a corresponding `KrknFileType` custom resource is automatically created with default settings.
-
 ## Usage Examples
 
 ### Create a Public Configuration File
@@ -229,7 +219,6 @@ curl -X POST http://localhost:8080/api/v1/files \
     "fileName": "global-settings.json",
     "content": "{\"timeout\": 30, \"retries\": 3}",
     "description": "Global application settings",
-    "fileType": "config",
     "availableToAll": true
   }'
 ```
@@ -259,7 +248,6 @@ curl -X PUT http://localhost:8080/api/v1/files/a1b2c3d4-e5f6-7890-abcd-ef1234567
     "fileName": "global-settings.json",
     "content": "{\"timeout\": 60, \"retries\": 5}",
     "description": "Updated global settings",
-    "fileType": "config",
     "availableToAll": true
   }'
 ```

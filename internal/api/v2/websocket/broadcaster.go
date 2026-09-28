@@ -357,29 +357,40 @@ func (b *Broadcaster) BroadcastJobsPageUpdate(ctx context.Context) {
 
 		// Build unified sorted list
 		allJobs := buildUnifiedJobList(filteredScenarioRuns, filteredGraphRuns)
+		visibleCategories, err := visibleCategoryNames(ctx, b.authz)
+		if err != nil {
+			logger.Error(err, "Failed to determine category visibility for jobs update", "user", client.userID)
+			return
+		}
+		filterJobCategoriesByVisibility(allJobs, visibleCategories)
 
 		// Get this client's pagination state
 		client.mu.RLock()
-		ps := client.paginationState["jobs"]
+		var state PaginationClientState
+		if current := client.paginationState["jobs"]; current != nil {
+			state = *current
+		}
 		client.mu.RUnlock()
 
-		if ps == nil {
+		if state.Page <= 0 || state.Limit <= 0 {
 			return
 		}
+		allJobs = filterJobsByCategories(allJobs, state.Categories)
 
 		// Compute stats from the full list before pagination
 		stats := computeWSJobStats(allJobs)
 
 		// Paginate
-		pageItems, meta := paginateJobItems(allJobs, ps.Page, ps.Limit)
+		pageItems, meta := paginateJobItems(allJobs, state.Page, state.Limit)
 
 		snapshot := WSUnifiedJobsSnapshot{Jobs: pageItems, Stats: stats}
 		msg := ServerMessage{
-			Resource:   "jobs",
-			Event:      "snapshot",
-			Data:       snapshot,
-			Pagination: &meta,
-			Stats:      &stats,
+			Resource:       "jobs",
+			SubscriptionID: state.SubscriptionID,
+			Event:          "snapshot",
+			Data:           snapshot,
+			Pagination:     &meta,
+			Stats:          &stats,
 		}
 
 		data, err := json.Marshal(msg)
@@ -391,11 +402,16 @@ func (b *Broadcaster) BroadcastJobsPageUpdate(ctx context.Context) {
 		// Check fingerprint — skip if page content unchanged
 		fp := hashBytes(data)
 		client.mu.Lock()
-		if ps.LastHash == fp {
+		current := client.paginationState["jobs"]
+		if current == nil || current.SubscriptionID != state.SubscriptionID {
 			client.mu.Unlock()
 			return
 		}
-		ps.LastHash = fp
+		if current.LastHash == fp {
+			client.mu.Unlock()
+			return
+		}
+		current.LastHash = fp
 		client.mu.Unlock()
 
 		select {

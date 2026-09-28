@@ -316,8 +316,10 @@ func (h *Handler) handleClientMessage(client *Client, msg *ClientMessage) {
 			}
 			client.mu.Lock()
 			client.paginationState["jobs"] = &PaginationClientState{
-				Page:  page,
-				Limit: limit,
+				Page:           page,
+				Limit:          limit,
+				Categories:     append([]string(nil), msg.Categories...),
+				SubscriptionID: msg.SubscriptionID,
 			}
 			client.mu.Unlock()
 		}
@@ -620,18 +622,30 @@ func (h *Handler) sendJobsSnapshot(ctx context.Context, client *Client, logger l
 
 	// Build unified sorted list
 	allJobs := buildUnifiedJobList(filteredScenarioRuns, filteredGraphRuns)
+	visibleCategories, err := visibleCategoryNames(ctx, h.authz)
+	if err != nil {
+		logger.Error(err, "Failed to determine category visibility for jobs snapshot")
+		return
+	}
+	filterJobCategoriesByVisibility(allJobs, visibleCategories)
 
 	// Get pagination state
 	client.mu.RLock()
-	ps := client.paginationState["jobs"]
+	var state PaginationClientState
+	if current := client.paginationState["jobs"]; current != nil {
+		state = *current
+	}
 	client.mu.RUnlock()
 
 	page := 1
 	limit := h.getDefaultPageSize()
-	if ps != nil {
-		page = ps.Page
-		limit = ps.Limit
+	if state.Page > 0 {
+		page = state.Page
 	}
+	if state.Limit > 0 {
+		limit = state.Limit
+	}
+	allJobs = filterJobsByCategories(allJobs, state.Categories)
 
 	// Compute stats from the full list before pagination
 	stats := computeWSJobStats(allJobs)
@@ -641,11 +655,12 @@ func (h *Handler) sendJobsSnapshot(ctx context.Context, client *Client, logger l
 
 	snapshot := WSUnifiedJobsSnapshot{Jobs: pageItems, Stats: stats}
 	msg := ServerMessage{
-		Resource:   "jobs",
-		Event:      "snapshot",
-		Data:       snapshot,
-		Pagination: &meta,
-		Stats:      &stats,
+		Resource:       "jobs",
+		SubscriptionID: state.SubscriptionID,
+		Event:          "snapshot",
+		Data:           snapshot,
+		Pagination:     &meta,
+		Stats:          &stats,
 	}
 
 	data, err := json.Marshal(msg)
@@ -657,8 +672,8 @@ func (h *Handler) sendJobsSnapshot(ctx context.Context, client *Client, logger l
 	// Update fingerprint
 	fp := hashBytes(data)
 	client.mu.Lock()
-	if client.paginationState["jobs"] != nil {
-		client.paginationState["jobs"].LastHash = fp
+	if current := client.paginationState["jobs"]; current != nil && current.SubscriptionID == state.SubscriptionID {
+		current.LastHash = fp
 	}
 	client.mu.Unlock()
 

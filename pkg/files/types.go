@@ -31,8 +31,6 @@ type CreateFileRequest struct {
 	WorkflowName string `json:"workflowName,omitempty"`
 	// Description is an optional description of the file
 	Description string `json:"description,omitempty"`
-	// FileType is an optional file type category (e.g., "config", "script") - for user categorization
-	FileType string `json:"fileType,omitempty"`
 	// Groups is a list of group names that can access this file
 	Groups []string `json:"groups,omitempty"`
 	// AvailableToAll makes the file accessible to all users
@@ -61,8 +59,6 @@ type UpdateFileRequest struct {
 	WorkflowName *string `json:"workflowName,omitempty"`
 	// Description is an optional description of the file
 	Description string `json:"description,omitempty"`
-	// FileType is an optional file type category (e.g., "config", "script") - for user categorization
-	FileType string `json:"fileType,omitempty"`
 	// Groups is a list of group names that can access this file
 	Groups []string `json:"groups,omitempty"`
 	// AvailableToAll makes the file accessible to all users
@@ -97,8 +93,6 @@ type FileResponse struct {
 	WorkflowName string `json:"workflowName,omitempty"`
 	// Description is an optional description of the file
 	Description string `json:"description,omitempty"`
-	// FileType is an optional file type category (e.g., "config", "script") - for user categorization
-	FileType string `json:"fileType,omitempty"`
 	// FilePurpose is the system-level classification (e.g., "workflow-template")
 	FilePurpose string `json:"filePurpose,omitempty"`
 	// Groups is a list of group names that can access this file
@@ -123,8 +117,6 @@ type FileInfo struct {
 	FileName string `json:"fileName"`
 	// Description is an optional description of the file
 	Description string `json:"description,omitempty"`
-	// FileType is an optional file type category (e.g., "config", "script") - for user categorization
-	FileType string `json:"fileType,omitempty"`
 	// FilePurpose is the system-level classification (e.g., "workflow-template")
 	FilePurpose string `json:"filePurpose,omitempty"`
 	// Groups is a list of group names that can access this file.
