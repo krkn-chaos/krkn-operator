@@ -24,6 +24,7 @@ import (
 // strPtr returns a pointer to s, for the tri-state CACert field in update tests.
 func strPtr(s string) *string { return &s }
 
+// boolPtr returns a pointer to the given bool value.
 func boolPtr(b bool) *bool { return &b }
 
 func TestValidateCreateRequest(t *testing.T) {

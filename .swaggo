@@ -1,0 +1,9 @@
+// swaggo global type overrides, consumed by `swag init --overridesFile` (default: .swaggo).
+//
+// Telemetry scenario parameters are passed through verbatim as raw JSON and vary in shape
+// by scenario type: an object (e.g. {"pvc_scenario":{...}}), an array
+// (e.g. [{"config":{...}}]), or an array nested in an object. json.RawMessage cannot be
+// expressed as an unconstrained schema through the swaggertype struct tag, so remap it to
+// the RawJSON named interface type here; swaggo emits an empty schema ({}) for interface
+// types, so the field accepts every JSON shape (object, array, or scalar).
+replace encoding/json.RawMessage github.com/krkn-chaos/krkn-operator/pkg/elasticsearch.RawJSON
