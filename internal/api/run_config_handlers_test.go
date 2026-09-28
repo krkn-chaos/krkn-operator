@@ -289,6 +289,7 @@ func TestGetGraphRunConfig_Success(t *testing.T) {
 			TargetClusters: map[string][]string{
 				"krkn-operator": {"cluster1"},
 			},
+			MaxRetries:  0,
 			OwnerUserID: "owner@test.com",
 		},
 	}
@@ -322,6 +323,8 @@ func TestGetGraphRunConfig_Success(t *testing.T) {
 
 	assert.Equal(t, "target-graph-123", payload.TargetRequestID)
 	assert.Equal(t, map[string][]string{"krkn-operator": {"cluster1"}}, payload.TargetClusters)
+	require.NotNil(t, payload.MaxRetries)
+	assert.Equal(t, 0, *payload.MaxRetries)
 
 	require.Len(t, payload.Graph, 2)
 	assert.Equal(t, "scenario-a", payload.Graph["node-1"].Scenario.Name)

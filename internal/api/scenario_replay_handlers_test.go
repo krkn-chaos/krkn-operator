@@ -74,7 +74,8 @@ func TestGetScenarioReplay_Success(t *testing.T) {
 			TargetClusters: map[string][]string{
 				"krkn-operator": {"cluster1"},
 			},
-			Scenario: publicScenarioReference("dummy-scenario"),
+			Scenario:   publicScenarioReference("dummy-scenario"),
+			MaxRetries: 5,
 			Environment: map[string]string{
 				"EXIT_STATUS": "0",
 			},
@@ -121,6 +122,8 @@ func TestGetScenarioReplay_Success(t *testing.T) {
 	var payload ScenarioRunRequest
 	err := json.Unmarshal(w.Body.Bytes(), &payload)
 	require.NoError(t, err)
+	require.NotNil(t, payload.MaxRetries)
+	assert.Equal(t, 5, *payload.MaxRetries)
 
 	assert.Equal(t, "target-123", payload.TargetRequestID)
 	assert.Equal(t, "dummy-scenario", payload.Scenario.Name)

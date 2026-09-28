@@ -30,6 +30,92 @@ import (
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
 )
 
+func TestShouldRetryJobHonorsConfiguredRetryLimit(t *testing.T) {
+	reconciler := &KrknScenarioRunReconciler{}
+
+	tests := []struct {
+		name       string
+		retryCount int
+		maxRetries int
+		want       bool
+	}{
+		{name: "zero disables retries", retryCount: 0, maxRetries: 0, want: false},
+		{name: "one allows first retry", retryCount: 0, maxRetries: 1, want: true},
+		{name: "limit reached", retryCount: 1, maxRetries: 1, want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			job := &krknv1alpha1.ClusterJobStatus{
+				Phase:      "Failed",
+				RetryCount: tt.retryCount,
+			}
+			if got := reconciler.shouldRetryJob(job, tt.maxRetries); got != tt.want {
+				t.Fatalf("shouldRetryJob() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestBackfillLegacyMaxRetries(t *testing.T) {
+	tests := []struct {
+		name          string
+		scenarioLimit int
+		initialLimit  int
+		wantLimit     int
+		configured    bool
+	}{
+		{name: "uses scenario limit", scenarioLimit: 5, wantLimit: 5},
+		{name: "uses default when scenario limit is absent", wantLimit: 3},
+		{name: "preserves configured status limit", scenarioLimit: 5, initialLimit: 2, wantLimit: 2},
+		{name: "preserves configured zero", scenarioLimit: 5, wantLimit: 0, configured: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			job := &krknv1alpha1.ClusterJobStatus{MaxRetries: tt.initialLimit, MaxRetriesConfigured: tt.configured, PodName: "scenario-pod"}
+			backfillLegacyMaxRetries(job, tt.scenarioLimit)
+			if job.MaxRetries != tt.wantLimit {
+				t.Fatalf("backfillLegacyMaxRetries() = %d, want %d", job.MaxRetries, tt.wantLimit)
+			}
+		})
+	}
+}
+
+func TestUpdateClusterJobStatuses_PreservesExplicitZero(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = krknv1alpha1.AddToScheme(scheme)
+	_ = corev1.AddToScheme(scheme)
+
+	now := metav1.Now()
+	failedPod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "pod-zero", Namespace: "default"},
+		Status:     corev1.PodStatus{Phase: corev1.PodFailed},
+	}
+	scenarioRun := &krknv1alpha1.KrknScenarioRun{
+		ObjectMeta: metav1.ObjectMeta{Name: "scenario-zero", Namespace: "default"},
+		Spec:       krknv1alpha1.KrknScenarioRunSpec{MaxRetries: 0},
+		Status: krknv1alpha1.KrknScenarioRunStatus{
+			ReportStatus: &krknv1alpha1.ReportStatus{Generated: true},
+			ClusterJobs: []krknv1alpha1.ClusterJobStatus{
+				{PodName: "pod-zero", Phase: "Running", StartTime: &now, MaxRetries: 0, MaxRetriesConfigured: true},
+			},
+		},
+	}
+
+	reconciler := &KrknScenarioRunReconciler{
+		Client:    fake.NewClientBuilder().WithScheme(scheme).WithObjects(scenarioRun, failedPod).Build(),
+		Scheme:    scheme,
+		Namespace: "default",
+	}
+	if err := reconciler.updateClusterJobStatuses(context.Background(), scenarioRun); err != nil {
+		t.Fatalf("updateClusterJobStatuses() error = %v", err)
+	}
+	if got := scenarioRun.Status.ClusterJobs[0].Phase; got != "MaxRetriesExceeded" {
+		t.Fatalf("job phase = %q, want MaxRetriesExceeded", got)
+	}
+}
+
 func TestUpdateClusterJobStatuses_ProviderNameEmpty(t *testing.T) {
 	scheme := runtime.NewScheme()
 	_ = krknv1alpha1.AddToScheme(scheme)

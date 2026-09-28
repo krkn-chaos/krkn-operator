@@ -335,16 +335,17 @@ func (r *KrknScenarioRunReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 					"retryAttempt", scenarioRun.Status.ClusterJobs[idx].RetryCount)
 			} else {
 				scenarioRun.Status.ClusterJobs = append(scenarioRun.Status.ClusterJobs, krknv1alpha1.ClusterJobStatus{
-					ProviderName:  outcome.target.providerName,
-					ClusterName:   outcome.target.clusterName,
-					ClusterAPIURL: outcome.target.clusterAPIURL,
-					JobID:         outcome.jobID,
-					PodName:       outcome.podName,
-					ScenarioImage: outcome.image,
-					Phase:         "Pending",
-					StartTime:     &now,
-					RetryCount:    0,
-					MaxRetries:    0,
+					ProviderName:         outcome.target.providerName,
+					ClusterName:          outcome.target.clusterName,
+					ClusterAPIURL:        outcome.target.clusterAPIURL,
+					JobID:                outcome.jobID,
+					PodName:              outcome.podName,
+					ScenarioImage:        outcome.image,
+					Phase:                "Pending",
+					StartTime:            &now,
+					RetryCount:           0,
+					MaxRetries:           scenarioRun.Spec.MaxRetries,
+					MaxRetriesConfigured: true,
 				})
 				logger.Info("created new cluster job",
 					"cluster", outcome.target.clusterName,
@@ -786,7 +787,6 @@ func (r *KrknScenarioRunReconciler) prepareJobResources(
 	}, nil
 }
 
-
 // appendCloudCredentialInjection loads the named cloud-credential Secret and
 // appends SecretKeyRef env vars (plus any volumes/mounts) to the job resources.
 // When cloudCredentialRef is empty, inputs are returned unchanged.
@@ -975,16 +975,17 @@ func (r *KrknScenarioRunReconciler) createClusterJob(
 			"retryAttempt", scenarioRun.Status.ClusterJobs[existingJobIndex].RetryCount)
 	} else {
 		scenarioRun.Status.ClusterJobs = append(scenarioRun.Status.ClusterJobs, krknv1alpha1.ClusterJobStatus{
-			ProviderName:  providerName,
-			ClusterName:   resources.clusterName,
-			ClusterAPIURL: resources.clusterAPIURL,
-			JobID:         resources.jobID,
-			PodName:       podName,
-			ScenarioImage: resources.containerImage,
-			Phase:         "Pending",
-			StartTime:     &now,
-			RetryCount:    0,
-			MaxRetries:    0,
+			ProviderName:         providerName,
+			ClusterName:          resources.clusterName,
+			ClusterAPIURL:        resources.clusterAPIURL,
+			JobID:                resources.jobID,
+			PodName:              podName,
+			ScenarioImage:        resources.containerImage,
+			Phase:                "Pending",
+			StartTime:            &now,
+			RetryCount:           0,
+			MaxRetries:           scenarioRun.Spec.MaxRetries,
+			MaxRetriesConfigured: true,
 		})
 		logger.Info("created new cluster job",
 			"cluster", resources.clusterName,
@@ -1004,6 +1005,7 @@ func (r *KrknScenarioRunReconciler) updateClusterJobStatuses(
 
 	for i := range scenarioRun.Status.ClusterJobs {
 		job := &scenarioRun.Status.ClusterJobs[i]
+		backfillLegacyMaxRetries(job, scenarioRun.Spec.MaxRetries)
 
 		logger.V(1).Info("checking job status",
 			"cluster", job.ClusterName,
@@ -1154,13 +1156,6 @@ func (r *KrknScenarioRunReconciler) updateClusterJobStatuses(
 				"failureReason", job.FailureReason)
 
 			maxRetries := job.MaxRetries
-			if maxRetries == 0 {
-				maxRetries = scenarioRun.Spec.MaxRetries
-				if maxRetries == 0 {
-					maxRetries = 3 // Default
-				}
-				job.MaxRetries = maxRetries
-			}
 
 			if r.shouldRetryJob(job, maxRetries) {
 				// Calculate backoff delay
@@ -1321,6 +1316,26 @@ func (r *KrknScenarioRunReconciler) extractFailureReason(pod *corev1.Pod) string
 	return "Unknown"
 }
 
+// backfillLegacyMaxRetries restores the retry limit for jobs written by older
+// controllers, which persisted zero before the field was introduced.
+func backfillLegacyMaxRetries(job *krknv1alpha1.ClusterJobStatus, scenarioMaxRetries int) {
+	if job.MaxRetriesConfigured {
+		return
+	}
+	if job.MaxRetries != 0 {
+		job.MaxRetriesConfigured = true
+		return
+	}
+	if job.PodName == "" {
+		return
+	}
+	job.MaxRetries = scenarioMaxRetries
+	if job.MaxRetries == 0 {
+		job.MaxRetries = 3
+	}
+	job.MaxRetriesConfigured = true
+}
+
 // shouldRetryJob determines if a failed job should be retried
 func (r *KrknScenarioRunReconciler) shouldRetryJob(job *krknv1alpha1.ClusterJobStatus, maxRetries int) bool {
 	// Don't retry if user cancelled
@@ -1339,10 +1354,6 @@ func (r *KrknScenarioRunReconciler) shouldRetryJob(job *krknv1alpha1.ClusterJobS
 	}
 
 	// Check retry count against max
-	if maxRetries == 0 {
-		maxRetries = 3 // Default
-	}
-
 	return job.RetryCount < maxRetries
 }
 

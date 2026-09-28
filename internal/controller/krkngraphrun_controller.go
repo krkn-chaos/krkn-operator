@@ -576,6 +576,7 @@ func (r *KrknGraphRunReconciler) createScenarioRun(
 	if err != nil {
 		return false, fmt.Errorf("failed to map node to scenario run spec: %w", err)
 	}
+	spec.MaxRetries = graphRun.Spec.MaxRetries
 
 	// Add translated file mounts to spec
 	if len(fileMounts) > 0 {
