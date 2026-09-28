@@ -22,15 +22,16 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
-)
 
-// boolPtr returns a pointer to the given bool value.
-func boolPtr(b bool) *bool {
-	return &b
-}
+	"github.com/go-openapi/spec"
+	"github.com/go-openapi/strfmt"
+	"github.com/go-openapi/validate"
+)
 
 // intPtr returns a pointer to the given int value.
 func intPtr(i int) *int {
@@ -647,6 +648,73 @@ func TestRawTelemetrySourceFlatten(t *testing.T) {
 			got := src.flatten()
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("flatten() = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}
+
+// scenarioParametersSchema loads the generated Swagger contract and returns the schema
+// for the ScenarioDetail.parameters property. It fails the test if the spec cannot be read.
+func scenarioParametersSchema(t *testing.T) spec.Schema {
+	t.Helper()
+
+	// Path is relative to this package (pkg/elasticsearch) up to the repo root.
+	specPath := filepath.Join("..", "..", "internal", "api", "docs", "swagger.json")
+	raw, err := os.ReadFile(specPath)
+	if err != nil {
+		t.Fatalf("read swagger spec %s: %v", specPath, err)
+	}
+
+	var swagger spec.Swagger
+	if err := json.Unmarshal(raw, &swagger); err != nil {
+		t.Fatalf("unmarshal swagger spec: %v", err)
+	}
+
+	const defKey = "github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.ScenarioDetail"
+	def, ok := swagger.Definitions[defKey]
+	if !ok {
+		t.Fatalf("definition %q missing from swagger spec", defKey)
+	}
+	paramsSchema, ok := def.Properties["parameters"]
+	if !ok {
+		t.Fatalf("parameters property missing from %q", defKey)
+	}
+	return paramsSchema
+}
+
+// TestScenarioParametersContractAcceptsAllShapes locks the ScenarioDetail.parameters
+// Swagger schema to the runtime reality: parameters is pass-through JSON whose shape varies
+// by scenario type. The contract must be unconstrained so object-, array-, and
+// array-nested-in-object payloads all validate. A fixed "type: object" (the prior bug)
+// would reject the array-shaped payload.
+func TestScenarioParametersContractAcceptsAllShapes(t *testing.T) {
+	paramsSchema := scenarioParametersSchema(t)
+
+	// Guard against a regression to a constrained schema. An empty schema (no type)
+	// is what permits every JSON shape.
+	if len(paramsSchema.Type) != 0 {
+		t.Fatalf("parameters schema must be unconstrained, got type %v", paramsSchema.Type)
+	}
+
+	// Fixtures mirror the shapes exercised by TestRawTelemetrySourceFlatten so the runtime
+	// decode path and the published contract stay in sync.
+	fixtures := []struct {
+		name    string
+		payload string
+	}{
+		{name: "object-style (pvc scenario)", payload: `{"pvc_scenario":{"namespace":"openshift-monitoring","pvc_name":"x"}}`},
+		{name: "array-style (pod disruption)", payload: `[{"config":{"namespace_pattern":"ns1"}}]`},
+		{name: "array-nested-in-object (time scenario)", payload: `{"time_scenarios":[{"namespace":"openshift-etcd","action":"skew_time"}]}`},
+	}
+
+	for _, f := range fixtures {
+		t.Run(f.name, func(t *testing.T) {
+			var value interface{}
+			if err := json.Unmarshal([]byte(f.payload), &value); err != nil {
+				t.Fatalf("unmarshal fixture: %v", err)
+			}
+			if err := validate.AgainstSchema(&paramsSchema, value, strfmt.Default); err != nil {
+				t.Errorf("payload rejected by contract: %v", err)
 			}
 		})
 	}

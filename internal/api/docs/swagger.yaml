@@ -93,49 +93,6 @@ definitions:
           is true.
         type: string
     type: object
-  github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.CreateElasticsearchConfigRequest:
-    properties:
-      alertsIndex:
-        type: string
-      availableToAll:
-        type: boolean
-      caCert:
-        description: |-
-          CACert is an optional PEM-encoded CA certificate (or bundle) used to trust
-          a self-signed cluster while keeping TLS verification enabled.
-        type: string
-      groups:
-        items:
-          type: string
-        type: array
-      host:
-        type: string
-      insecureSkipTlsVerify:
-        description: |-
-          InsecureSkipTLSVerify disables TLS certificate verification entirely. It is
-          a restricted last resort for self-signed clusters without CA material;
-          prefer CACert.
-        type: boolean
-      metricsIndex:
-        type: string
-      name:
-        type: string
-      password:
-        type: string
-      port:
-        type: integer
-      telemetryIndex:
-        type: string
-      username:
-        type: string
-    type: object
-  github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.CreateElasticsearchConfigResponse:
-    properties:
-      message:
-        type: string
-      name:
-        type: string
-    type: object
   github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.AffectedPods:
     properties:
       recovered:
@@ -161,13 +118,19 @@ definitions:
         description: ClusterVersion is the full cluster version string.
         type: string
       etcd_encryption_enabled:
-        description: EtcdEncryptionEnabled indicates whether etcd encryption is enabled.
+        description: |-
+          EtcdEncryptionEnabled indicates whether etcd encryption is enabled.
+          Pointer distinguishes absent (nil) from explicit false.
         type: boolean
       fips_enabled:
-        description: FIPSEnabled indicates whether FIPS mode is enabled in the cluster.
+        description: |-
+          FIPSEnabled indicates whether FIPS mode is enabled in the cluster.
+          Pointer distinguishes absent (nil) from explicit false.
         type: boolean
       ipsec_enabled:
-        description: IPSecEnabled indicates whether IPSec is enabled in the cluster.
+        description: |-
+          IPSecEnabled indicates whether IPSec is enabled in the cluster.
+          Pointer distinguishes absent (nil) from explicit false.
         type: boolean
       kubernetes_objects_count:
         additionalProperties:
@@ -195,21 +158,26 @@ definitions:
         description: Tag is an arbitrary label applied to the telemetry run.
         type: string
       total_node_count:
-        description: TotalNodeCount is the number of nodes in the cluster at run time.
+        description: |-
+          TotalNodeCount is the number of nodes in the cluster at run time.
+          Pointer distinguishes absent (nil) from explicit zero.
         type: integer
     type: object
   github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.CreateElasticsearchConfigRequest:
     properties:
       alertsIndex:
         type: string
+      availableToAll:
+        type: boolean
       caCert:
         description: |-
-          CACert is an optional PEM-encoded CA certificate (or bundle) trusted in
-          addition to the host's system root CAs, so a self-signed cluster is reachable
-          with TLS verification still enabled and publicly trusted chains keep working.
+          CACert is an optional PEM-encoded CA certificate (or bundle) used to trust
+          a self-signed cluster while keeping TLS verification enabled.
         type: string
-      grafanaUrl:
-        type: string
+      groups:
+        items:
+          type: string
+        type: array
       host:
         type: string
       insecureSkipTlsVerify:
@@ -429,9 +397,11 @@ definitions:
           indicates failure.
         type: integer
       parameters:
-        description: Parameters holds scenario-specific configuration as unconstrained
-          JSON (object, array, or other).
-        type: object
+        description: |-
+          Parameters holds scenario-specific configuration as unconstrained JSON. Its shape
+          varies by scenario type (object, array, or an array nested in an object), so the
+          Swagger contract represents it as an unconstrained value via the encoding/json.RawMessage
+          override in .swaggo rather than a fixed type.
       scenario_type:
         description: ScenarioType is the type of chaos scenario executed (e.g. "pod_disruption_scenarios").
         type: string
@@ -1509,6 +1479,9 @@ definitions:
         allOf:
         - $ref: '#/definitions/internal_api_v2_websocket.WSJobStatsSummary'
         description: aggregate job stats (for "jobs" resource)
+      subscriptionId:
+        description: request correlation for jobs snapshots
+        type: string
     type: object
   internal_api_v2_websocket.WSJobStatsSummary:
     properties:

@@ -3137,15 +3137,15 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "etcd_encryption_enabled": {
-                    "description": "EtcdEncryptionEnabled indicates whether etcd encryption is enabled.",
+                    "description": "EtcdEncryptionEnabled indicates whether etcd encryption is enabled.\nPointer distinguishes absent (nil) from explicit false.",
                     "type": "boolean"
                 },
                 "fips_enabled": {
-                    "description": "FIPSEnabled indicates whether FIPS mode is enabled in the cluster.",
+                    "description": "FIPSEnabled indicates whether FIPS mode is enabled in the cluster.\nPointer distinguishes absent (nil) from explicit false.",
                     "type": "boolean"
                 },
                 "ipsec_enabled": {
-                    "description": "IPSecEnabled indicates whether IPSec is enabled in the cluster.",
+                    "description": "IPSecEnabled indicates whether IPSec is enabled in the cluster.\nPointer distinguishes absent (nil) from explicit false.",
                     "type": "boolean"
                 },
                 "kubernetes_objects_count": {
@@ -3178,7 +3178,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "total_node_count": {
-                    "description": "TotalNodeCount is the number of nodes in the cluster at run time.",
+                    "description": "TotalNodeCount is the number of nodes in the cluster at run time.\nPointer distinguishes absent (nil) from explicit zero.",
                     "type": "integer"
                 }
             }
@@ -3468,8 +3468,7 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "parameters": {
-                    "description": "Parameters holds scenario-specific configuration as unconstrained JSON (object, array, or other).",
-                    "type": "object"
+                    "description": "Parameters holds scenario-specific configuration as unconstrained JSON. Its shape\nvaries by scenario type (object, array, or an array nested in an object), so the\nSwagger contract represents it as an unconstrained value via the encoding/json.RawMessage\noverride in .swaggo rather than a fixed type."
                 },
                 "scenario_type": {
                     "description": "ScenarioType is the type of chaos scenario executed (e.g. \"pod_disruption_scenarios\").",
@@ -4934,6 +4933,10 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api_v2_websocket.WSJobStatsSummary"
                         }
                     ]
+                },
+                "subscriptionId": {
+                    "description": "request correlation for jobs snapshots",
+                    "type": "string"
                 }
             }
         },

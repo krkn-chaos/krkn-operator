@@ -264,6 +264,12 @@ type AffectedPods struct {
 	Recovered []RecoveredPod `json:"recovered,omitempty"`
 }
 
+// RawJSON is an unconstrained JSON value (object, array, or scalar). It exists so the
+// generated Swagger contract can represent verbatim pass-through JSON fields as an empty
+// schema that accepts any shape. The .swaggo overrides file maps encoding/json.RawMessage
+// to this type at generation time; runtime code keeps using json.RawMessage directly.
+type RawJSON interface{}
+
 // ScenarioDetail describes a single scenario within a telemetry run. The
 // Parameters field is passed through verbatim as raw JSON because its shape
 // varies by scenario type (e.g. an application_outage block vs a pod-scenario
@@ -277,8 +283,11 @@ type ScenarioDetail struct {
 	EndTimestamp float64 `json:"end_timestamp"`
 	// ExitStatus is the scenario exit code; 0 indicates success, non-zero indicates failure.
 	ExitStatus int `json:"exit_status"`
-	// Parameters holds scenario-specific configuration as unconstrained JSON (object, array, or other).
-	Parameters json.RawMessage `json:"parameters,omitempty" swaggertype:"object"`
+	// Parameters holds scenario-specific configuration as unconstrained JSON. Its shape
+	// varies by scenario type (object, array, or an array nested in an object), so the
+	// Swagger contract represents it as an unconstrained value via the encoding/json.RawMessage
+	// override in .swaggo rather than a fixed type.
+	Parameters json.RawMessage `json:"parameters,omitempty"`
 	// AffectedPods carries per-pod recovery timings for pod_disruption scenarios;
 	// nil when the source document had none.
 	AffectedPods *AffectedPods `json:"affected_pods,omitempty"`
