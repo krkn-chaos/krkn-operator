@@ -49,7 +49,7 @@ func TestBuildCategoryResiliencyHistoryGroupsTypedConfigurationsAndSortsPerClust
 			{ClusterName: "cluster-a", Score: 90, Status: "calculated"},
 		}),
 		graphHistoryRun("graph-first", baseTime, graphBase, []krknv1alpha1.GraphClusterScore{
-			{ClusterName: "cluster-a", ProviderName: "provider-a", Calculated: 60, Status: "fail"},
+			{ClusterName: "cluster-a", ProviderName: "provider-a", Calculated: 60, Status: "fail", Baseline: floatPointer(65)},
 		}),
 		graphHistoryRun("graph-equivalent", baseTime.Add(4*time.Hour), graphEquivalent, []krknv1alpha1.GraphClusterScore{
 			{ClusterName: "cluster-b", ProviderName: "provider-b", Calculated: 65, Status: "pass"},
@@ -104,6 +104,13 @@ func TestBuildCategoryResiliencyHistoryGroupsTypedConfigurationsAndSortsPerClust
 	if got, want := groupFor("cluster-a", "graph-first"), groupFor("cluster-b", "graph-equivalent"); got != want {
 		t.Fatalf("equivalent graph configurations have different group IDs: %q and %q", got, want)
 	}
+	graphPoint := datapointForRunID(t, clusterA, "graph-first")
+	if graphPoint.Baseline == nil || *graphPoint.Baseline != 65 {
+		t.Fatalf("graph datapoint baseline = %v, want 65", graphPoint.Baseline)
+	}
+	if scenarioPoint := datapointForRunID(t, clusterA, "scenario-old"); scenarioPoint.Baseline != nil {
+		t.Fatalf("scenario datapoint baseline = %v, want omitted", *scenarioPoint.Baseline)
+	}
 	if groupFor("cluster-a", "scenario-different") == groupFor("cluster-a", "scenario-old") {
 		t.Fatal("different scenario parameters unexpectedly share a configuration group")
 	}
@@ -129,15 +136,17 @@ func TestScenarioHistoryScoresOnlyKeepsCalculatedClusterScores(t *testing.T) {
 	}
 
 	got := scenarioHistoryScores(run)
-	if len(got) != 1 || got[0].clusterName != "cluster-a" || got[0].providerName != "provider-a" || got[0].score != 82.5 {
+	if len(got) != 1 || got[0].clusterName != "cluster-a" || got[0].providerName != "provider-a" || got[0].score != 82.5 || got[0].baseline != nil {
 		t.Fatalf("scenario score datapoints = %+v, want one calculated score enriched with provider", got)
 	}
 }
 
 func TestGraphHistoryScoresOnlyKeepsFinalScoresIncludingZero(t *testing.T) {
 	run := graphRunConfigurationFixture()
+	run.Spec.ResiliencyScoreBaseline = floatPointer(85)
 	run.Status.ResiliencyScores = []krknv1alpha1.GraphClusterScore{
-		{ClusterName: "cluster-a", ProviderName: "provider-a", Calculated: 0, Status: "no-baseline"},
+		{ClusterName: "cluster-a", ProviderName: "provider-a", Calculated: 0, Status: "pass", Baseline: floatPointer(0)},
+		{ClusterName: "cluster-e", Calculated: 80, Status: "fail"},
 		{ClusterName: "cluster-b", Calculated: -1, Status: "calculating"},
 		{ClusterName: "cluster-c", Calculated: 80, Status: "error"},
 		{ClusterName: "cluster-d", Calculated: 80, Status: "unknown"},
@@ -145,8 +154,11 @@ func TestGraphHistoryScoresOnlyKeepsFinalScoresIncludingZero(t *testing.T) {
 	}
 
 	got := graphHistoryScores(run)
-	if len(got) != 1 || got[0].clusterName != "cluster-a" || got[0].providerName != "provider-a" || got[0].score != 0 {
-		t.Fatalf("graph score datapoints = %+v, want final zero score only", got)
+	if len(got) != 2 || got[0].clusterName != "cluster-a" || got[0].providerName != "provider-a" || got[0].score != 0 || got[0].baseline == nil || *got[0].baseline != 0 {
+		t.Fatalf("graph score datapoints = %+v, want zero score and zero per-cluster baseline retained", got)
+	}
+	if got[1].clusterName != "cluster-e" || got[1].baseline == nil || *got[1].baseline != 85 {
+		t.Fatalf("graph score without status baseline = %+v, want spec baseline fallback 85", got[1])
 	}
 }
 
@@ -385,4 +397,15 @@ func datapointRunIDs(points []CategoryResiliencyDataPoint) []string {
 		runIDs = append(runIDs, point.RunID)
 	}
 	return runIDs
+}
+
+func datapointForRunID(t *testing.T, points []CategoryResiliencyDataPoint, runID string) CategoryResiliencyDataPoint {
+	t.Helper()
+	for _, point := range points {
+		if point.RunID == runID {
+			return point
+		}
+	}
+	t.Fatalf("no datapoint for run %q", runID)
+	return CategoryResiliencyDataPoint{}
 }

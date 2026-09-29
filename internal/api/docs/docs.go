@@ -4158,6 +4158,9 @@ const docTemplate = `{
         "internal_api.CategoryResiliencyDataPoint": {
             "type": "object",
             "properties": {
+                "baseline": {
+                    "type": "number"
+                },
                 "configurationGroupId": {
                     "type": "string"
                 },

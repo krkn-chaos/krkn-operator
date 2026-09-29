@@ -47,12 +47,14 @@ type CategoryResiliencyHistoryResponse struct {
 
 // CategoryResiliencyDataPoint is one cluster's score from a category run.
 type CategoryResiliencyDataPoint struct {
-	Date                 time.Time `json:"date"`
-	RunID                string    `json:"runId"`
-	RunType              string    `json:"runType"`
-	Score                float64   `json:"score"`
-	ConfigurationGroupID string    `json:"configurationGroupId"`
-	ProviderName         string    `json:"providerName,omitempty"`
+	Date    time.Time `json:"date"`
+	RunID   string    `json:"runId"`
+	RunType string    `json:"runType"`
+	Score   float64   `json:"score"`
+	// Baseline is the run's minimum acceptable resiliency score, when configured.
+	Baseline             *float64 `json:"baseline,omitempty"`
+	ConfigurationGroupID string   `json:"configurationGroupId"`
+	ProviderName         string   `json:"providerName,omitempty"`
 }
 
 // CategoryConfigurationGroup describes a set of runs with equivalent
@@ -67,6 +69,7 @@ type categoryHistoryScore struct {
 	clusterName  string
 	providerName string
 	score        float64
+	baseline     *float64
 }
 
 type categoryHistoryRun struct {
@@ -438,10 +441,15 @@ func graphHistoryScores(run *krknv1alpha1.KrknGraphRun) []categoryHistoryScore {
 		default:
 			continue
 		}
+		baseline := score.Baseline
+		if baseline == nil {
+			baseline = run.Spec.ResiliencyScoreBaseline
+		}
 		scores = append(scores, categoryHistoryScore{
 			clusterName:  score.ClusterName,
 			providerName: score.ProviderName,
 			score:        score.Calculated,
+			baseline:     baseline,
 		})
 	}
 	return scores
@@ -500,6 +508,7 @@ func buildCategoryResiliencyHistory(runs []categoryHistoryRun) CategoryResilienc
 				RunID:                runs[i].runID,
 				RunType:              runs[i].runType,
 				Score:                score.score,
+				Baseline:             score.baseline,
 				ConfigurationGroupID: runs[i].groupID,
 				ProviderName:         score.providerName,
 			})

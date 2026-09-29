@@ -48,8 +48,9 @@ func TestQueryResiliencyHistoryAggregatesSelectedCategoriesAndClusters(t *testin
 	graphRun.Namespace = "default"
 	graphRun.Labels = map[string]string{labelOne: "true"}
 	graphRun.CreationTimestamp = metav1.NewTime(time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC))
+	graphRun.Spec.ResiliencyScoreBaseline = floatPointer(80)
 	graphRun.Status.ResiliencyScores = []krknv1alpha1.GraphClusterScore{{
-		ClusterName: "cluster-a", ProviderName: "provider-a", Calculated: 88, Status: "pass",
+		ClusterName: "cluster-a", ProviderName: "provider-a", Calculated: 88, Status: "pass", Baseline: floatPointer(82),
 	}}
 
 	noScoreRun := scenarioRunConfigurationFixture()
@@ -88,6 +89,12 @@ func TestQueryResiliencyHistoryAggregatesSelectedCategoriesAndClusters(t *testin
 	categoryOnePoints := clusterHistory["category-one"]
 	if len(categoryOnePoints) != 2 || categoryOnePoints[0].RunID != "shared-run" || categoryOnePoints[1].RunID != "graph-run" {
 		t.Fatalf("category-one datapoints = %+v, want scored scenario and graph runs sorted by date", categoryOnePoints)
+	}
+	if categoryOnePoints[0].Baseline != nil {
+		t.Fatalf("scenario datapoint baseline = %v, want omitted", *categoryOnePoints[0].Baseline)
+	}
+	if categoryOnePoints[1].Baseline == nil || *categoryOnePoints[1].Baseline != 82 {
+		t.Fatalf("graph datapoint baseline = %v, want per-cluster baseline 82", categoryOnePoints[1].Baseline)
 	}
 	categoryTwoPoints := clusterHistory["category-two"]
 	if len(categoryTwoPoints) != 2 || categoryTwoPoints[0].RunID != "older-run" || categoryTwoPoints[1].RunID != "shared-run" {

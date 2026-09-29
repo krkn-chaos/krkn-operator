@@ -826,6 +826,8 @@ definitions:
     type: object
   internal_api.CategoryResiliencyDataPoint:
     properties:
+      baseline:
+        type: number
       configurationGroupId:
         type: string
       date:
