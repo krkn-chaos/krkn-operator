@@ -349,6 +349,74 @@ type QueryTelemetryResponse struct {
 	Stats TelemetryStats `json:"stats"`
 }
 
+// QueryAlertsRequest represents a request to query alert documents from the
+// alerts index of a saved Elasticsearch config.
+type QueryAlertsRequest struct {
+	// ConfigName identifies the saved Elasticsearch config whose alerts index
+	// and credentials are resolved server-side.
+	ConfigName string `json:"configName"`
+	// Size is the maximum number of alert documents to return. Zero uses the
+	// default and values above MaxQuerySize are clamped.
+	Size int `json:"size,omitempty"`
+	// StartDate is the inclusive lower date bound in yyyy-MM-dd format.
+	StartDate string `json:"startDate,omitempty"`
+	// EndDate is the inclusive calendar-date upper bound in yyyy-MM-dd format.
+	EndDate string `json:"endDate,omitempty"`
+}
+
+// AlertDocument is an alert index document. Source is returned as raw JSON
+// because alert schemas are configured by the Elasticsearch deployment.
+type AlertDocument struct {
+	// ID is the Elasticsearch document identifier.
+	ID string `json:"id,omitempty"`
+	// Source contains the redacted, deployment-specific alert payload.
+	Source json.RawMessage `json:"source"`
+}
+
+// QueryAlertsResponse wraps alert documents returned to the client.
+type QueryAlertsResponse struct {
+	// Documents contains the size-capped alert document page.
+	Documents []AlertDocument `json:"documents"`
+	// Total is the number of documents returned in Documents.
+	Total int `json:"total"`
+}
+
+// ValidateAlertsQueryRequest validates and normalizes an alerts query.
+func ValidateAlertsQueryRequest(req *QueryAlertsRequest) error {
+	if req == nil {
+		return fmt.Errorf("request is required")
+	}
+	if req.ConfigName == "" {
+		return fmt.Errorf("configName is required")
+	}
+	return validateQueryOptions(&req.Size, req.StartDate, req.EndDate)
+}
+
+func validateQueryOptions(size *int, startDate, endDate string) error {
+	if *size < 0 {
+		return fmt.Errorf("size must not be negative")
+	}
+	if *size == 0 {
+		*size = DefaultQuerySize
+	}
+	if *size > MaxQuerySize {
+		*size = MaxQuerySize
+	}
+	if err := validateDate("startDate", startDate); err != nil {
+		return err
+	}
+	if err := validateDate("endDate", endDate); err != nil {
+		return err
+	}
+	if startDate != "" && endDate != "" && startDate > endDate {
+		return fmt.Errorf("startDate must not be after endDate")
+	}
+	if endDate != "" && endDate > time.Now().UTC().Format(dateLayout) {
+		return fmt.Errorf("endDate must not be in the future")
+	}
+	return nil
+}
+
 // ValidateQueryRequest validates a QueryTelemetryRequest and normalizes the
 // requested size into the supported bounds. Exactly one of configName or inline
 // must be supplied; an inline connection additionally requires a host and a
@@ -378,28 +446,7 @@ func ValidateQueryRequest(req *QueryTelemetryRequest) error {
 			return err
 		}
 	}
-	if req.Size < 0 {
-		return fmt.Errorf("size must not be negative")
-	}
-	if req.Size == 0 {
-		req.Size = DefaultQuerySize
-	}
-	if req.Size > MaxQuerySize {
-		req.Size = MaxQuerySize
-	}
-	if err := validateDate("startDate", req.StartDate); err != nil {
-		return err
-	}
-	if err := validateDate("endDate", req.EndDate); err != nil {
-		return err
-	}
-	if req.StartDate != "" && req.EndDate != "" && req.StartDate > req.EndDate {
-		return fmt.Errorf("startDate must not be after endDate")
-	}
-	if req.EndDate != "" && req.EndDate > time.Now().UTC().Format(dateLayout) {
-		return fmt.Errorf("endDate must not be in the future")
-	}
-	return nil
+	return validateQueryOptions(&req.Size, req.StartDate, req.EndDate)
 }
 
 // dateLayout is the date-only layout accepted for query bounds and understood by

@@ -1230,6 +1230,101 @@ func newEsTestSecretWithHost(name, namespace, host, telemetryIndex string) *core
 	}
 }
 
+func newEsAlertsTestSecretWithHost(name, namespace, host, alertsIndex string) *corev1.Secret {
+	return &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        name,
+			Namespace:   namespace,
+			Labels:      elasticsearch.BuildLabels(nil, true),
+			Annotations: elasticsearch.BuildAnnotations(host, 9200, "", "", alertsIndex, "admin@test.local"),
+		},
+		Type: corev1.SecretTypeOpaque,
+		Data: map[string][]byte{},
+	}
+}
+
+func TestQueryElasticsearchAlerts_Success(t *testing.T) {
+	esServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/krkn-alerts/_search") {
+			t.Errorf("query path = %q, want configured alerts index", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"hits":{"hits":[{"_id":"alert-1","_source":{"run_uuid":"run-1","phase":"Running","created_at":"2026-09-25T14:32:18Z","severity":"critical","alertname":"APIDown"}}]}}`))
+	}))
+	defer esServer.Close()
+
+	secret := newEsAlertsTestSecretWithHost("prod-es", "default", esServer.URL, "krkn-alerts")
+	fakeClient := fakeclient.NewClientBuilder().WithScheme(newEsScheme()).WithObjects(secret).Build()
+	handler := NewTestHandler(fakeClient, fake.NewSimpleClientset(), "default", "localhost:50051")
+	body, _ := json.Marshal(elasticsearch.QueryAlertsRequest{ConfigName: "prod-es"})
+	req := httptest.NewRequest(http.MethodPost, ElasticsearchAlertsQueryPath, bytes.NewReader(body)).WithContext(createUserContext("user@example.com"))
+	w := httptest.NewRecorder()
+
+	handler.QueryElasticsearchAlerts(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var response elasticsearch.QueryAlertsResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if response.Total != 1 || response.Documents[0].ID != "alert-1" {
+		t.Fatalf("unexpected response: %+v", response)
+	}
+}
+
+func TestQueryElasticsearchAlerts_ValidationAndLookup(t *testing.T) {
+	fakeClient := fakeclient.NewClientBuilder().WithScheme(newEsScheme()).Build()
+	handler := NewTestHandler(fakeClient, fake.NewSimpleClientset(), "default", "localhost:50051")
+	cases := []struct {
+		name   string
+		method string
+		body   any
+		want   int
+	}{
+		{name: "method not allowed", method: http.MethodGet, want: http.StatusMethodNotAllowed},
+		{name: "missing config name", method: http.MethodPost, body: elasticsearch.QueryAlertsRequest{}, want: http.StatusBadRequest},
+		{name: "config not found", method: http.MethodPost, body: elasticsearch.QueryAlertsRequest{ConfigName: "missing"}, want: http.StatusNotFound},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var reader *bytes.Reader
+			if tc.body != nil {
+				body, _ := json.Marshal(tc.body)
+				reader = bytes.NewReader(body)
+			} else {
+				reader = bytes.NewReader(nil)
+			}
+			req := httptest.NewRequest(tc.method, ElasticsearchAlertsQueryPath, reader).WithContext(createUserContext("user@example.com"))
+			w := httptest.NewRecorder()
+			handler.QueryElasticsearchAlerts(w, req)
+			if w.Code != tc.want {
+				t.Fatalf("status = %d, want %d: %s", w.Code, tc.want, w.Body.String())
+			}
+		})
+	}
+}
+
+func TestQueryElasticsearchAlerts_DeniesInaccessibleConfig(t *testing.T) {
+	secret := newEsAlertsTestSecretWithHost("restricted-es", "default", "http://127.0.0.1:1", "krkn-alerts")
+	secret.Labels = elasticsearch.BuildLabels([]string{"platform"}, false)
+	user := &krknv1alpha1.KrknUser{ObjectMeta: metav1.ObjectMeta{
+		Name: sanitizeUsername("user@example.com"), Namespace: "default",
+	}, Spec: krknv1alpha1.KrknUserSpec{UserID: "user@example.com"}}
+	fakeClient := fakeclient.NewClientBuilder().WithScheme(newEsScheme()).WithObjects(secret, user).Build()
+	handler := NewTestHandler(fakeClient, fake.NewSimpleClientset(), "default", "localhost:50051")
+	body, _ := json.Marshal(elasticsearch.QueryAlertsRequest{ConfigName: "restricted-es"})
+	req := httptest.NewRequest(http.MethodPost, ElasticsearchAlertsQueryPath, bytes.NewReader(body)).WithContext(createUserContext("user@example.com"))
+	w := httptest.NewRecorder()
+
+	handler.QueryElasticsearchAlerts(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403: %s", w.Code, w.Body.String())
+	}
+}
+
 func TestQueryElasticsearchTelemetry_Success(t *testing.T) {
 	esServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)

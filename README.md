@@ -280,6 +280,38 @@ curl -sS -X POST https://<operator-host>/api/v1/elasticsearch-query \
       }'
 ```
 
+## Alerts Query API
+
+Query alert documents from the `alertsIndex` configured on a saved Elasticsearch config. The operator resolves the config's credentials and alerts index server-side; alert sources are redacted before they are returned.
+
+**Endpoint:** `POST /api/v1/elasticsearch-alerts-query`
+
+**Authentication:** Required. Send `Authorization: Bearer <token>`. The named config must be public, accessible through the user's group, or queried by an administrator.
+
+**Request body:**
+
+```json
+{
+  "configName": "prod-es",
+  "size": 50,
+  "startDate": "2026-08-01",
+  "endDate": "2026-08-26"
+}
+```
+
+`size` defaults to `50` and is capped at `500`. Date bounds use `yyyy-MM-dd` and filter the alert index's `created_at` field. Results are sorted newest-first by `created_at`.
+
+**Example:**
+
+```bash
+curl -sS -X POST https://<operator-host>/api/v1/elasticsearch-alerts-query \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"configName":"prod-es","size":50,"startDate":"2026-08-01","endDate":"2026-08-26"}'
+```
+
+The complete request and response schema is available through the generated Swagger documentation at `/api/swagger/index.html`.
+
 ## Ecosystem
 
 See [DEPLOYMENT.md](DEPLOYMENT.md) for full installation options and configuration.
