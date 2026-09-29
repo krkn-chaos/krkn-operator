@@ -110,6 +110,17 @@ func (h *Handler) CategoriesRouter(w http.ResponseWriter, r *http.Request) {
 	}
 
 	parts := strings.Split(strings.TrimPrefix(path, v2.CategoriesPath+"/"), "/")
+	if len(parts) == 2 && parts[1] == "resiliency-history" {
+		if r.Method != http.MethodGet {
+			writeJSONError(w, http.StatusMethodNotAllowed, ErrorResponse{
+				Error:   "method_not_allowed",
+				Message: "Only GET is allowed for category resiliency history",
+			})
+			return
+		}
+		h.GetCategoryResiliencyHistory(w, r, parts[0])
+		return
+	}
 	if len(parts) == 4 && parts[1] == "entities" {
 		switch r.Method {
 		case http.MethodPut:

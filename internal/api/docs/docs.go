@@ -2279,6 +2279,145 @@ const docTemplate = `{
                 }
             }
         },
+        "/v2/categories/{category}/resiliency-history": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Return per-cluster resiliency scores for category-associated scenario and graph runs, grouped by behavior-affecting configuration.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "categories"
+                ],
+                "summary": "Get category resiliency score history",
+                "parameters": [
+                    {
+                        "description": "Category name",
+                        "name": "category",
+                        "in": "path",
+                        "required": true,
+                        "type": "string"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.CategoryResiliencyHistoryResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid category name",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Authentication required",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "The caller cannot access the category",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Category not found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/v2/resiliency-history": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Return category-associated scenario and graph scores selected by non-empty category and cluster arrays. Datapoints are nested as clusters[clusterName][categoryName]; configurationGroups[categoryName] resolves each datapoint's configurationGroupId.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "resiliency-history"
+                ],
+                "summary": "Query resiliency score history",
+                "parameters": [
+                    {
+                        "description": "History filters",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ResiliencyHistoryQueryRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ResiliencyHistoryQueryResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid query",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Authentication required",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "The caller cannot access a category",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Category not found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/v2/categories/{category}/entities/{entityType}/{entityName}": {
             "put": {
                 "security": [
@@ -3996,6 +4135,114 @@ const docTemplate = `{
                 },
                 "name": {
                     "type": "string"
+                }
+            }
+        },
+        "internal_api.CategoryConfigurationGroup": {
+            "type": "object",
+            "properties": {
+                "representativeRunId": {
+                    "type": "string"
+                },
+                "runType": {
+                    "type": "string"
+                },
+                "scenarioNames": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "internal_api.CategoryResiliencyDataPoint": {
+            "type": "object",
+            "properties": {
+                "configurationGroupId": {
+                    "type": "string"
+                },
+                "date": {
+                    "type": "string",
+                    "format": "date-time"
+                },
+                "providerName": {
+                    "type": "string"
+                },
+                "runId": {
+                    "type": "string"
+                },
+                "runType": {
+                    "type": "string"
+                },
+                "score": {
+                    "type": "number"
+                }
+            }
+        },
+        "internal_api.CategoryResiliencyHistoryResponse": {
+            "type": "object",
+            "properties": {
+                "clusters": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/definitions/internal_api.CategoryResiliencyDataPoint"
+                        }
+                    }
+                },
+                "configurationGroups": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "$ref": "#/definitions/internal_api.CategoryConfigurationGroup"
+                    }
+                }
+            }
+        },
+        "internal_api.ResiliencyHistoryQueryRequest": {
+            "type": "object",
+            "properties": {
+                "categories": {
+                    "description": "Categories selects the categories included in the query.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "clusters": {
+                    "description": "Clusters selects the clusters included in the query.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "internal_api.ResiliencyHistoryQueryResponse": {
+            "type": "object",
+            "properties": {
+                "clusters": {
+                    "description": "Clusters maps cluster names to category names to sorted score datapoints.",
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "object",
+                        "additionalProperties": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/internal_api.CategoryResiliencyDataPoint"
+                            }
+                        }
+                    }
+                },
+                "configurationGroups": {
+                    "description": "ConfigurationGroups maps category names to configuration group IDs.",
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "object",
+                        "additionalProperties": {
+                            "$ref": "#/definitions/internal_api.CategoryConfigurationGroup"
+                        }
+                    }
                 }
             }
         },
