@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"slices"
 	"sort"
+	"strings"
 
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -80,30 +81,176 @@ func compareGraphRunConfigurations(left, right krknv1alpha1.KrknGraphRunSpec) []
 	if left.ResiliencyMountPath != right.ResiliencyMountPath {
 		differences = append(differences, "resiliencyMountPath")
 	}
+	differences = append(differences, compareGraphConfigurations(left.Graph, right.Graph)...)
+	sort.Strings(differences)
+	return differences
+}
 
-	nodeIDs := make(map[string]struct{}, len(left.Graph)+len(right.Graph))
-	for nodeID := range left.Graph {
-		nodeIDs[nodeID] = struct{}{}
+func compareGraphConfigurations(left, right map[string]krknv1alpha1.GraphScenarioNode) []string {
+	if sameGraphNodeIDs(left, right) {
+		differences := compareGraphConfigurationsWithStableNodeIDs(left, right)
+		if len(differences) == 0 || sameGraphConfigurationIgnoringNodeIDs(left, right) {
+			return nil
+		}
+		return differences
 	}
-	for nodeID := range right.Graph {
-		nodeIDs[nodeID] = struct{}{}
+	// A replay may regenerate node IDs. Preserve the graph behavior and
+	// dependency shape without treating those identifiers as configuration.
+	if sameGraphConfigurationIgnoringNodeIDs(left, right) {
+		return nil
 	}
-	sortedNodeIDs := make([]string, 0, len(nodeIDs))
-	for nodeID := range nodeIDs {
-		sortedNodeIDs = append(sortedNodeIDs, nodeID)
+	return []string{"graph"}
+}
+
+func compareGraphConfigurationsWithStableNodeIDs(
+	left, right map[string]krknv1alpha1.GraphScenarioNode,
+) []string {
+	differences := make([]string, 0)
+	nodeIDs := make([]string, 0, len(left))
+	for nodeID := range left {
+		nodeIDs = append(nodeIDs, nodeID)
 	}
-	sort.Strings(sortedNodeIDs)
-	for _, nodeID := range sortedNodeIDs {
-		leftNode, leftExists := left.Graph[nodeID]
-		rightNode, rightExists := right.Graph[nodeID]
+	sort.Strings(nodeIDs)
+	for _, nodeID := range nodeIDs {
+		leftNode, leftExists := left[nodeID]
+		rightNode, rightExists := right[nodeID]
 		if !leftExists || !rightExists {
-			differences = append(differences, fmt.Sprintf("graph.%s", nodeID))
-			continue
+			return []string{fmt.Sprintf("graph.%s", nodeID)}
 		}
 		differences = append(differences, compareGraphNodeConfigurations(nodeID, leftNode, rightNode)...)
 	}
 	sort.Strings(differences)
 	return differences
+}
+
+func sameGraphNodeIDs(left, right map[string]krknv1alpha1.GraphScenarioNode) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for nodeID := range left {
+		if _, exists := right[nodeID]; !exists {
+			return false
+		}
+	}
+	return true
+}
+
+// sameGraphConfigurationIgnoringNodeIDs compares a graph as a forest of
+// behavior-labeled nodes. DependsOn references are translated into parent/
+// child edges, so equivalent graphs can use different node IDs while changed
+// dependencies still produce a different structure.
+func sameGraphConfigurationIgnoringNodeIDs(
+	left, right map[string]krknv1alpha1.GraphScenarioNode,
+) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	leftSignature, leftValid := graphConfigurationSignature(left)
+	rightSignature, rightValid := graphConfigurationSignature(right)
+	return leftValid && rightValid && leftSignature == rightSignature
+}
+
+func graphConfigurationSignature(graph map[string]krknv1alpha1.GraphScenarioNode) (string, bool) {
+	children := make(map[string][]string, len(graph))
+	roots := make([]string, 0, len(graph))
+	for nodeID, node := range graph {
+		parentID := optionalStringValue(node.DependsOn)
+		if parentID == "" {
+			roots = append(roots, nodeID)
+			continue
+		}
+		if _, exists := graph[parentID]; !exists {
+			return "", false
+		}
+		children[parentID] = append(children[parentID], nodeID)
+	}
+
+	states := make(map[string]uint8, len(graph))
+	memo := make(map[string]string, len(graph))
+	rootSignatures := make([]string, 0, len(roots))
+	for _, rootID := range roots {
+		signature, valid := graphNodeConfigurationSignature(rootID, graph, children, states, memo)
+		if !valid {
+			return "", false
+		}
+		rootSignatures = append(rootSignatures, signature)
+	}
+	// Nodes left out of all roots belong to a dependency cycle.
+	if len(memo) != len(graph) {
+		return "", false
+	}
+	sort.Strings(rootSignatures)
+
+	var signature strings.Builder
+	fmt.Fprintf(&signature, "%d:", len(rootSignatures))
+	for _, root := range rootSignatures {
+		appendGraphSignaturePart(&signature, root)
+	}
+	return signature.String(), true
+}
+
+func graphNodeConfigurationSignature(
+	nodeID string,
+	graph map[string]krknv1alpha1.GraphScenarioNode,
+	children map[string][]string,
+	states map[string]uint8,
+	memo map[string]string,
+) (string, bool) {
+	if signature, exists := memo[nodeID]; exists {
+		return signature, true
+	}
+	if states[nodeID] == 1 {
+		return "", false
+	}
+	node, exists := graph[nodeID]
+	if !exists {
+		return "", false
+	}
+	states[nodeID] = 1
+
+	childSignatures := make([]string, 0, len(children[nodeID]))
+	for _, childID := range children[nodeID] {
+		signature, valid := graphNodeConfigurationSignature(childID, graph, children, states, memo)
+		if !valid {
+			return "", false
+		}
+		childSignatures = append(childSignatures, signature)
+	}
+	sort.Strings(childSignatures)
+
+	var signature strings.Builder
+	appendGraphSignaturePart(&signature, scenarioIdentity(node.Scenario.Name, node.Name))
+	environmentKeys := make([]string, 0, len(node.Env))
+	for key := range node.Env {
+		environmentKeys = append(environmentKeys, key)
+	}
+	sort.Strings(environmentKeys)
+	fmt.Fprintf(&signature, "%d:", len(environmentKeys))
+	for _, key := range environmentKeys {
+		appendGraphSignaturePart(&signature, key)
+		appendGraphSignaturePart(&signature, node.Env[key])
+	}
+	volumePaths := make([]string, 0, len(node.Volumes))
+	for _, mountPath := range node.Volumes {
+		volumePaths = append(volumePaths, mountPath)
+	}
+	sort.Strings(volumePaths)
+	fmt.Fprintf(&signature, "%d:", len(volumePaths))
+	for _, mountPath := range volumePaths {
+		appendGraphSignaturePart(&signature, mountPath)
+	}
+	fmt.Fprintf(&signature, "%d:", len(childSignatures))
+	for _, child := range childSignatures {
+		appendGraphSignaturePart(&signature, child)
+	}
+
+	states[nodeID] = 2
+	memo[nodeID] = signature.String()
+	return memo[nodeID], true
+}
+
+func appendGraphSignaturePart(signature *strings.Builder, part string) {
+	fmt.Fprintf(signature, "%d:%s", len(part), part)
 }
 
 func compareGraphNodeConfigurations(nodeID string, left, right krknv1alpha1.GraphScenarioNode) []string {

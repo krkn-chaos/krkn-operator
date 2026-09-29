@@ -191,13 +191,30 @@ func TestCompareCategoryRunConfigurationsGraphRuns(t *testing.T) {
 			want: []string{"graph.node-b.depends_on"},
 		},
 		{
-			name: "node identity set",
+			name: "regenerated node IDs with remapped dependencies",
 			mutate: func(run *krknv1alpha1.KrknGraphRun) {
-				node := run.Spec.Graph["node-a"]
+				first := run.Spec.Graph["node-a"]
+				second := run.Spec.Graph["node-b"]
 				delete(run.Spec.Graph, "node-a")
-				run.Spec.Graph["renamed-node"] = node
+				delete(run.Spec.Graph, "node-b")
+				second.DependsOn = stringPointer("replayed-node-a")
+				run.Spec.Graph["replayed-node-a"] = first
+				run.Spec.Graph["replayed-node-b"] = second
 			},
-			want: []string{"graph.node-a", "graph.renamed-node"},
+			want: nil,
+		},
+		{
+			name: "regenerated node IDs with changed dependency topology",
+			mutate: func(run *krknv1alpha1.KrknGraphRun) {
+				first := run.Spec.Graph["node-a"]
+				second := run.Spec.Graph["node-b"]
+				delete(run.Spec.Graph, "node-a")
+				delete(run.Spec.Graph, "node-b")
+				second.DependsOn = nil
+				run.Spec.Graph["replayed-node-a"] = first
+				run.Spec.Graph["replayed-node-b"] = second
+			},
+			want: []string{"graph"},
 		},
 		{
 			name: "resiliency mount path",

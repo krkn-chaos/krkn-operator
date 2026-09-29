@@ -34,6 +34,14 @@ func TestBuildCategoryResiliencyHistoryGroupsTypedConfigurationsAndSortsPerClust
 	graphNode = graphDifferent.Spec.Graph["node-b"]
 	graphNode.Env["LATENCY_MS"] = "200"
 	graphDifferent.Spec.Graph["node-b"] = graphNode
+	graphReplay := graphBase.DeepCopy()
+	graphReplayNodeA := graphReplay.Spec.Graph["node-a"]
+	graphReplayNodeB := graphReplay.Spec.Graph["node-b"]
+	graphReplayNodeB.DependsOn = stringPointer("replay-node-a")
+	graphReplay.Spec.Graph = map[string]krknv1alpha1.GraphScenarioNode{
+		"replay-node-a": graphReplayNodeA,
+		"replay-node-b": graphReplayNodeB,
+	}
 
 	runs := []categoryHistoryRun{
 		scenarioHistoryRun("scenario-old", baseTime.Add(3*time.Hour), scenarioBase, []krknv1alpha1.ClusterResiliencyScore{
@@ -57,10 +65,13 @@ func TestBuildCategoryResiliencyHistoryGroupsTypedConfigurationsAndSortsPerClust
 		graphHistoryRun("graph-different", baseTime.Add(5*time.Hour), graphDifferent, []krknv1alpha1.GraphClusterScore{
 			{ClusterName: "cluster-a", ProviderName: "provider-a", Calculated: 0, Status: "no-baseline"},
 		}),
-		scenarioHistoryRun("scenario-without-score", baseTime.Add(6*time.Hour), scenarioBase, []krknv1alpha1.ClusterResiliencyScore{
+		graphHistoryRun("graph-replay", baseTime.Add(6*time.Hour), graphReplay, []krknv1alpha1.GraphClusterScore{
+			{ClusterName: "cluster-a", ProviderName: "provider-a", Calculated: 75, Status: "pass", Baseline: floatPointer(70)},
+		}),
+		scenarioHistoryRun("scenario-without-score", baseTime.Add(7*time.Hour), scenarioBase, []krknv1alpha1.ClusterResiliencyScore{
 			{ClusterName: "cluster-a", Score: 100, Status: "error"},
 		}),
-		graphHistoryRun("graph-without-score", baseTime.Add(7*time.Hour), graphBase, []krknv1alpha1.GraphClusterScore{
+		graphHistoryRun("graph-without-score", baseTime.Add(8*time.Hour), graphBase, []krknv1alpha1.GraphClusterScore{
 			{ClusterName: "cluster-a", Calculated: -1, Status: "calculating"},
 			{ClusterName: "cluster-b", Calculated: 80, Status: "error"},
 			{ClusterName: "cluster-c", Calculated: 80, Status: "unknown-status"},
@@ -73,7 +84,7 @@ func TestBuildCategoryResiliencyHistoryGroupsTypedConfigurationsAndSortsPerClust
 	}
 
 	clusterA := response.Clusters["cluster-a"]
-	wantRuns := []string{"graph-first", "scenario-equivalent", "scenario-different", "scenario-old", "graph-different"}
+	wantRuns := []string{"graph-first", "scenario-equivalent", "scenario-different", "scenario-old", "graph-different", "graph-replay"}
 	if got := datapointRunIDs(clusterA); !slices.Equal(got, wantRuns) {
 		t.Fatalf("cluster-a run order = %v, want %v", got, wantRuns)
 	}
@@ -103,6 +114,9 @@ func TestBuildCategoryResiliencyHistoryGroupsTypedConfigurationsAndSortsPerClust
 	}
 	if got, want := groupFor("cluster-a", "graph-first"), groupFor("cluster-b", "graph-equivalent"); got != want {
 		t.Fatalf("equivalent graph configurations have different group IDs: %q and %q", got, want)
+	}
+	if got, want := groupFor("cluster-a", "graph-first"), groupFor("cluster-a", "graph-replay"); got != want {
+		t.Fatalf("graph replay with regenerated node IDs has configuration group %q, want shared group %q", want, got)
 	}
 	graphPoint := datapointForRunID(t, clusterA, "graph-first")
 	if graphPoint.Baseline == nil || *graphPoint.Baseline != 65 {
