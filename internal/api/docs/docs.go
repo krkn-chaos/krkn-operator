@@ -1839,6 +1839,12 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
+                        "description": "Target provider name, required when cluster names overlap",
+                        "name": "operator-name",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
                         "description": "Cluster name (legacy, required with id)",
                         "name": "cluster-name",
                         "in": "query"

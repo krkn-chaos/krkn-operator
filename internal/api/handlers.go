@@ -284,6 +284,7 @@ func (h *Handler) GetClusters(w http.ResponseWriter, r *http.Request) {
 // @Produce json
 // @Param targetUUID query string false "KrknOperatorTarget UUID (new API)"
 // @Param id query string false "KrknTargetRequest ID (legacy)"
+// @Param operator-name query string false "Target provider name, required when cluster names overlap"
 // @Param cluster-name query string false "Cluster name (legacy, required with id)"
 // @Success 200 {object} object "List of nodes"
 // @Failure 400 {object} ErrorResponse "Missing or invalid parameters"
@@ -300,6 +301,7 @@ func (h *Handler) GetNodes(w http.ResponseWriter, r *http.Request) {
 	// Legacy parameters (KrknTargetRequest)
 	id := r.URL.Query().Get("id")
 	clusterName := r.URL.Query().Get("cluster-name")
+	operatorName := r.URL.Query().Get("operator-name")
 
 	// Validate that at least one set of parameters is provided
 	if targetUUID == "" && (id == "" || clusterName == "") {
@@ -315,8 +317,15 @@ func (h *Handler) GetNodes(w http.ResponseWriter, r *http.Request) {
 	claims := auth.GetClaimsFromContext(ctx)
 	if claims != nil && !auth.IsAdmin(ctx) {
 		// Get cluster API URL for permission check
-		clusterAPIURL, err := h.getClusterAPIURL(ctx, targetUUID, id, clusterName)
+		clusterAPIURL, err := h.getClusterAPIURL(ctx, targetUUID, id, operatorName, clusterName)
 		if err != nil {
+			if errors.Is(err, errAmbiguousClusterProvider) {
+				writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+					Error:   "ambiguous_cluster",
+					Message: err.Error(),
+				})
+				return
+			}
 			log.FromContext(ctx).Error(err, "Failed to get cluster API URL for permission check")
 			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
 				Error:   "internal_error",
@@ -357,8 +366,15 @@ func (h *Handler) GetNodes(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get kubeconfig using unified helper function
-	kubeconfigBase64, err := h.getKubeconfig(ctx, targetUUID, id, clusterName)
+	kubeconfigBase64, err := h.getKubeconfig(ctx, targetUUID, id, operatorName, clusterName)
 	if err != nil {
+		if errors.Is(err, errAmbiguousClusterProvider) {
+			writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+				Error:   "ambiguous_cluster",
+				Message: err.Error(),
+			})
+			return
+		}
 		if client.IgnoreNotFound(err) == nil || strings.Contains(err.Error(), "not found") {
 			writeJSONError(w, http.StatusNotFound, ErrorResponse{
 				Error:   "not_found",

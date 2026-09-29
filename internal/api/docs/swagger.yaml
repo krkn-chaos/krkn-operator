@@ -3580,6 +3580,10 @@ paths:
         in: query
         name: id
         type: string
+      - description: Target provider name, required when cluster names overlap
+        in: query
+        name: operator-name
+        type: string
       - description: Cluster name (legacy, required with id)
         in: query
         name: cluster-name
