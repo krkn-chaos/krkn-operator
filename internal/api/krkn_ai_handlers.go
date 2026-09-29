@@ -135,24 +135,24 @@ func validateKrknAIRunName(name string) error {
 	return nil
 }
 
-func (h *Handler) resolveKrknAITarget(ctx context.Context, requestID string, targets map[string][]string, action groupauth.Action) (*krknv1alpha1.KrknTargetRequest, string, string, error) {
+func (h *Handler) resolveKrknAITarget(ctx context.Context, requestID string, targets map[string][]string, action groupauth.Action) (*krknv1alpha1.KrknTargetRequest, string, string, string, error) {
 	if requestID == "" || len(targets) != 1 {
-		return nil, "", "", fmt.Errorf("exactly one target provider and cluster is required")
+		return nil, "", "", "", fmt.Errorf("exactly one target provider and cluster is required")
 	}
 	var provider, cluster string
 	for selectedProvider, clusters := range targets {
 		if selectedProvider == "" || len(clusters) != 1 || clusters[0] == "" {
-			return nil, "", "", fmt.Errorf("exactly one target provider and cluster is required")
+			return nil, "", "", "", fmt.Errorf("exactly one target provider and cluster is required")
 		}
 		provider = selectedProvider
 		cluster = clusters[0]
 	}
 	var target krknv1alpha1.KrknTargetRequest
 	if err := h.client.Get(ctx, client.ObjectKey{Name: requestID, Namespace: h.namespace}, &target); err != nil {
-		return nil, "", "", fmt.Errorf("target request not found: %w", err)
+		return nil, "", "", "", fmt.Errorf("target request not found: %w", err)
 	}
 	if !strings.EqualFold(target.Status.Status, "completed") {
-		return nil, "", "", fmt.Errorf("target request is not completed")
+		return nil, "", "", "", fmt.Errorf("target request is not completed")
 	}
 	var apiURL string
 	for _, candidate := range target.Status.TargetData[provider] {
@@ -162,22 +162,95 @@ func (h *Handler) resolveKrknAITarget(ctx context.Context, requestID string, tar
 		}
 	}
 	if apiURL == "" {
-		return nil, "", "", fmt.Errorf("target cluster not found")
+		return nil, "", "", "", fmt.Errorf("target cluster not found")
 	}
-	if !auth.IsAdmin(ctx) {
-		claims := auth.GetClaimsFromContext(ctx)
-		if claims == nil {
-			return nil, "", "", fmt.Errorf("authentication required")
+	if err := h.authorizeKrknAITargetAPIURL(ctx, apiURL, action); err != nil {
+		return nil, "", "", "", err
+	}
+	return &target, provider, cluster, apiURL, nil
+}
+
+func (h *Handler) authorizeKrknAITargetAPIURL(ctx context.Context, apiURL string, action groupauth.Action) error {
+	if apiURL == "" {
+		return fmt.Errorf("target cluster API URL is required")
+	}
+	if auth.IsAdmin(ctx) {
+		return nil
+	}
+	claims := auth.GetClaimsFromContext(ctx)
+	if claims == nil {
+		return fmt.Errorf("authentication required")
+	}
+	allowed, err := groupauth.HasClusterPermission(ctx, h.client, claims.UserID, h.namespace, apiURL, action)
+	if err != nil {
+		return err
+	}
+	if !allowed {
+		return fmt.Errorf("target access denied")
+	}
+	return nil
+}
+
+func (h *Handler) authorizeKrknAIRunTarget(ctx context.Context, run *krknv1alpha1.KrknAIRun, action groupauth.Action) error {
+	if auth.IsAdmin(ctx) {
+		return nil
+	}
+	if run.Spec.TargetClusterAPIURL != "" {
+		return h.authorizeKrknAITargetAPIURL(ctx, run.Spec.TargetClusterAPIURL, action)
+	}
+	if _, _, _, _, err := h.resolveKrknAITarget(ctx, run.Spec.TargetRequestID, run.Spec.TargetClusters, action); err == nil {
+		return nil
+	} else if !apierrors.IsNotFound(err) {
+		return err
+	}
+	apiURL, err := h.krknAIRunTargetAPIURLFromChildren(ctx, run)
+	if err != nil {
+		return err
+	}
+	return h.authorizeKrknAITargetAPIURL(ctx, apiURL, action)
+}
+
+func (h *Handler) krknAIRunTargetAPIURLFromChildren(ctx context.Context, run *krknv1alpha1.KrknAIRun) (string, error) {
+	if run.Spec.TargetRequestID == "" || len(run.Spec.TargetClusters) != 1 {
+		return "", fmt.Errorf("Krkn-AI run has no resolvable target")
+	}
+	var providerName, clusterName string
+	for provider, clusters := range run.Spec.TargetClusters {
+		if provider == "" || len(clusters) != 1 || clusters[0] == "" {
+			return "", fmt.Errorf("Krkn-AI run has no resolvable target")
 		}
-		allowed, err := groupauth.HasClusterPermission(ctx, h.client, claims.UserID, h.namespace, apiURL, action)
-		if err != nil {
-			return nil, "", "", err
+		providerName, clusterName = provider, clusters[0]
+	}
+	var children krknv1alpha1.KrknScenarioRunList
+	if err := h.client.List(ctx, &children, client.InNamespace(h.namespace), client.MatchingLabels{
+		"krkn.dev/ai-run": krknAIRunLabelValue(run.Name),
+	}); err != nil {
+		return "", fmt.Errorf("failed to list Krkn-AI child runs: %w", err)
+	}
+	apiURL := ""
+	for i := range children.Items {
+		child := &children.Items[i]
+		if !hasKrknAIRunOwnerUID(child.OwnerReferences, run.UID) ||
+			child.Spec.TargetRequestID != run.Spec.TargetRequestID ||
+			len(child.Spec.TargetClusters) != 1 ||
+			len(child.Spec.TargetClusters[providerName]) != 1 ||
+			child.Spec.TargetClusters[providerName][0] != clusterName {
+			continue
 		}
-		if !allowed {
-			return nil, "", "", fmt.Errorf("target access denied")
+		for _, job := range child.Status.ClusterJobs {
+			if job.ClusterName != clusterName || job.ClusterAPIURL == "" {
+				continue
+			}
+			if apiURL != "" && apiURL != job.ClusterAPIURL {
+				return "", fmt.Errorf("Krkn-AI child runs contain conflicting target API URLs")
+			}
+			apiURL = job.ClusterAPIURL
 		}
 	}
-	return &target, provider, cluster, nil
+	if apiURL == "" {
+		return "", fmt.Errorf("target API URL is unavailable from Krkn-AI child runs")
+	}
+	return apiURL, nil
 }
 
 func (h *Handler) managedClusterKubeconfig(ctx context.Context, requestID, provider, cluster string) (string, error) {
@@ -292,7 +365,7 @@ func (h *Handler) createKrknAIDiscovery(w http.ResponseWriter, r *http.Request) 
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{Error: "bad_request", Message: "invalid discovery request"})
 		return
 	}
-	_, provider, cluster, err := h.resolveKrknAITarget(r.Context(), request.TargetRequestID, request.TargetClusters, groupauth.ActionRun)
+	_, provider, cluster, _, err := h.resolveKrknAITarget(r.Context(), request.TargetRequestID, request.TargetClusters, groupauth.ActionRun)
 	if err != nil {
 		h.writeKrknAITargetError(w, err)
 		return
@@ -343,7 +416,7 @@ func (h *Handler) createKrknAIConfig(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{Error: "bad_request", Message: "configYaml must be a non-empty YAML object"})
 		return
 	}
-	_, provider, cluster, err := h.resolveKrknAITarget(r.Context(), request.TargetRequestID, request.TargetClusters, groupauth.ActionRun)
+	_, provider, cluster, _, err := h.resolveKrknAITarget(r.Context(), request.TargetRequestID, request.TargetClusters, groupauth.ActionRun)
 	if err != nil {
 		h.writeKrknAITargetError(w, err)
 		return
@@ -440,7 +513,7 @@ func (h *Handler) createKrknAIRun(w http.ResponseWriter, r *http.Request) {
 		}
 		activeDeadlineSeconds = *request.ActiveDeadlineSeconds
 	}
-	_, provider, cluster, err := h.resolveKrknAITarget(r.Context(), request.TargetRequestID, request.TargetClusters, groupauth.ActionRun)
+	_, provider, cluster, targetClusterAPIURL, err := h.resolveKrknAITarget(r.Context(), request.TargetRequestID, request.TargetClusters, groupauth.ActionRun)
 	if err != nil {
 		h.writeKrknAITargetError(w, err)
 		return
@@ -458,7 +531,7 @@ func (h *Handler) createKrknAIRun(w http.ResponseWriter, r *http.Request) {
 	claims := auth.GetClaimsFromContext(r.Context())
 	run := &krknv1alpha1.KrknAIRun{ObjectMeta: metav1.ObjectMeta{Name: request.Name, Namespace: h.namespace}, Spec: krknv1alpha1.KrknAIRunSpec{
 		ConfigMapName: configMap.Name, ConfigMapKey: files.KrknAIConfigFileName, TargetRequestID: request.TargetRequestID,
-		TargetClusters: request.TargetClusters, PrometheusURL: request.PrometheusURL, PrometheusTokenSecretRef: request.PrometheusTokenSecretRef,
+		TargetClusters: request.TargetClusters, TargetClusterAPIURL: targetClusterAPIURL,
 		ActiveDeadlineSeconds: activeDeadlineSeconds,
 	}}
 	if claims != nil {
@@ -497,7 +570,7 @@ func (h *Handler) listKrknAIRuns(w http.ResponseWriter, r *http.Request) {
 	visible := make([]krknv1alpha1.KrknAIRun, 0, len(runs.Items))
 	for i := range runs.Items {
 		run := &runs.Items[i]
-		if _, _, _, err := h.resolveKrknAITarget(r.Context(), run.Spec.TargetRequestID, run.Spec.TargetClusters, groupauth.ActionView); err == nil {
+		if err := h.authorizeKrknAIRunTarget(r.Context(), run, groupauth.ActionView); err == nil {
 			visible = append(visible, *run)
 		}
 	}
@@ -549,7 +622,7 @@ func (h *Handler) authorizeKrknAIRun(w http.ResponseWriter, r *http.Request, nam
 		writeJSONError(w, http.StatusNotFound, ErrorResponse{Error: "not_found", Message: "run not found"})
 		return nil, false
 	}
-	if _, _, _, err := h.resolveKrknAITarget(r.Context(), run.Spec.TargetRequestID, run.Spec.TargetClusters, action); err != nil {
+	if err := h.authorizeKrknAIRunTarget(r.Context(), &run, action); err != nil {
 		h.writeKrknAITargetError(w, err)
 		return nil, false
 	}

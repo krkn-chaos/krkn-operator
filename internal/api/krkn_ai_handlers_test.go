@@ -12,6 +12,7 @@ import (
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
 	"github.com/krkn-chaos/krkn-operator/pkg/auth"
 	"github.com/krkn-chaos/krkn-operator/pkg/files"
+	"github.com/krkn-chaos/krkn-operator/pkg/groupauth"
 	"github.com/krkn-chaos/krkn-operator/pkg/krknaiserver"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -60,6 +61,14 @@ func newKrknAITestHandler(t *testing.T, serviceURL string) *Handler {
 func adminKrknAIRequest(method, path, body string) *http.Request {
 	req := httptest.NewRequest(method, path, strings.NewReader(body))
 	return req.WithContext(context.WithValue(req.Context(), auth.UserClaimsKey, &auth.Claims{UserID: "admin@example.com", Role: "admin"}))
+}
+
+func userKrknAIRequest(method, path, body, userID string) *http.Request {
+	req := httptest.NewRequest(method, path, strings.NewReader(body))
+	return req.WithContext(context.WithValue(req.Context(), auth.UserClaimsKey, &auth.Claims{
+		UserID: userID,
+		Role:   "user",
+	}))
 }
 
 func TestKrknAIConfigBindingAndRunCRUD(t *testing.T) {
@@ -122,10 +131,138 @@ func TestKrknAIConfigBindingAndRunCRUD(t *testing.T) {
 	if listResponse.Code != http.StatusOK || !strings.Contains(listResponse.Body.String(), "first-run") {
 		t.Fatalf("run list did not include created run: %d %s", listResponse.Code, listResponse.Body.String())
 	}
+	if run.Spec.TargetClusterAPIURL != "https://cluster.example" {
+		t.Fatalf("run target API URL = %q, want stable target snapshot", run.Spec.TargetClusterAPIURL)
+	}
 	deleteResponse := httptest.NewRecorder()
 	handler.KrknAIRouter(deleteResponse, adminKrknAIRequest(http.MethodDelete, KrknAIPath+"/runs/first-run", ""))
 	if deleteResponse.Code != http.StatusNoContent {
 		t.Fatalf("run deletion failed: %d %s", deleteResponse.Code, deleteResponse.Body.String())
+	}
+}
+
+func TestKrknAIRunReadAPIsUseDurableTargetAPIURL(t *testing.T) {
+	handler := newKrknAITestHandler(t, "http://unused")
+	const (
+		viewerID  = "viewer@example.com"
+		groupName = "run-viewers"
+		apiURL    = "https://cluster.example"
+	)
+	viewer := &krknv1alpha1.KrknUser{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "krknuser-viewer-example-com",
+			Namespace: "default",
+			Labels:    map[string]string{groupauth.GroupLabelKey(groupName): "true"},
+		},
+		Spec: krknv1alpha1.KrknUserSpec{UserID: viewerID, Role: "user"},
+	}
+	group := &krknv1alpha1.KrknUserGroup{
+		ObjectMeta: metav1.ObjectMeta{Name: groupName, Namespace: "default"},
+		Spec: krknv1alpha1.KrknUserGroupSpec{
+			Name: groupName,
+			ClusterPermissions: map[string]krknv1alpha1.ClusterPermissionSet{
+				apiURL: {Actions: []string{string(groupauth.ActionView)}},
+			},
+		},
+	}
+	if err := handler.client.Create(context.Background(), viewer); err != nil {
+		t.Fatal(err)
+	}
+	if err := handler.client.Create(context.Background(), group); err != nil {
+		t.Fatal(err)
+	}
+
+	targetClusters := map[string][]string{"provider": {"cluster"}}
+	storedURLRun := &krknv1alpha1.KrknAIRun{
+		ObjectMeta: metav1.ObjectMeta{Name: "stored-url-run", Namespace: "default", UID: types.UID("stored-url-uid")},
+		Spec: krknv1alpha1.KrknAIRunSpec{
+			TargetRequestID:     "expired-target",
+			TargetClusters:      targetClusters,
+			TargetClusterAPIURL: apiURL,
+		},
+	}
+	legacyRun := &krknv1alpha1.KrknAIRun{
+		ObjectMeta: metav1.ObjectMeta{Name: "legacy-run", Namespace: "default", UID: types.UID("legacy-run-uid")},
+		Spec: krknv1alpha1.KrknAIRunSpec{
+			TargetRequestID: "expired-target",
+			TargetClusters:  targetClusters,
+		},
+	}
+	privateRun := &krknv1alpha1.KrknAIRun{
+		ObjectMeta: metav1.ObjectMeta{Name: "private-run", Namespace: "default", UID: types.UID("private-run-uid")},
+		Spec: krknv1alpha1.KrknAIRunSpec{
+			TargetRequestID:     "expired-target",
+			TargetClusters:      targetClusters,
+			TargetClusterAPIURL: "https://private.example",
+		},
+	}
+	child := &krknv1alpha1.KrknScenarioRun{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "legacy-run-child",
+			Namespace: "default",
+			Labels:    map[string]string{"krkn.dev/ai-run": legacyRun.Name},
+			OwnerReferences: []metav1.OwnerReference{{
+				APIVersion: krknv1alpha1.GroupVersion.String(),
+				Kind:       "KrknAIRun",
+				Name:       legacyRun.Name,
+				UID:        legacyRun.UID,
+			}},
+		},
+		Spec: krknv1alpha1.KrknScenarioRunSpec{
+			TargetRequestID: "expired-target",
+			TargetClusters:  targetClusters,
+		},
+		Status: krknv1alpha1.KrknScenarioRunStatus{ClusterJobs: []krknv1alpha1.ClusterJobStatus{{
+			ClusterName:   "cluster",
+			ClusterAPIURL: apiURL,
+			JobID:         "legacy-job",
+		}}},
+	}
+	for _, run := range []*krknv1alpha1.KrknAIRun{storedURLRun, legacyRun, privateRun} {
+		if err := handler.client.Create(context.Background(), run); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := handler.client.Create(context.Background(), child); err != nil {
+		t.Fatal(err)
+	}
+
+	list := httptest.NewRecorder()
+	handler.KrknAIRouter(list, userKrknAIRequest(http.MethodGet, KrknAIPath+"/runs", "", viewerID))
+	if list.Code != http.StatusOK {
+		t.Fatalf("list status = %d: %s", list.Code, list.Body.String())
+	}
+	var visible []krknv1alpha1.KrknAIRun
+	if err := json.Unmarshal(list.Body.Bytes(), &visible); err != nil {
+		t.Fatal(err)
+	}
+	visibleNames := map[string]bool{}
+	for _, run := range visible {
+		visibleNames[run.Name] = true
+	}
+	if len(visibleNames) != 2 || !visibleNames[storedURLRun.Name] || !visibleNames[legacyRun.Name] {
+		t.Fatalf("authorized runs with no target request = %+v", visibleNames)
+	}
+
+	for _, name := range []string{storedURLRun.Name, legacyRun.Name} {
+		response := httptest.NewRecorder()
+		handler.KrknAIRouter(response, userKrknAIRequest(http.MethodGet, KrknAIPath+"/runs/"+name, "", viewerID))
+		if response.Code != http.StatusOK {
+			t.Fatalf("get %s status = %d: %s", name, response.Code, response.Body.String())
+		}
+	}
+	privateResponse := httptest.NewRecorder()
+	handler.KrknAIRouter(privateResponse, userKrknAIRequest(http.MethodGet, KrknAIPath+"/runs/private-run", "", viewerID))
+	if privateResponse.Code != http.StatusForbidden {
+		t.Fatalf("unauthorized run status = %d, want %d: %s", privateResponse.Code, http.StatusForbidden, privateResponse.Body.String())
+	}
+
+	summary := httptest.NewRecorder()
+	handler.KrknAIRouter(summary, userKrknAIRequest(http.MethodGet, KrknAIPath+"/runs/legacy-run/results/summary", "", viewerID))
+	var summaryBody KrknAIRunSummaryResponse
+	if summary.Code != http.StatusOK || json.Unmarshal(summary.Body.Bytes(), &summaryBody) != nil ||
+		summaryBody.Name != legacyRun.Name || summaryBody.ArtifactStatus != "not_available" {
+		t.Fatalf("legacy summary was not returned through child target metadata: %d %s", summary.Code, summary.Body.String())
 	}
 }
 

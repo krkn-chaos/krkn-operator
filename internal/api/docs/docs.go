@@ -4040,6 +4040,10 @@ const docTemplate = `{
                     "description": "PrometheusURL overrides the Prometheus endpoint used by the orchestrator.\n+optional",
                     "type": "string"
                 },
+                "targetClusterApiUrl": {
+                    "description": "TargetClusterAPIURL preserves target-scoped authorization after target discovery expires.\n+optional",
+                    "type": "string"
+                },
                 "targetClusters": {
                     "description": "TargetClusters selects exactly one provider and cluster from TargetRequestID.\n+kubebuilder:validation:MinProperties=1",
                     "type": "object",
