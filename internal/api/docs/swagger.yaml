@@ -166,11 +166,6 @@ definitions:
           PrometheusURL overrides the Prometheus endpoint used by the orchestrator.
           +optional
         type: string
-      targetClusterApiUrl:
-        description: |-
-          TargetClusterAPIURL preserves target-scoped authorization after target discovery expires.
-          +optional
-        type: string
       targetClusters:
         additionalProperties:
           items:

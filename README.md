@@ -302,7 +302,7 @@ Run results are available through authenticated, target-authorized endpoints:
 | `GET /api/v1/krkn-ai/runs/{name}/results/scenarios/{generation}/{scenarioId}` | Read committed scenario parameters, fitness, measured health samples, and log path. |
 | `GET /api/v1/krkn-ai/runs/{name}/results` and `/files/{path}` | Read the raw committed manifest or download a listed attachment. |
 
-`KrknAIRun` stores the selected cluster API URL for durable target authorization after target-request cleanup. Completed run reads therefore do not depend on the transient discovery request; requests remain while a run is active so the orchestrator can provision or retry.
+Krkn-AI run reads authorize from cluster metadata persisted in child `KrknScenarioRun` resources; they do not resolve the transient discovery request. The request remains while a run is active so the orchestrator can provision or retry.
 
 Before the first artifact manifest, summary reads report `artifactStatus:
 not_available` and scenario indexes are empty; child-run metadata can still show

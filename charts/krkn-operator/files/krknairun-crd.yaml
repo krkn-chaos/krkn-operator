@@ -80,10 +80,6 @@ spec:
                 description: PrometheusURL overrides the Prometheus endpoint used
                   by the orchestrator.
                 type: string
-              targetClusterApiUrl:
-                description: TargetClusterAPIURL preserves target-scoped authorization
-                  after target discovery expires.
-                type: string
               targetClusters:
                 additionalProperties:
                   items:

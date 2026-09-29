@@ -30,10 +30,6 @@ type KrknAIRunSpec struct {
 	// +kubebuilder:validation:MinProperties=1
 	TargetClusters map[string][]string `json:"targetClusters"`
 
-	// TargetClusterAPIURL preserves target-scoped authorization after target discovery expires.
-	// +optional
-	TargetClusterAPIURL string `json:"targetClusterApiUrl,omitempty"`
-
 	// ConfigMapName identifies the ConfigMap containing the krkn-ai YAML.
 	ConfigMapName string `json:"configMapName"`
 
