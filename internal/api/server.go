@@ -299,6 +299,7 @@ func NewServer(port int, client client.Client, clientset kubernetes.Interface, n
 	mux.Handle(ElasticsearchConfigsPath+"/", authMw.RequireAuth(http.HandlerFunc(handler.ElasticsearchConfigsRouter)))
 	// Elasticsearch telemetry query endpoint - any authenticated user
 	mux.Handle(ElasticsearchQueryPath, authMw.RequireAuth(http.HandlerFunc(handler.QueryElasticsearchTelemetry)))
+	mux.Handle(ElasticsearchAlertsQueryPath, authMw.RequireAuth(http.HandlerFunc(handler.QueryElasticsearchAlerts)))
 	// Cloud credential endpoints
 	mux.Handle(CloudCredentialsAvailablePath, authMw.RequireAuth(http.HandlerFunc(handler.ListAvailableCloudCredentials)))
 	mux.Handle(CloudCredentialsAvailablePath+"/", authMw.RequireAuth(http.HandlerFunc(handler.ListAvailableCloudCredentials)))

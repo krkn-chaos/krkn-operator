@@ -181,6 +181,60 @@ func TestQueryTelemetryRejectsCredentialsOverHTTP(t *testing.T) {
 	}
 }
 
+func TestQueryAlertsReturnsRawDocuments(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/alerts/_search") {
+			t.Errorf("unexpected path %q", r.URL.Path)
+		}
+		var request map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		query := request["query"].(map[string]any)["bool"].(map[string]any)
+		filter := query["filter"].([]any)[0].(map[string]any)["range"].(map[string]any)
+		if _, ok := filter["created_at"]; !ok {
+			t.Errorf("alerts query should filter created_at: %v", query)
+		}
+		if _, err := w.Write([]byte(`{"hits":{"hits":[{"_id":"alert-1","_source":{"alertname":"APIDown","severity":"critical"}},{"_id":"alert-2","_source":{"alertstate":"firing"}}]}}`)); err != nil {
+			t.Fatalf("write response fixture: %v", err)
+		}
+	}))
+	defer srv.Close()
+
+	docs, err := NewClient().QueryAlerts(context.Background(), ConnectionParams{Host: srv.URL, Index: "alerts"}, 50, "", "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(docs) != 2 || docs[0].ID != "alert-1" {
+		t.Fatalf("got %+v, want two raw alert documents", docs)
+	}
+	if !strings.Contains(string(docs[0].Source), "APIDown") {
+		t.Errorf("source = %s, want alert payload", docs[0].Source)
+	}
+}
+
+func TestQueryAlertsValidatesQueryOptions(t *testing.T) {
+	client := NewClient()
+	conn := ConnectionParams{Host: "https://es.example.com", Index: "alerts"}
+	for _, test := range []struct {
+		name      string
+		size      int
+		startDate string
+		endDate   string
+	}{
+		{name: "negative size", size: -1},
+		{name: "invalid start date", startDate: "09/01/2026"},
+		{name: "reversed dates", startDate: "2026-09-10", endDate: "2026-09-01"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := client.QueryAlerts(context.Background(), conn, test.size, test.startDate, test.endDate)
+			if err == nil {
+				t.Fatal("expected query validation error")
+			}
+		})
+	}
+}
+
 func TestConnectionParamsTLSConfig(t *testing.T) {
 	// A syntactically valid self-signed certificate in PEM form.
 	const caPEM = `-----BEGIN CERTIFICATE-----

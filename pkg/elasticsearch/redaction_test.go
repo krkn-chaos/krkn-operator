@@ -139,6 +139,9 @@ func TestIsSensitiveKey(t *testing.T) {
 		{"name", false},
 		{"secret_key", true},
 		{"bearer_token", true},
+		{"client_secret", true},
+		{"authorization", true},
+		{"x-api-key", true},
 	}
 
 	for _, tt := range tests {
