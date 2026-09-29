@@ -23,7 +23,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
+	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -46,6 +48,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -56,7 +59,9 @@ import (
 	"github.com/krkn-chaos/krkn-operator/pkg/auth"
 	"github.com/krkn-chaos/krkn-operator/pkg/cloudcreds"
 	"github.com/krkn-chaos/krkn-operator/pkg/elasticsearch"
+	"github.com/krkn-chaos/krkn-operator/pkg/files"
 	"github.com/krkn-chaos/krkn-operator/pkg/groupauth"
+	"github.com/krkn-chaos/krkn-operator/pkg/krknaiserver"
 	"github.com/krkn-chaos/krkn-operator/pkg/registry"
 	pb "github.com/krkn-chaos/krkn-operator/proto/dataprovider"
 )
@@ -125,6 +130,8 @@ type Handler struct {
 	namespace      string
 	grpcServerAddr string
 	secretManager  *auth.SecretManager
+	artifactClient *krknaiserver.Client
+	krknAIEnabled  bool
 	// scenarioProviderFactory is injectable for API tests; production handlers
 	// use the krknctl-backed factory assigned by NewHandler.
 	scenarioProviderFactory func(provider.Mode) (provider.ScenarioDataProvider, error)
@@ -140,7 +147,7 @@ type Handler struct {
 
 // NewHandler creates a new Handler.
 // Call Shutdown() during server teardown to cancel in-flight background jobs.
-func NewHandler(client client.Client, clientset kubernetes.Interface, namespace string, grpcServerAddr string, secretManager *auth.SecretManager) *Handler {
+func NewHandler(client client.Client, clientset kubernetes.Interface, namespace string, grpcServerAddr string, secretManager *auth.SecretManager, krknAIEnabled bool) *Handler {
 	bgCtx, bgCancel := context.WithCancel(context.Background())
 	return &Handler{
 		client:                  client,
@@ -148,6 +155,8 @@ func NewHandler(client client.Client, clientset kubernetes.Interface, namespace 
 		namespace:               namespace,
 		grpcServerAddr:          grpcServerAddr,
 		secretManager:           secretManager,
+		artifactClient:          krknaiserver.New(os.Getenv("KRKNAI_SERVICE_URL"), os.Getenv("KRKNAI_SERVICE_TOKEN")),
+		krknAIEnabled:           krknAIEnabled,
 		scenarioProviderFactory: createScenarioProvider,
 		esClient:                elasticsearch.NewClient(),
 		jobTracker:              NewJobTracker(),
@@ -527,6 +536,7 @@ func (h *Handler) PostTarget(w http.ResponseWriter, r *http.Request) {
 // @Success 200 {object} object "Target deleted successfully"
 // @Failure 400 {object} ErrorResponse "Invalid UUID"
 // @Failure 403 {object} ErrorResponse "Insufficient permissions"
+// @Failure 409 {object} ErrorResponse "Target request is referenced by a Krkn-AI config or run"
 // @Failure 404 {object} ErrorResponse "Target not found"
 // @Failure 500 {object} ErrorResponse "Internal server error"
 // @Security BearerAuth
@@ -569,56 +579,54 @@ func (h *Handler) DeleteTargetByUUID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Admin bypass - can delete any resource
-	if auth.IsAdmin(ctx) {
-		if err := h.client.Delete(ctx, &targetRequest); err != nil {
-			logger.Error(err, "Failed to delete KrknTargetRequest", "uuid", uuid)
-			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
-				Error:   "internal_error",
-				Message: "Failed to delete KrknTargetRequest",
+	// Non-admin users may delete only their own request.
+	if !auth.IsAdmin(ctx) {
+		claims := auth.GetClaimsFromContext(ctx)
+		if claims == nil {
+			writeJSONError(w, http.StatusUnauthorized, ErrorResponse{
+				Error:   "unauthorized",
+				Message: "No authentication claims found",
 			})
 			return
 		}
-		logger.Info("Successfully deleted KrknTargetRequest (admin)", "uuid", uuid)
-		w.WriteHeader(http.StatusNoContent)
-		return
+
+		ownerLabel := targetRequest.Labels["krkn.krkn-chaos.dev/owner-user"]
+		currentUserSanitized, err := groupauth.SanitizeUserIDForLabel(claims.UserID)
+		if err != nil {
+			logger.Error(err, "Failed to sanitize user ID for owner comparison", "userID", claims.UserID)
+			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+				Error:   "internal_error",
+				Message: "Failed to process user identity",
+			})
+			return
+		}
+		if ownerLabel != currentUserSanitized {
+			logger.Info("Denying delete - user is not the owner", "uuid", uuid, "userID", claims.UserID, "owner", ownerLabel)
+			writeJSONError(w, http.StatusForbidden, ErrorResponse{
+				Error:   "forbidden",
+				Message: "You can only delete resources you created",
+			})
+			return
+		}
 	}
 
-	// Non-admin: check ownership
-	claims := auth.GetClaimsFromContext(ctx)
-	if claims == nil {
-		writeJSONError(w, http.StatusUnauthorized, ErrorResponse{
-			Error:   "unauthorized",
-			Message: "No authentication claims found",
-		})
-		return
-	}
-
-	// Extract owner from label
-	ownerLabel := targetRequest.Labels["krkn.krkn-chaos.dev/owner-user"]
-	currentUserSanitized, err := groupauth.SanitizeUserIDForLabel(claims.UserID)
+	referenced, err := h.krknAITargetReferenced(ctx, uuid)
 	if err != nil {
-		logger.Error(err, "Failed to sanitize user ID for owner comparison", "userID", claims.UserID)
+		logger.Error(err, "Failed to check Krkn-AI references", "uuid", uuid)
 		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
 			Error:   "internal_error",
-			Message: "Failed to process user identity",
+			Message: "Failed to check target references",
+		})
+		return
+	}
+	if referenced {
+		writeJSONError(w, http.StatusConflict, ErrorResponse{
+			Error:   "conflict",
+			Message: "Target request is referenced by a Krkn-AI config or run",
 		})
 		return
 	}
 
-	if ownerLabel != currentUserSanitized {
-		logger.Info("Denying delete - user is not the owner",
-			"uuid", uuid,
-			"userID", claims.UserID,
-			"owner", ownerLabel)
-		writeJSONError(w, http.StatusForbidden, ErrorResponse{
-			Error:   "forbidden",
-			Message: "You can only delete resources you created",
-		})
-		return
-	}
-
-	// User is the owner - proceed with deletion
 	if err := h.client.Delete(ctx, &targetRequest); err != nil {
 		logger.Error(err, "Failed to delete KrknTargetRequest", "uuid", uuid)
 		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
@@ -627,9 +635,33 @@ func (h *Handler) DeleteTargetByUUID(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-
-	logger.Info("Successfully deleted KrknTargetRequest (owner)", "uuid", uuid)
+	logger.Info("Successfully deleted KrknTargetRequest", "uuid", uuid)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) krknAITargetReferenced(ctx context.Context, requestID string) (bool, error) {
+	var configMaps corev1.ConfigMapList
+	if err := h.client.List(ctx, &configMaps, client.InNamespace(h.namespace)); err != nil {
+		return false, err
+	}
+	for i := range configMaps.Items {
+		configMap := &configMaps.Items[i]
+		if configMap.Labels[files.FilePurposeLabel] == files.FilePurposeKrknAIConfig &&
+			configMap.Annotations[files.KrknAIConfigTargetRequestAnnotation] == requestID {
+			return true, nil
+		}
+	}
+
+	var runs krknv1alpha1.KrknAIRunList
+	if err := h.client.List(ctx, &runs, client.InNamespace(h.namespace)); err != nil {
+		return false, err
+	}
+	for i := range runs.Items {
+		if runs.Items[i].Spec.TargetRequestID == requestID {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // TargetsHandler handles GET, POST, and DELETE for /api/v1/targets endpoints
@@ -1707,6 +1739,14 @@ func normalizeLegacyScenarioRunRequest(req *ScenarioRunRequest) {
 	}
 }
 
+func scenarioReferenceForResponse(spec krknv1alpha1.KrknScenarioRunSpec) krknv1alpha1.ScenarioReference {
+	reference, _, err := spec.ResolveScenarioReference()
+	if err != nil {
+		return spec.Scenario
+	}
+	return reference
+}
+
 // GetScenarioRunStatus handles GET /api/v1/scenarios/run/{scenarioRunName} endpoint
 // It returns the current status of a scenario run
 //
@@ -1755,6 +1795,7 @@ func (h *Handler) GetScenarioRunStatus(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, status, ErrorResponse{Error: errCode, Message: errMsg})
 		return
 	}
+	scenario := scenarioReferenceForResponse(scenarioRun.Spec)
 
 	claims := auth.GetClaimsFromContext(ctx)
 
@@ -1795,7 +1836,7 @@ func (h *Handler) GetScenarioRunStatus(w http.ResponseWriter, r *http.Request) {
 				// Allow access and return 201 Created with empty jobs array
 				response := ScenarioRunStatusResponse{
 					ScenarioRunName:        scenarioRunName,
-					ScenarioName:           scenarioRun.Spec.Scenario.Name,
+					ScenarioName:           scenario.Name,
 					Phase:                  scenarioRun.Status.Phase,
 					TotalTargets:           scenarioRun.Status.TotalTargets,
 					SuccessfulJobs:         scenarioRun.Status.SuccessfulJobs,
@@ -1803,7 +1844,7 @@ func (h *Handler) GetScenarioRunStatus(w http.ResponseWriter, r *http.Request) {
 					RunningJobs:            scenarioRun.Status.RunningJobs,
 					ClusterJobs:            []ClusterJobStatusResponse{},
 					OwnerUserID:            scenarioRun.Spec.OwnerUserID,
-					RegistryName:           scenarioRun.Spec.Scenario.RegistryName,
+					RegistryName:           scenario.RegistryName,
 					GraphRunName:           scenarioRun.Labels["krkn.dev/graph-run"],
 					GraphNodeID:            scenarioRun.Labels["krkn.dev/graph-node"],
 					ResiliencyScoreEnabled: scenarioRun.Spec.ResiliencyScoreEnabled,
@@ -1845,7 +1886,7 @@ func (h *Handler) GetScenarioRunStatus(w http.ResponseWriter, r *http.Request) {
 
 	response := ScenarioRunStatusResponse{
 		ScenarioRunName:        scenarioRunName,
-		ScenarioName:           scenarioRun.Spec.Scenario.Name,
+		ScenarioName:           scenario.Name,
 		Phase:                  scenarioRun.Status.Phase,
 		TotalTargets:           scenarioRun.Status.TotalTargets,
 		SuccessfulJobs:         scenarioRun.Status.SuccessfulJobs,
@@ -1853,7 +1894,7 @@ func (h *Handler) GetScenarioRunStatus(w http.ResponseWriter, r *http.Request) {
 		RunningJobs:            scenarioRun.Status.RunningJobs,
 		ClusterJobs:            clusterJobs,
 		OwnerUserID:            scenarioRun.Spec.OwnerUserID,
-		RegistryName:           scenarioRun.Spec.Scenario.RegistryName,
+		RegistryName:           scenario.RegistryName,
 		GraphRunName:           scenarioRun.Labels["krkn.dev/graph-run"],
 		GraphNodeID:            scenarioRun.Labels["krkn.dev/graph-node"],
 		CustomRunName:          scenarioRun.Spec.CustomRunName,
@@ -2171,38 +2212,8 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 		"clusterAPIURL", targetJob.ClusterAPIURL,
 		"isAdmin", auth.IsAdmin(ctx))
 
-	// Set up ping/pong handlers to detect client disconnection
-	pongWait := 60 * time.Second
-	_ = conn.SetReadDeadline(time.Now().Add(pongWait)) // Best-effort timeout
-	conn.SetPongHandler(func(string) error {
-		_ = conn.SetReadDeadline(time.Now().Add(pongWait)) // Best-effort timeout
-		return nil
-	})
-
-	// Start ping ticker
-	pingTicker := time.NewTicker(30 * time.Second)
-	defer pingTicker.Stop()
-
-	// Channel to signal when to stop pinging
-	done := make(chan struct{})
-	defer close(done)
-
-	// Goroutine to send periodic pings
-	go func() {
-		for {
-			select {
-			case <-pingTicker.C:
-				if err := conn.WriteMessage(websocket.PingMessage, nil); err != nil {
-					logger.V(1).Info("Failed to send ping, client disconnected",
-						"scenarioRunName", scenarioRunName,
-						"jobID", jobID)
-					return
-				}
-			case <-done:
-				return
-			}
-		}
-	}()
+	stopPings := startLogWebSocketPings(conn, logger, scenarioRunName, jobID)
+	defer stopPings()
 
 	// Use PodName directly from CR status (already fetched above for permissions)
 	if targetJob.PodName == "" {
@@ -2225,25 +2236,9 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 
 	logger.Info("Found pod for job", "scenarioRunName", scenarioRunName, "jobID", jobID, "podName", pod.Name, "podPhase", pod.Status.Phase)
 
-	// Parse query parameters
 	follow := r.URL.Query().Get("follow") == "true"
 	timestamps := r.URL.Query().Get("timestamps") == "true"
-	tailLinesStr := r.URL.Query().Get("tailLines")
-
-	// Build pod logs options
-	logOptions := &corev1.PodLogOptions{
-		Container:  "scenario",
-		Follow:     follow,
-		Timestamps: timestamps,
-	}
-
-	// Parse tailLines if provided
-	if tailLinesStr != "" {
-		tailLines, err := strconv.ParseInt(tailLinesStr, 10, 64)
-		if err == nil && tailLines > 0 {
-			logOptions.TailLines = &tailLines
-		}
-	}
+	logOptions := podLogOptions(r, "scenario")
 
 	logger.Info("Opening log stream",
 		"scenarioRunName", scenarioRunName,
@@ -2267,58 +2262,173 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 	defer stream.Close()
 
 	logger.Info("Streaming logs started", "scenarioRunName", scenarioRunName, "jobID", jobID, "podName", pod.Name)
+	if err := streamPodLogs(conn, stream, logger, scenarioRunName, jobID, pod.Name); err != nil {
+		if !isWebSocketDisconnectError(err) {
+			writeWSError(conn, logger, "ERROR: Log stream error")
+		}
+		return
+	}
+}
 
-	// Read logs line by line and send via WebSocket
+func podLogOptions(r *http.Request, container string) *corev1.PodLogOptions {
+	logOptions := &corev1.PodLogOptions{
+		Container:  container,
+		Follow:     r.URL.Query().Get("follow") == "true",
+		Timestamps: r.URL.Query().Get("timestamps") == "true",
+	}
+	if tailLines, err := strconv.ParseInt(r.URL.Query().Get("tailLines"), 10, 64); err == nil && tailLines > 0 {
+		logOptions.TailLines = &tailLines
+	}
+	return logOptions
+}
+
+func streamPodLogs(conn *websocket.Conn, stream io.Reader, logger logr.Logger, runName, jobID, podName string) error {
 	scanner := bufio.NewScanner(stream)
 	lineCount := 0
 	for scanner.Scan() {
-		line := scanner.Text()
-		err := conn.WriteMessage(websocket.TextMessage, []byte(line))
-		if err != nil {
-			// Check if this is a normal client disconnection
+		if err := conn.WriteMessage(websocket.TextMessage, []byte(scanner.Text())); err != nil {
 			if isWebSocketDisconnectError(err) {
-				logger.Info("WebSocket client disconnected",
-					"scenarioRunName", scenarioRunName,
-					"jobID", jobID,
-					"podName", pod.Name,
-					"linesStreamed", lineCount)
+				logger.Info("WebSocket client disconnected", "runName", runName, "jobID", jobID, "podName", podName, "linesStreamed", lineCount)
 			} else {
-				logger.Error(err, "Unexpected WebSocket write error",
-					"scenarioRunName", scenarioRunName,
-					"jobID", jobID,
-					"podName", pod.Name,
-					"linesStreamed", lineCount)
+				logger.Error(err, "Unexpected WebSocket write error", "runName", runName, "jobID", jobID, "podName", podName, "linesStreamed", lineCount)
 			}
-			return
+			return err
 		}
 		lineCount++
 	}
-
-	// Check for scanner errors
 	if err := scanner.Err(); err != nil {
-		logger.Error(err, "Log stream scanner error",
-			"scenarioRunName", scenarioRunName,
-			"jobID", jobID,
-			"podName", pod.Name,
-			"linesStreamed", lineCount)
-		writeWSError(conn, logger, "ERROR: Log stream error")
+		logger.Error(err, "Log stream scanner error", "runName", runName, "jobID", jobID, "podName", podName, "linesStreamed", lineCount)
+		return err
+	}
+	logger.Info("Log streaming completed", "runName", runName, "jobID", jobID, "podName", podName, "totalLines", lineCount)
+	if err := conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, "")); err != nil && !isWebSocketDisconnectError(err) {
+		logger.V(1).Info("Failed to send close message", "runName", runName, "jobID", jobID, "error", err.Error())
+	}
+	return nil
+}
+
+func startLogWebSocketPings(conn *websocket.Conn, logger logr.Logger, runName, jobID string) func() {
+	pongWait := 60 * time.Second
+	_ = conn.SetReadDeadline(time.Now().Add(pongWait))
+	conn.SetPongHandler(func(string) error {
+		_ = conn.SetReadDeadline(time.Now().Add(pongWait))
+		return nil
+	})
+	pingTicker := time.NewTicker(30 * time.Second)
+	done := make(chan struct{})
+	go func() {
+		for {
+			select {
+			case <-pingTicker.C:
+				if err := conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+					logger.V(1).Info("Failed to send ping, client disconnected", "runName", runName, "jobID", jobID)
+					return
+				}
+			case <-done:
+				return
+			}
+		}
+	}()
+	return func() {
+		pingTicker.Stop()
+		close(done)
+	}
+}
+
+func (h *Handler) GetKrknAIRunLogs(w http.ResponseWriter, r *http.Request) {
+	const prefix = "/api/v2/ws/krkn-ai/runs/"
+	const suffix = "/logs"
+	if !strings.HasPrefix(r.URL.Path, prefix) || !strings.HasSuffix(r.URL.Path, suffix) {
+		http.NotFound(w, r)
+		return
+	}
+	runName := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, prefix), suffix)
+	if runName == "" || strings.Contains(runName, "/") {
+		http.NotFound(w, r)
 		return
 	}
 
-	logger.Info("Log streaming completed",
-		"scenarioRunName", scenarioRunName,
-		"jobID", jobID,
-		"podName", pod.Name,
-		"totalLines", lineCount)
+	protocol := r.Header.Get("Sec-WebSocket-Protocol")
+	parts := strings.SplitN(protocol, ".", 2)
+	if len(parts) != 2 || parts[0] != "access_token" || parts[1] == "" {
+		http.Error(w, "Unauthorized: expected access_token.<jwt> WebSocket subprotocol", http.StatusUnauthorized)
+		return
+	}
+	tokenGen, err := h.getTokenGenerator()
+	if err != nil {
+		http.Error(w, "Authentication service unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	claims, err := tokenGen.ValidateToken(parts[1])
+	if err != nil {
+		http.Error(w, "Unauthorized: invalid or expired token", http.StatusUnauthorized)
+		return
+	}
+	r = r.WithContext(context.WithValue(r.Context(), auth.UserClaimsKey, claims))
 
-	// Send close message (ignore error if client already disconnected)
-	if err := conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, "")); err != nil {
-		if !isWebSocketDisconnectError(err) {
-			logger.V(1).Info("Failed to send close message, client may have already disconnected",
-				"scenarioRunName", scenarioRunName,
-				"jobID", jobID,
-				"error", err.Error())
+	run, ok := h.authorizeKrknAIRun(w, r, runName, groupauth.ActionView)
+	if !ok {
+		return
+	}
+	waiting := func() {
+		conn, err := upgrader.Upgrade(w, r, http.Header{"Sec-WebSocket-Protocol": []string{protocol}})
+		if err != nil {
+			return
 		}
+		defer conn.Close()
+		writeWSError(conn, log.Log.WithName("websocket-krkn-ai-logs"), "WAITING: Krkn-AI orchestrator Pod is not available yet")
+	}
+
+	if run.Status.OrchestratorPodName == "" {
+		waiting()
+		return
+	}
+	var pod corev1.Pod
+	if err := h.client.Get(r.Context(), client.ObjectKey{Name: run.Status.OrchestratorPodName, Namespace: h.namespace}, &pod); err != nil {
+		if client.IgnoreNotFound(err) == nil {
+			waiting()
+		} else {
+			http.Error(w, "Failed to resolve Krkn-AI orchestrator Pod", http.StatusInternalServerError)
+		}
+		return
+	}
+	ownedByRun := run.UID != ""
+	if ownedByRun {
+		ownedByRun = false
+		for _, owner := range pod.OwnerReferences {
+			if owner.Kind == "KrknAIRun" && owner.UID == run.UID {
+				ownedByRun = true
+				break
+			}
+		}
+	}
+	if !ownedByRun {
+		http.Error(w, "Forbidden: orchestrator Pod is not owned by this run", http.StatusForbidden)
+		return
+	}
+	if h.clientset == nil {
+		http.Error(w, "Pod log client is unavailable", http.StatusServiceUnavailable)
+		return
+	}
+
+	conn, err := upgrader.Upgrade(w, r, http.Header{"Sec-WebSocket-Protocol": []string{protocol}})
+	if err != nil {
+		return
+	}
+	defer conn.Close()
+	logger := log.Log.WithName("websocket-krkn-ai-logs")
+	stopPings := startLogWebSocketPings(conn, logger, run.Name, "")
+	defer stopPings()
+	logOptions := podLogOptions(r, "orchestrator")
+	stream, err := h.clientset.CoreV1().Pods(h.namespace).GetLogs(pod.Name, logOptions).Stream(r.Context())
+	if err != nil {
+		logger.Error(err, "Failed to open Krkn-AI orchestrator log stream", "runName", run.Name, "podName", pod.Name)
+		writeWSError(conn, logger, "ERROR: Failed to open orchestrator log stream")
+		return
+	}
+	defer stream.Close()
+	if err := streamPodLogs(conn, stream, logger, run.Name, "", pod.Name); err != nil && !isWebSocketDisconnectError(err) {
+		writeWSError(conn, logger, "ERROR: Orchestrator log stream error")
 	}
 }
 
@@ -2326,11 +2436,12 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 // It returns a list of all scenario runs (KrknScenarioRun CRs)
 //
 // @Summary List scenario runs
-// @Description Get list of all scenario runs with optional filtering by phase or scenario name
+// @Description Get list of all scenario runs with optional filtering by phase, scenario name, or Kubernetes labels
 // @Tags scenarios
 // @Produce json
 // @Param phase query string false "Filter by phase (Running, Succeeded, Failed)"
 // @Param scenarioName query string false "Filter by scenario name"
+// @Param labelSelector query string false "Kubernetes label selector"
 // @Param page query int false "Page number (1-based). Omit for all results."
 // @Param limit query int false "Items per page (defaults to jobs.defaultPageSize config, fallback 20; max 500). Only used when page is set."
 // @Success 200 {object} ScenarioRunListResponse "List of scenario runs with pagination"
@@ -2343,10 +2454,23 @@ func (h *Handler) ListScenarioRuns(w http.ResponseWriter, r *http.Request) {
 	// Parse query parameters for filtering
 	phaseFilter := r.URL.Query().Get("phase") // e.g., Running, Succeeded, Failed
 	scenarioNameFilter := r.URL.Query().Get("scenarioName")
+	labelSelector := r.URL.Query().Get("labelSelector")
+	listOptions := []client.ListOption{client.InNamespace(h.namespace)}
+	if labelSelector != "" {
+		selector, err := labels.Parse(labelSelector)
+		if err != nil {
+			writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+				Error:   "bad_request",
+				Message: "invalid labelSelector",
+			})
+			return
+		}
+		listOptions = append(listOptions, client.MatchingLabelsSelector{Selector: selector})
+	}
 
-	// List all KrknScenarioRun CRs in the namespace
+	// List all KrknScenarioRun CRs in the namespace.
 	var scenarioRunList krknv1alpha1.KrknScenarioRunList
-	if err := h.client.List(ctx, &scenarioRunList, client.InNamespace(h.namespace)); err != nil {
+	if err := h.client.List(ctx, &scenarioRunList, listOptions...); err != nil {
 		log.FromContext(ctx).Error(err, "Failed to list scenario runs")
 		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
 			Error:   "internal_error",
@@ -2361,17 +2485,18 @@ func (h *Handler) ListScenarioRuns(w http.ResponseWriter, r *http.Request) {
 	// Convert to response format with optional filtering
 	runs := make([]ScenarioRunListItem, 0)
 	for _, sr := range scenarioRunList.Items {
+		scenario := scenarioReferenceForResponse(sr.Spec)
 		// Apply filters
 		if phaseFilter != "" && sr.Status.Phase != phaseFilter {
 			continue
 		}
-		if scenarioNameFilter != "" && sr.Spec.Scenario.Name != scenarioNameFilter {
+		if scenarioNameFilter != "" && scenario.Name != scenarioNameFilter {
 			continue
 		}
 
 		run := ScenarioRunListItem{
 			ScenarioRunName:        sr.Name,
-			ScenarioName:           sr.Spec.Scenario.Name,
+			ScenarioName:           scenario.Name,
 			ScenarioImage:          scenarioRunImage(sr.Status.ClusterJobs),
 			Phase:                  sr.Status.Phase,
 			TotalTargets:           sr.Status.TotalTargets,
