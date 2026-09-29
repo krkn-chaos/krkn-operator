@@ -25,8 +25,11 @@ func TestBuildCategoryResiliencyHistoryGroupsTypedConfigurationsAndSortsPerClust
 	scenarioDifferent.Spec.Environment["POD_COUNT"] = "3"
 
 	graphBase := graphRunConfigurationFixture()
+	graphNode := graphBase.Spec.Graph["node-a"]
+	graphNode.Volumes["node-a-metrics-file"] = "/etc/metrics.yaml"
+	graphBase.Spec.Graph["node-a"] = graphNode
 	graphEquivalent := graphBase.DeepCopy()
-	graphNode := graphEquivalent.Spec.Graph["node-a"]
+	graphNode = graphEquivalent.Spec.Graph["node-a"]
 	graphNode.Comment = "display-only comment"
 	graphNode.Scenario.RegistryName = "registry-b"
 	graphEquivalent.Spec.Graph["node-a"] = graphNode
@@ -38,6 +41,10 @@ func TestBuildCategoryResiliencyHistoryGroupsTypedConfigurationsAndSortsPerClust
 	graphReplayNodeA := graphReplay.Spec.Graph["node-a"]
 	graphReplayNodeB := graphReplay.Spec.Graph["node-b"]
 	graphReplayNodeB.DependsOn = stringPointer("replay-node-a")
+	// Score collection mounts are omitted from the replay but must not split
+	// the scenario configuration group.
+	graphReplayNodeA.Volumes = map[string]string{"scenario-file": "/etc/scenario.yaml"}
+	graphReplayNodeB.Volumes = nil
 	graphReplay.Spec.Graph = map[string]krknv1alpha1.GraphScenarioNode{
 		"replay-node-a": graphReplayNodeA,
 		"replay-node-b": graphReplayNodeB,
@@ -116,7 +123,7 @@ func TestBuildCategoryResiliencyHistoryGroupsTypedConfigurationsAndSortsPerClust
 		t.Fatalf("equivalent graph configurations have different group IDs: %q and %q", got, want)
 	}
 	if got, want := groupFor("cluster-a", "graph-first"), groupFor("cluster-a", "graph-replay"); got != want {
-		t.Fatalf("graph replay with regenerated node IDs has configuration group %q, want shared group %q", want, got)
+		t.Fatalf("graph replay with regenerated node IDs and omitted score mounts has configuration group %q, want shared group %q", want, got)
 	}
 	graphPoint := datapointForRunID(t, clusterA, "graph-first")
 	if graphPoint.Baseline == nil || *graphPoint.Baseline != 65 {

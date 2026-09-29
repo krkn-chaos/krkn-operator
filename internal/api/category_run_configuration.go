@@ -78,25 +78,47 @@ func compareGraphRunConfigurations(left, right krknv1alpha1.KrknGraphRunSpec) []
 	if left.MaxRetries != right.MaxRetries {
 		differences = append(differences, "maxRetries")
 	}
-	if left.ResiliencyMountPath != right.ResiliencyMountPath {
-		differences = append(differences, "resiliencyMountPath")
-	}
-	differences = append(differences, compareGraphConfigurations(left.Graph, right.Graph)...)
+	// Score collection configuration, including its metrics file mount path,
+	// does not change scenario behavior and must not split history groups.
+	differences = append(differences, compareGraphConfigurations(
+		left.Graph,
+		right.Graph,
+		left.ResiliencyMountPath,
+		right.ResiliencyMountPath,
+	)...)
 	sort.Strings(differences)
 	return differences
 }
 
-func compareGraphConfigurations(left, right map[string]krknv1alpha1.GraphScenarioNode) []string {
+func compareGraphConfigurations(
+	left, right map[string]krknv1alpha1.GraphScenarioNode,
+	leftResiliencyMountPath, rightResiliencyMountPath string,
+) []string {
 	if sameGraphNodeIDs(left, right) {
-		differences := compareGraphConfigurationsWithStableNodeIDs(left, right)
-		if len(differences) == 0 || sameGraphConfigurationIgnoringNodeIDs(left, right) {
+		differences := compareGraphConfigurationsWithStableNodeIDs(
+			left,
+			right,
+			leftResiliencyMountPath,
+			rightResiliencyMountPath,
+		)
+		if len(differences) == 0 || sameGraphConfigurationIgnoringNodeIDs(
+			left,
+			right,
+			leftResiliencyMountPath,
+			rightResiliencyMountPath,
+		) {
 			return nil
 		}
 		return differences
 	}
 	// A replay may regenerate node IDs. Preserve the graph behavior and
 	// dependency shape without treating those identifiers as configuration.
-	if sameGraphConfigurationIgnoringNodeIDs(left, right) {
+	if sameGraphConfigurationIgnoringNodeIDs(
+		left,
+		right,
+		leftResiliencyMountPath,
+		rightResiliencyMountPath,
+	) {
 		return nil
 	}
 	return []string{"graph"}
@@ -104,6 +126,7 @@ func compareGraphConfigurations(left, right map[string]krknv1alpha1.GraphScenari
 
 func compareGraphConfigurationsWithStableNodeIDs(
 	left, right map[string]krknv1alpha1.GraphScenarioNode,
+	leftResiliencyMountPath, rightResiliencyMountPath string,
 ) []string {
 	differences := make([]string, 0)
 	nodeIDs := make([]string, 0, len(left))
@@ -117,7 +140,13 @@ func compareGraphConfigurationsWithStableNodeIDs(
 		if !leftExists || !rightExists {
 			return []string{fmt.Sprintf("graph.%s", nodeID)}
 		}
-		differences = append(differences, compareGraphNodeConfigurations(nodeID, leftNode, rightNode)...)
+		differences = append(differences, compareGraphNodeConfigurations(
+			nodeID,
+			leftNode,
+			rightNode,
+			leftResiliencyMountPath,
+			rightResiliencyMountPath,
+		)...)
 	}
 	sort.Strings(differences)
 	return differences
@@ -141,16 +170,20 @@ func sameGraphNodeIDs(left, right map[string]krknv1alpha1.GraphScenarioNode) boo
 // dependencies still produce a different structure.
 func sameGraphConfigurationIgnoringNodeIDs(
 	left, right map[string]krknv1alpha1.GraphScenarioNode,
+	leftResiliencyMountPath, rightResiliencyMountPath string,
 ) bool {
 	if len(left) != len(right) {
 		return false
 	}
-	leftSignature, leftValid := graphConfigurationSignature(left)
-	rightSignature, rightValid := graphConfigurationSignature(right)
+	leftSignature, leftValid := graphConfigurationSignature(left, leftResiliencyMountPath)
+	rightSignature, rightValid := graphConfigurationSignature(right, rightResiliencyMountPath)
 	return leftValid && rightValid && leftSignature == rightSignature
 }
 
-func graphConfigurationSignature(graph map[string]krknv1alpha1.GraphScenarioNode) (string, bool) {
+func graphConfigurationSignature(
+	graph map[string]krknv1alpha1.GraphScenarioNode,
+	resiliencyMountPath string,
+) (string, bool) {
 	children := make(map[string][]string, len(graph))
 	roots := make([]string, 0, len(graph))
 	for nodeID, node := range graph {
@@ -169,7 +202,14 @@ func graphConfigurationSignature(graph map[string]krknv1alpha1.GraphScenarioNode
 	memo := make(map[string]string, len(graph))
 	rootSignatures := make([]string, 0, len(roots))
 	for _, rootID := range roots {
-		signature, valid := graphNodeConfigurationSignature(rootID, graph, children, states, memo)
+		signature, valid := graphNodeConfigurationSignature(
+			rootID,
+			graph,
+			children,
+			states,
+			memo,
+			resiliencyMountPath,
+		)
 		if !valid {
 			return "", false
 		}
@@ -195,6 +235,7 @@ func graphNodeConfigurationSignature(
 	children map[string][]string,
 	states map[string]uint8,
 	memo map[string]string,
+	resiliencyMountPath string,
 ) (string, bool) {
 	if signature, exists := memo[nodeID]; exists {
 		return signature, true
@@ -210,7 +251,14 @@ func graphNodeConfigurationSignature(
 
 	childSignatures := make([]string, 0, len(children[nodeID]))
 	for _, childID := range children[nodeID] {
-		signature, valid := graphNodeConfigurationSignature(childID, graph, children, states, memo)
+		signature, valid := graphNodeConfigurationSignature(
+			childID,
+			graph,
+			children,
+			states,
+			memo,
+			resiliencyMountPath,
+		)
 		if !valid {
 			return "", false
 		}
@@ -232,7 +280,9 @@ func graphNodeConfigurationSignature(
 	}
 	volumePaths := make([]string, 0, len(node.Volumes))
 	for _, mountPath := range node.Volumes {
-		volumePaths = append(volumePaths, mountPath)
+		if resiliencyMountPath == "" || mountPath != resiliencyMountPath {
+			volumePaths = append(volumePaths, mountPath)
+		}
 	}
 	sort.Strings(volumePaths)
 	fmt.Fprintf(&signature, "%d:", len(volumePaths))
@@ -253,14 +303,18 @@ func appendGraphSignaturePart(signature *strings.Builder, part string) {
 	fmt.Fprintf(signature, "%d:%s", len(part), part)
 }
 
-func compareGraphNodeConfigurations(nodeID string, left, right krknv1alpha1.GraphScenarioNode) []string {
+func compareGraphNodeConfigurations(
+	nodeID string,
+	left, right krknv1alpha1.GraphScenarioNode,
+	leftResiliencyMountPath, rightResiliencyMountPath string,
+) []string {
 	path := "graph." + nodeID
 	differences := make([]string, 0)
 	if scenarioIdentity(left.Scenario.Name, left.Name) != scenarioIdentity(right.Scenario.Name, right.Name) {
 		differences = append(differences, path+".scenario.name")
 	}
 	differences = append(differences, compareStringMaps(path+".env", left.Env, right.Env)...)
-	if !sameGraphVolumeMounts(left.Volumes, right.Volumes) {
+	if !sameGraphVolumeMounts(left.Volumes, right.Volumes, leftResiliencyMountPath, rightResiliencyMountPath) {
 		differences = append(differences, path+".volumes")
 	}
 	if optionalStringValue(left.DependsOn) != optionalStringValue(right.DependsOn) {
@@ -269,20 +323,24 @@ func compareGraphNodeConfigurations(nodeID string, left, right krknv1alpha1.Grap
 	return differences
 }
 
-// sameGraphVolumeMounts compares mount paths as a multiset. Graph volume map
-// keys are file IDs, which identify stored files but do not describe scenario
-// behavior and therefore must not split otherwise equivalent configurations.
-func sameGraphVolumeMounts(left, right map[string]string) bool {
-	if len(left) != len(right) {
-		return false
-	}
+// sameGraphVolumeMounts compares scenario file mount paths as a multiset.
+// Graph volume map keys are file IDs, and resiliency metrics mounts only
+// configure score collection; neither is scenario behavior.
+func sameGraphVolumeMounts(left, right map[string]string, leftResiliencyMountPath, rightResiliencyMountPath string) bool {
 	leftPaths := make([]string, 0, len(left))
 	for _, mountPath := range left {
-		leftPaths = append(leftPaths, mountPath)
+		if leftResiliencyMountPath == "" || mountPath != leftResiliencyMountPath {
+			leftPaths = append(leftPaths, mountPath)
+		}
 	}
 	rightPaths := make([]string, 0, len(right))
 	for _, mountPath := range right {
-		rightPaths = append(rightPaths, mountPath)
+		if rightResiliencyMountPath == "" || mountPath != rightResiliencyMountPath {
+			rightPaths = append(rightPaths, mountPath)
+		}
+	}
+	if len(leftPaths) != len(rightPaths) {
+		return false
 	}
 	sort.Strings(leftPaths)
 	sort.Strings(rightPaths)

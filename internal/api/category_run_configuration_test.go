@@ -182,6 +182,25 @@ func TestCompareCategoryRunConfigurationsGraphRuns(t *testing.T) {
 			want: []string{"graph.node-a.volumes"},
 		},
 		{
+			name: "resiliency score mount presence and path are ignored",
+			mutate: func(run *krknv1alpha1.KrknGraphRun) {
+				run.Spec.ResiliencyMountPath = "/var/run/other-metrics.yaml"
+				node := run.Spec.Graph["node-b"]
+				node.Volumes["metrics-file"] = run.Spec.ResiliencyMountPath
+				run.Spec.Graph["node-b"] = node
+			},
+			want: nil,
+		},
+		{
+			name: "resiliency score mount can be absent without splitting",
+			mutate: func(run *krknv1alpha1.KrknGraphRun) {
+				node := run.Spec.Graph["node-b"]
+				node.Volumes = nil
+				run.Spec.Graph["node-b"] = node
+			},
+			want: nil,
+		},
+		{
 			name: "dependency relation",
 			mutate: func(run *krknv1alpha1.KrknGraphRun) {
 				node := run.Spec.Graph["node-b"]
@@ -204,6 +223,20 @@ func TestCompareCategoryRunConfigurationsGraphRuns(t *testing.T) {
 			want: nil,
 		},
 		{
+			name: "regenerated node IDs with missing resiliency metrics mounts",
+			mutate: func(run *krknv1alpha1.KrknGraphRun) {
+				first := run.Spec.Graph["node-a"]
+				second := run.Spec.Graph["node-b"]
+				delete(run.Spec.Graph, "node-a")
+				delete(run.Spec.Graph, "node-b")
+				second.DependsOn = stringPointer("replayed-node-a")
+				second.Volumes = nil
+				run.Spec.Graph["replayed-node-a"] = first
+				run.Spec.Graph["replayed-node-b"] = second
+			},
+			want: nil,
+		},
+		{
 			name: "regenerated node IDs with changed dependency topology",
 			mutate: func(run *krknv1alpha1.KrknGraphRun) {
 				first := run.Spec.Graph["node-a"]
@@ -215,13 +248,6 @@ func TestCompareCategoryRunConfigurationsGraphRuns(t *testing.T) {
 				run.Spec.Graph["replayed-node-b"] = second
 			},
 			want: []string{"graph"},
-		},
-		{
-			name: "resiliency mount path",
-			mutate: func(run *krknv1alpha1.KrknGraphRun) {
-				run.Spec.ResiliencyMountPath = "/different/metrics.yaml"
-			},
-			want: []string{"resiliencyMountPath"},
 		},
 		{
 			name: "graph retry count",
