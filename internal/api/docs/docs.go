@@ -4368,6 +4368,13 @@ const docTemplate = `{
         "internal_api.GraphRunCreateRequest": {
             "type": "object",
             "properties": {
+                "categories": {
+                    "description": "Categories are visible category names to associate with the run when it is created.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "cloudCredentialRef": {
                     "description": "CloudCredentialRef is the default cloud credential for all nodes (optional)",
                     "type": "string"
@@ -4920,6 +4927,13 @@ const docTemplate = `{
         "internal_api.ScenarioRunRequest": {
             "type": "object",
             "properties": {
+                "categories": {
+                    "description": "Categories are visible category names to associate with the run when it is created.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "cloudCredentialRef": {
                     "description": "CloudCredentialRef, if set, names a saved cloud credential Secret whose\nreference is set on the CRD spec for controller-level SecretKeyRef injection.",
                     "type": "string"

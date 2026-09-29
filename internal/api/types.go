@@ -175,6 +175,9 @@ type ScenarioRunRequest struct {
 	// TargetClusters is a map of provider-name to list of cluster names
 	// Example: {"krkn-operator": ["cluster1", "cluster2"], "krkn-operator-acm": ["cluster3"]}
 	TargetClusters map[string][]string `json:"targetClusters"`
+	// Categories are visible category names to associate with the run when it is created.
+	// They are stored as metadata labels and remain optional for existing clients.
+	Categories []string `json:"categories,omitempty"`
 
 	// Scenario identifies the scenario and registry to resolve. The operator
 	// resolves the executable image through krknctl; callers cannot provide one.
@@ -893,6 +896,8 @@ type GraphRunCreateRequest struct {
 	TargetRequestID string `json:"targetRequestId"`
 	// TargetClusters is a map of provider-name to list of cluster names
 	TargetClusters map[string][]string `json:"targetClusters"`
+	// Categories are visible category names to associate with the run when it is created.
+	Categories []string `json:"categories,omitempty"`
 	// CloudCredentialRef is the default cloud credential for all nodes (optional)
 	CloudCredentialRef string `json:"cloudCredentialRef,omitempty"`
 	// MaxRetries is the maximum number of retries for each scenario node.

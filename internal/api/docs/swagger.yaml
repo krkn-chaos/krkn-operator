@@ -971,6 +971,12 @@ definitions:
     type: object
   internal_api.GraphRunCreateRequest:
     properties:
+      categories:
+        description: Categories are visible category names to associate with the run
+          when it is created.
+        items:
+          type: string
+        type: array
       cloudCredentialRef:
         description: CloudCredentialRef is the default cloud credential for all nodes
           (optional)
@@ -1353,6 +1359,12 @@ definitions:
     type: object
   internal_api.ScenarioRunRequest:
     properties:
+      categories:
+        description: Categories are visible category names to associate with the run
+          when it is created.
+        items:
+          type: string
+        type: array
       cloudCredentialRef:
         description: |-
           CloudCredentialRef, if set, names a saved cloud credential Secret whose

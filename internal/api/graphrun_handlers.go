@@ -566,12 +566,17 @@ func (h *Handler) CreateGraphRun(w http.ResponseWriter, r *http.Request) {
 
 	// Generate unique name for the graph run
 	graphRunName := fmt.Sprintf("graphrun-%s", uuid.New().String()[:8])
+	labels := make(map[string]string)
+	if !h.addRequestedRunCategoryLabels(w, r, req.Categories, labels) {
+		return
+	}
 
 	// Create KrknGraphRun CR
 	graphRun := &krknv1alpha1.KrknGraphRun{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      graphRunName,
 			Namespace: h.namespace,
+			Labels:    labels,
 		},
 		Spec: krknv1alpha1.KrknGraphRunSpec{
 			Graph:                   req.Graph,

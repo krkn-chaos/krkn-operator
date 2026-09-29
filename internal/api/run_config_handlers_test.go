@@ -45,6 +45,9 @@ func TestGetScenarioRunConfig_Success(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      scenarioRunName,
 			Namespace: "krkn-operator-system",
+			Labels: map[string]string{
+				krknv1alpha1.CategoryEntityLabelPrefix + "network": "true",
+			},
 		},
 		Spec: krknv1alpha1.KrknScenarioRunSpec{
 			TargetRequestID: "target-123",
@@ -71,10 +74,12 @@ func TestGetScenarioRunConfig_Success(t *testing.T) {
 			},
 		},
 	}
+	category := runCategoryFixture("network", "")
+	category.Namespace = "krkn-operator-system"
 
 	fakeClient := fake.NewClientBuilder().
 		WithScheme(scheme).
-		WithObjects(scenarioRun).
+		WithObjects(scenarioRun, category).
 		Build()
 
 	handler := &Handler{
@@ -100,6 +105,7 @@ func TestGetScenarioRunConfig_Success(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, "target-123", payload.TargetRequestID)
+	assert.Equal(t, []string{"network"}, payload.Categories)
 	assert.Equal(t, "dummy-scenario", payload.Scenario.Name)
 	assert.Equal(t, "quay.io/krkn-chaos/krkn-hub:dummy-scenario", payload.ScenarioImage)
 	assert.NotNil(t, payload.Scenario.Private)
@@ -273,6 +279,9 @@ func TestGetGraphRunConfig_Success(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      graphRunName,
 			Namespace: "krkn-operator-system",
+			Labels: map[string]string{
+				krknv1alpha1.CategoryEntityLabelPrefix + "resilience": "true",
+			},
 		},
 		Spec: krknv1alpha1.KrknGraphRunSpec{
 			Graph: map[string]krknv1alpha1.GraphScenarioNode{
@@ -293,10 +302,12 @@ func TestGetGraphRunConfig_Success(t *testing.T) {
 			OwnerUserID: "owner@test.com",
 		},
 	}
+	category := runCategoryFixture("resilience", "")
+	category.Namespace = "krkn-operator-system"
 
 	fakeClient := fake.NewClientBuilder().
 		WithScheme(scheme).
-		WithObjects(graphRun).
+		WithObjects(graphRun, category).
 		Build()
 
 	handler := &Handler{
@@ -322,6 +333,7 @@ func TestGetGraphRunConfig_Success(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, "target-graph-123", payload.TargetRequestID)
+	assert.Equal(t, []string{"resilience"}, payload.Categories)
 	assert.Equal(t, map[string][]string{"krkn-operator": {"cluster1"}}, payload.TargetClusters)
 	require.NotNil(t, payload.MaxRetries)
 	assert.Equal(t, 0, *payload.MaxRetries)
