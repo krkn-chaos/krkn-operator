@@ -298,7 +298,7 @@ Run results are available through authenticated, target-authorized endpoints:
 |----------|---------|
 | `GET /api/v1/krkn-ai/runs` | List visible `KrknAIRun` resources. |
 | `GET /api/v1/krkn-ai/runs/{name}/results/summary` | Combine CR phase/cluster metadata with committed partial or final metrics. |
-| `GET /api/v1/krkn-ai/runs/{name}/results/scenarios` | Read a paginated typed scenario index, including matching child-run phase and Pod/job metadata. |
+| `GET /api/v1/krkn-ai/runs/{name}/results/scenarios` | Read a paginated typed scenario index, including the baseline artifact and matching child-run phase and Pod/job metadata. |
 | `GET /api/v1/krkn-ai/runs/{name}/results/scenarios/{generation}/{scenarioId}` | Read committed scenario parameters, fitness, measured health samples, and log path. |
 | `GET /api/v1/krkn-ai/runs/{name}/results` and `/files/{path}` | Read the raw committed manifest or download a listed attachment. |
 

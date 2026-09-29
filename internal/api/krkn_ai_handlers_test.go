@@ -429,7 +429,7 @@ func TestKrknAITypedResultsPreserveRetryableAndCorruptStatuses(t *testing.T) {
 
 func TestKrknAIRunScenarioIndexJoinsChildRunsByGenerationAndOwnerUID(t *testing.T) {
 	service := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(`{"scenarios":[{"generation":1,"scenarioId":"9","scenarioType":"pod-delete","fitnessScore":0.5,"fitnessState":"final"}],"pagination":{"page":1,"limit":100,"total":1,"totalPages":1}}`))
+		_, _ = w.Write([]byte(`{"scenarios":[{"generation":0,"scenarioId":"baseline","scenarioType":"baseline","outcome":"succeeded","durationSeconds":60,"fitnessScore":12,"fitnessState":"final"},{"generation":1,"scenarioId":"9","scenarioType":"pod-delete","fitnessScore":0.5,"fitnessState":"final"}],"pagination":{"page":1,"limit":100,"total":2,"totalPages":1}}`))
 	}))
 	defer service.Close()
 	handler := newKrknAITestHandler(t, service.URL)
@@ -456,7 +456,7 @@ func TestKrknAIRunScenarioIndexJoinsChildRunsByGenerationAndOwnerUID(t *testing.
 			ObjectMeta: metav1.ObjectMeta{Name: "child-baseline", Namespace: "default", OwnerReferences: owner, Labels: map[string]string{
 				"krkn.dev/ai-run": "children-run", "krkn.dev/generation-id": "0", "krkn.dev/scenario-id": "baseline", "krkn.dev/scenario-name": "baseline",
 			}},
-			Status: krknv1alpha1.KrknScenarioRunStatus{Phase: "Running"},
+			Status: krknv1alpha1.KrknScenarioRunStatus{Phase: "Running", ClusterJobs: []krknv1alpha1.ClusterJobStatus{{JobID: "baseline-job", PodName: "baseline-pod"}}},
 		},
 		{
 			ObjectMeta: metav1.ObjectMeta{Name: "stale-child", Namespace: "default", OwnerReferences: []metav1.OwnerReference{{UID: "old-uid"}}, Labels: map[string]string{
@@ -482,10 +482,18 @@ func TestKrknAIRunScenarioIndexJoinsChildRunsByGenerationAndOwnerUID(t *testing.
 	if err := json.Unmarshal(response.Body.Bytes(), &index); err != nil {
 		t.Fatal(err)
 	}
-	if len(index.Scenarios) != 2 {
-		t.Fatalf("same scenario ID in two generations collapsed or stale owner joined: %+v", index.Scenarios)
+	if len(index.Scenarios) != 3 {
+		t.Fatalf("baseline result or generation-specific child rows missing: %+v", index.Scenarios)
 	}
-	first, second := index.Scenarios[0], index.Scenarios[1]
+	if index.Pagination.Total != 3 {
+		t.Fatalf("total = %d, want 3", index.Pagination.Total)
+	}
+	baseline, first, second := index.Scenarios[0], index.Scenarios[1], index.Scenarios[2]
+	if baseline.Generation != 0 || baseline.ScenarioID != "baseline" || baseline.ScenarioType != "baseline" ||
+		baseline.ChildRunName != "child-baseline" || baseline.Phase != "Running" ||
+		baseline.JobID != "baseline-job" || baseline.PodName != "baseline-pod" {
+		t.Fatalf("baseline artifact row child metadata was not joined: %+v", baseline)
+	}
 	if first.Generation != 1 || first.ScenarioID != "9" || first.ChildRunName != "child-gen-1" ||
 		first.Phase != "Running" || first.JobID != "job-1" || first.PodName != "pod-1" {
 		t.Fatalf("artifact row child metadata was not joined: %+v", first)

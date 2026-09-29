@@ -747,9 +747,6 @@ func (h *Handler) mergeKrknAIChildRuns(r *http.Request, run *krknv1alpha1.KrknAI
 		if err != nil || generation < 0 || scenarioID == "" {
 			continue
 		}
-		if scenarioID == "baseline" {
-			continue
-		}
 		scenarioType := child.Labels["krkn.dev/scenario-name"]
 		if !matchesKrknAIScenarioFilter(query, generation, scenarioID, scenarioType) {
 			continue
