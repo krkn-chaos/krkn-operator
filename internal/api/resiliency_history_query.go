@@ -150,10 +150,10 @@ func parseResiliencyHistoryQuery(body io.Reader) (resiliencyHistoryQuerySelectio
 	decoder.DisallowUnknownFields()
 	var request ResiliencyHistoryQueryRequest
 	if err := decoder.Decode(&request); err != nil {
-		return resiliencyHistoryQuerySelections{}, fmt.Errorf("Request body must be valid JSON with categories and clusters arrays")
+		return resiliencyHistoryQuerySelections{}, fmt.Errorf("request body must be valid JSON with categories and clusters arrays")
 	}
 	if err := decoder.Decode(&struct{}{}); err != io.EOF {
-		return resiliencyHistoryQuerySelections{}, fmt.Errorf("Request body must contain a single JSON value")
+		return resiliencyHistoryQuerySelections{}, fmt.Errorf("request body must contain a single JSON value")
 	}
 	categories, err := normalizeResiliencyHistorySelections(request.Categories)
 	if err != nil {
