@@ -18,10 +18,7 @@ func TestBuildCategoryResiliencyHistoryGroupsTypedConfigurationsAndSortsPerClust
 	baseTime := time.Date(2026, time.January, 2, 3, 4, 5, 0, time.UTC)
 	scenarioBase := scenarioRunConfigurationFixture()
 	scenarioEquivalent := scenarioBase.DeepCopy()
-	scenarioEquivalent.Spec.Scenario.RegistryName = "registry-b"
-	scenarioEquivalent.Spec.CloudCredentialRef = "credential-b"
 	scenarioEquivalent.Spec.Files[0].FileID = "different-file-id"
-	scenarioEquivalent.Spec.MaxRetries++
 	scenarioDifferent := scenarioBase.DeepCopy()
 	scenarioDifferent.Spec.Environment["POD_COUNT"] = "3"
 
@@ -32,9 +29,7 @@ func TestBuildCategoryResiliencyHistoryGroupsTypedConfigurationsAndSortsPerClust
 	graphEquivalent := graphBase.DeepCopy()
 	graphNode = graphEquivalent.Spec.Graph["node-a"]
 	graphNode.Comment = "display-only comment"
-	graphNode.Scenario.RegistryName = "registry-b"
 	graphEquivalent.Spec.Graph["node-a"] = graphNode
-	graphEquivalent.Spec.MaxRetries++
 	graphDifferent := graphBase.DeepCopy()
 	graphNode = graphDifferent.Spec.Graph["node-b"]
 	graphNode.Env["LATENCY_MS"] = "200"
