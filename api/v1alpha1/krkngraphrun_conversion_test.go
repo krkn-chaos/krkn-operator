@@ -22,10 +22,11 @@ func TestToKrknctlScenarioSetUsesScenarioReference(t *testing.T) {
 	parent := "scenario1"
 	graph := map[string]GraphScenarioNode{
 		"scenario1": {
-			Scenario: publicScenario("scenario-1"),
-			Comment:  "First scenario",
-			Env:      map[string]string{"KEY1": "value1"},
-			Volumes:  map[string]string{"/host": "/container"},
+			Scenario:         publicScenario("scenario-1"),
+			Comment:          "First scenario",
+			Env:              map[string]string{"KEY1": "value1"},
+			Volumes:          map[string]string{"/host": "/container"},
+			ResiliencyWeight: 2.5,
 		},
 		"scenario2": {Scenario: publicScenario("scenario-2"), DependsOn: &parent},
 	}
@@ -37,12 +38,15 @@ func TestToKrknctlScenarioSetUsesScenarioReference(t *testing.T) {
 	if set["scenario2"].Parent == nil || *set["scenario2"].Parent != parent {
 		t.Fatalf("expected parent %q", parent)
 	}
+	if set["scenario1"].ResiliencyWeight != 2.5 {
+		t.Fatalf("expected resiliency weight 2.5, got %v", set["scenario1"].ResiliencyWeight)
+	}
 }
 
 func TestFromKrknctlScenarioSetCreatesPublicReferences(t *testing.T) {
 	parent := "scenario1"
 	set := krknctlmodels.ScenarioSet{
-		"scenario1": {Scenario: krknctlmodels.Scenario{Name: "scenario-1", Image: "legacy-image"}},
+		"scenario1": {Scenario: krknctlmodels.Scenario{Name: "scenario-1", Image: "legacy-image", ResiliencyWeight: 3.5}},
 		"scenario2": {Scenario: krknctlmodels.Scenario{Name: "scenario-2"}, Parent: &parent},
 	}
 
@@ -58,5 +62,8 @@ func TestFromKrknctlScenarioSetCreatesPublicReferences(t *testing.T) {
 	}
 	if graph["scenario2"].DependsOn == nil || *graph["scenario2"].DependsOn != parent {
 		t.Fatalf("expected dependency %q", parent)
+	}
+	if graph["scenario1"].ResiliencyWeight != 3.5 {
+		t.Fatalf("expected resiliency weight 3.5, got %v", graph["scenario1"].ResiliencyWeight)
 	}
 }

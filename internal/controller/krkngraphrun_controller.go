@@ -66,6 +66,7 @@ type KrknGraphRunReconciler struct {
 	// signatureVerifier is injectable for controller unit tests; production
 	// reconciliation uses krknctl's verifier when it is nil.
 	signatureVerifier imageSignatureVerifier
+	imageResolver     imageResolver
 }
 
 // sanitizeNodeID sanitizes a node ID for use in Kubernetes resource names and label values.
@@ -522,7 +523,11 @@ func (r *KrknGraphRunReconciler) createScenarioRun(
 	if err != nil {
 		return false, err
 	}
-	image, err := buildContainerImageFromReference(node.Scenario, &krknctlCfg, privateRegistry)
+	resolver := r.imageResolver
+	if resolver == nil {
+		resolver = resolveImmutableImage
+	}
+	image, err := resolver(ctx, &krknctlCfg, node.Scenario, privateRegistry)
 	if err != nil {
 		return false, fmt.Errorf("failed to resolve scenario image: %w", err)
 	}

@@ -200,3 +200,32 @@ func TestScenarioRunStatus_ResiliencyScoresField(t *testing.T) {
 
 	assert.Empty(t, scenarioRunNoScore.Status.ResiliencyScores)
 }
+
+func TestWeightedScoreAverage(t *testing.T) {
+	score, err := weightedScoreAverage(
+		map[string]float64{"high-priority": 80, "normal": 100},
+		map[string]float64{"high-priority": 3, "normal": 1},
+	)
+
+	assert.NoError(t, err)
+	assert.Equal(t, 85.0, score)
+}
+
+func TestWeightedScoreAverageDefaultsLegacyWeight(t *testing.T) {
+	score, err := weightedScoreAverage(
+		map[string]float64{"legacy": 80, "weighted": 100},
+		map[string]float64{"weighted": 3},
+	)
+
+	assert.NoError(t, err)
+	assert.Equal(t, 95.0, score)
+}
+
+func TestWeightedScoreAverageRejectsInvalidWeight(t *testing.T) {
+	_, err := weightedScoreAverage(
+		map[string]float64{"invalid": 80},
+		map[string]float64{"invalid": -1},
+	)
+
+	assert.EqualError(t, err, `invalid resiliency weight for node "invalid": must be greater than zero`)
+}

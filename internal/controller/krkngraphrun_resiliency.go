@@ -61,6 +61,7 @@ func (r *KrknGraphRunReconciler) calculateResiliencyScore(
 		providerName string
 		clusterName  string
 		nodeScores   map[string]float64
+		nodeWeights  map[string]float64
 	}
 	foundReports := false
 	// Key: "providerName/clusterName" to avoid collisions across providers
@@ -123,6 +124,7 @@ func (r *KrknGraphRunReconciler) calculateResiliencyScore(
 			clusterScore := krknv1alpha1.ClusterResiliencyScore{
 				ClusterName: jobStatus.ClusterName,
 				Score:       report.OverallReport.ResiliencyScore,
+				Status:      "calculated",
 			}
 			clusterScores = append(clusterScores, clusterScore)
 
@@ -135,10 +137,14 @@ func (r *KrknGraphRunReconciler) calculateResiliencyScore(
 					providerName: jobStatus.ProviderName,
 					clusterName:  jobStatus.ClusterName,
 					nodeScores:   make(map[string]float64),
+					nodeWeights:  make(map[string]float64),
 				}
 				clusterAggs[aggKey] = agg
 			}
 			agg.nodeScores[nodeStatus.NodeID] = report.OverallReport.ResiliencyScore
+			if weight := graphRun.Spec.Graph[nodeStatus.NodeID].ResiliencyWeight; weight != 0 {
+				agg.nodeWeights[nodeStatus.NodeID] = weight
+			}
 		}
 
 		// Persist per-cluster scores on the ScenarioRun (best-effort)
@@ -166,11 +172,10 @@ func (r *KrknGraphRunReconciler) calculateResiliencyScore(
 	var graphClusterScores []krknv1alpha1.GraphClusterScore
 
 	for _, agg := range clusterAggs {
-		var sum float64
-		for _, score := range agg.nodeScores {
-			sum += score
+		avgScore, err := weightedScoreAverage(agg.nodeScores, agg.nodeWeights)
+		if err != nil {
+			return err
 		}
-		avgScore := sum / float64(len(agg.nodeScores))
 
 		status := "no-baseline"
 		var message string
@@ -239,6 +244,26 @@ func (r *KrknGraphRunReconciler) calculateResiliencyScore(
 		"clusterCount", len(graphClusterScores))
 
 	return nil
+}
+
+// weightedScoreAverage returns the weighted average of node resiliency scores.
+// Nodes omitted from weights preserve the default used by legacy graph nodes.
+func weightedScoreAverage(scores, weights map[string]float64) (float64, error) {
+	var weightedSum, weightTotal float64
+	for nodeID, score := range scores {
+		weight, ok := weights[nodeID]
+		if !ok {
+			weight = 1
+		} else if weight <= 0 {
+			return 0, fmt.Errorf("invalid resiliency weight for node %q: must be greater than zero", nodeID)
+		}
+		weightedSum += score * weight
+		weightTotal += weight
+	}
+	if weightTotal == 0 {
+		return 0, nil
+	}
+	return weightedSum / weightTotal, nil
 }
 
 // fetchPodLogs fetches logs from a specific pod with exponential backoff retry.
