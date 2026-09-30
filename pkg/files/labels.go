@@ -45,6 +45,8 @@ const (
 	DescriptionAnnotation = "files.krkn.krkn-chaos.dev/description"
 	// WorkflowNameAnnotation stores the user-defined workflow name (for workflow templates)
 	WorkflowNameAnnotation = "files.krkn.krkn-chaos.dev/workflow-name"
+	// WorkflowCategoriesAnnotation stores JSON-encoded category metadata for workflow templates.
+	WorkflowCategoriesAnnotation = "files.krkn.krkn-chaos.dev/workflow-categories"
 	// CreatedByAnnotation stores the email of the admin who created the file
 	CreatedByAnnotation = "files.krkn.krkn-chaos.dev/created-by"
 	// CreatedAtAnnotation stores the creation timestamp

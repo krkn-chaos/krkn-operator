@@ -692,6 +692,12 @@ definitions:
       availableToAll:
         description: AvailableToAll makes the workflow accessible to all users
         type: boolean
+      categories:
+        description: Categories are workflow-template metadata used to organize saved
+          workflows.
+        items:
+          type: string
+        type: array
       description:
         description: Description is an optional description of the workflow
         type: string
@@ -738,6 +744,11 @@ definitions:
     type: object
   github_com_krkn-chaos_krkn-operator_pkg_workflows.WorkflowInfo:
     properties:
+      categories:
+        description: Categories contains categories visible to the current user.
+        items:
+          type: string
+        type: array
       description:
         description: Description is an optional description of the workflow
         type: string
@@ -757,6 +768,13 @@ definitions:
         description: AvailableToAll indicates if the workflow is accessible to all
           users
         type: boolean
+      categories:
+        description: |-
+          Categories contains the categories assigned to this workflow template.
+          It is always an empty list when the template has no category assignments.
+        items:
+          type: string
+        type: array
       createdAt:
         description: CreatedAt is the timestamp when the workflow was created
         type: string

@@ -37,6 +37,8 @@ type CreateFileRequest struct {
 	AvailableToAll bool `json:"availableToAll,omitempty"`
 	// FilePurpose is an optional system-level classification (e.g., "workflow-template")
 	FilePurpose string `json:"filePurpose,omitempty"`
+	// WorkflowCategories is internal workflow metadata; generic file APIs do not expose it.
+	WorkflowCategories []string `json:"-"`
 }
 
 // CreateFileResponse is the response for create file requests
@@ -65,6 +67,9 @@ type UpdateFileRequest struct {
 	AvailableToAll bool `json:"availableToAll,omitempty"`
 	// FilePurpose is an optional system-level classification (e.g., "workflow-template")
 	FilePurpose string `json:"filePurpose,omitempty"`
+	// WorkflowCategories is internal workflow metadata. Nil preserves assignments;
+	// a non-nil empty list clears them.
+	WorkflowCategories *[]string `json:"-"`
 }
 
 // UpdateFileResponse is the response for update file requests
@@ -89,6 +94,8 @@ type FileResponse struct {
 	Content string `json:"content"`
 	// StudioLayout is optional frontend visual layout data
 	StudioLayout string `json:"studioLayout,omitempty"`
+	// WorkflowCategoriesJSON is internal workflow metadata read from ConfigMap annotations.
+	WorkflowCategoriesJSON string `json:"-"`
 	// WorkflowName is the user-defined workflow name (only for workflow templates)
 	WorkflowName string `json:"workflowName,omitempty"`
 	// Description is an optional description of the file

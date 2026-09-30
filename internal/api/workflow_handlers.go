@@ -83,6 +83,13 @@ func (h *Handler) CreateWorkflow(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	if err := validateWorkflowCategories(req.Categories); err != nil {
+		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+			Error:   "bad_request",
+			Message: err.Error(),
+		})
+		return
+	}
 
 	// Validate graph structure (workflow-specific validation)
 	if err := workflows.ValidateWorkflowGraph(req.Graph); err != nil {
@@ -120,14 +127,15 @@ func (h *Handler) CreateWorkflow(w http.ResponseWriter, r *http.Request) {
 
 	// Delegate to file creation (reuse ALL file logic)
 	fileReq := files.CreateFileRequest{
-		FileName:       files.WorkflowFileName, // Standard filename for workflows
-		Content:        content,                // Graph JSON
-		StudioLayout:   studioLayoutJSON,       // Studio visual layout (optional)
-		WorkflowName:   req.WorkflowName,       // User-defined workflow name
-		Description:    req.Description,
-		Groups:         req.Groups,                // RBAC groups
-		AvailableToAll: req.AvailableToAll,        // Public flag
-		FilePurpose:    files.FilePurposeWorkflow, // System marker
+		FileName:           files.WorkflowFileName, // Standard filename for workflows
+		Content:            content,                // Graph JSON
+		StudioLayout:       studioLayoutJSON,       // Studio visual layout (optional)
+		WorkflowName:       req.WorkflowName,       // User-defined workflow name
+		Description:        req.Description,
+		Groups:             req.Groups,                // RBAC groups
+		AvailableToAll:     req.AvailableToAll,        // Public flag
+		FilePurpose:        files.FilePurposeWorkflow, // System marker
+		WorkflowCategories: req.Categories,
 	}
 
 	// Call existing CreateFile handler logic
@@ -230,7 +238,6 @@ func (h *Handler) ListWorkflows(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-
 	// Convert file responses to workflow responses
 	workflowList := make([]workflows.WorkflowResponse, 0, len(fileList))
 	for _, fileResp := range fileList {
@@ -240,6 +247,20 @@ func (h *Handler) ListWorkflows(w http.ResponseWriter, r *http.Request) {
 			continue // Skip invalid workflows
 		}
 		workflowList = append(workflowList, workflowResp)
+	}
+	if workflowResponsesHaveCategories(workflowList) {
+		visibleCategories, err := h.VisibleCategoryNames(ctx)
+		if err != nil {
+			logger.Error(err, "Failed to determine visible workflow categories")
+			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+				Error:   "internal_error",
+				Message: "Failed to retrieve workflows",
+			})
+			return
+		}
+		for i := range workflowList {
+			workflowList[i].Categories = filterVisibleWorkflowCategories(workflowList[i].Categories, visibleCategories)
+		}
 	}
 
 	writeJSON(w, http.StatusOK, workflows.ListWorkflowsResponse{
@@ -283,12 +304,29 @@ func (h *Handler) ListAvailableWorkflows(w http.ResponseWriter, r *http.Request)
 		})
 		return
 	}
-
 	// Convert ConfigMaps to workflow info
 	workflowList := make([]workflows.WorkflowInfo, 0, len(configMaps))
 	for _, cm := range configMaps {
-		workflowInfo := convertConfigMapToWorkflowInfo(&cm)
+		workflowInfo, err := convertConfigMapToWorkflowInfo(&cm)
+		if err != nil {
+			logger.Error(err, "Failed to convert file to workflow info", "fileID", files.ExtractFileIDFromLabels(cm.Labels))
+			continue
+		}
 		workflowList = append(workflowList, workflowInfo)
+	}
+	if workflowInfosHaveCategories(workflowList) {
+		visibleCategories, err := h.VisibleCategoryNames(ctx)
+		if err != nil {
+			logger.Error(err, "Failed to determine visible workflow categories")
+			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+				Error:   "internal_error",
+				Message: "Failed to retrieve workflows",
+			})
+			return
+		}
+		for i := range workflowList {
+			workflowList[i].Categories = filterVisibleWorkflowCategories(workflowList[i].Categories, visibleCategories)
+		}
 	}
 
 	writeJSON(w, http.StatusOK, workflows.AvailableWorkflowsResponse{
@@ -342,6 +380,18 @@ func (h *Handler) GetWorkflow(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	if len(workflowResp.Categories) > 0 {
+		visibleCategories, err := h.VisibleCategoryNames(ctx)
+		if err != nil {
+			logger.Error(err, "Failed to determine visible workflow categories", "workflowID", workflowID)
+			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+				Error:   "internal_error",
+				Message: "Failed to retrieve workflow",
+			})
+			return
+		}
+		workflowResp.Categories = filterVisibleWorkflowCategories(workflowResp.Categories, visibleCategories)
+	}
 
 	logger.Info("Retrieved workflow", "workflowID", workflowID)
 	writeJSON(w, http.StatusOK, workflowResp)
@@ -381,6 +431,15 @@ func (h *Handler) UpdateWorkflow(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	if req.Categories != nil {
+		if err := validateWorkflowCategories(*req.Categories); err != nil {
+			writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+				Error:   "bad_request",
+				Message: err.Error(),
+			})
+			return
+		}
+	}
 
 	// Validate graph structure
 	if err := workflows.ValidateWorkflowGraph(req.Graph); err != nil {
@@ -419,14 +478,15 @@ func (h *Handler) UpdateWorkflow(w http.ResponseWriter, r *http.Request) {
 	// Delegate to file update
 	workflowNamePtr := &req.WorkflowName // Convert to pointer (always set for workflows)
 	fileReq := files.UpdateFileRequest{
-		FileName:       files.WorkflowFileName,
-		Content:        content,
-		StudioLayout:   studioLayoutJSON,
-		WorkflowName:   workflowNamePtr, // Always set for workflow updates
-		Description:    req.Description,
-		Groups:         req.Groups,
-		AvailableToAll: req.AvailableToAll,
-		FilePurpose:    files.FilePurposeWorkflow,
+		FileName:           files.WorkflowFileName,
+		Content:            content,
+		StudioLayout:       studioLayoutJSON,
+		WorkflowName:       workflowNamePtr, // Always set for workflow updates
+		Description:        req.Description,
+		Groups:             req.Groups,
+		AvailableToAll:     req.AvailableToAll,
+		FilePurpose:        files.FilePurposeWorkflow,
+		WorkflowCategories: req.Categories,
 	}
 
 	err = h.updateFileInternal(ctx, workflowID, fileReq)
@@ -509,6 +569,57 @@ func (h *Handler) DeleteWorkflow(w http.ResponseWriter, r *http.Request) {
 
 // Helper functions
 
+func validateWorkflowCategories(categories []string) error {
+	for _, name := range categories {
+		if err := validateCategoryName(name); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func filterVisibleWorkflowCategories(categories []string, visible map[string]struct{}) []string {
+	filtered := make([]string, 0, len(categories))
+	for _, name := range categories {
+		if _, ok := visible[name]; ok {
+			filtered = append(filtered, name)
+		}
+	}
+	return filtered
+}
+
+func workflowResponsesHaveCategories(workflows []workflows.WorkflowResponse) bool {
+	for i := range workflows {
+		if len(workflows[i].Categories) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func workflowInfosHaveCategories(workflows []workflows.WorkflowInfo) bool {
+	for i := range workflows {
+		if len(workflows[i].Categories) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func parseWorkflowCategories(encoded string) ([]string, error) {
+	categories := []string{}
+	if encoded == "" {
+		return categories, nil
+	}
+	if err := json.Unmarshal([]byte(encoded), &categories); err != nil {
+		return nil, fmt.Errorf("failed to parse workflow categories: %w", err)
+	}
+	if categories == nil {
+		categories = []string{}
+	}
+	return categories, nil
+}
+
 // convertFileResponseToWorkflow converts a FileResponse to a WorkflowResponse
 func convertFileResponseToWorkflow(fileResp files.FileResponse) (workflows.WorkflowResponse, error) {
 	// Parse graph from file content
@@ -523,6 +634,12 @@ func convertFileResponseToWorkflow(fileResp files.FileResponse) (workflows.Workf
 		return workflows.WorkflowResponse{}, fmt.Errorf("failed to parse studioLayout: %w", err)
 	}
 
+	// Templates created before category metadata was introduced have no annotation.
+	categories, err := parseWorkflowCategories(fileResp.WorkflowCategoriesJSON)
+	if err != nil {
+		return workflows.WorkflowResponse{}, err
+	}
+
 	return workflows.WorkflowResponse{
 		WorkflowID:     fileResp.FileID,
 		WorkflowName:   fileResp.WorkflowName, // User-defined workflow name from annotation
@@ -531,6 +648,7 @@ func convertFileResponseToWorkflow(fileResp files.FileResponse) (workflows.Workf
 		StudioLayout:   studioLayout,
 		Groups:         fileResp.Groups,
 		AvailableToAll: fileResp.AvailableToAll,
+		Categories:     categories,
 		CreatedAt:      fileResp.CreatedAt,
 		CreatedBy:      fileResp.CreatedBy,
 		UpdatedAt:      fileResp.UpdatedAt,
@@ -539,8 +657,12 @@ func convertFileResponseToWorkflow(fileResp files.FileResponse) (workflows.Workf
 }
 
 // convertConfigMapToWorkflowInfo converts a ConfigMap to WorkflowInfo with accurate NodeCount
-func convertConfigMapToWorkflowInfo(cm *corev1.ConfigMap) workflows.WorkflowInfo {
+func convertConfigMapToWorkflowInfo(cm *corev1.ConfigMap) (workflows.WorkflowInfo, error) {
 	fileInfo := buildFileInfo(cm)
+	categories, err := parseWorkflowCategories(cm.Annotations[files.WorkflowCategoriesAnnotation])
+	if err != nil {
+		return workflows.WorkflowInfo{}, err
+	}
 
 	// Parse graph to count nodes (exclude metadata nodes starting with _)
 	nodeCount := 0
@@ -567,7 +689,8 @@ func convertConfigMapToWorkflowInfo(cm *corev1.ConfigMap) workflows.WorkflowInfo
 		WorkflowName: workflowName,
 		Description:  fileInfo.Description,
 		NodeCount:    nodeCount,
-	}
+		Categories:   categories,
+	}, nil
 }
 
 // createFileInternal extracts file creation logic for reuse by workflow handlers
@@ -604,6 +727,13 @@ func (h *Handler) createFileInternal(ctx context.Context, req files.CreateFileRe
 	// Build labels and annotations
 	labels := files.BuildFileLabels(fileID, req.Groups, req.AvailableToAll, req.FilePurpose, logicalName)
 	annotations := files.BuildFileAnnotations(req.Description, createdBy, req.WorkflowName)
+	if len(req.WorkflowCategories) > 0 {
+		categoriesJSON, err := json.Marshal(req.WorkflowCategories)
+		if err != nil {
+			return nil, fmt.Errorf("failed to serialize workflow categories: %w", err)
+		}
+		annotations[files.WorkflowCategoriesAnnotation] = string(categoriesJSON)
+	}
 
 	// Build ConfigMap data
 	data := map[string]string{
@@ -834,6 +964,17 @@ func (h *Handler) updateFileInternal(ctx context.Context, fileID string, req fil
 		updatedBy,
 		req.WorkflowName, // Pointer: nil preserves existing, non-nil updates/deletes
 	)
+	if req.WorkflowCategories != nil {
+		if len(*req.WorkflowCategories) == 0 {
+			delete(configMap.Annotations, files.WorkflowCategoriesAnnotation)
+		} else {
+			categoriesJSON, err := json.Marshal(*req.WorkflowCategories)
+			if err != nil {
+				return fmt.Errorf("failed to serialize workflow categories: %w", err)
+			}
+			configMap.Annotations[files.WorkflowCategoriesAnnotation] = string(categoriesJSON)
+		}
+	}
 
 	// Update data
 	data := map[string]string{

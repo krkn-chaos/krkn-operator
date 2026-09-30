@@ -38,6 +38,8 @@ type CreateWorkflowRequest struct {
 	Groups []string `json:"groups,omitempty"`
 	// AvailableToAll makes the workflow accessible to all users
 	AvailableToAll bool `json:"availableToAll,omitempty"`
+	// Categories are workflow-template metadata used to organize saved workflows.
+	Categories []string `json:"categories,omitempty"`
 }
 
 // UpdateWorkflowRequest represents a request to update an existing workflow template.
@@ -56,6 +58,9 @@ type UpdateWorkflowRequest struct {
 	Groups []string `json:"groups,omitempty"`
 	// AvailableToAll makes the workflow accessible to all users
 	AvailableToAll bool `json:"availableToAll,omitempty"`
+	// Categories is optional so updates that omit it preserve existing assignments.
+	// An explicitly empty list clears all assigned categories.
+	Categories *[]string `json:"categories,omitempty"`
 }
 
 // WorkflowResponse represents a workflow template in API responses.
@@ -75,6 +80,9 @@ type WorkflowResponse struct {
 	Groups []string `json:"groups,omitempty"`
 	// AvailableToAll indicates if the workflow is accessible to all users
 	AvailableToAll bool `json:"availableToAll"`
+	// Categories contains the categories assigned to this workflow template.
+	// It is always an empty list when the template has no category assignments.
+	Categories []string `json:"categories"`
 	// CreatedAt is the timestamp when the workflow was created
 	CreatedAt string `json:"createdAt,omitempty"`
 	// CreatedBy is the email of the user who created the workflow
@@ -95,6 +103,8 @@ type WorkflowInfo struct {
 	Description string `json:"description,omitempty"`
 	// NodeCount is the number of nodes in the workflow graph
 	NodeCount int `json:"nodeCount"`
+	// Categories contains categories visible to the current user.
+	Categories []string `json:"categories"`
 }
 
 // ListWorkflowsResponse is the response for list workflows requests (admin only).
