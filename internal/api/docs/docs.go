@@ -4035,6 +4035,13 @@ const docTemplate = `{
         "github_com_krkn-chaos_krkn-operator_pkg_workflows.WorkflowInfo": {
             "type": "object",
             "properties": {
+                "categories": {
+                    "description": "Categories contains categories visible to the current user.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "description": {
                     "description": "Description is an optional description of the workflow",
                     "type": "string"

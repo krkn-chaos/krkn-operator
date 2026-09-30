@@ -103,6 +103,8 @@ type WorkflowInfo struct {
 	Description string `json:"description,omitempty"`
 	// NodeCount is the number of nodes in the workflow graph
 	NodeCount int `json:"nodeCount"`
+	// Categories contains categories visible to the current user.
+	Categories []string `json:"categories"`
 }
 
 // ListWorkflowsResponse is the response for list workflows requests (admin only).

@@ -83,6 +83,13 @@ func (h *Handler) CreateWorkflow(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	if err := validateWorkflowCategories(req.Categories); err != nil {
+		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+			Error:   "bad_request",
+			Message: err.Error(),
+		})
+		return
+	}
 
 	// Validate graph structure (workflow-specific validation)
 	if err := workflows.ValidateWorkflowGraph(req.Graph); err != nil {
@@ -231,7 +238,6 @@ func (h *Handler) ListWorkflows(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-
 	// Convert file responses to workflow responses
 	workflowList := make([]workflows.WorkflowResponse, 0, len(fileList))
 	for _, fileResp := range fileList {
@@ -241,6 +247,20 @@ func (h *Handler) ListWorkflows(w http.ResponseWriter, r *http.Request) {
 			continue // Skip invalid workflows
 		}
 		workflowList = append(workflowList, workflowResp)
+	}
+	if workflowResponsesHaveCategories(workflowList) {
+		visibleCategories, err := h.VisibleCategoryNames(ctx)
+		if err != nil {
+			logger.Error(err, "Failed to determine visible workflow categories")
+			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+				Error:   "internal_error",
+				Message: "Failed to retrieve workflows",
+			})
+			return
+		}
+		for i := range workflowList {
+			workflowList[i].Categories = filterVisibleWorkflowCategories(workflowList[i].Categories, visibleCategories)
+		}
 	}
 
 	writeJSON(w, http.StatusOK, workflows.ListWorkflowsResponse{
@@ -284,12 +304,29 @@ func (h *Handler) ListAvailableWorkflows(w http.ResponseWriter, r *http.Request)
 		})
 		return
 	}
-
 	// Convert ConfigMaps to workflow info
 	workflowList := make([]workflows.WorkflowInfo, 0, len(configMaps))
 	for _, cm := range configMaps {
-		workflowInfo := convertConfigMapToWorkflowInfo(&cm)
+		workflowInfo, err := convertConfigMapToWorkflowInfo(&cm)
+		if err != nil {
+			logger.Error(err, "Failed to convert file to workflow info", "fileID", files.ExtractFileIDFromLabels(cm.Labels))
+			continue
+		}
 		workflowList = append(workflowList, workflowInfo)
+	}
+	if workflowInfosHaveCategories(workflowList) {
+		visibleCategories, err := h.VisibleCategoryNames(ctx)
+		if err != nil {
+			logger.Error(err, "Failed to determine visible workflow categories")
+			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+				Error:   "internal_error",
+				Message: "Failed to retrieve workflows",
+			})
+			return
+		}
+		for i := range workflowList {
+			workflowList[i].Categories = filterVisibleWorkflowCategories(workflowList[i].Categories, visibleCategories)
+		}
 	}
 
 	writeJSON(w, http.StatusOK, workflows.AvailableWorkflowsResponse{
@@ -343,6 +380,18 @@ func (h *Handler) GetWorkflow(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	if len(workflowResp.Categories) > 0 {
+		visibleCategories, err := h.VisibleCategoryNames(ctx)
+		if err != nil {
+			logger.Error(err, "Failed to determine visible workflow categories", "workflowID", workflowID)
+			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+				Error:   "internal_error",
+				Message: "Failed to retrieve workflow",
+			})
+			return
+		}
+		workflowResp.Categories = filterVisibleWorkflowCategories(workflowResp.Categories, visibleCategories)
+	}
 
 	logger.Info("Retrieved workflow", "workflowID", workflowID)
 	writeJSON(w, http.StatusOK, workflowResp)
@@ -381,6 +430,15 @@ func (h *Handler) UpdateWorkflow(w http.ResponseWriter, r *http.Request) {
 			Message: "Workflow name is required",
 		})
 		return
+	}
+	if req.Categories != nil {
+		if err := validateWorkflowCategories(*req.Categories); err != nil {
+			writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+				Error:   "bad_request",
+				Message: err.Error(),
+			})
+			return
+		}
 	}
 
 	// Validate graph structure
@@ -511,6 +569,57 @@ func (h *Handler) DeleteWorkflow(w http.ResponseWriter, r *http.Request) {
 
 // Helper functions
 
+func validateWorkflowCategories(categories []string) error {
+	for _, name := range categories {
+		if err := validateCategoryName(name); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func filterVisibleWorkflowCategories(categories []string, visible map[string]struct{}) []string {
+	filtered := make([]string, 0, len(categories))
+	for _, name := range categories {
+		if _, ok := visible[name]; ok {
+			filtered = append(filtered, name)
+		}
+	}
+	return filtered
+}
+
+func workflowResponsesHaveCategories(workflows []workflows.WorkflowResponse) bool {
+	for i := range workflows {
+		if len(workflows[i].Categories) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func workflowInfosHaveCategories(workflows []workflows.WorkflowInfo) bool {
+	for i := range workflows {
+		if len(workflows[i].Categories) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func parseWorkflowCategories(encoded string) ([]string, error) {
+	categories := []string{}
+	if encoded == "" {
+		return categories, nil
+	}
+	if err := json.Unmarshal([]byte(encoded), &categories); err != nil {
+		return nil, fmt.Errorf("failed to parse workflow categories: %w", err)
+	}
+	if categories == nil {
+		categories = []string{}
+	}
+	return categories, nil
+}
+
 // convertFileResponseToWorkflow converts a FileResponse to a WorkflowResponse
 func convertFileResponseToWorkflow(fileResp files.FileResponse) (workflows.WorkflowResponse, error) {
 	// Parse graph from file content
@@ -526,14 +635,9 @@ func convertFileResponseToWorkflow(fileResp files.FileResponse) (workflows.Workf
 	}
 
 	// Templates created before category metadata was introduced have no annotation.
-	categories := []string{}
-	if fileResp.WorkflowCategoriesJSON != "" {
-		if err := json.Unmarshal([]byte(fileResp.WorkflowCategoriesJSON), &categories); err != nil {
-			return workflows.WorkflowResponse{}, fmt.Errorf("failed to parse workflow categories: %w", err)
-		}
-		if categories == nil {
-			categories = []string{}
-		}
+	categories, err := parseWorkflowCategories(fileResp.WorkflowCategoriesJSON)
+	if err != nil {
+		return workflows.WorkflowResponse{}, err
 	}
 
 	return workflows.WorkflowResponse{
@@ -553,8 +657,12 @@ func convertFileResponseToWorkflow(fileResp files.FileResponse) (workflows.Workf
 }
 
 // convertConfigMapToWorkflowInfo converts a ConfigMap to WorkflowInfo with accurate NodeCount
-func convertConfigMapToWorkflowInfo(cm *corev1.ConfigMap) workflows.WorkflowInfo {
+func convertConfigMapToWorkflowInfo(cm *corev1.ConfigMap) (workflows.WorkflowInfo, error) {
 	fileInfo := buildFileInfo(cm)
+	categories, err := parseWorkflowCategories(cm.Annotations[files.WorkflowCategoriesAnnotation])
+	if err != nil {
+		return workflows.WorkflowInfo{}, err
+	}
 
 	// Parse graph to count nodes (exclude metadata nodes starting with _)
 	nodeCount := 0
@@ -581,7 +689,8 @@ func convertConfigMapToWorkflowInfo(cm *corev1.ConfigMap) workflows.WorkflowInfo
 		WorkflowName: workflowName,
 		Description:  fileInfo.Description,
 		NodeCount:    nodeCount,
-	}
+		Categories:   categories,
+	}, nil
 }
 
 // createFileInternal extracts file creation logic for reuse by workflow handlers
