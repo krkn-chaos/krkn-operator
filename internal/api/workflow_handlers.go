@@ -120,14 +120,15 @@ func (h *Handler) CreateWorkflow(w http.ResponseWriter, r *http.Request) {
 
 	// Delegate to file creation (reuse ALL file logic)
 	fileReq := files.CreateFileRequest{
-		FileName:       files.WorkflowFileName, // Standard filename for workflows
-		Content:        content,                // Graph JSON
-		StudioLayout:   studioLayoutJSON,       // Studio visual layout (optional)
-		WorkflowName:   req.WorkflowName,       // User-defined workflow name
-		Description:    req.Description,
-		Groups:         req.Groups,                // RBAC groups
-		AvailableToAll: req.AvailableToAll,        // Public flag
-		FilePurpose:    files.FilePurposeWorkflow, // System marker
+		FileName:           files.WorkflowFileName, // Standard filename for workflows
+		Content:            content,                // Graph JSON
+		StudioLayout:       studioLayoutJSON,       // Studio visual layout (optional)
+		WorkflowName:       req.WorkflowName,       // User-defined workflow name
+		Description:        req.Description,
+		Groups:             req.Groups,                // RBAC groups
+		AvailableToAll:     req.AvailableToAll,        // Public flag
+		FilePurpose:        files.FilePurposeWorkflow, // System marker
+		WorkflowCategories: req.Categories,
 	}
 
 	// Call existing CreateFile handler logic
@@ -419,14 +420,15 @@ func (h *Handler) UpdateWorkflow(w http.ResponseWriter, r *http.Request) {
 	// Delegate to file update
 	workflowNamePtr := &req.WorkflowName // Convert to pointer (always set for workflows)
 	fileReq := files.UpdateFileRequest{
-		FileName:       files.WorkflowFileName,
-		Content:        content,
-		StudioLayout:   studioLayoutJSON,
-		WorkflowName:   workflowNamePtr, // Always set for workflow updates
-		Description:    req.Description,
-		Groups:         req.Groups,
-		AvailableToAll: req.AvailableToAll,
-		FilePurpose:    files.FilePurposeWorkflow,
+		FileName:           files.WorkflowFileName,
+		Content:            content,
+		StudioLayout:       studioLayoutJSON,
+		WorkflowName:       workflowNamePtr, // Always set for workflow updates
+		Description:        req.Description,
+		Groups:             req.Groups,
+		AvailableToAll:     req.AvailableToAll,
+		FilePurpose:        files.FilePurposeWorkflow,
+		WorkflowCategories: req.Categories,
 	}
 
 	err = h.updateFileInternal(ctx, workflowID, fileReq)
@@ -523,6 +525,17 @@ func convertFileResponseToWorkflow(fileResp files.FileResponse) (workflows.Workf
 		return workflows.WorkflowResponse{}, fmt.Errorf("failed to parse studioLayout: %w", err)
 	}
 
+	// Templates created before category metadata was introduced have no annotation.
+	categories := []string{}
+	if fileResp.WorkflowCategoriesJSON != "" {
+		if err := json.Unmarshal([]byte(fileResp.WorkflowCategoriesJSON), &categories); err != nil {
+			return workflows.WorkflowResponse{}, fmt.Errorf("failed to parse workflow categories: %w", err)
+		}
+		if categories == nil {
+			categories = []string{}
+		}
+	}
+
 	return workflows.WorkflowResponse{
 		WorkflowID:     fileResp.FileID,
 		WorkflowName:   fileResp.WorkflowName, // User-defined workflow name from annotation
@@ -531,6 +544,7 @@ func convertFileResponseToWorkflow(fileResp files.FileResponse) (workflows.Workf
 		StudioLayout:   studioLayout,
 		Groups:         fileResp.Groups,
 		AvailableToAll: fileResp.AvailableToAll,
+		Categories:     categories,
 		CreatedAt:      fileResp.CreatedAt,
 		CreatedBy:      fileResp.CreatedBy,
 		UpdatedAt:      fileResp.UpdatedAt,
@@ -604,6 +618,13 @@ func (h *Handler) createFileInternal(ctx context.Context, req files.CreateFileRe
 	// Build labels and annotations
 	labels := files.BuildFileLabels(fileID, req.Groups, req.AvailableToAll, req.FilePurpose, logicalName)
 	annotations := files.BuildFileAnnotations(req.Description, createdBy, req.WorkflowName)
+	if len(req.WorkflowCategories) > 0 {
+		categoriesJSON, err := json.Marshal(req.WorkflowCategories)
+		if err != nil {
+			return nil, fmt.Errorf("failed to serialize workflow categories: %w", err)
+		}
+		annotations[files.WorkflowCategoriesAnnotation] = string(categoriesJSON)
+	}
 
 	// Build ConfigMap data
 	data := map[string]string{
@@ -834,6 +855,17 @@ func (h *Handler) updateFileInternal(ctx context.Context, fileID string, req fil
 		updatedBy,
 		req.WorkflowName, // Pointer: nil preserves existing, non-nil updates/deletes
 	)
+	if req.WorkflowCategories != nil {
+		if len(*req.WorkflowCategories) == 0 {
+			delete(configMap.Annotations, files.WorkflowCategoriesAnnotation)
+		} else {
+			categoriesJSON, err := json.Marshal(*req.WorkflowCategories)
+			if err != nil {
+				return fmt.Errorf("failed to serialize workflow categories: %w", err)
+			}
+			configMap.Annotations[files.WorkflowCategoriesAnnotation] = string(categoriesJSON)
+		}
+	}
 
 	// Update data
 	data := map[string]string{

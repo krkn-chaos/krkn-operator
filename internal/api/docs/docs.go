@@ -3967,6 +3967,13 @@ const docTemplate = `{
                     "description": "AvailableToAll makes the workflow accessible to all users",
                     "type": "boolean"
                 },
+                "categories": {
+                    "description": "Categories are workflow-template metadata used to organize saved workflows.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "description": {
                     "description": "Description is an optional description of the workflow",
                     "type": "string"
@@ -4052,6 +4059,13 @@ const docTemplate = `{
                 "availableToAll": {
                     "description": "AvailableToAll indicates if the workflow is accessible to all users",
                     "type": "boolean"
+                },
+                "categories": {
+                    "description": "Categories contains the categories assigned to this workflow template.\nIt is always an empty list when the template has no category assignments.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
                 },
                 "createdAt": {
                     "description": "CreatedAt is the timestamp when the workflow was created",

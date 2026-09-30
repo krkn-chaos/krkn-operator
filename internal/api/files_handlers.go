@@ -881,19 +881,20 @@ func buildFileResponse(configMap *corev1.ConfigMap) files.FileResponse {
 	}
 
 	return files.FileResponse{
-		FileID:         files.ExtractFileIDFromLabels(configMap.Labels),
-		FileName:       logicalName,
-		Content:        content,
-		StudioLayout:   studioLayout,
-		WorkflowName:   logicalName,
-		Description:    configMap.Annotations[files.DescriptionAnnotation],
-		FilePurpose:    files.ExtractFilePurposeFromLabels(configMap.Labels),
-		Groups:         files.ExtractGroupsFromLabels(configMap.Labels),
-		AvailableToAll: configMap.Labels[files.AvailableToAllLabel] == "true",
-		CreatedAt:      configMap.Annotations[files.CreatedAtAnnotation],
-		CreatedBy:      configMap.Annotations[files.CreatedByAnnotation],
-		UpdatedAt:      configMap.Annotations[files.UpdatedAtAnnotation],
-		UpdatedBy:      configMap.Annotations[files.UpdatedByAnnotation],
+		FileID:                 files.ExtractFileIDFromLabels(configMap.Labels),
+		FileName:               logicalName,
+		Content:                content,
+		StudioLayout:           studioLayout,
+		WorkflowCategoriesJSON: configMap.Annotations[files.WorkflowCategoriesAnnotation],
+		WorkflowName:           logicalName,
+		Description:            configMap.Annotations[files.DescriptionAnnotation],
+		FilePurpose:            files.ExtractFilePurposeFromLabels(configMap.Labels),
+		Groups:                 files.ExtractGroupsFromLabels(configMap.Labels),
+		AvailableToAll:         configMap.Labels[files.AvailableToAllLabel] == "true",
+		CreatedAt:              configMap.Annotations[files.CreatedAtAnnotation],
+		CreatedBy:              configMap.Annotations[files.CreatedByAnnotation],
+		UpdatedAt:              configMap.Annotations[files.UpdatedAtAnnotation],
+		UpdatedBy:              configMap.Annotations[files.UpdatedByAnnotation],
 	}
 }
 

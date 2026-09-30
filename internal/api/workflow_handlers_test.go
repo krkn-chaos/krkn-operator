@@ -24,6 +24,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -704,6 +705,7 @@ func TestWorkflowStudioLayout(t *testing.T) {
 		Graph:          validWorkflowGraph(),
 		StudioLayout:   studioLayout,
 		AvailableToAll: true,
+		Categories:     []string{"graph-runs-example", "other-category"},
 	}
 
 	body, _ := json.Marshal(createReq)
@@ -738,6 +740,12 @@ func TestWorkflowStudioLayout(t *testing.T) {
 	var getResp workflows.WorkflowResponse
 	if err := json.Unmarshal(getRr.Body.Bytes(), &getResp); err != nil {
 		t.Fatalf("Failed to unmarshal get response: %v", err)
+	}
+	if !equalStrings(getResp.Categories, []string{"graph-runs-example", "other-category"}) {
+		t.Fatalf("Expected workflow categories to round-trip, got %v", getResp.Categories)
+	}
+	if !reflect.DeepEqual(getResp.Graph, validWorkflowGraph()) {
+		t.Errorf("Expected graph to remain unchanged, got %#v", getResp.Graph)
 	}
 
 	// Verify studioLayout was persisted
@@ -785,6 +793,7 @@ func TestWorkflowStudioLayout(t *testing.T) {
 		WorkflowName: "Studio Workflow Updated",
 		Graph:        validWorkflowGraph(),
 		StudioLayout: updatedLayout,
+		// Omitted categories preserve existing assignments.
 	}
 
 	updateBody, _ := json.Marshal(updateReq)
@@ -809,6 +818,9 @@ func TestWorkflowStudioLayout(t *testing.T) {
 	if err := json.Unmarshal(getRr2.Body.Bytes(), &getResp2); err != nil {
 		t.Fatalf("Failed to unmarshal updated response: %v", err)
 	}
+	if !equalStrings(getResp2.Categories, []string{"graph-runs-example", "other-category"}) {
+		t.Errorf("Expected omitted categories to be preserved, got %v", getResp2.Categories)
+	}
 
 	// Verify updated nodes
 	updatedNodes, ok := getResp2.StudioLayout["nodes"].([]interface{})
@@ -821,6 +833,97 @@ func TestWorkflowStudioLayout(t *testing.T) {
 	if !ok || updatedNextNum != 4.0 {
 		t.Errorf("Expected nextNodeNumber=4 after update, got %v", getResp2.StudioLayout["nextNodeNumber"])
 	}
+
+	// An explicitly empty list clears category assignments.
+	emptyCategories := []string{}
+	clearReq := workflows.UpdateWorkflowRequest{
+		WorkflowName: "Studio Workflow Updated",
+		Graph:        validWorkflowGraph(),
+		StudioLayout: updatedLayout,
+		Categories:   &emptyCategories,
+	}
+	clearBody, _ := json.Marshal(clearReq)
+	clearHTTPReq := httptest.NewRequest(http.MethodPut, WorkflowsPath+"/"+workflowID, bytes.NewReader(clearBody))
+	clearHTTPReq = addAdminContext(clearHTTPReq)
+	clearRR := httptest.NewRecorder()
+	handler.UpdateWorkflow(clearRR, clearHTTPReq)
+	if clearRR.Code != http.StatusOK {
+		t.Fatalf("Expected status 200 when clearing categories, got %d. Body: %s", clearRR.Code, clearRR.Body.String())
+	}
+
+	getAfterClearReq := httptest.NewRequest(http.MethodGet, WorkflowsPath+"/"+workflowID, nil)
+	getAfterClearReq = addAdminContext(getAfterClearReq)
+	getAfterClearRR := httptest.NewRecorder()
+	handler.GetWorkflow(getAfterClearRR, getAfterClearReq)
+	var getAfterClearResp workflows.WorkflowResponse
+	if err := json.Unmarshal(getAfterClearRR.Body.Bytes(), &getAfterClearResp); err != nil {
+		t.Fatalf("Failed to unmarshal response after clearing categories: %v", err)
+	}
+	if getAfterClearResp.Categories == nil || len(getAfterClearResp.Categories) != 0 {
+		t.Errorf("Expected categories to be an empty list after clearing, got %#v", getAfterClearResp.Categories)
+	}
+	clearedNodes, ok := getAfterClearResp.StudioLayout["nodes"].([]interface{})
+	if !reflect.DeepEqual(getAfterClearResp.Graph, validWorkflowGraph()) || !ok || len(clearedNodes) != 2 {
+		t.Errorf("Expected clearing categories to leave graph and studioLayout unchanged")
+	}
+}
+
+func TestGetWorkflow_LegacyWithoutCategories(t *testing.T) {
+	handler := setupWorkflowTestHandler()
+	adminUser := &krknv1alpha1.KrknUser{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      mustSanitizeUserIDForResourceName(t, "admin@test.example"),
+			Namespace: handler.namespace,
+		},
+		Spec: krknv1alpha1.KrknUserSpec{UserID: "admin@test.example"},
+	}
+	if err := handler.client.Create(context.Background(), adminUser); err != nil {
+		t.Fatalf("Failed to create admin user: %v", err)
+	}
+
+	createReq := workflows.CreateWorkflowRequest{
+		WorkflowName: "Legacy Workflow",
+		Graph:        validWorkflowGraph(),
+	}
+	body, _ := json.Marshal(createReq)
+	req := httptest.NewRequest(http.MethodPost, WorkflowsPath, bytes.NewReader(body))
+	req = addAdminContext(req)
+	createRR := httptest.NewRecorder()
+	handler.CreateWorkflow(createRR, req)
+	if createRR.Code != http.StatusCreated {
+		t.Fatalf("Expected status 201, got %d. Body: %s", createRR.Code, createRR.Body.String())
+	}
+	var createResp workflows.CreateWorkflowResponse
+	if err := json.Unmarshal(createRR.Body.Bytes(), &createResp); err != nil {
+		t.Fatalf("Failed to decode create response: %v", err)
+	}
+
+	getReq := httptest.NewRequest(http.MethodGet, WorkflowsPath+"/"+createResp.WorkflowID, nil)
+	getReq = addAdminContext(getReq)
+	getRR := httptest.NewRecorder()
+	handler.GetWorkflow(getRR, getReq)
+	if getRR.Code != http.StatusOK {
+		t.Fatalf("Expected status 200, got %d. Body: %s", getRR.Code, getRR.Body.String())
+	}
+	var workflowResp workflows.WorkflowResponse
+	if err := json.Unmarshal(getRR.Body.Bytes(), &workflowResp); err != nil {
+		t.Fatalf("Failed to decode workflow response: %v", err)
+	}
+	if workflowResp.Categories == nil || len(workflowResp.Categories) != 0 {
+		t.Errorf("Expected a legacy workflow without categories to return an empty list, got %#v", workflowResp.Categories)
+	}
+}
+
+func equalStrings(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for i := range left {
+		if left[i] != right[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func TestCreateWorkflow_DuplicateName(t *testing.T) {
