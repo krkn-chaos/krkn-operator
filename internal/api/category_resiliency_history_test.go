@@ -380,6 +380,85 @@ func TestCategoryResiliencyHistoryRespectsCategoryAndPerClusterVisibility(t *tes
 	}
 }
 
+func TestGraphHistoryAuthorizationRequiresAUsableClusterURL(t *testing.T) {
+	const (
+		providerName = "provider-a"
+		clusterName  = "cluster-a"
+		clusterURL   = "https://cluster-a.example.com:6443"
+	)
+
+	run := graphRunConfigurationFixture()
+	run.Spec.TargetClusters = map[string][]string{providerName: {clusterName}}
+	groups := []krknv1alpha1.KrknUserGroup{{
+		Spec: krknv1alpha1.KrknUserGroupSpec{
+			ClusterPermissions: map[string]krknv1alpha1.ClusterPermissionSet{
+				clusterURL: {Actions: []string{"view"}},
+			},
+		},
+	}}
+
+	tests := []struct {
+		name               string
+		childClusterURL    string
+		targetRequestFound bool
+		targetClusterURL   string
+		wantVisible        bool
+	}{
+		{
+			name: "missing child URL and deleted target request fail closed",
+		},
+		{
+			name:            "authorized child URL preserves history",
+			childClusterURL: clusterURL,
+			wantVisible:     true,
+		},
+		{
+			name:               "authorized target request URL preserves history",
+			targetRequestFound: true,
+			targetClusterURL:   clusterURL,
+			wantVisible:        true,
+		},
+		{
+			name:               "empty target request URL fails closed",
+			targetRequestFound: true,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			childRun := &krknv1alpha1.KrknScenarioRun{
+				ObjectMeta: metav1.ObjectMeta{Name: "graph-child"},
+				Status: krknv1alpha1.KrknScenarioRunStatus{
+					ClusterJobs: []krknv1alpha1.ClusterJobStatus{{
+						ProviderName:  providerName,
+						ClusterName:   clusterName,
+						ClusterAPIURL: test.childClusterURL,
+					}},
+				},
+			}
+			targetRequest := &krknv1alpha1.KrknTargetRequest{}
+			if test.targetClusterURL != "" {
+				targetRequest.Status.TargetData = map[string][]krknv1alpha1.ClusterTarget{
+					providerName: {{ClusterName: clusterName, ClusterAPIURL: test.targetClusterURL}},
+				}
+			}
+
+			got := filterGraphHistoryScoresByPermission(
+				run,
+				[]categoryHistoryScore{{clusterName: clusterName, providerName: providerName, score: 90}},
+				groups,
+				map[string]*krknv1alpha1.KrknScenarioRun{},
+				[]*krknv1alpha1.KrknScenarioRun{childRun},
+				targetRequest,
+				test.targetRequestFound,
+			)
+			if visible := len(got) == 1; visible != test.wantVisible {
+				t.Fatalf("visible scores = %+v, wantVisible %t", got, test.wantVisible)
+			}
+		})
+	}
+}
+
 func TestCategoryResiliencyHistoryHandlerValidatesAuthenticationMethodAndCategory(t *testing.T) {
 	path := v2.CategoriesPath + "/missing-category/resiliency-history"
 	privateCategory := &krknv1alpha1.KrknCategory{ObjectMeta: metav1.ObjectMeta{

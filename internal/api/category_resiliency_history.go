@@ -473,13 +473,21 @@ func filterGraphHistoryScoresByPermission(
 					continue
 				}
 				foundCluster = true
-				if target.ClusterAPIURL == "" || !groupauth.CanPerformAction(userGroups, target.ClusterAPIURL, groupauth.ActionView) {
+				if target.ClusterAPIURL == "" {
+					clusterVisible = false
+					break
+				}
+				clusterURLFound = true
+				if !groupauth.CanPerformAction(userGroups, target.ClusterAPIURL, groupauth.ActionView) {
 					clusterVisible = false
 					break
 				}
 			}
 		}
-		if foundCluster && clusterVisible {
+		// A matching child run identifies the scored cluster, but it does not
+		// prove that the caller may view it. Require at least one non-empty URL
+		// from retained run metadata or the target request to have been checked.
+		if foundCluster && clusterURLFound && clusterVisible {
 			score.providerName = providerName
 			visibleScores = append(visibleScores, score)
 		}
