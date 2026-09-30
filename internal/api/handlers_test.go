@@ -60,6 +60,7 @@ func TestGetClusters_Success(t *testing.T) {
 					{
 						ClusterName:   "cluster-1",
 						ClusterAPIURL: "https://api.cluster1.example.com",
+						ClusterStatus: krknv1alpha1.ClusterStatusHealthy,
 						Online:        &online,
 						CheckedAt:     &checkedAt,
 					},
@@ -107,6 +108,9 @@ func TestGetClusters_Success(t *testing.T) {
 	}
 	if cluster.CheckedAt == nil || !cluster.CheckedAt.Equal(&checkedAt) {
 		t.Errorf("Expected checked-at %v, got %v", checkedAt, cluster.CheckedAt)
+	}
+	if cluster.ClusterStatus != krknv1alpha1.ClusterStatusHealthy {
+		t.Errorf("Expected cluster-status %q, got %q", krknv1alpha1.ClusterStatusHealthy, cluster.ClusterStatus)
 	}
 }
 

@@ -89,6 +89,15 @@ spec:
                       cluster-name:
                         description: ClusterName is the name of the managed cluster
                         type: string
+                      cluster-status:
+                        description: |-
+                          ClusterStatus is the ACM sanity-check result for this target.
+                          It is independent of Online, which only reports API liveness.
+                        enum:
+                        - healthy
+                        - unhealthy
+                        - unknown
+                        type: string
                       online:
                         description: |-
                           Online indicates whether the cluster API responded to the liveness check

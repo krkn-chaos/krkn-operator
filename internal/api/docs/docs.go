@@ -3016,6 +3016,19 @@ const docTemplate = `{
         }
     },
     "definitions": {
+        "github_com_krkn-chaos_krkn-operator_api_v1alpha1.ClusterHealthStatus": {
+            "type": "string",
+            "enum": [
+                "healthy",
+                "unhealthy",
+                "unknown"
+            ],
+            "x-enum-varnames": [
+                "ClusterStatusHealthy",
+                "ClusterStatusUnhealthy",
+                "ClusterStatusUnknown"
+            ]
+        },
         "github_com_krkn-chaos_krkn-operator_api_v1alpha1.ClusterTarget": {
             "type": "object",
             "properties": {
@@ -3030,6 +3043,14 @@ const docTemplate = `{
                 "cluster-name": {
                     "description": "ClusterName is the name of the managed cluster",
                     "type": "string"
+                },
+                "cluster-status": {
+                    "description": "ClusterStatus is the ACM sanity-check result for this target.\nIt is independent of Online, which only reports API liveness.\n+kubebuilder:validation:Enum=healthy;unhealthy;unknown\n+optional",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_krkn-chaos_krkn-operator_api_v1alpha1.ClusterHealthStatus"
+                        }
+                    ]
                 },
                 "online": {
                     "description": "Online indicates whether the cluster API responded to the liveness check\nperformed while building this target request. A nil value means that the\nprovider did not perform a liveness check.\n+optional",
@@ -4024,7 +4045,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "targetData": {
-                    "description": "TargetData contains a map of operator-name to list of cluster targets,\nincluding the latest optional liveness result for each target.",
+                    "description": "TargetData contains a map of operator-name to list of cluster targets,\nincluding optional liveness and ACM sanity-check results for each target.",
                     "type": "object",
                     "additionalProperties": {
                         "type": "array",
@@ -4129,6 +4150,10 @@ const docTemplate = `{
                         "$ref": "#/definitions/github_com_krkn-chaos_krkn-operator_api_v1alpha1.GraphScenarioNode"
                     }
                 },
+                "maxRetries": {
+                    "description": "MaxRetries is the maximum number of retries for each scenario node.\nA nil value uses the default of 3; zero disables retries. Negative values\nare rejected with a 400 bad_request response.",
+                    "type": "integer"
+                },
                 "targetClusters": {
                     "description": "TargetClusters is a map of provider-name to list of cluster names",
                     "type": "object",
@@ -4217,6 +4242,9 @@ const docTemplate = `{
                     "additionalProperties": {
                         "$ref": "#/definitions/github_com_krkn-chaos_krkn-operator_api_v1alpha1.GraphScenarioNode"
                     }
+                },
+                "maxRetries": {
+                    "type": "integer"
                 },
                 "ownerUserId": {
                     "type": "string"
@@ -4706,6 +4734,10 @@ const docTemplate = `{
                 "kubeconfigPath": {
                     "description": "KubeconfigPath is the path where kubeconfig should be mounted (optional, default: /home/krkn/.kube/config)",
                     "type": "string"
+                },
+                "maxRetries": {
+                    "description": "MaxRetries is the maximum number of retries after the initial attempt.\nA nil value uses the default of 3; zero disables retries. Negative values\nare rejected with a 400 bad_request response.",
+                    "type": "integer"
                 },
                 "registryName": {
                     "description": "RegistryName is the name of a saved registry (optional)\nIf omitted, defaults to quay.io public registry",
