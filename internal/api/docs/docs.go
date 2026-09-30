@@ -4141,6 +4141,14 @@ const docTemplate = `{
         "internal_api.CategoryConfigurationGroup": {
             "type": "object",
             "properties": {
+                "parameterProfileFingerprint": {
+                    "description": "ParameterProfileFingerprint identifies the unordered multiset of environment key/value pairs.",
+                    "type": "string"
+                },
+                "parameterProfileName": {
+                    "description": "ParameterProfileName is a deterministic readable alias for the parameter profile.",
+                    "type": "string"
+                },
                 "representativeRunId": {
                     "type": "string"
                 },

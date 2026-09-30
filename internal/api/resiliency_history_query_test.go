@@ -109,11 +109,14 @@ func TestQueryResiliencyHistoryAggregatesSelectedCategoriesAndClusters(t *testin
 	if countingClient.listCalls != 2 {
 		t.Fatalf("Kubernetes list calls = %d, want one per run type for a multi-category query", countingClient.listCalls)
 	}
-	for _, categoryGroups := range history.ConfigurationGroups {
+	for categoryName, categoryGroups := range history.ConfigurationGroups {
 		for groupID, group := range categoryGroups {
 			found := false
 			for _, categories := range history.Clusters {
-				for _, points := range categories {
+				for pointCategory, points := range categories {
+					if pointCategory != categoryName {
+						continue
+					}
 					for _, point := range points {
 						if point.ConfigurationGroupID == groupID && point.RunType == group.RunType {
 							found = true

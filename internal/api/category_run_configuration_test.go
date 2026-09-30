@@ -50,11 +50,11 @@ func TestCompareCategoryRunConfigurationsScenarioRuns(t *testing.T) {
 			want: []string{"kubeconfigPath"},
 		},
 		{
-			name: "retry count",
+			name: "retry count does not change scenario behavior",
 			mutate: func(run *krknv1alpha1.KrknScenarioRun) {
 				run.Spec.MaxRetries++
 			},
-			want: []string{"maxRetries"},
+			want: nil,
 		},
 		{
 			name: "retry policy",
@@ -250,11 +250,11 @@ func TestCompareCategoryRunConfigurationsGraphRuns(t *testing.T) {
 			want: []string{"graph"},
 		},
 		{
-			name: "graph retry count",
+			name: "retry count does not change graph behavior",
 			mutate: func(run *krknv1alpha1.KrknGraphRun) {
 				run.Spec.MaxRetries++
 			},
-			want: []string{"maxRetries"},
+			want: nil,
 		},
 	}
 

@@ -56,9 +56,6 @@ func compareScenarioRunConfigurations(left, right krknv1alpha1.KrknScenarioRunSp
 	if left.KubeconfigPath != right.KubeconfigPath {
 		differences = append(differences, "kubeconfigPath")
 	}
-	if left.MaxRetries != right.MaxRetries {
-		differences = append(differences, "maxRetries")
-	}
 	if left.RetryBackoff != right.RetryBackoff {
 		differences = append(differences, "retryBackoff")
 	}
@@ -75,9 +72,6 @@ func compareScenarioRunConfigurations(left, right krknv1alpha1.KrknScenarioRunSp
 
 func compareGraphRunConfigurations(left, right krknv1alpha1.KrknGraphRunSpec) []string {
 	differences := make([]string, 0)
-	if left.MaxRetries != right.MaxRetries {
-		differences = append(differences, "maxRetries")
-	}
 	// Score collection configuration, including its metrics file mount path,
 	// does not change scenario behavior and must not split history groups.
 	differences = append(differences, compareGraphConfigurations(

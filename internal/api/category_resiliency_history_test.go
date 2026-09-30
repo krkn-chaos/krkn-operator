@@ -21,6 +21,7 @@ func TestBuildCategoryResiliencyHistoryGroupsTypedConfigurationsAndSortsPerClust
 	scenarioEquivalent.Spec.Scenario.RegistryName = "registry-b"
 	scenarioEquivalent.Spec.CloudCredentialRef = "credential-b"
 	scenarioEquivalent.Spec.Files[0].FileID = "different-file-id"
+	scenarioEquivalent.Spec.MaxRetries++
 	scenarioDifferent := scenarioBase.DeepCopy()
 	scenarioDifferent.Spec.Environment["POD_COUNT"] = "3"
 
@@ -33,6 +34,7 @@ func TestBuildCategoryResiliencyHistoryGroupsTypedConfigurationsAndSortsPerClust
 	graphNode.Comment = "display-only comment"
 	graphNode.Scenario.RegistryName = "registry-b"
 	graphEquivalent.Spec.Graph["node-a"] = graphNode
+	graphEquivalent.Spec.MaxRetries++
 	graphDifferent := graphBase.DeepCopy()
 	graphNode = graphDifferent.Spec.Graph["node-b"]
 	graphNode.Env["LATENCY_MS"] = "200"
@@ -145,6 +147,43 @@ func TestBuildCategoryResiliencyHistoryGroupsTypedConfigurationsAndSortsPerClust
 	}
 }
 
+func TestBuildCategoryResiliencyHistorySharesParameterProfileAcrossGroups(t *testing.T) {
+	baseTime := time.Date(2026, time.January, 2, 3, 4, 5, 0, time.UTC)
+	firstScenario := scenarioRunConfigurationFixture()
+	secondScenario := firstScenario.DeepCopy()
+	secondScenario.Spec.Scenario.Name = "another-scenario"
+
+	history := buildCategoryResiliencyHistory([]categoryHistoryRun{
+		scenarioHistoryRun("profile-run-a", baseTime, firstScenario, []krknv1alpha1.ClusterResiliencyScore{
+			{ClusterName: "cluster-a", Score: 80, Status: "calculated"},
+		}),
+		scenarioHistoryRun("profile-run-b", baseTime.Add(time.Minute), secondScenario, []krknv1alpha1.ClusterResiliencyScore{
+			{ClusterName: "cluster-a", Score: 85, Status: "calculated"},
+		}),
+	})
+
+	points := history.Clusters["cluster-a"]
+	if len(points) != 2 {
+		t.Fatalf("cluster datapoints = %d, want 2", len(points))
+	}
+	firstGroupID, secondGroupID := points[0].ConfigurationGroupID, points[1].ConfigurationGroupID
+	if firstGroupID == secondGroupID {
+		t.Fatalf("different historical series unexpectedly share group ID %q", firstGroupID)
+	}
+	if firstGroupID != "scenario-runs/profile-run-a" || secondGroupID != "scenario-runs/profile-run-b" {
+		t.Fatalf("configuration group IDs = %q and %q, want representative run IDs", firstGroupID, secondGroupID)
+	}
+
+	firstGroup := history.ConfigurationGroups[firstGroupID]
+	secondGroup := history.ConfigurationGroups[secondGroupID]
+	if firstGroup.ParameterProfileFingerprint != secondGroup.ParameterProfileFingerprint {
+		t.Fatalf("same parameter profile produced different fingerprints: %q != %q", firstGroup.ParameterProfileFingerprint, secondGroup.ParameterProfileFingerprint)
+	}
+	if firstGroup.ParameterProfileName != secondGroup.ParameterProfileName {
+		t.Fatalf("same parameter profile produced different names: %q != %q", firstGroup.ParameterProfileName, secondGroup.ParameterProfileName)
+	}
+}
+
 func TestScenarioHistoryScoresOnlyKeepsCalculatedClusterScores(t *testing.T) {
 	run := scenarioRunConfigurationFixture()
 	run.Status.ClusterJobs = []krknv1alpha1.ClusterJobStatus{
@@ -222,6 +261,13 @@ func TestCategoryResiliencyHistoryHandlerReturnsScoredCategoryRuns(t *testing.T)
 	}
 	if len(history.ConfigurationGroups) != 1 {
 		t.Fatalf("configuration groups = %+v, want only the group for scored run", history.ConfigurationGroups)
+	}
+	group, exists := history.ConfigurationGroups["scenario-runs/scored-run"]
+	if !exists {
+		t.Fatalf("configuration group metadata missing for scored run: %+v", history.ConfigurationGroups)
+	}
+	if len(group.ParameterProfileFingerprint) != 64 || group.ParameterProfileName == "" {
+		t.Fatalf("parameter profile metadata = %+v, want a SHA-256 fingerprint and readable name", group)
 	}
 }
 

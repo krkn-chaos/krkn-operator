@@ -63,6 +63,10 @@ type CategoryConfigurationGroup struct {
 	RunType             string   `json:"runType"`
 	RepresentativeRunID string   `json:"representativeRunId"`
 	ScenarioNames       []string `json:"scenarioNames,omitempty"`
+	// ParameterProfileFingerprint identifies the unordered multiset of environment key/value pairs.
+	ParameterProfileFingerprint string `json:"parameterProfileFingerprint"`
+	// ParameterProfileName is a deterministic readable alias for the parameter profile.
+	ParameterProfileName string `json:"parameterProfileName"`
 }
 
 type categoryHistoryScore struct {
@@ -492,10 +496,13 @@ func buildCategoryResiliencyHistory(runs []categoryHistoryRun) CategoryResilienc
 		if !matched {
 			runs[i].groupID = fmt.Sprintf("%s/%s", runs[i].runType, runs[i].runID)
 			profilesByScenario[bucket] = append(profilesByScenario[bucket], i)
+			parameterProfileFingerprint := categoryParameterProfileFingerprint(runs[i])
 			response.ConfigurationGroups[runs[i].groupID] = CategoryConfigurationGroup{
-				RunType:             runs[i].runType,
-				RepresentativeRunID: runs[i].runID,
-				ScenarioNames:       categoryRunScenarioNames(runs[i]),
+				RunType:                     runs[i].runType,
+				RepresentativeRunID:         runs[i].runID,
+				ScenarioNames:               categoryRunScenarioNames(runs[i]),
+				ParameterProfileFingerprint: parameterProfileFingerprint,
+				ParameterProfileName:        categoryParameterProfileName(parameterProfileFingerprint),
 			}
 		}
 
