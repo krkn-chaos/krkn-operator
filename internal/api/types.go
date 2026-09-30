@@ -43,7 +43,7 @@ func resolveMaxRetries(value *int) (int, error) {
 // ClustersResponse represents the response for GET /clusters endpoint
 type ClustersResponse struct {
 	// TargetData contains a map of operator-name to list of cluster targets,
-	// including the latest optional liveness result for each target.
+	// including optional liveness and ACM sanity-check results for each target.
 	TargetData map[string][]krknv1alpha1.ClusterTarget `json:"targetData"`
 	// Status represents the current state of the request (pending, completed)
 	Status string `json:"status"`

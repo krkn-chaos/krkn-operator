@@ -32,6 +32,11 @@ type ClusterTarget struct {
 	ClusterName string `json:"cluster-name"`
 	// ClusterAPIURL is the API server URL of the managed cluster
 	ClusterAPIURL string `json:"cluster-api-url"`
+	// ClusterStatus is the ACM sanity-check result for this target.
+	// It is independent of Online, which only reports API liveness.
+	// +kubebuilder:validation:Enum=healthy;unhealthy;unknown
+	// +optional
+	ClusterStatus ClusterHealthStatus `json:"cluster-status,omitempty"`
 	// Online indicates whether the cluster API responded to the liveness check
 	// performed while building this target request. A nil value means that the
 	// provider did not perform a liveness check.
@@ -41,6 +46,23 @@ type ClusterTarget struct {
 	// +optional
 	CheckedAt *metav1.Time `json:"checked-at,omitempty"`
 }
+
+// ClusterHealthStatus is the ACM health classification for a target cluster.
+// The krkn-operator-acm controller populates ClusterTarget.ClusterStatus from
+// ManagedCluster availability and proxy prerequisites (see
+// krkn-operator-acm/internal/controller/krkntargetrequest_controller.go).
+// krkn-operator-console displays this value separately from
+// ClusterTarget.Online, which reports API liveness.
+type ClusterHealthStatus string
+
+const (
+	// ClusterStatusHealthy means ACM reports the cluster and required proxy prerequisites as ready.
+	ClusterStatusHealthy ClusterHealthStatus = "healthy"
+	// ClusterStatusUnhealthy means ACM reports a failed cluster or proxy prerequisite.
+	ClusterStatusUnhealthy ClusterHealthStatus = "unhealthy"
+	// ClusterStatusUnknown means the ACM sanity check could not determine the cluster state.
+	ClusterStatusUnknown ClusterHealthStatus = "unknown"
+)
 
 // KrknTargetRequestSpec defines the desired state of KrknTargetRequest.
 type KrknTargetRequestSpec struct {
