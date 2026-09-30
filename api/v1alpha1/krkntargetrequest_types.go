@@ -47,7 +47,12 @@ type ClusterTarget struct {
 	CheckedAt *metav1.Time `json:"checked-at,omitempty"`
 }
 
-// ClusterHealthStatus represents the result of the ACM sanity check for a target.
+// ClusterHealthStatus is the ACM health classification for a target cluster.
+// The krkn-operator-acm controller populates ClusterTarget.ClusterStatus from
+// ManagedCluster availability and proxy prerequisites (see
+// krkn-operator-acm/internal/controller/krkntargetrequest_controller.go).
+// krkn-operator-console displays this value separately from
+// ClusterTarget.Online, which reports API liveness.
 type ClusterHealthStatus string
 
 const (
