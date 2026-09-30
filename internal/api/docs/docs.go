@@ -2350,7 +2350,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Return category-associated scenario and graph scores selected by non-empty category and cluster arrays. Datapoints are nested as clusters[clusterName][categoryName]; configurationGroups[categoryName] resolves each datapoint's configurationGroupId.",
+                "description": "Return category-associated scenario and graph scores selected by non-empty category and cluster arrays. Optional clusterProviders selects providers for duplicate cluster names. Datapoints are nested as clusters[clusterName][categoryName]; providerName identifies each point's provider, and configurationGroups[categoryName] resolves each point's configurationGroupId.",
                 "consumes": [
                     "application/json"
                 ],
@@ -4225,6 +4225,16 @@ const docTemplate = `{
                     "type": "array",
                     "items": {
                         "type": "string"
+                    }
+                },
+                "clusterProviders": {
+                    "description": "ClusterProviders optionally narrows selected cluster names to providers. When omitted, all providers for each selected cluster name are included.",
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
                     }
                 }
             }

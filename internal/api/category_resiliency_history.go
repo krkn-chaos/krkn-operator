@@ -18,10 +18,10 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"sort"
-	"strings"
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -36,6 +36,7 @@ import (
 const (
 	categoryHistoryScenarioRunType = "scenario-runs"
 	categoryHistoryGraphRunType    = "graph-runs"
+	categoryHistoryGraphRunLabel   = "krkn.dev/graph-run"
 )
 
 // CategoryResiliencyHistoryResponse contains resiliency score datapoints grouped
@@ -170,7 +171,7 @@ func (h *Handler) GetCategoryResiliencyHistory(w http.ResponseWriter, r *http.Re
 		userGroups = groups
 	}
 
-	history, err := h.loadCategoryResiliencyHistory(ctx, categoryName, userGroups, nil)
+	history, err := h.loadCategoryResiliencyHistory(ctx, categoryName, userGroups, nil, nil)
 	if err != nil {
 		logger.Error(err, "Failed to load category resiliency history")
 		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
@@ -190,8 +191,9 @@ func (h *Handler) loadCategoryResiliencyHistory(
 	categoryName string,
 	userGroups []krknv1alpha1.KrknUserGroup,
 	selectedClusters map[string]struct{},
+	selectedProviders map[string]map[string]struct{},
 ) (CategoryResiliencyHistoryResponse, error) {
-	histories, err := h.loadCategoryResiliencyHistories(ctx, []string{categoryName}, userGroups, selectedClusters)
+	histories, err := h.loadCategoryResiliencyHistories(ctx, []string{categoryName}, userGroups, selectedClusters, selectedProviders)
 	if err != nil {
 		return CategoryResiliencyHistoryResponse{}, err
 	}
@@ -206,6 +208,7 @@ func (h *Handler) loadCategoryResiliencyHistories(
 	categoryNames []string,
 	userGroups []krknv1alpha1.KrknUserGroup,
 	selectedClusters map[string]struct{},
+	selectedProviders map[string]map[string]struct{},
 ) (map[string]CategoryResiliencyHistoryResponse, error) {
 	categorySet := make(map[string]struct{}, len(categoryNames))
 	categoryRuns := make(map[string][]categoryHistoryRun, len(categoryNames))
@@ -214,41 +217,61 @@ func (h *Handler) loadCategoryResiliencyHistories(
 		categoryRuns[categoryName] = nil
 	}
 
-	listOptions := []client.ListOption{client.InNamespace(h.namespace)}
+	categoryListOptions := []client.ListOption{client.InNamespace(h.namespace)}
 	if len(categoryNames) == 1 {
-		listOptions = append(listOptions, client.MatchingLabels{
+		categoryListOptions = append(categoryListOptions, client.MatchingLabels{
 			krknv1alpha1.CategoryEntityLabelPrefix + categoryNames[0]: "true",
 		})
 	}
 
-	scenarioRuns := &krknv1alpha1.KrknScenarioRunList{}
-	if err := h.client.List(ctx, scenarioRuns, listOptions...); err != nil {
-		return nil, fmt.Errorf("list category scenario runs: %w", err)
-	}
 	graphRuns := &krknv1alpha1.KrknGraphRunList{}
-	if err := h.client.List(ctx, graphRuns, listOptions...); err != nil {
+	if err := h.client.List(ctx, graphRuns, categoryListOptions...); err != nil {
 		return nil, fmt.Errorf("list category graph runs: %w", err)
+	}
+	categoryGraphRuns := make([]krknv1alpha1.KrknGraphRun, 0, len(graphRuns.Items))
+	needsGraphChildRuns := false
+	for i := range graphRuns.Items {
+		if !runHasAnyCategory(graphRuns.Items[i].Labels, categorySet) {
+			continue
+		}
+		categoryGraphRuns = append(categoryGraphRuns, graphRuns.Items[i])
+		if !auth.IsAdmin(ctx) && len(filterCategoryHistoryScoresByCluster(
+			graphHistoryScores(&graphRuns.Items[i]), selectedClusters, selectedProviders,
+		)) > 0 {
+			needsGraphChildRuns = true
+		}
+	}
+
+	// Graph child runs do not carry category labels. Load them in one additional
+	// read only when non-admin graph scores need per-cluster authorization.
+	scenarioListOptions := categoryListOptions
+	if len(categoryNames) == 1 && needsGraphChildRuns {
+		scenarioListOptions = []client.ListOption{client.InNamespace(h.namespace)}
+	}
+	scenarioRuns := &krknv1alpha1.KrknScenarioRunList{}
+	if err := h.client.List(ctx, scenarioRuns, scenarioListOptions...); err != nil {
+		return nil, fmt.Errorf("list category scenario runs: %w", err)
 	}
 
 	categoryScenarioRuns := make([]krknv1alpha1.KrknScenarioRun, 0, len(scenarioRuns.Items))
+	scenarioRunsByName := make(map[string]*krknv1alpha1.KrknScenarioRun, len(scenarioRuns.Items))
+	scenarioRunsByGraph := make(map[string][]*krknv1alpha1.KrknScenarioRun)
 	for i := range scenarioRuns.Items {
+		scenarioRunsByName[scenarioRuns.Items[i].Name] = &scenarioRuns.Items[i]
+		if graphRunName := scenarioRuns.Items[i].Labels[categoryHistoryGraphRunLabel]; graphRunName != "" {
+			scenarioRunsByGraph[graphRunName] = append(scenarioRunsByGraph[graphRunName], &scenarioRuns.Items[i])
+		}
 		if runHasAnyCategory(scenarioRuns.Items[i].Labels, categorySet) {
 			categoryScenarioRuns = append(categoryScenarioRuns, scenarioRuns.Items[i])
 		}
 	}
-	scenarioRuns.Items = h.FilterScenarioRunsByGroupPermission(categoryScenarioRuns, ctx)
-	categoryGraphRuns := make([]krknv1alpha1.KrknGraphRun, 0, len(graphRuns.Items))
-	for i := range graphRuns.Items {
-		if runHasAnyCategory(graphRuns.Items[i].Labels, categorySet) {
-			categoryGraphRuns = append(categoryGraphRuns, graphRuns.Items[i])
-		}
-	}
-	graphRuns.Items = h.FilterGraphRunsByGroupPermission(categoryGraphRuns, ctx)
+	scenarioRuns.Items = categoryScenarioRuns
+	graphRuns.Items = categoryGraphRuns
 
 	for i := range scenarioRuns.Items {
 		run := &scenarioRuns.Items[i]
 		scores := scenarioHistoryScores(run)
-		scores = filterCategoryHistoryScoresByCluster(scores, selectedClusters)
+		scores = filterCategoryHistoryScoresByCluster(scores, selectedClusters, selectedProviders)
 		if !auth.IsAdmin(ctx) {
 			scores = filterScenarioHistoryScoresByPermission(run, scores, userGroups)
 		}
@@ -271,16 +294,17 @@ func (h *Handler) loadCategoryResiliencyHistories(
 	for i := range graphRuns.Items {
 		run := &graphRuns.Items[i]
 		scores := graphHistoryScores(run)
-		scores = filterCategoryHistoryScoresByCluster(scores, selectedClusters)
+		scores = filterCategoryHistoryScoresByCluster(scores, selectedClusters, selectedProviders)
 		if !auth.IsAdmin(ctx) && len(scores) > 0 {
 			var targetRequest krknv1alpha1.KrknTargetRequest
-			if err := h.client.Get(ctx, client.ObjectKey{
-				Name:      run.Spec.TargetRequestID,
-				Namespace: h.namespace,
-			}, &targetRequest); err != nil {
-				return nil, fmt.Errorf("load graph run target details for %s: %w", run.Name, err)
+			targetRequestFound := true
+			if err := h.client.Get(ctx, client.ObjectKey{Name: run.Spec.TargetRequestID, Namespace: h.namespace}, &targetRequest); err != nil {
+				if !apierrors.IsNotFound(err) {
+					return nil, fmt.Errorf("load graph run target details for %s: %w", run.Name, err)
+				}
+				targetRequestFound = false
 			}
-			scores = filterGraphHistoryScoresByPermission(run, targetRequest, scores, userGroups)
+			scores = filterGraphHistoryScoresByPermission(run, scores, userGroups, scenarioRunsByName, scenarioRunsByGraph[run.Name], &targetRequest, targetRequestFound)
 		}
 		if len(scores) == 0 {
 			continue
@@ -315,15 +339,25 @@ func runHasAnyCategory(labels map[string]string, categories map[string]struct{})
 	return false
 }
 
-func filterCategoryHistoryScoresByCluster(scores []categoryHistoryScore, selectedClusters map[string]struct{}) []categoryHistoryScore {
+func filterCategoryHistoryScoresByCluster(
+	scores []categoryHistoryScore,
+	selectedClusters map[string]struct{},
+	selectedProviders map[string]map[string]struct{},
+) []categoryHistoryScore {
 	if selectedClusters == nil {
 		return scores
 	}
 	filtered := make([]categoryHistoryScore, 0, len(scores))
 	for _, score := range scores {
-		if _, selected := selectedClusters[score.clusterName]; selected {
-			filtered = append(filtered, score)
+		if _, selected := selectedClusters[score.clusterName]; !selected {
+			continue
 		}
+		if providers, hasProviderFilter := selectedProviders[score.clusterName]; hasProviderFilter {
+			if _, selected := providers[score.providerName]; !selected || score.providerName == "" {
+				continue
+			}
+		}
+		filtered = append(filtered, score)
 	}
 	return filtered
 }
@@ -335,10 +369,28 @@ func filterScenarioHistoryScoresByPermission(
 ) []categoryHistoryScore {
 	visibleScores := make([]categoryHistoryScore, 0, len(scores))
 	for _, score := range scores {
+		providerName := score.providerName
+		providers := make(map[string]struct{})
+		for _, job := range run.Status.ClusterJobs {
+			if job.ClusterName != score.clusterName {
+				continue
+			}
+			providers[job.ProviderName] = struct{}{}
+		}
+		// Older scores lack a provider. Only expose them when their cluster name
+		// maps to one provider in the run.
+		if providerName == "" {
+			if len(providers) != 1 {
+				continue
+			}
+			for name := range providers {
+				providerName = name
+			}
+		}
 		foundCluster := false
 		clusterVisible := true
 		for _, job := range run.Status.ClusterJobs {
-			if job.ClusterName != score.clusterName {
+			if job.ClusterName != score.clusterName || job.ProviderName != providerName {
 				continue
 			}
 			foundCluster = true
@@ -347,10 +399,8 @@ func filterScenarioHistoryScoresByPermission(
 				break
 			}
 		}
-		// Cluster names are not globally unique across providers. If the run has
-		// no matching job or any same-named target is hidden, omit the ambiguous
-		// score instead of revealing it through another visible target.
 		if foundCluster && clusterVisible {
+			score.providerName = providerName
 			visibleScores = append(visibleScores, score)
 		}
 	}
@@ -359,11 +409,23 @@ func filterScenarioHistoryScoresByPermission(
 
 func filterGraphHistoryScoresByPermission(
 	run *krknv1alpha1.KrknGraphRun,
-	targetRequest krknv1alpha1.KrknTargetRequest,
 	scores []categoryHistoryScore,
 	userGroups []krknv1alpha1.KrknUserGroup,
+	scenarioRunsByName map[string]*krknv1alpha1.KrknScenarioRun,
+	graphChildRuns []*krknv1alpha1.KrknScenarioRun,
+	targetRequest *krknv1alpha1.KrknTargetRequest,
+	targetRequestFound bool,
 ) []categoryHistoryScore {
 	visibleScores := make([]categoryHistoryScore, 0, len(scores))
+	childRunSet := make(map[string]*krknv1alpha1.KrknScenarioRun, len(graphChildRuns)+len(run.Status.NodeStatuses))
+	for _, childRun := range graphChildRuns {
+		childRunSet[childRun.Name] = childRun
+	}
+	for _, nodeStatus := range run.Status.NodeStatuses {
+		if childRun := scenarioRunsByName[nodeStatus.ScenarioRunRef]; childRun != nil {
+			childRunSet[childRun.Name] = childRun
+		}
+	}
 	for _, score := range scores {
 		providers := make([]string, 0, 1)
 		if score.providerName != "" {
@@ -383,20 +445,42 @@ func filterGraphHistoryScoresByPermission(
 			continue
 		}
 		providerName := providers[0]
-		targets := targetRequest.Status.TargetData[providerName]
 		foundCluster := false
+		clusterURLFound := false
 		clusterVisible := true
-		for _, target := range targets {
-			if target.ClusterName != score.clusterName {
-				continue
+		for _, childRun := range childRunSet {
+			for _, job := range childRun.Status.ClusterJobs {
+				if job.ProviderName != providerName || job.ClusterName != score.clusterName {
+					continue
+				}
+				foundCluster = true
+				if job.ClusterAPIURL == "" {
+					continue
+				}
+				clusterURLFound = true
+				if !groupauth.CanPerformAction(userGroups, job.ClusterAPIURL, groupauth.ActionView) {
+					clusterVisible = false
+					break
+				}
 			}
-			foundCluster = true
-			if target.ClusterAPIURL == "" || !groupauth.CanPerformAction(userGroups, target.ClusterAPIURL, groupauth.ActionView) {
-				clusterVisible = false
+			if !clusterVisible {
 				break
 			}
 		}
+		if !clusterURLFound && targetRequestFound {
+			for _, target := range targetRequest.Status.TargetData[providerName] {
+				if target.ClusterName != score.clusterName {
+					continue
+				}
+				foundCluster = true
+				if target.ClusterAPIURL == "" || !groupauth.CanPerformAction(userGroups, target.ClusterAPIURL, groupauth.ActionView) {
+					clusterVisible = false
+					break
+				}
+			}
+		}
 		if foundCluster && clusterVisible {
+			score.providerName = providerName
 			visibleScores = append(visibleScores, score)
 		}
 	}
@@ -418,11 +502,16 @@ func scenarioHistoryScores(run *krknv1alpha1.KrknScenarioRun) []categoryHistoryS
 		if score.Status != "calculated" || score.ClusterName == "" {
 			continue
 		}
-		providerName := ""
+		providerName := score.ProviderName
+		providers := make(map[string]struct{})
 		for _, job := range run.Status.ClusterJobs {
 			if job.ClusterName == score.ClusterName {
-				providerName = job.ProviderName
-				break
+				providers[job.ProviderName] = struct{}{}
+			}
+		}
+		if providerName == "" && len(providers) == 1 {
+			for name := range providers {
+				providerName = name
 			}
 		}
 		scores = append(scores, categoryHistoryScore{
@@ -449,9 +538,21 @@ func graphHistoryScores(run *krknv1alpha1.KrknGraphRun) []categoryHistoryScore {
 		if baseline == nil {
 			baseline = run.Spec.ResiliencyScoreBaseline
 		}
+		providerName := score.ProviderName
+		if providerName == "" {
+			providers := make([]string, 0, 1)
+			for candidate, clusterNames := range run.Spec.TargetClusters {
+				if containsString(clusterNames, score.ClusterName) {
+					providers = append(providers, candidate)
+				}
+			}
+			if len(providers) == 1 {
+				providerName = providers[0]
+			}
+		}
 		scores = append(scores, categoryHistoryScore{
 			clusterName:  score.ClusterName,
-			providerName: score.ProviderName,
+			providerName: providerName,
 			score:        score.Calculated,
 			baseline:     baseline,
 		})
@@ -482,20 +583,20 @@ func buildCategoryResiliencyHistory(runs []categoryHistoryRun) CategoryResilienc
 		Clusters:            make(map[string][]CategoryResiliencyDataPoint),
 		ConfigurationGroups: make(map[string]CategoryConfigurationGroup),
 	}
-	profilesByScenario := make(map[string][]int, len(runs))
+	profilesByConfiguration := make(map[string]int, len(runs))
 	for i := range runs {
-		matched := false
-		bucket := categoryBehaviorBucketKey(runs[i])
-		for _, profileIndex := range profilesByScenario[bucket] {
-			if sameCategoryBehaviorConfiguration(runs[profileIndex], runs[i]) {
-				runs[i].groupID = runs[profileIndex].groupID
-				matched = true
-				break
-			}
+		signature, valid := categoryBehaviorConfigurationSignature(runs[i])
+		profileIndex, matched := profilesByConfiguration[signature]
+		if !valid {
+			matched = false
 		}
-		if !matched {
+		if matched {
+			runs[i].groupID = runs[profileIndex].groupID
+		} else {
 			runs[i].groupID = fmt.Sprintf("%s/%s", runs[i].runType, runs[i].runID)
-			profilesByScenario[bucket] = append(profilesByScenario[bucket], i)
+			if valid {
+				profilesByConfiguration[signature] = i
+			}
 			parameterProfileFingerprint := categoryParameterProfileFingerprint(runs[i])
 			response.ConfigurationGroups[runs[i].groupID] = CategoryConfigurationGroup{
 				RunType:                     runs[i].runType,
@@ -537,34 +638,70 @@ func buildCategoryResiliencyHistory(runs []categoryHistoryRun) CategoryResilienc
 	return response
 }
 
-// categoryBehaviorBucketKey narrows comparisons to runs with the same run type
-// and scenario identities. Full equality is still decided by the typed
-// comparators below; this key is only a cheap prefilter, not a serialized
-// configuration signature.
-func categoryBehaviorBucketKey(run categoryHistoryRun) string {
-	names := categoryRunScenarioNames(run)
-	var key strings.Builder
-	fmt.Fprintf(&key, "%s:%d:", run.runType, len(names))
-	if run.graph != nil {
-		fmt.Fprintf(&key, "nodes:%d:", len(run.graph.Spec.Graph))
-	}
-	for _, name := range names {
-		fmt.Fprintf(&key, "%d:%s", len(name), name)
-	}
-	return key.String()
-}
-
-func sameCategoryBehaviorConfiguration(left, right categoryHistoryRun) bool {
-	if left.runType != right.runType {
-		return false
-	}
-	switch left.runType {
-	case categoryHistoryScenarioRunType:
-		return left.scenario != nil && right.scenario != nil && len(compareCategoryRunConfigurations(left.scenario, right.scenario)) == 0
-	case categoryHistoryGraphRunType:
-		return left.graph != nil && right.graph != nil && len(compareCategoryRunConfigurations(left.graph, right.graph)) == 0
+func categoryBehaviorConfigurationSignature(run categoryHistoryRun) (string, bool) {
+	switch {
+	case run.scenario != nil:
+		spec := run.scenario.Spec
+		scenarioReference := spec.Scenario
+		scenarioReference.Name = scenarioIdentity(spec.Scenario.Name, spec.ScenarioName)
+		files := make([]scenarioFileBehavior, 0, len(spec.Files))
+		for _, file := range spec.Files {
+			files = append(files, scenarioFileBehavior{name: file.Name, content: file.Content, mountPath: file.MountPath})
+		}
+		sort.Slice(files, func(i, j int) bool {
+			if files[i].name != files[j].name {
+				return files[i].name < files[j].name
+			}
+			if files[i].content != files[j].content {
+				return files[i].content < files[j].content
+			}
+			return files[i].mountPath < files[j].mountPath
+		})
+		configuration := struct {
+			RunType         string
+			ScenarioName    string
+			Scenario        krknv1alpha1.ScenarioReference
+			KubeconfigPath  string
+			MaxRetries      int
+			RetryBackoff    string
+			RetryDelay      string
+			CloudCredential string
+			Environment     map[string]string
+			Files           []scenarioFileBehavior
+		}{
+			RunType:         run.runType,
+			ScenarioName:    scenarioIdentity(spec.Scenario.Name, spec.ScenarioName),
+			Scenario:        scenarioReference,
+			KubeconfigPath:  spec.KubeconfigPath,
+			MaxRetries:      spec.MaxRetries,
+			RetryBackoff:    spec.RetryBackoff,
+			RetryDelay:      spec.RetryDelay,
+			CloudCredential: spec.CloudCredentialRef,
+			Environment:     spec.Environment,
+			Files:           files,
+		}
+		encoded, err := json.Marshal(configuration)
+		return string(encoded), err == nil
+	case run.graph != nil:
+		graphSignature, valid := graphConfigurationSignature(run.graph.Spec.Graph, run.graph.Spec.ResiliencyMountPath)
+		if !valid {
+			return "", false
+		}
+		configuration := struct {
+			RunType         string
+			Graph           string
+			MaxRetries      int
+			CloudCredential string
+		}{
+			RunType:         run.runType,
+			Graph:           graphSignature,
+			MaxRetries:      run.graph.Spec.MaxRetries,
+			CloudCredential: run.graph.Spec.CloudCredentialRef,
+		}
+		encoded, err := json.Marshal(configuration)
+		return string(encoded), err == nil
 	default:
-		return false
+		return "", false
 	}
 }
 

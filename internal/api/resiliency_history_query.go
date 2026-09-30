@@ -17,6 +17,7 @@ limitations under the License.
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -37,6 +38,9 @@ type ResiliencyHistoryQueryRequest struct {
 	Categories []string `json:"categories"`
 	// Clusters selects the clusters included in the query.
 	Clusters []string `json:"clusters"`
+	// ClusterProviders optionally narrows selected cluster names to providers.
+	// When omitted, all providers for each selected cluster name are included.
+	ClusterProviders map[string][]string `json:"clusterProviders,omitempty"`
 }
 
 // ResiliencyHistoryQueryResponse groups score datapoints by cluster and then
@@ -52,7 +56,7 @@ type ResiliencyHistoryQueryResponse struct {
 // QueryResiliencyHistory handles POST /api/v2/resiliency-history.
 //
 // @Summary Query resiliency score history
-// @Description Return category-associated scenario and graph scores selected by non-empty category and cluster arrays. Datapoints are nested as clusters[clusterName][categoryName]; configurationGroups[categoryName] resolves each datapoint's configurationGroupId.
+// @Description Return category-associated scenario and graph scores selected by non-empty category and cluster arrays. Optional clusterProviders selects providers for duplicate cluster names. Datapoints are nested as clusters[clusterName][categoryName]; providerName identifies each point's provider, and configurationGroups[categoryName] resolves each point's configurationGroupId.
 // @Tags resiliency-history
 // @Accept json
 // @Produce json
@@ -86,85 +90,23 @@ func (h *Handler) QueryResiliencyHistory(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	decoder := json.NewDecoder(r.Body)
-	decoder.DisallowUnknownFields()
-	var request ResiliencyHistoryQueryRequest
-	if err := decoder.Decode(&request); err != nil {
-		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
-			Error:   "bad_request",
-			Message: "Request body must be valid JSON with categories and clusters arrays",
-		})
-		return
-	}
-	if err := decoder.Decode(&struct{}{}); err != io.EOF {
-		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
-			Error:   "bad_request",
-			Message: "Request body must contain a single JSON value",
-		})
-		return
-	}
-
-	categories, err := normalizeResiliencyHistorySelections(request.Categories)
+	selections, err := parseResiliencyHistoryQuery(r.Body)
 	if err != nil {
-		writeJSONError(w, http.StatusBadRequest, ErrorResponse{Error: "bad_request", Message: "categories: " + err.Error()})
+		writeJSONError(w, http.StatusBadRequest, ErrorResponse{Error: "bad_request", Message: err.Error()})
 		return
-	}
-	clusters, err := normalizeResiliencyHistorySelections(request.Clusters)
-	if err != nil {
-		writeJSONError(w, http.StatusBadRequest, ErrorResponse{Error: "bad_request", Message: "clusters: " + err.Error()})
-		return
-	}
-	for _, categoryName := range categories {
-		if err := validateCategoryName(categoryName); err != nil {
-			writeJSONError(w, http.StatusBadRequest, ErrorResponse{Error: "bad_request", Message: "categories: " + err.Error()})
-			return
-		}
 	}
 
 	logger := log.FromContext(ctx).WithName("resiliency-history-query")
 	isAdmin := auth.IsAdmin(ctx)
-	selectedClusters := make(map[string]struct{}, len(clusters))
-	for _, clusterName := range clusters {
+	selectedClusters := make(map[string]struct{}, len(selections.clusters))
+	for _, clusterName := range selections.clusters {
 		selectedClusters[clusterName] = struct{}{}
 	}
 
-	selectedCategories := make([]*krknv1alpha1.KrknCategory, 0, len(categories))
-	for _, categoryName := range categories {
-		category := &krknv1alpha1.KrknCategory{}
-		if err := h.client.Get(ctx, client.ObjectKey{Name: categoryName, Namespace: h.namespace}, category); err != nil {
-			if apierrors.IsNotFound(err) {
-				writeJSONError(w, http.StatusNotFound, ErrorResponse{
-					Error:   "not_found",
-					Message: "Category " + categoryName + " not found",
-				})
-				return
-			}
-			logger.Error(err, "Failed to load category", "category", categoryName)
-			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
-				Error:   "internal_error",
-				Message: "Failed to load resiliency history query categories",
-			})
-			return
-		}
-		if !isAdmin {
-			visible, err := h.canViewCategory(ctx, category, claims.UserID)
-			if err != nil {
-				logger.Error(err, "Failed to check category visibility", "category", categoryName)
-				writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
-					Error:   "internal_error",
-					Message: "Failed to validate category access",
-				})
-				return
-			}
-			if !visible {
-				writeJSONError(w, http.StatusForbidden, ErrorResponse{
-					Error:   "forbidden",
-					Message: "You do not have permission to view category " + categoryName,
-				})
-				return
-			}
-		}
-		selectedCategories = append(selectedCategories, category)
+	selectedCategories, accessError, accessStatus := h.loadVisibleHistoryCategories(ctx, selections.categories, claims.UserID, isAdmin)
+	if accessStatus != 0 {
+		writeJSONError(w, accessStatus, *accessError)
+		return
 	}
 
 	var userGroups []krknv1alpha1.KrknUserGroup
@@ -181,15 +123,11 @@ func (h *Handler) QueryResiliencyHistory(w http.ResponseWriter, r *http.Request)
 		userGroups = groups
 	}
 
-	response := ResiliencyHistoryQueryResponse{
-		Clusters:            make(map[string]map[string][]CategoryResiliencyDataPoint),
-		ConfigurationGroups: make(map[string]map[string]CategoryConfigurationGroup, len(selectedCategories)),
-	}
 	categoryNames := make([]string, 0, len(selectedCategories))
 	for _, category := range selectedCategories {
 		categoryNames = append(categoryNames, category.Name)
 	}
-	histories, err := h.loadCategoryResiliencyHistories(ctx, categoryNames, userGroups, selectedClusters)
+	histories, err := h.loadCategoryResiliencyHistories(ctx, categoryNames, userGroups, selectedClusters, selections.providers)
 	if err != nil {
 		logger.Error(err, "Failed to load category resiliency histories", "categories", categoryNames)
 		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
@@ -198,7 +136,86 @@ func (h *Handler) QueryResiliencyHistory(w http.ResponseWriter, r *http.Request)
 		})
 		return
 	}
-	for _, category := range selectedCategories {
+	writeJSON(w, http.StatusOK, assembleResiliencyHistoryQueryResponse(selectedCategories, histories))
+}
+
+type resiliencyHistoryQuerySelections struct {
+	categories []string
+	clusters   []string
+	providers  map[string]map[string]struct{}
+}
+
+func parseResiliencyHistoryQuery(body io.Reader) (resiliencyHistoryQuerySelections, error) {
+	decoder := json.NewDecoder(body)
+	decoder.DisallowUnknownFields()
+	var request ResiliencyHistoryQueryRequest
+	if err := decoder.Decode(&request); err != nil {
+		return resiliencyHistoryQuerySelections{}, fmt.Errorf("Request body must be valid JSON with categories and clusters arrays")
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		return resiliencyHistoryQuerySelections{}, fmt.Errorf("Request body must contain a single JSON value")
+	}
+	categories, err := normalizeResiliencyHistorySelections(request.Categories)
+	if err != nil {
+		return resiliencyHistoryQuerySelections{}, fmt.Errorf("categories: %w", err)
+	}
+	clusters, err := normalizeResiliencyHistorySelections(request.Clusters)
+	if err != nil {
+		return resiliencyHistoryQuerySelections{}, fmt.Errorf("clusters: %w", err)
+	}
+	providers, err := normalizeResiliencyHistoryProviders(request.ClusterProviders, clusters)
+	if err != nil {
+		return resiliencyHistoryQuerySelections{}, fmt.Errorf("clusterProviders: %w", err)
+	}
+	for _, categoryName := range categories {
+		if err := validateCategoryName(categoryName); err != nil {
+			return resiliencyHistoryQuerySelections{}, fmt.Errorf("categories: %w", err)
+		}
+	}
+	return resiliencyHistoryQuerySelections{categories: categories, clusters: clusters, providers: providers}, nil
+}
+
+func (h *Handler) loadVisibleHistoryCategories(
+	ctx context.Context,
+	categoryNames []string,
+	userID string,
+	isAdmin bool,
+) ([]*krknv1alpha1.KrknCategory, *ErrorResponse, int) {
+	logger := log.FromContext(ctx).WithName("resiliency-history-query")
+	categories := make([]*krknv1alpha1.KrknCategory, 0, len(categoryNames))
+	for _, categoryName := range categoryNames {
+		category := &krknv1alpha1.KrknCategory{}
+		if err := h.client.Get(ctx, client.ObjectKey{Name: categoryName, Namespace: h.namespace}, category); err != nil {
+			if apierrors.IsNotFound(err) {
+				return nil, &ErrorResponse{Error: "not_found", Message: "Category " + categoryName + " not found"}, http.StatusNotFound
+			}
+			logger.Error(err, "Failed to load category", "category", categoryName)
+			return nil, &ErrorResponse{Error: "internal_error", Message: "Failed to load resiliency history query categories"}, http.StatusInternalServerError
+		}
+		if !isAdmin {
+			visible, err := h.canViewCategory(ctx, category, userID)
+			if err != nil {
+				logger.Error(err, "Failed to check category visibility", "category", categoryName)
+				return nil, &ErrorResponse{Error: "internal_error", Message: "Failed to validate category access"}, http.StatusInternalServerError
+			}
+			if !visible {
+				return nil, &ErrorResponse{Error: "forbidden", Message: "You do not have permission to view category " + categoryName}, http.StatusForbidden
+			}
+		}
+		categories = append(categories, category)
+	}
+	return categories, nil, 0
+}
+
+func assembleResiliencyHistoryQueryResponse(
+	categories []*krknv1alpha1.KrknCategory,
+	histories map[string]CategoryResiliencyHistoryResponse,
+) ResiliencyHistoryQueryResponse {
+	response := ResiliencyHistoryQueryResponse{
+		Clusters:            make(map[string]map[string][]CategoryResiliencyDataPoint),
+		ConfigurationGroups: make(map[string]map[string]CategoryConfigurationGroup, len(categories)),
+	}
+	for _, category := range categories {
 		history := histories[category.Name]
 		response.ConfigurationGroups[category.Name] = history.ConfigurationGroups
 		for clusterName, points := range history.Clusters {
@@ -208,8 +225,36 @@ func (h *Handler) QueryResiliencyHistory(w http.ResponseWriter, r *http.Request)
 			response.Clusters[clusterName][category.Name] = points
 		}
 	}
+	return response
+}
 
-	writeJSON(w, http.StatusOK, response)
+func normalizeResiliencyHistoryProviders(
+	selections map[string][]string,
+	selectedClusters []string,
+) (map[string]map[string]struct{}, error) {
+	if selections == nil {
+		return nil, nil
+	}
+	clusterSet := make(map[string]struct{}, len(selectedClusters))
+	for _, clusterName := range selectedClusters {
+		clusterSet[clusterName] = struct{}{}
+	}
+	normalized := make(map[string]map[string]struct{}, len(selections))
+	for clusterName, providers := range selections {
+		if _, selected := clusterSet[clusterName]; !selected {
+			return nil, fmt.Errorf("cluster %q must also appear in clusters", clusterName)
+		}
+		providerNames, err := normalizeResiliencyHistorySelections(providers)
+		if err != nil {
+			return nil, fmt.Errorf("cluster %q: %w", clusterName, err)
+		}
+		providerSet := make(map[string]struct{}, len(providerNames))
+		for _, providerName := range providerNames {
+			providerSet[providerName] = struct{}{}
+		}
+		normalized[clusterName] = providerSet
+	}
+	return normalized, nil
 }
 
 func normalizeResiliencyHistorySelections(values []string) ([]string, error) {

@@ -12,7 +12,7 @@ import (
 func TestCompareCategoryRunConfigurationsScenarioRuns(t *testing.T) {
 	base := scenarioRunConfigurationFixture()
 
-	t.Run("ignores registry credentials run metadata and file IDs", func(t *testing.T) {
+	t.Run("compares image registry and cloud credentials while ignoring run metadata and file IDs", func(t *testing.T) {
 		other := base.DeepCopy()
 		private := false
 		other.Spec.Scenario.Private = &private
@@ -27,7 +27,7 @@ func TestCompareCategoryRunConfigurationsScenarioRuns(t *testing.T) {
 			{Name: "scenario.yaml", Content: "c2NlbmFyaW8=", MountPath: "/etc/scenario.yaml", FileID: "file-1"},
 		}
 
-		assertConfigurationDifferences(t, base, other, nil)
+		assertConfigurationDifferences(t, base, other, []string{"cloudCredentialRef", "scenario.registry"})
 	})
 
 	tests := []struct {
@@ -50,11 +50,11 @@ func TestCompareCategoryRunConfigurationsScenarioRuns(t *testing.T) {
 			want: []string{"kubeconfigPath"},
 		},
 		{
-			name: "retry count does not change scenario behavior",
+			name: "retry count changes scenario behavior",
 			mutate: func(run *krknv1alpha1.KrknScenarioRun) {
 				run.Spec.MaxRetries++
 			},
-			want: nil,
+			want: []string{"maxRetries"},
 		},
 		{
 			name: "retry policy",
@@ -119,7 +119,7 @@ func TestCompareCategoryRunConfigurationsScenarioRuns(t *testing.T) {
 func TestCompareCategoryRunConfigurationsGraphRuns(t *testing.T) {
 	base := graphRunConfigurationFixture()
 
-	t.Run("ignores registry credentials comments images file IDs baseline and map order", func(t *testing.T) {
+	t.Run("compares credentials registries and file IDs while ignoring comments images baseline and map order", func(t *testing.T) {
 		other := base.DeepCopy()
 		other.Spec.Graph = map[string]krknv1alpha1.GraphScenarioNode{
 			"node-b": {
@@ -146,7 +146,14 @@ func TestCompareCategoryRunConfigurationsGraphRuns(t *testing.T) {
 		other.Spec.ResiliencyScoreBaseline = floatPointer(99)
 		other.Spec.ResiliencyScoreEnabled = !base.Spec.ResiliencyScoreEnabled
 
-		assertConfigurationDifferences(t, base, other, nil)
+		assertConfigurationDifferences(t, base, other, []string{
+			"cloudCredentialRef",
+			"graph.node-a.cloudCredentialRef",
+			"graph.node-a.scenario.registry",
+			"graph.node-a.volumes",
+			"graph.node-b.cloudCredentialRef",
+			"graph.node-b.scenario.registry",
+		})
 	})
 
 	tests := []struct {
@@ -250,11 +257,11 @@ func TestCompareCategoryRunConfigurationsGraphRuns(t *testing.T) {
 			want: []string{"graph"},
 		},
 		{
-			name: "retry count does not change graph behavior",
+			name: "retry count changes graph behavior",
 			mutate: func(run *krknv1alpha1.KrknGraphRun) {
 				run.Spec.MaxRetries++
 			},
-			want: nil,
+			want: []string{"maxRetries"},
 		},
 	}
 

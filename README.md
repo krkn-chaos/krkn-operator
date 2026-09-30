@@ -68,6 +68,78 @@ against `k8s-operatorhub/community-operators` when the
 helm uninstall krkn-operator -n krkn-operator-system
 ```
 
+## Resiliency History API
+
+The history API returns calculated resiliency scores for runs labeled with the
+selected categories. Both endpoints require a bearer token. Users must be able
+to view each category and each scored cluster; inaccessible cluster scores are
+omitted.
+
+### Query several categories and clusters
+
+`POST /api/v2/resiliency-history` accepts non-empty `categories` and `clusters`
+arrays. If cluster names are shared by multiple providers, optionally pass
+`clusterProviders` to select the providers for each name. Omitting that field
+includes every provider for each selected cluster name.
+
+```bash
+curl -sS -X POST https://<operator-host>/api/v2/resiliency-history \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+        "categories": ["resilience"],
+        "clusters": ["cluster-a"],
+        "clusterProviders": {"cluster-a": ["krkn-operator"]}
+      }'
+```
+
+The response nests points under `clusters[clusterName][categoryName]` and
+configuration groups under `configurationGroups[categoryName][groupId]`.
+Each point includes `providerName`, `runId`, `runType`, `date`, `score`, and
+`configurationGroupId`; the group entry describes the equivalent run
+configuration. `baseline` is present when configured.
+
+```json
+{
+  "clusters": {
+    "cluster-a": {
+      "resilience": [
+        {
+          "date": "2026-09-29T10:00:00Z",
+          "providerName": "krkn-operator",
+          "runId": "scenario-run-123",
+          "runType": "scenario-runs",
+          "score": 91.5,
+          "configurationGroupId": "scenario-runs/scenario-run-123"
+        }
+      ]
+    }
+  },
+  "configurationGroups": {
+    "resilience": {
+      "scenario-runs/scenario-run-123": {
+        "runType": "scenario-runs",
+        "representativeRunId": "scenario-run-123",
+        "parameterProfileFingerprint": "…",
+        "parameterProfileName": "default"
+      }
+    }
+  }
+}
+```
+
+### Query one category
+
+`GET /api/v2/categories/{category}/resiliency-history` returns the same score
+points for one category, grouped as `clusters[clusterName]`; each point's
+`providerName` distinguishes same-named clusters owned by different providers.
+
+Invalid filters return `400`, missing authentication returns `401`, category
+access failures return `403`, a missing category returns `404`, and unexpected
+server errors return `500`. See the
+[official API documentation](https://krkn-chaos.dev/docs/krkn-operator) for
+the full operator API reference.
+
 ## Telemetry Query API
 
 Query chaos-run telemetry stored in Elasticsearch/OpenSearch through the operator's REST API. The request supplies the connection in one of two mutually exclusive ways:

@@ -873,6 +873,13 @@ definitions:
         items:
           type: string
         type: array
+      clusterProviders:
+        additionalProperties:
+          items:
+            type: string
+          type: array
+        description: ClusterProviders optionally narrows selected cluster names to providers. When omitted, all providers for each selected cluster name are included.
+        type: object
     type: object
   internal_api.ResiliencyHistoryQueryResponse:
     properties:
@@ -3140,7 +3147,7 @@ paths:
     post:
       consumes:
       - application/json
-      description: Return category-associated scenario and graph scores selected by non-empty category and cluster arrays. Datapoints are nested as clusters[clusterName][categoryName]; configurationGroups[categoryName] resolves each datapoint's configurationGroupId.
+      description: Return category-associated scenario and graph scores selected by non-empty category and cluster arrays. Optional clusterProviders selects providers for duplicate cluster names. Datapoints are nested as clusters[clusterName][categoryName]; providerName identifies each point's provider, and configurationGroups[categoryName] resolves each point's configurationGroupId.
       parameters:
       - description: History filters
         in: body

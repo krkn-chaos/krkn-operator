@@ -18,7 +18,6 @@ package api
 
 import (
 	"fmt"
-	"slices"
 	"sort"
 	"strings"
 
@@ -53,14 +52,23 @@ func compareScenarioRunConfigurations(left, right krknv1alpha1.KrknScenarioRunSp
 	if scenarioIdentity(left.Scenario.Name, left.ScenarioName) != scenarioIdentity(right.Scenario.Name, right.ScenarioName) {
 		differences = append(differences, "scenario.name")
 	}
+	if !sameScenarioReference(left.Scenario, right.Scenario) {
+		differences = append(differences, "scenario.registry")
+	}
 	if left.KubeconfigPath != right.KubeconfigPath {
 		differences = append(differences, "kubeconfigPath")
+	}
+	if left.MaxRetries != right.MaxRetries {
+		differences = append(differences, "maxRetries")
 	}
 	if left.RetryBackoff != right.RetryBackoff {
 		differences = append(differences, "retryBackoff")
 	}
 	if left.RetryDelay != right.RetryDelay {
 		differences = append(differences, "retryDelay")
+	}
+	if left.CloudCredentialRef != right.CloudCredentialRef {
+		differences = append(differences, "cloudCredentialRef")
 	}
 	differences = append(differences, compareStringMaps("environment", left.Environment, right.Environment)...)
 	if !sameScenarioFiles(left.Files, right.Files) {
@@ -72,6 +80,12 @@ func compareScenarioRunConfigurations(left, right krknv1alpha1.KrknScenarioRunSp
 
 func compareGraphRunConfigurations(left, right krknv1alpha1.KrknGraphRunSpec) []string {
 	differences := make([]string, 0)
+	if left.MaxRetries != right.MaxRetries {
+		differences = append(differences, "maxRetries")
+	}
+	if left.CloudCredentialRef != right.CloudCredentialRef {
+		differences = append(differences, "cloudCredentialRef")
+	}
 	// Score collection configuration, including its metrics file mount path,
 	// does not change scenario behavior and must not split history groups.
 	differences = append(differences, compareGraphConfigurations(
@@ -262,6 +276,8 @@ func graphNodeConfigurationSignature(
 
 	var signature strings.Builder
 	appendGraphSignaturePart(&signature, scenarioIdentity(node.Scenario.Name, node.Name))
+	appendGraphSignaturePart(&signature, scenarioReferenceSignature(node.Scenario))
+	appendGraphSignaturePart(&signature, node.CloudCredentialRef)
 	environmentKeys := make([]string, 0, len(node.Env))
 	for key := range node.Env {
 		environmentKeys = append(environmentKeys, key)
@@ -272,15 +288,17 @@ func graphNodeConfigurationSignature(
 		appendGraphSignaturePart(&signature, key)
 		appendGraphSignaturePart(&signature, node.Env[key])
 	}
-	volumePaths := make([]string, 0, len(node.Volumes))
-	for _, mountPath := range node.Volumes {
+	volumeIDs := make([]string, 0, len(node.Volumes))
+	for fileID, mountPath := range node.Volumes {
 		if resiliencyMountPath == "" || mountPath != resiliencyMountPath {
-			volumePaths = append(volumePaths, mountPath)
+			volumeIDs = append(volumeIDs, fileID)
 		}
 	}
-	sort.Strings(volumePaths)
-	fmt.Fprintf(&signature, "%d:", len(volumePaths))
-	for _, mountPath := range volumePaths {
+	sort.Strings(volumeIDs)
+	fmt.Fprintf(&signature, "%d:", len(volumeIDs))
+	for _, fileID := range volumeIDs {
+		appendGraphSignaturePart(&signature, fileID)
+		mountPath := node.Volumes[fileID]
 		appendGraphSignaturePart(&signature, mountPath)
 	}
 	fmt.Fprintf(&signature, "%d:", len(childSignatures))
@@ -307,6 +325,12 @@ func compareGraphNodeConfigurations(
 	if scenarioIdentity(left.Scenario.Name, left.Name) != scenarioIdentity(right.Scenario.Name, right.Name) {
 		differences = append(differences, path+".scenario.name")
 	}
+	if !sameScenarioReference(left.Scenario, right.Scenario) {
+		differences = append(differences, path+".scenario.registry")
+	}
+	if left.CloudCredentialRef != right.CloudCredentialRef {
+		differences = append(differences, path+".cloudCredentialRef")
+	}
 	differences = append(differences, compareStringMaps(path+".env", left.Env, right.Env)...)
 	if !sameGraphVolumeMounts(left.Volumes, right.Volumes, leftResiliencyMountPath, rightResiliencyMountPath) {
 		differences = append(differences, path+".volumes")
@@ -317,28 +341,51 @@ func compareGraphNodeConfigurations(
 	return differences
 }
 
-// sameGraphVolumeMounts compares scenario file mount paths as a multiset.
-// Graph volume map keys are file IDs, and resiliency metrics mounts only
-// configure score collection; neither is scenario behavior.
+// sameGraphVolumeMounts compares the file IDs and mount paths used by a node.
+// Resiliency metrics mounts only configure score collection and are ignored.
 func sameGraphVolumeMounts(left, right map[string]string, leftResiliencyMountPath, rightResiliencyMountPath string) bool {
-	leftPaths := make([]string, 0, len(left))
-	for _, mountPath := range left {
+	leftScenarioVolumes := make(map[string]string, len(left))
+	for fileID, mountPath := range left {
 		if leftResiliencyMountPath == "" || mountPath != leftResiliencyMountPath {
-			leftPaths = append(leftPaths, mountPath)
+			leftScenarioVolumes[fileID] = mountPath
 		}
 	}
-	rightPaths := make([]string, 0, len(right))
-	for _, mountPath := range right {
+	rightScenarioVolumes := make(map[string]string, len(right))
+	for fileID, mountPath := range right {
 		if rightResiliencyMountPath == "" || mountPath != rightResiliencyMountPath {
-			rightPaths = append(rightPaths, mountPath)
+			rightScenarioVolumes[fileID] = mountPath
 		}
 	}
-	if len(leftPaths) != len(rightPaths) {
+	if len(leftScenarioVolumes) != len(rightScenarioVolumes) {
 		return false
 	}
-	sort.Strings(leftPaths)
-	sort.Strings(rightPaths)
-	return slices.Equal(leftPaths, rightPaths)
+	for fileID, mountPath := range leftScenarioVolumes {
+		if rightMountPath, exists := rightScenarioVolumes[fileID]; !exists || rightMountPath != mountPath {
+			return false
+		}
+	}
+	return true
+}
+
+func sameScenarioReference(left, right krknv1alpha1.ScenarioReference) bool {
+	return optionalBoolValue(left.Private) == optionalBoolValue(right.Private) &&
+		(left.Private == nil) == (right.Private == nil) &&
+		left.RegistryName == right.RegistryName
+}
+
+func optionalBoolValue(value *bool) bool {
+	return value != nil && *value
+}
+
+func scenarioReferenceSignature(reference krknv1alpha1.ScenarioReference) string {
+	private := "unset"
+	if reference.Private != nil {
+		private = fmt.Sprintf("%t", *reference.Private)
+	}
+	var signature strings.Builder
+	appendGraphSignaturePart(&signature, private)
+	appendGraphSignaturePart(&signature, reference.RegistryName)
+	return signature.String()
 }
 
 func compareStringMaps(path string, left, right map[string]string) []string {

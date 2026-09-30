@@ -379,6 +379,9 @@ spec:
                       description: ClusterName is the name of the cluster this score
                         applies to
                       type: string
+                    providerName:
+                      description: ProviderName is the provider that owns this cluster.
+                      type: string
                     message:
                       description: Message provides human-readable context about the
                         score or error
