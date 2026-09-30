@@ -30,6 +30,10 @@ var scenarioNamePattern = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}
 
 // ClusterResiliencyScore represents the resiliency score for a specific cluster.
 type ClusterResiliencyScore struct {
+	// ProviderName is the provider that owns this cluster.
+	// +optional
+	ProviderName string `json:"providerName,omitempty"`
+
 	// ClusterName is the name of the cluster this score applies to
 	ClusterName string `json:"clusterName"`
 	// Score is the calculated resiliency score for this cluster (0-100)

@@ -1593,6 +1593,9 @@ func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	if !h.addRequestedRunCategoryLabels(w, r, req.Categories, labels) {
+		return
+	}
 
 	scenarioRun := &krknv1alpha1.KrknScenarioRun{
 		ObjectMeta: metav1.ObjectMeta{
@@ -1609,7 +1612,7 @@ func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
 			Environment:            req.Environment,
 			CustomRunName:          req.CustomRunName,
 			ResiliencyScoreEnabled: req.ResiliencyScoreEnabled,
-			MaxRetries:      maxRetries,
+			MaxRetries:             maxRetries,
 		},
 	}
 

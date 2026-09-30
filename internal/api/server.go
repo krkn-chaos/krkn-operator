@@ -331,6 +331,7 @@ func NewServer(port int, client client.Client, clientset kubernetes.Interface, n
 	mux.Handle(v2.DashboardActiveRunsPath, authMw.RequireAuth(http.HandlerFunc(handler.GetActiveRunsOverview)))
 	mux.Handle(v2.JobsPath, authMw.RequireAuth(http.HandlerFunc(handler.ListJobs)))
 	mux.Handle(v2.JobsPath+"/", authMw.RequireAuth(http.HandlerFunc(handler.ListJobs)))
+	mux.Handle(v2.ResiliencyHistoryPath, authMw.RequireAuth(http.HandlerFunc(handler.QueryResiliencyHistory)))
 	mux.Handle(v2.CategoriesPath, authMw.RequireAuth(http.HandlerFunc(handler.CategoriesRouter)))
 	mux.Handle(v2.CategoriesPath+"/", authMw.RequireAuth(http.HandlerFunc(handler.CategoriesRouter)))
 

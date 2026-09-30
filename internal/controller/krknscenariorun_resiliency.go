@@ -67,9 +67,10 @@ func (r *KrknScenarioRunReconciler) calculateResiliencyScores(
 			logger.V(1).Info("pod name not set for cluster job",
 				"clusterName", jobStatus.ClusterName)
 			clusterScores = append(clusterScores, krknv1alpha1.ClusterResiliencyScore{
-				ClusterName: jobStatus.ClusterName,
-				Status:      "error",
-				Message:     "pod name not available",
+				ProviderName: jobStatus.ProviderName,
+				ClusterName:  jobStatus.ClusterName,
+				Status:       "error",
+				Message:      "pod name not available",
 			})
 			hasErrors = true
 			continue
@@ -81,9 +82,10 @@ func (r *KrknScenarioRunReconciler) calculateResiliencyScores(
 				"podName", jobStatus.PodName,
 				"clusterName", jobStatus.ClusterName)
 			clusterScores = append(clusterScores, krknv1alpha1.ClusterResiliencyScore{
-				ClusterName: jobStatus.ClusterName,
-				Status:      "error",
-				Message:     fmt.Sprintf("failed to fetch pod logs: %v", err),
+				ProviderName: jobStatus.ProviderName,
+				ClusterName:  jobStatus.ClusterName,
+				Status:       "error",
+				Message:      fmt.Sprintf("failed to fetch pod logs: %v", err),
 			})
 			hasErrors = true
 			continue
@@ -96,9 +98,10 @@ func (r *KrknScenarioRunReconciler) calculateResiliencyScores(
 				"clusterName", jobStatus.ClusterName,
 				"error", err.Error())
 			clusterScores = append(clusterScores, krknv1alpha1.ClusterResiliencyScore{
-				ClusterName: jobStatus.ClusterName,
-				Status:      "error",
-				Message:     fmt.Sprintf("no resiliency report in logs: %v", err),
+				ProviderName: jobStatus.ProviderName,
+				ClusterName:  jobStatus.ClusterName,
+				Status:       "error",
+				Message:      fmt.Sprintf("no resiliency report in logs: %v", err),
 			})
 			hasErrors = true
 			continue
@@ -110,9 +113,10 @@ func (r *KrknScenarioRunReconciler) calculateResiliencyScores(
 			"score", report.OverallReport.ResiliencyScore)
 
 		clusterScores = append(clusterScores, krknv1alpha1.ClusterResiliencyScore{
-			ClusterName: jobStatus.ClusterName,
-			Score:       report.OverallReport.ResiliencyScore,
-			Status:      "calculated",
+			ProviderName: jobStatus.ProviderName,
+			ClusterName:  jobStatus.ClusterName,
+			Score:        report.OverallReport.ResiliencyScore,
+			Status:       "calculated",
 		})
 	}
 

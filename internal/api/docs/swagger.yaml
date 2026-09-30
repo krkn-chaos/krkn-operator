@@ -813,6 +813,93 @@ definitions:
       name:
         type: string
     type: object
+  internal_api.CategoryConfigurationGroup:
+    properties:
+      parameterProfileFingerprint:
+        description: ParameterProfileFingerprint identifies the unordered multiset of environment key/value pairs.
+        type: string
+      parameterProfileName:
+        description: ParameterProfileName is a deterministic readable alias for the parameter profile.
+        type: string
+      representativeRunId:
+        type: string
+      runType:
+        type: string
+      scenarioNames:
+        items:
+          type: string
+        type: array
+    type: object
+  internal_api.CategoryResiliencyDataPoint:
+    properties:
+      baseline:
+        type: number
+      configurationGroupId:
+        type: string
+      date:
+        format: date-time
+        type: string
+      providerName:
+        type: string
+      runId:
+        type: string
+      runType:
+        type: string
+      score:
+        type: number
+    type: object
+  internal_api.CategoryResiliencyHistoryResponse:
+    properties:
+      clusters:
+        additionalProperties:
+          items:
+            $ref: '#/definitions/internal_api.CategoryResiliencyDataPoint'
+          type: array
+        type: object
+      configurationGroups:
+        additionalProperties:
+          $ref: '#/definitions/internal_api.CategoryConfigurationGroup'
+        type: object
+    type: object
+  internal_api.ResiliencyHistoryQueryRequest:
+    properties:
+      categories:
+        description: Categories selects the categories included in the query.
+        items:
+          type: string
+        type: array
+      clusters:
+        description: Clusters selects the clusters included in the query.
+        items:
+          type: string
+        type: array
+      clusterProviders:
+        additionalProperties:
+          items:
+            type: string
+          type: array
+        description: ClusterProviders optionally narrows selected cluster names to providers. When omitted, all providers for each selected cluster name are included.
+        type: object
+    type: object
+  internal_api.ResiliencyHistoryQueryResponse:
+    properties:
+      clusters:
+        description: Clusters maps cluster names to category names to sorted score datapoints.
+        additionalProperties:
+          additionalProperties:
+            items:
+              $ref: '#/definitions/internal_api.CategoryResiliencyDataPoint'
+            type: array
+          type: object
+        type: object
+      configurationGroups:
+        description: ConfigurationGroups maps category names to configuration group IDs.
+        additionalProperties:
+          additionalProperties:
+            $ref: '#/definitions/internal_api.CategoryConfigurationGroup'
+          type: object
+        type: object
+    type: object
   internal_api.ClusterResiliencyScoreResponse:
     properties:
       clusterName:
@@ -897,6 +984,12 @@ definitions:
     type: object
   internal_api.GraphRunCreateRequest:
     properties:
+      categories:
+        description: Categories are visible category names to associate with the run
+          when it is created.
+        items:
+          type: string
+        type: array
       cloudCredentialRef:
         description: CloudCredentialRef is the default cloud credential for all nodes
           (optional)
@@ -1279,6 +1372,12 @@ definitions:
     type: object
   internal_api.ScenarioRunRequest:
     properties:
+      categories:
+        description: Categories are visible category names to associate with the run
+          when it is created.
+        items:
+          type: string
+        type: array
       cloudCredentialRef:
         description: |-
           CloudCredentialRef, if set, names a saved cloud credential Secret whose
@@ -3003,6 +3102,95 @@ paths:
       summary: Create a category
       tags:
       - categories
+  /v2/categories/{category}/resiliency-history:
+    get:
+      description: Return per-cluster resiliency scores for category-associated scenario and graph runs, grouped by behavior-affecting configuration.
+      parameters:
+      - description: Category name
+        in: path
+        name: category
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_api.CategoryResiliencyHistoryResponse'
+        "400":
+          description: Invalid category name
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "401":
+          description: Authentication required
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "403":
+          description: The caller cannot access the category
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "404":
+          description: Category not found
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get category resiliency score history
+      tags:
+      - categories
+  /v2/resiliency-history:
+    post:
+      consumes:
+      - application/json
+      description: Return category-associated scenario and graph scores selected by non-empty category and cluster arrays. Optional clusterProviders selects providers for duplicate cluster names. Datapoints are nested as clusters[clusterName][categoryName]; providerName identifies each point's provider, and configurationGroups[categoryName] resolves each point's configurationGroupId.
+      parameters:
+      - description: History filters
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_api.ResiliencyHistoryQueryRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_api.ResiliencyHistoryQueryResponse'
+        "400":
+          description: Invalid query
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "401":
+          description: Authentication required
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "403":
+          description: The caller cannot access a category
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "404":
+          description: Category not found
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "405":
+          description: Method not allowed
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Query resiliency score history
+      tags:
+      - resiliency-history
   /v2/categories/{category}/entities/{entityType}/{entityName}:
     delete:
       description: Remove one category label from a scenario or graph run. Other category

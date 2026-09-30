@@ -43,6 +43,12 @@ const (
 	// Categories endpoint for category definitions used to label Krkn entities.
 	CategoriesPath = APIBasePath + "/categories"
 
+	// ResiliencyHistoryPath queries score history across selected categories and clusters.
+	ResiliencyHistoryPath = APIBasePath + "/resiliency-history"
+
+	// CategoryResiliencyHistoryPath returns per-cluster score history for all runs associated with a category.
+	CategoryResiliencyHistoryPath = CategoriesPath + "/{category}/resiliency-history"
+
 	// Dashboard endpoints (same as v1)
 	DashboardPath           = APIBasePath + "/dashboard"
 	DashboardActiveRunsPath = DashboardPath + "/active-runs"

@@ -232,11 +232,21 @@ func (h *Handler) GetGraphRunConfig(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Reconstruct the creation payload from the spec
+	categories, err := h.visibleRunCategoryNames(ctx, graphRun.Labels)
+	if err != nil {
+		logger.Error(err, "Failed to retrieve visible categories for graph replay", "graphRunName", graphRunName)
+		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+			Error:   "internal_error",
+			Message: "Failed to retrieve graph run configuration",
+		})
+		return
+	}
 	payload := GraphRunCreateRequest{
 		Graph:           graphRun.Spec.Graph,
 		TargetRequestID: graphRun.Spec.TargetRequestID,
 		TargetClusters:  graphRun.Spec.TargetClusters,
 		MaxRetries:      intPtr(graphRun.Spec.MaxRetries),
+		Categories:      categories,
 	}
 
 	logger.Info("Graph run config retrieved successfully",

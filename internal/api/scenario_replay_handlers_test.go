@@ -68,6 +68,9 @@ func TestGetScenarioReplay_Success(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      scenarioRunName,
 			Namespace: "krkn-operator-system",
+			Labels: map[string]string{
+				krknv1alpha1.CategoryEntityLabelPrefix + "resilience": "true",
+			},
 		},
 		Spec: krknv1alpha1.KrknScenarioRunSpec{
 			TargetRequestID: "target-123",
@@ -89,10 +92,12 @@ func TestGetScenarioReplay_Success(t *testing.T) {
 			},
 		},
 	}
+	category := runCategoryFixture("resilience", "")
+	category.Namespace = "krkn-operator-system"
 
 	fakeClient := fake.NewClientBuilder().
 		WithScheme(scheme).
-		WithObjects(pod, scenarioRun).
+		WithObjects(pod, scenarioRun, category).
 		Build()
 
 	handler := &Handler{
@@ -126,6 +131,7 @@ func TestGetScenarioReplay_Success(t *testing.T) {
 	assert.Equal(t, 5, *payload.MaxRetries)
 
 	assert.Equal(t, "target-123", payload.TargetRequestID)
+	assert.Equal(t, []string{"resilience"}, payload.Categories)
 	assert.Equal(t, "dummy-scenario", payload.Scenario.Name)
 	assert.NotNil(t, payload.Scenario.Private)
 	assert.False(t, *payload.Scenario.Private)
