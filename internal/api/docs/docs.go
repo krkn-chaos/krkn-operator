@@ -1579,6 +1579,64 @@ const docTemplate = `{
                 }
             }
         },
+        "/krkn-ai/runs/{name}/results/download": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Download every file in the committed artifact manifest as one ZIP after target authorization.",
+                "produces": [
+                    "application/zip"
+                ],
+                "tags": [
+                    "krkn-ai"
+                ],
+                "summary": "Download Krkn-AI run results archive",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "KrknAIRun name",
+                        "name": "name",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Committed run artifacts ZIP",
+                        "schema": {
+                            "type": "file"
+                        }
+                    },
+                    "403": {
+                        "description": "Target access denied",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Run or committed artifacts not found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "502": {
+                        "description": "Committed artifact manifest is corrupt",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Artifact upload is updating or service unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/krkn-ai/runs/{name}/results/scenarios": {
             "get": {
                 "security": [

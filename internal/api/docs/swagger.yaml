@@ -3437,6 +3437,44 @@ paths:
       summary: Download Krkn-AI run artifacts
       tags:
       - krkn-ai
+  /krkn-ai/runs/{name}/results/download:
+    get:
+      description: Download every file in the committed artifact manifest as one ZIP
+        after target authorization.
+      parameters:
+      - description: KrknAIRun name
+        in: path
+        name: name
+        required: true
+        type: string
+      produces:
+      - application/zip
+      responses:
+        "200":
+          description: Committed run artifacts ZIP
+          schema:
+            type: file
+        "403":
+          description: Target access denied
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "404":
+          description: Run or committed artifacts not found
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "502":
+          description: Committed artifact manifest is corrupt
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "503":
+          description: Artifact upload is updating or service unavailable
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Download Krkn-AI run results archive
+      tags:
+      - krkn-ai
   /krkn-ai/runs/{name}/results/scenarios:
     get:
       description: Return the authorized typed scenario index and matching child job

@@ -76,6 +76,9 @@ func (h *Handler) krknAIRunRouter(w http.ResponseWriter, r *http.Request, remain
 	switch parts[1] {
 	case "results":
 		switch {
+		case len(parts) == 3 && parts[2] == "download":
+			h.downloadKrknAIRunArchive(w, r, name)
+			return
 		case len(parts) == 2:
 			h.proxyKrknAIArtifact(w, r, name, "results")
 			return
