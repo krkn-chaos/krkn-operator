@@ -279,6 +279,13 @@ definitions:
       username:
         type: string
     type: object
+  github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.FacetOption:
+    properties:
+      count:
+        type: integer
+      value:
+        type: string
+    type: object
   github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.InlineConnection:
     properties:
       host:
@@ -383,11 +390,27 @@ definitions:
         type: string
       endDate:
         type: string
+      filters:
+        additionalProperties:
+          items:
+            type: string
+          type: array
+        description: |-
+          Filters narrows the search to documents matching selected facet values,
+          keyed by facet category (one of the keys in facetFields). The values for a
+          category are OR-ed together; different categories are AND-ed. Unknown
+          category keys are rejected by ValidateQueryRequest.
+        type: object
       inline:
         allOf:
         - $ref: '#/definitions/github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.InlineConnection'
         description: Inline carries an ephemeral connection when no saved config is
           used.
+      page:
+        description: |-
+          Page is the 1-based page number for pagination. Values below 1 default to 1
+          in ValidateQueryRequest. The offset sent to Elasticsearch is (Page-1)*Size.
+        type: integer
       size:
         description: |-
           Size is the max documents to return. Optional; 0 defaults to DefaultQuerySize
@@ -409,16 +432,38 @@ definitions:
         items:
           $ref: '#/definitions/github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.TelemetryDocument'
         type: array
+      facets:
+        additionalProperties:
+          items:
+            $ref: '#/definitions/github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.FacetOption'
+          type: array
+        description: |-
+          Facets maps each filter category (a key from facetFields) to the available
+          values in the matched window, derived from a terms aggregation per category.
+          The UI uses it to populate the value multi-select. Because filters are
+          applied in the query, facets narrow as filters are selected.
+        type: object
+      facetsTruncated:
+        additionalProperties:
+          type: boolean
+        description: |-
+          FacetsTruncated lists, by facet category, whether that category has more
+          distinct values than Facets returned (the bucket cap was exceeded). A true
+          entry means the category's Facets are a prefix, not the complete set, so the
+          UI should fetch the remaining values rather than treat the dropdown as
+          exhaustive. Absent/empty when every category's values fit.
+        type: object
       stats:
         allOf:
         - $ref: '#/definitions/github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.TelemetryStats'
-        description: |-
-          Stats summarizes pass/fail across the whole matched window, so Stats.Pass +
-          Stats.Fail can exceed Total (which counts only the returned documents page).
+        description: Stats summarizes pass/fail across the whole matched window.
       total:
         description: |-
-          Total is the number of documents in this returned page (len(Documents)),
-          not the total matched across the window. Unit: documents.
+          Total is the count of documents matching the query across the whole matched
+          window (not just the returned page), used by the client to compute the page
+          count. It equals Stats.Pass + Stats.Fail only when every matching document
+          has job_status set; documents missing job_status count toward Total but
+          neither Pass nor Fail.
         type: integer
     type: object
   github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.RecoveredPod:

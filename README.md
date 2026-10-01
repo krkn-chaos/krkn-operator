@@ -180,11 +180,13 @@ In both modes credentials never leave the backend beyond the connection to the t
 | Field        | Type   | Required | Description |
 |--------------|--------|----------|-------------|
 | `configName` | string | yes      | Name of the saved Elasticsearch config to query. |
-| `size`       | int    | no       | Max documents to return. Defaults to `50`; clamped to `500`. Negative values are rejected. |
+| `size`       | int    | no       | Max documents per page. Defaults to `50`; clamped to `500`. Negative values are rejected. |
+| `page`       | int    | no       | 1-based page number. Values below `1` default to `1`. The offset is `(page-1)*size`; a page whose offset plus size exceeds the `10000` result window is rejected. |
 | `startDate`  | string | no       | Inclusive lower bound on the run timestamp, `yyyy-MM-dd`. Defaults to 30 days ago. |
 | `endDate`    | string | no       | Upper bound on the run timestamp, `yyyy-MM-dd`. Includes only the selected calendar day. Defaults to the current instant. |
+| `filters`    | object | no       | Map of facet category to selected values. Keys must be known facet categories (`scenario_type`, `job_status`, `cloud_infrastructure`, `cloud_type`, `major_version`, `network_plugins`); unknown keys are rejected. Values within a category are OR-ed; categories are AND-ed. `job_status` values must be `"true"` or `"false"`. |
 
-Results are sorted newest-first by timestamp before the `size` limit is applied.
+Results are sorted newest-first by timestamp, then the `page`/`size` window is applied.
 
 **Response `200` shape:**
 
@@ -243,11 +245,21 @@ Results are sorted newest-first by timestamp before the `size` limit is applied.
       ]
     }
   ],
-  "total": 1,
+  "total": 50,
   "stats": {
     "pass": 42,
     "fail": 8,
     "pass_percent": 84.0
+  },
+  "facets": {
+    "job_status": [
+      {"value": "true", "count": 42},
+      {"value": "false", "count": 8}
+    ],
+    "cloud_infrastructure": [
+      {"value": "AWS", "count": 30},
+      {"value": "GCP", "count": 20}
+    ]
   }
 }
 ```
@@ -267,9 +279,9 @@ Each document includes run-level cluster/infrastructure metadata (`metadata`) an
 | `metadata` | object | Run-level cluster/infrastructure details: object counts, network plugins, node summaries, cloud type, versions, security settings. Omitted when source document had no metadata. |
 | `scenarios` | array | All scenarios executed in run. Each includes type, timestamps, exit status, raw parameters, and optional affected pod recovery timings. |
 
-`total` is the number of documents returned. Hits whose stored shape cannot be parsed are skipped rather than failing the request, so `total` may be smaller than the cluster's raw hit count.
+`total` is the count of documents matching the query across the whole matched window (all documents in range), not just the returned `page`. The client uses it to compute the page count; it equals `stats.pass` + `stats.fail` only when every matching document has `job_status` set (documents missing it count toward `total` but neither `pass` nor `fail`).
 
-`stats` summarizes run-level pass/fail across the entire matched time window (all documents in range), not just the returned `size`-capped page, so `pass` + `fail` may exceed `total`. Fields:
+`stats` summarizes run-level pass/fail across the entire matched time window (all documents in range), not just the returned `size`-capped page. Fields:
 
 | Field          | Type   | Description |
 |----------------|--------|-------------|
@@ -277,11 +289,20 @@ Each document includes run-level cluster/infrastructure metadata (`metadata`) an
 | `fail`         | int    | Runs with `job_status` false in the matched window. |
 | `pass_percent` | float  | `pass` / (`pass` + `fail`) as a percentage, `0`-`100`, rounded to 2 decimals; `0` when no runs matched. |
 
+`facets` maps each filter category to the available values in the matched window (from a per-category terms aggregation), each with its document count. The UI populates the value multi-select from it. Because filters are applied in the query, facet counts narrow as filters are selected.
+
+| Field   | Type   | Description |
+|---------|--------|-------------|
+| `value` | string | A selectable facet value. |
+| `count` | int    | Documents in the matched window carrying that value. |
+
+Each string category returns up to 100 values; `job_status` returns its two. When a category has more distinct values than were returned, its `facets` list is a prefix and the category is flagged in `facetsTruncated` (a map of category to `true`); the UI should fetch the remaining values rather than treat the dropdown as complete. `facetsTruncated` is omitted when every category's values fit.
+
 **Errors:**
 
 | Status | Meaning |
 |--------|---------|
-| `400`  | Invalid request body or validation failure: missing `configName`, negative `size`, a malformed date, `startDate` after `endDate`, or an `endDate` in the future. |
+| `400`  | Invalid request body or validation failure: missing `configName`, negative `size`, a `page` whose offset exceeds the result window, an unknown `filters` category, an invalid `job_status` value, a malformed date, `startDate` after `endDate`, or an `endDate` in the future. |
 | `401`  | Missing or invalid authentication token. |
 | `404`  | The named Elasticsearch config does not exist. |
 | `502`  | The upstream Elasticsearch cluster could not be reached or returned an error. The response carries a stable, sanitized message; detailed upstream diagnostics are logged server-side only. |

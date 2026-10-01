@@ -656,7 +656,7 @@ func (h *Handler) QueryElasticsearchTelemetry(w http.ResponseWriter, r *http.Req
 	// Page is 1-based and defaulted/validated by ValidateQueryRequest; the
 	// Elasticsearch offset is (page-1)*size.
 	from := (req.Page - 1) * req.Size
-	docs, total, stats, facets, err := h.esClient.QueryTelemetry(ctx, conn, req.Size, from, req.StartDate, req.EndDate, req.Filters)
+	docs, total, stats, facets, facetsTruncated, err := h.esClient.QueryTelemetryPage(ctx, conn, req.Size, from, req.StartDate, req.EndDate, req.Filters)
 	if err != nil {
 		// A rejected inline destination is a client error (the caller asked the
 		// operator to reach an address the destination policy forbids), not an
@@ -689,10 +689,11 @@ func (h *Handler) QueryElasticsearchTelemetry(w http.ResponseWriter, r *http.Req
 	logger.Info("Queried Elasticsearch telemetry", "source", source, "results", len(docs))
 
 	writeJSON(w, http.StatusOK, elasticsearch.QueryTelemetryResponse{
-		Documents: docs,
-		Total:     total,
-		Stats:     stats,
-		Facets:    facets,
+		Documents:       docs,
+		Total:           total,
+		Stats:           stats,
+		Facets:          facets,
+		FacetsTruncated: facetsTruncated,
 	})
 }
 

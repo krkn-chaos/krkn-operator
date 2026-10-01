@@ -363,7 +363,9 @@ type QueryTelemetryResponse struct {
 	Documents []TelemetryDocument `json:"documents"`
 	// Total is the count of documents matching the query across the whole matched
 	// window (not just the returned page), used by the client to compute the page
-	// count. It equals Stats.Pass + Stats.Fail.
+	// count. It equals Stats.Pass + Stats.Fail only when every matching document
+	// has job_status set; documents missing job_status count toward Total but
+	// neither Pass nor Fail.
 	Total int `json:"total"`
 	// Stats summarizes pass/fail across the whole matched window.
 	Stats TelemetryStats `json:"stats"`
@@ -372,6 +374,12 @@ type QueryTelemetryResponse struct {
 	// The UI uses it to populate the value multi-select. Because filters are
 	// applied in the query, facets narrow as filters are selected.
 	Facets map[string][]FacetOption `json:"facets,omitempty"`
+	// FacetsTruncated lists, by facet category, whether that category has more
+	// distinct values than Facets returned (the bucket cap was exceeded). A true
+	// entry means the category's Facets are a prefix, not the complete set, so the
+	// UI should fetch the remaining values rather than treat the dropdown as
+	// exhaustive. Absent/empty when every category's values fit.
+	FacetsTruncated map[string]bool `json:"facetsTruncated,omitempty"`
 }
 
 // QueryAlertsRequest represents a request to query alert documents from the
@@ -484,8 +492,10 @@ func ValidateQueryRequest(req *QueryTelemetryRequest) error {
 		req.Page = 1
 	}
 	// Reject deep pages the cluster cannot serve: from+size must stay within the
-	// result window. from is (Page-1)*Size, so guard on the offset alone.
-	if (req.Page-1)*req.Size >= MaxResultWindow {
+	// result window. from is (Page-1)*Size, so the last requested offset is
+	// Page*Size. Compare via division to avoid overflow on large page numbers:
+	// Page*Size > MaxResultWindow is equivalent to Page > MaxResultWindow/Size.
+	if req.Page > MaxResultWindow/req.Size {
 		return fmt.Errorf("requested page exceeds the maximum result window of %d", MaxResultWindow)
 	}
 	if err := validateDate("startDate", req.StartDate); err != nil {
@@ -506,13 +516,24 @@ func ValidateQueryRequest(req *QueryTelemetryRequest) error {
 	return nil
 }
 
-// validateFilters rejects filter categories that are not known facet fields.
-// Empty value slices are dropped from the map so they never reach the query
-// builder as no-op clauses.
+// validateFilters rejects filter categories that are not known facet fields and
+// rejects invalid values for typed categories. Boolean facets (e.g. job_status)
+// accept only "true" or "false"; an invalid value is a client error rather than
+// a silently dropped clause, so a filtered request can never run without the
+// status restriction it asked for. Empty value slices are dropped from the map
+// so they never reach the query builder as no-op clauses.
 func validateFilters(filters map[string][]string) error {
 	for key, values := range filters {
-		if !isFacetField(key) {
+		def, ok := facetFieldByKey(key)
+		if !ok {
 			return fmt.Errorf("unknown filter category %q", key)
+		}
+		if def.Boolean {
+			for _, v := range values {
+				if v != "true" && v != "false" {
+					return fmt.Errorf("filter %q must be \"true\" or \"false\", got %q", key, v)
+				}
+			}
 		}
 		if len(values) == 0 {
 			delete(filters, key)

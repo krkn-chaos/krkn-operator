@@ -3550,6 +3550,17 @@
                 }
             }
         },
+        "github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.FacetOption": {
+            "type": "object",
+            "properties": {
+                "count": {
+                    "type": "integer"
+                },
+                "value": {
+                    "type": "string"
+                }
+            }
+        },
         "github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.InlineConnection": {
             "type": "object",
             "properties": {
@@ -3669,6 +3680,16 @@
                 "endDate": {
                     "type": "string"
                 },
+                "filters": {
+                    "description": "Filters narrows the search to documents matching selected facet values,\nkeyed by facet category (one of the keys in facetFields). The values for a\ncategory are OR-ed together; different categories are AND-ed. Unknown\ncategory keys are rejected by ValidateQueryRequest.",
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    }
+                },
                 "inline": {
                     "description": "Inline carries an ephemeral connection when no saved config is used.",
                     "allOf": [
@@ -3676,6 +3697,10 @@
                             "$ref": "#/definitions/github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.InlineConnection"
                         }
                     ]
+                },
+                "page": {
+                    "description": "Page is the 1-based page number for pagination. Values below 1 default to 1\nin ValidateQueryRequest. The offset sent to Elasticsearch is (Page-1)*Size.",
+                    "type": "integer"
                 },
                 "size": {
                     "description": "Size is the max documents to return. Optional; 0 defaults to DefaultQuerySize\nand values above MaxQuerySize are clamped. Unit: documents.",
@@ -3697,8 +3722,25 @@
                         "$ref": "#/definitions/github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.TelemetryDocument"
                     }
                 },
+                "facets": {
+                    "description": "Facets maps each filter category (a key from facetFields) to the available\nvalues in the matched window, derived from a terms aggregation per category.\nThe UI uses it to populate the value multi-select. Because filters are\napplied in the query, facets narrow as filters are selected.",
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/definitions/github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.FacetOption"
+                        }
+                    }
+                },
+                "facetsTruncated": {
+                    "description": "FacetsTruncated lists, by facet category, whether that category has more\ndistinct values than Facets returned (the bucket cap was exceeded). A true\nentry means the category's Facets are a prefix, not the complete set, so the\nUI should fetch the remaining values rather than treat the dropdown as\nexhaustive. Absent/empty when every category's values fit.",
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "boolean"
+                    }
+                },
                 "stats": {
-                    "description": "Stats summarizes pass/fail across the whole matched window, so Stats.Pass +\nStats.Fail can exceed Total (which counts only the returned documents page).",
+                    "description": "Stats summarizes pass/fail across the whole matched window.",
                     "allOf": [
                         {
                             "$ref": "#/definitions/github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.TelemetryStats"
@@ -3706,7 +3748,7 @@
                     ]
                 },
                 "total": {
-                    "description": "Total is the number of documents in this returned page (len(Documents)),\nnot the total matched across the window. Unit: documents.",
+                    "description": "Total is the count of documents matching the query across the whole matched\nwindow (not just the returned page), used by the client to compute the page\ncount. It equals Stats.Pass + Stats.Fail only when every matching document\nhas job_status set; documents missing job_status count toward Total but\nneither Pass nor Fail.",
                     "type": "integer"
                 }
             }

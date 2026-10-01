@@ -177,7 +177,7 @@ func TestFlattenRedactsParameters(t *testing.T) {
 		t.Fatalf("unmarshal error: %v", err)
 	}
 
-	doc := src.flatten()
+	doc := src.flatten(nil)
 
 	if len(doc.Scenarios) != 1 {
 		t.Fatalf("expected 1 scenario, got %d", len(doc.Scenarios))
