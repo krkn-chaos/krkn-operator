@@ -430,7 +430,7 @@ func TestKrknAIRunTypedResultsAuthorizeAndProxyByUID(t *testing.T) {
 		serviceCalls++
 		switch r.URL.Path {
 		case "/v1/runs/uid-typed/summary":
-			_, _ = w.Write([]byte(`{"artifactStatus":"in_progress","completedGenerations":1,"bestFitness":0.75,"fitnessProgression":[]}`))
+			_, _ = w.Write([]byte(`{"artifactStatus":"in_progress","completedGenerations":1,"currentGeneration":1,"bestFitness":75,"fitnessProgression":[]}`))
 		case "/v1/runs/uid-typed/scenarios":
 			if r.URL.Query().Get("page") != "2" || r.URL.Query().Get("search") != "cpu" || r.URL.Query().Get("ignored") != "" {
 				t.Errorf("unexpected forwarded query: %s", r.URL.RawQuery)
@@ -440,7 +440,7 @@ func TestKrknAIRunTypedResultsAuthorizeAndProxyByUID(t *testing.T) {
 			if !strings.HasSuffix(r.URL.EscapedPath(), "/scenario%20id") {
 				t.Errorf("scenario ID was not escaped in service route: %s", r.URL.EscapedPath())
 			}
-			_, _ = w.Write([]byte(`{"generation":1,"scenarioId":"scenario id","scenarioType":"pod-delete","parameters":[{"name":"namespace","value":"shop"}],"command":"krkn --scenario pod","origin":"initial","parentIds":[],"durationSeconds":1.5,"returnCode":0,"fitnessResult":{"fitnessScore":0.75,"scores":[{"id":1,"fitnessScore":0.5,"weightedScore":0.25,"normalizedScore":0.75}],"healthCheckFailureScore":0.1,"healthCheckResponseTimeScore":0.2,"krknFailureScore":0.3},"healthChecks":[{"application":"shop","timestamp":"2025-01-01T00:00:02+00:00","elapsedSeconds":2,"responseTimeSeconds":0.12,"statusCode":200,"success":true}],"logPath":"logs/scenario.log","fitnessState":"final"}`))
+			_, _ = w.Write([]byte(`{"generation":1,"scenarioId":"scenario id","scenarioType":"pod-delete","parameters":[{"name":"namespace","value":"shop"}],"command":"krkn --scenario pod","origin":"initial","parentIds":[],"durationSeconds":1.5,"returnCode":0,"fitnessResult":{"fitnessScore":75,"scores":[{"id":1,"rawScore":42,"normalizedScore":0.75,"query":"sum(rate(http_requests_total[5m]))","queryType":"range"}],"healthCheckFailureScore":0.1,"healthCheckResponseTimeScore":0.2,"krknFailureScore":0.3},"healthChecks":[{"application":"shop","timestamp":"2025-01-01T00:00:02+00:00","elapsedSeconds":2,"responseTimeSeconds":0.12,"statusCode":200,"success":true}],"logPath":"logs/scenario.log","fitnessState":"final"}`))
 		default:
 			http.NotFound(w, r)
 		}
@@ -475,7 +475,7 @@ func TestKrknAIRunTypedResultsAuthorizeAndProxyByUID(t *testing.T) {
 	}
 	if result.Name != "typed-run" || result.Phase != "Running" || result.Cluster != "cluster" ||
 		result.OrchestratorPodName != "orchestrator-1" || result.ArtifactStatus != "in_progress" ||
-		result.BestFitness == nil || *result.BestFitness != 0.75 {
+		result.BestFitness == nil || *result.BestFitness != 75 {
 		t.Fatalf("summary did not merge run metadata and artifact data: %+v", result)
 	}
 

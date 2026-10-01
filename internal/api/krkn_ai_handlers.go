@@ -687,6 +687,7 @@ func (h *Handler) getKrknAIRunResultsSummary(w http.ResponseWriter, r *http.Requ
 		Name: run.Name, Phase: run.Status.Phase, CreatedAt: run.CreationTimestamp.Time,
 		Cluster: cluster, OrchestratorPodName: run.Status.OrchestratorPodName, FailureReason: run.Status.FailureReason,
 		ArtifactStatus: artifact.ArtifactStatus, CompletedGenerations: artifact.CompletedGenerations,
+		CurrentGeneration:  artifact.CurrentGeneration,
 		CompletedScenarios: artifact.CompletedScenarios, ConfiguredGenerations: artifact.ConfiguredGenerations,
 		PopulationSize: artifact.PopulationSize, BestFitness: artifact.BestFitness,
 		AverageFitness: artifact.AverageFitness, BaselineFitness: artifact.BaselineFitness,

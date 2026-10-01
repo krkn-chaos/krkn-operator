@@ -52,8 +52,11 @@ type KrknAIFitnessProgression struct {
 }
 
 type KrknAIArtifactSummary struct {
-	ArtifactStatus        string                     `json:"artifactStatus"`
-	CompletedGenerations  *int                       `json:"completedGenerations"`
+	// Scores include only completed generations with finalized normalization.
+	ArtifactStatus       string `json:"artifactStatus"`
+	CompletedGenerations *int   `json:"completedGenerations"`
+	// CurrentGeneration is zero-based; null means no generation has started.
+	CurrentGeneration     *int                       `json:"currentGeneration"`
 	CompletedScenarios    *int                       `json:"completedScenarios"`
 	ConfiguredGenerations *int                       `json:"configuredGenerations"`
 	PopulationSize        *int                       `json:"populationSize"`
@@ -64,14 +67,16 @@ type KrknAIArtifactSummary struct {
 }
 
 type KrknAIRunSummaryResponse struct {
-	Name                  string                     `json:"name"`
-	Phase                 string                     `json:"phase"`
-	CreatedAt             time.Time                  `json:"createdAt"`
-	Cluster               string                     `json:"cluster"`
-	OrchestratorPodName   string                     `json:"orchestratorPodName"`
-	FailureReason         string                     `json:"failureReason"`
-	ArtifactStatus        string                     `json:"artifactStatus"`
-	CompletedGenerations  *int                       `json:"completedGenerations"`
+	Name                 string    `json:"name"`
+	Phase                string    `json:"phase"`
+	CreatedAt            time.Time `json:"createdAt"`
+	Cluster              string    `json:"cluster"`
+	OrchestratorPodName  string    `json:"orchestratorPodName"`
+	FailureReason        string    `json:"failureReason"`
+	ArtifactStatus       string    `json:"artifactStatus"`
+	CompletedGenerations *int      `json:"completedGenerations"`
+	// CurrentGeneration is zero-based; fitness totals include completed generations only.
+	CurrentGeneration     *int                       `json:"currentGeneration"`
 	CompletedScenarios    *int                       `json:"completedScenarios"`
 	ConfiguredGenerations *int                       `json:"configuredGenerations"`
 	PopulationSize        *int                       `json:"populationSize"`
@@ -87,7 +92,7 @@ type KrknAIScenarioIndexItem struct {
 	ScenarioType    string   `json:"scenarioType,omitempty"`
 	Outcome         string   `json:"outcome,omitempty"`
 	DurationSeconds *float64 `json:"durationSeconds,omitempty"`
-	FitnessScore    *float64 `json:"fitnessScore,omitempty"`
+	FitnessScore    *float64 `json:"fitnessScore"`
 	FitnessState    string   `json:"fitnessState,omitempty"`
 	ChildRunName    string   `json:"childRunName,omitempty"`
 	Phase           string   `json:"phase,omitempty"`
@@ -108,10 +113,14 @@ type KrknAIScenarioIndexResponse struct {
 }
 
 type KrknAIScenarioFitnessScore struct {
-	ID              int      `json:"id"`
-	FitnessScore    *float64 `json:"fitnessScore"`
-	WeightedScore   *float64 `json:"weightedScore"`
+	ID int `json:"id"`
+	// RawScore is the measured Prometheus value before generation normalization.
+	RawScore *float64 `json:"rawScore"`
+	// NormalizedScore is 0–1 and remains null until generation completion.
 	NormalizedScore *float64 `json:"normalizedScore"`
+	// Query is captured with the scenario result, not read from mutable configuration.
+	Query     *string `json:"query"`
+	QueryType *string `json:"queryType"`
 }
 
 type KrknAIScenarioFitnessResult struct {

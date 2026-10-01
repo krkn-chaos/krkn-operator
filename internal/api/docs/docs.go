@@ -3020,145 +3020,6 @@ const docTemplate = `{
                 }
             }
         },
-        "/v2/categories/{category}/resiliency-history": {
-            "get": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "Return per-cluster resiliency scores for category-associated scenario and graph runs, grouped by behavior-affecting configuration.",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "categories"
-                ],
-                "summary": "Get category resiliency score history",
-                "parameters": [
-                    {
-                        "description": "Category name",
-                        "name": "category",
-                        "in": "path",
-                        "required": true,
-                        "type": "string"
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/internal_api.CategoryResiliencyHistoryResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Invalid category name",
-                        "schema": {
-                            "$ref": "#/definitions/internal_api.ErrorResponse"
-                        }
-                    },
-                    "401": {
-                        "description": "Authentication required",
-                        "schema": {
-                            "$ref": "#/definitions/internal_api.ErrorResponse"
-                        }
-                    },
-                    "403": {
-                        "description": "The caller cannot access the category",
-                        "schema": {
-                            "$ref": "#/definitions/internal_api.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Category not found",
-                        "schema": {
-                            "$ref": "#/definitions/internal_api.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal server error",
-                        "schema": {
-                            "$ref": "#/definitions/internal_api.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/v2/resiliency-history": {
-            "post": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "Return category-associated scenario and graph scores selected by non-empty category and cluster arrays. Optional clusterProviders selects providers for duplicate cluster names. Datapoints are nested as clusters[clusterName][categoryName]; providerName identifies each point's provider, and configurationGroups[categoryName] resolves each point's configurationGroupId.",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "resiliency-history"
-                ],
-                "summary": "Query resiliency score history",
-                "parameters": [
-                    {
-                        "description": "History filters",
-                        "name": "request",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/internal_api.ResiliencyHistoryQueryRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/internal_api.ResiliencyHistoryQueryResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Invalid query",
-                        "schema": {
-                            "$ref": "#/definitions/internal_api.ErrorResponse"
-                        }
-                    },
-                    "401": {
-                        "description": "Authentication required",
-                        "schema": {
-                            "$ref": "#/definitions/internal_api.ErrorResponse"
-                        }
-                    },
-                    "403": {
-                        "description": "The caller cannot access a category",
-                        "schema": {
-                            "$ref": "#/definitions/internal_api.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Category not found",
-                        "schema": {
-                            "$ref": "#/definitions/internal_api.ErrorResponse"
-                        }
-                    },
-                    "405": {
-                        "description": "Method not allowed",
-                        "schema": {
-                            "$ref": "#/definitions/internal_api.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal server error",
-                        "schema": {
-                            "$ref": "#/definitions/internal_api.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
         "/v2/categories/{category}/entities/{entityType}/{entityName}": {
             "put": {
                 "security": [
@@ -3320,6 +3181,70 @@ const docTemplate = `{
                     },
                     "409": {
                         "description": "Run changed concurrently",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/v2/categories/{category}/resiliency-history": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Return per-cluster resiliency scores for category-associated scenario and graph runs, grouped by behavior-affecting configuration.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "categories"
+                ],
+                "summary": "Get category resiliency score history",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Category name",
+                        "name": "category",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.CategoryResiliencyHistoryResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid category name",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Authentication required",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "The caller cannot access the category",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Category not found",
                         "schema": {
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
@@ -3576,6 +3501,81 @@ const docTemplate = `{
                         "description": "Paginated list of jobs",
                         "schema": {
                             "$ref": "#/definitions/internal_api.UnifiedJobsResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/v2/resiliency-history": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Return category-associated scenario and graph scores selected by non-empty category and cluster arrays. Optional clusterProviders selects providers for duplicate cluster names. Datapoints are nested as clusters[clusterName][categoryName]; providerName identifies each point's provider, and configurationGroups[categoryName] resolves each point's configurationGroupId.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "resiliency-history"
+                ],
+                "summary": "Query resiliency score history",
+                "parameters": [
+                    {
+                        "description": "History filters",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ResiliencyHistoryQueryRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ResiliencyHistoryQueryResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid query",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Authentication required",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "The caller cannot access a category",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Category not found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     },
                     "500": {
@@ -3973,7 +3973,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "resiliencyWeight": {
-                    "description": "ResiliencyWeight controls this node's contribution to the resiliency score.\n+optional",
+                    "description": "ResiliencyWeight controls this node's contribution to the resiliency score.\n+optional\n+kubebuilder:validation:Minimum=0\n+kubebuilder:validation:ExclusiveMinimum=true",
                     "type": "number"
                 },
                 "scenario": {
@@ -4976,6 +4976,31 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_api.CategoryConfigurationGroup": {
+            "type": "object",
+            "properties": {
+                "parameterProfileFingerprint": {
+                    "description": "ParameterProfileFingerprint identifies the unordered multiset of environment key/value pairs.",
+                    "type": "string"
+                },
+                "parameterProfileName": {
+                    "description": "ParameterProfileName is a deterministic readable alias for the parameter profile.",
+                    "type": "string"
+                },
+                "representativeRunId": {
+                    "type": "string"
+                },
+                "runType": {
+                    "type": "string"
+                },
+                "scenarioNames": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
         "internal_api.CategoryEntityAssociationResponse": {
             "type": "object",
             "properties": {
@@ -5007,69 +5032,18 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.CategoryResponse": {
-            "type": "object",
-            "properties": {
-                "availableToAll": {
-                    "description": "AvailableToAll is true for public categories. Categories created without a group default to public.",
-                    "type": "boolean"
-                },
-                "color": {
-                    "type": "string"
-                },
-                "createdBy": {
-                    "description": "CreatedBy identifies the user allowed to update or delete the category, unless the caller is an admin.",
-                    "type": "string"
-                },
-                "groups": {
-                    "description": "Groups contains the single group allowed to view the category, when group-scoped.",
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "name": {
-                    "type": "string"
-                }
-            }
-        },
-        "internal_api.CategoryConfigurationGroup": {
-            "type": "object",
-            "properties": {
-                "parameterProfileFingerprint": {
-                    "description": "ParameterProfileFingerprint identifies the unordered multiset of environment key/value pairs.",
-                    "type": "string"
-                },
-                "parameterProfileName": {
-                    "description": "ParameterProfileName is a deterministic readable alias for the parameter profile.",
-                    "type": "string"
-                },
-                "representativeRunId": {
-                    "type": "string"
-                },
-                "runType": {
-                    "type": "string"
-                },
-                "scenarioNames": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                }
-            }
-        },
         "internal_api.CategoryResiliencyDataPoint": {
             "type": "object",
             "properties": {
                 "baseline": {
+                    "description": "Baseline is the run's minimum acceptable resiliency score, when configured.",
                     "type": "number"
                 },
                 "configurationGroupId": {
                     "type": "string"
                 },
                 "date": {
-                    "type": "string",
-                    "format": "date-time"
+                    "type": "string"
                 },
                 "providerName": {
                     "type": "string"
@@ -5105,60 +5079,29 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_api.ResiliencyHistoryQueryRequest": {
+        "internal_api.CategoryResponse": {
             "type": "object",
             "properties": {
-                "categories": {
-                    "description": "Categories selects the categories included in the query.",
+                "availableToAll": {
+                    "description": "AvailableToAll is true for public categories. Categories created without a group default to public.",
+                    "type": "boolean"
+                },
+                "color": {
+                    "type": "string"
+                },
+                "createdBy": {
+                    "description": "CreatedBy identifies the user allowed to update or delete the category, unless the caller is an admin.",
+                    "type": "string"
+                },
+                "groups": {
+                    "description": "Groups contains the single group allowed to view the category, when group-scoped.",
                     "type": "array",
                     "items": {
                         "type": "string"
                     }
                 },
-                "clusters": {
-                    "description": "Clusters selects the clusters included in the query.",
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "clusterProviders": {
-                    "description": "ClusterProviders optionally narrows selected cluster names to providers. When omitted, all providers for each selected cluster name are included.",
-                    "type": "object",
-                    "additionalProperties": {
-                        "type": "array",
-                        "items": {
-                            "type": "string"
-                        }
-                    }
-                }
-            }
-        },
-        "internal_api.ResiliencyHistoryQueryResponse": {
-            "type": "object",
-            "properties": {
-                "clusters": {
-                    "description": "Clusters maps cluster names to category names to sorted score datapoints.",
-                    "type": "object",
-                    "additionalProperties": {
-                        "type": "object",
-                        "additionalProperties": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/internal_api.CategoryResiliencyDataPoint"
-                            }
-                        }
-                    }
-                },
-                "configurationGroups": {
-                    "description": "ConfigurationGroups maps category names to configuration group IDs.",
-                    "type": "object",
-                    "additionalProperties": {
-                        "type": "object",
-                        "additionalProperties": {
-                            "$ref": "#/definitions/internal_api.CategoryConfigurationGroup"
-                        }
-                    }
+                "name": {
+                    "type": "string"
                 }
             }
         },
@@ -5726,6 +5669,10 @@ const docTemplate = `{
                 "createdAt": {
                     "type": "string"
                 },
+                "currentGeneration": {
+                    "description": "CurrentGeneration is zero-based; fitness totals include completed generations only.",
+                    "type": "integer"
+                },
                 "failureReason": {
                     "type": "string"
                 },
@@ -5823,16 +5770,22 @@ const docTemplate = `{
         "internal_api.KrknAIScenarioFitnessScore": {
             "type": "object",
             "properties": {
-                "fitnessScore": {
-                    "type": "number"
-                },
                 "id": {
                     "type": "integer"
                 },
                 "normalizedScore": {
+                    "description": "NormalizedScore is 0–1 and remains null until generation completion.",
                     "type": "number"
                 },
-                "weightedScore": {
+                "query": {
+                    "description": "Query is captured with the scenario result, not read from mutable configuration.",
+                    "type": "string"
+                },
+                "queryType": {
+                    "type": "string"
+                },
+                "rawScore": {
+                    "description": "RawScore is the measured Prometheus value before generation normalization.",
                     "type": "number"
                 }
             }
@@ -6082,6 +6035,63 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_api.ResiliencyHistoryQueryRequest": {
+            "type": "object",
+            "properties": {
+                "categories": {
+                    "description": "Categories selects the categories included in the query.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "clusterProviders": {
+                    "description": "ClusterProviders optionally narrows selected cluster names to providers.\nWhen omitted, all providers for each selected cluster name are included.",
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    }
+                },
+                "clusters": {
+                    "description": "Clusters selects the clusters included in the query.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "internal_api.ResiliencyHistoryQueryResponse": {
+            "type": "object",
+            "properties": {
+                "clusters": {
+                    "description": "Clusters maps cluster names to category names to sorted score datapoints.",
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "object",
+                        "additionalProperties": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/internal_api.CategoryResiliencyDataPoint"
+                            }
+                        }
+                    }
+                },
+                "configurationGroups": {
+                    "description": "ConfigurationGroups maps category names to configuration group IDs.",
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "object",
+                        "additionalProperties": {
+                            "$ref": "#/definitions/internal_api.CategoryConfigurationGroup"
+                        }
+                    }
+                }
+            }
+        },
         "internal_api.RestoreResponse": {
             "type": "object",
             "properties": {
@@ -6227,7 +6237,7 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "categories": {
-                    "description": "Categories are visible category names to associate with the run when it is created.",
+                    "description": "Categories are visible category names to associate with the run when it is created.\nThey are stored as metadata labels and remain optional for existing clients.",
                     "type": "array",
                     "items": {
                         "type": "string"
