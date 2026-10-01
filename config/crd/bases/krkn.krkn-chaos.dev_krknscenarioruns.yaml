@@ -216,8 +216,8 @@ spec:
                         for this job
                       type: integer
                     maxRetriesConfigured:
-                      description: MaxRetriesConfigured indicates that MaxRetries was
-                        initialized by the current controller.
+                      description: MaxRetriesConfigured indicates that MaxRetries
+                        was initialized by the current controller.
                       type: boolean
                     message:
                       description: Message contains additional information about the
@@ -383,12 +383,12 @@ spec:
                       description: ClusterName is the name of the cluster this score
                         applies to
                       type: string
-                    providerName:
-                      description: ProviderName is the provider that owns this cluster.
-                      type: string
                     message:
                       description: Message provides human-readable context about the
                         score or error
+                      type: string
+                    providerName:
+                      description: ProviderName is the provider that owns this cluster.
                       type: string
                     score:
                       description: Score is the calculated resiliency score for this

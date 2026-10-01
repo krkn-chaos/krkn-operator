@@ -93,12 +93,6 @@ const scenarioTypeFacetKey = "scenario_type"
 // not a facet key, so it never collides with a facetFields entry.
 const statsAggKey = "stats_job_status"
 
-// isFacetField reports whether key names a known filter category.
-func isFacetField(key string) bool {
-	_, ok := facetFieldByKey(key)
-	return ok
-}
-
 // facetFieldByKey returns the facet definition for key and whether it exists, so
 // callers can inspect typing (e.g. Boolean) instead of only checking membership.
 func facetFieldByKey(key string) (facetField, bool) {
