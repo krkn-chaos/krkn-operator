@@ -46,7 +46,22 @@ type facetField struct {
 	Key     string
 	Field   string
 	Boolean bool
+	// Size caps how many terms buckets the aggregation returns for this category.
+	// String categories use stringFacetBucketSize; the boolean job_status needs only
+	// its two buckets. A zero value falls back to stringFacetBucketSize.
+	Size int
 }
+
+const (
+	// stringFacetBucketSize caps the terms buckets returned per string facet
+	// category. It is well above the realistic distinct-value count for these
+	// fields so the dropdown gets the full set in one query; when a category still
+	// exceeds it the response flags the category as truncated (see
+	// facetsFromBuckets) rather than presenting the buckets as complete.
+	stringFacetBucketSize = 100
+	// booleanFacetBucketSize caps the job_status facet, which has only true/false.
+	booleanFacetBucketSize = 2
+)
 
 // facetFields is the single source of truth for the filterable categories. It
 // drives the terms aggregations, the query filter clauses, and the facet buckets
@@ -54,26 +69,45 @@ type facetField struct {
 // sub-fields are used for the analyzed string fields so aggregations and term
 // matches operate on the exact value.
 var facetFields = []facetField{
-	{Key: "scenario_type", Field: "scenarios.scenario_type.keyword"},
-	{Key: "job_status", Field: "job_status", Boolean: true},
-	{Key: "cloud_infrastructure", Field: "cloud_infrastructure.keyword"},
-	{Key: "cloud_type", Field: "cloud_type.keyword"},
-	{Key: "major_version", Field: "major_version.keyword"},
-	{Key: "network_plugins", Field: "network_plugins.keyword"},
+	{Key: "scenario_type", Field: "scenarios.scenario_type.keyword", Size: stringFacetBucketSize},
+	{Key: "job_status", Field: "job_status", Boolean: true, Size: booleanFacetBucketSize},
+	{Key: "cloud_infrastructure", Field: "cloud_infrastructure.keyword", Size: stringFacetBucketSize},
+	{Key: "cloud_type", Field: "cloud_type.keyword", Size: stringFacetBucketSize},
+	{Key: "major_version", Field: "major_version.keyword", Size: stringFacetBucketSize},
+	{Key: "network_plugins", Field: "network_plugins.keyword", Size: stringFacetBucketSize},
 }
 
 // jobStatusFacetKey is the facet category whose true/false buckets also feed the
 // pass/fail TelemetryStats summary.
 const jobStatusFacetKey = "job_status"
 
+// scenarioTypeFacetKey is the facet category filtered and aggregated on the
+// per-scenario scenario_type. A run matches when ANY of its scenarios has a
+// selected type, so the flattened row must surface the matching scenario rather
+// than always the first one (see rawTelemetrySource.flatten).
+const scenarioTypeFacetKey = "scenario_type"
+
+// statsAggKey names the aggregation that feeds TelemetryStats. It is separate
+// from the job_status facet aggregation: stats applies all selected filters
+// (including job_status), while the facet excludes its own filter. The name is
+// not a facet key, so it never collides with a facetFields entry.
+const statsAggKey = "stats_job_status"
+
 // isFacetField reports whether key names a known filter category.
 func isFacetField(key string) bool {
+	_, ok := facetFieldByKey(key)
+	return ok
+}
+
+// facetFieldByKey returns the facet definition for key and whether it exists, so
+// callers can inspect typing (e.g. Boolean) instead of only checking membership.
+func facetFieldByKey(key string) (facetField, bool) {
 	for _, f := range facetFields {
 		if f.Key == key {
-			return true
+			return f, true
 		}
 	}
-	return false
+	return facetField{}, false
 }
 
 // maxResponseBytes caps how much of an Elasticsearch response we will buffer in
@@ -255,11 +289,21 @@ type esSearchResponse struct {
 			Source json.RawMessage `json:"_source"`
 		} `json:"hits"`
 	} `json:"hits"`
-	// Aggregations carries one terms aggregation per facet category (keyed by the
-	// facet key). Each feeds the response Facets; the job_status aggregation also
-	// feeds the pass/fail summary. The aggregations span the whole matched window
-	// (independent of the hits size cap).
-	Aggregations map[string]termsAggregation `json:"aggregations"`
+	// Aggregations carries one filtered terms aggregation per facet category (keyed
+	// by the facet key), plus a statsAggKey aggregation feeding the pass/fail
+	// summary. Each facet aggregation applies the date filter and every OTHER
+	// selected category but not its own, so a category keeps showing its unselected
+	// options; the stats aggregation applies all filters. The aggregations span the
+	// whole matched window (independent of the hits size cap).
+	Aggregations map[string]filterAggregation `json:"aggregations"`
+}
+
+// filterAggregation is the decoded shape of an Elasticsearch filter aggregation
+// wrapping a terms sub-aggregation named "values". The wrapper scopes the terms
+// counts to a per-facet filter context (see buildFacetAggs).
+type filterAggregation struct {
+	DocCount int              `json:"doc_count"`
+	Values   termsAggregation `json:"values"`
 }
 
 // termsAggregation is the decoded shape of an Elasticsearch terms aggregation.
@@ -272,6 +316,10 @@ type termsAggregation struct {
 		KeyAsString string          `json:"key_as_string"`
 		DocCount    int             `json:"doc_count"`
 	} `json:"buckets"`
+	// SumOtherDocCount is the document count of the terms that did not fit in the
+	// returned buckets (the size cap). A non-zero value means the category has more
+	// distinct values than were returned, so the buckets are not the complete set.
+	SumOtherDocCount int `json:"sum_other_doc_count"`
 }
 
 // rawTelemetrySource mirrors the subset of a krkn telemetry document _source we
@@ -310,15 +358,21 @@ type rawTelemetrySource struct {
 }
 
 // flatten converts a raw telemetry source into the fixed TelemetryDocument
-// surfaced to the UI, deriving scenario-level columns from the first scenario.
-func (s rawTelemetrySource) flatten() TelemetryDocument {
+// surfaced to the UI, deriving scenario-level columns from a representative
+// scenario. selectedScenarioTypes is the set of scenario_type values the request
+// filtered on (empty when none). A run matches the scenario_type filter when any
+// of its scenarios has a selected type, so the representative scenario is the
+// first one whose type is selected; this keeps the displayed scenario_type
+// consistent with the filter. With no scenario_type filter the first scenario is
+// used, preserving the table's long-standing first-scenario columns.
+func (s rawTelemetrySource) flatten(selectedScenarioTypes map[string]bool) TelemetryDocument {
 	doc := TelemetryDocument{
 		RunUUID:  s.RunUUID,
 		Status:   s.JobStatus,
 		Metadata: s.metadata(),
 	}
 	if len(s.Scenarios) > 0 {
-		sc := s.Scenarios[0]
+		sc := s.Scenarios[s.representativeScenario(selectedScenarioTypes)]
 		doc.ScenarioType = sc.ScenarioType
 		doc.StartTimestamp = sc.StartTimestamp
 		doc.EndTimestamp = sc.EndTimestamp
@@ -344,6 +398,22 @@ func (s rawTelemetrySource) flatten() TelemetryDocument {
 		}
 	}
 	return doc
+}
+
+// representativeScenario returns the index of the scenario whose columns represent
+// the run in the flattened row. When selectedScenarioTypes is non-empty it is the
+// first scenario whose type is selected, so the displayed scenario_type matches
+// the filter; otherwise, or when no scenario matches (a defensive fallback), it is
+// the first scenario. Callers must ensure len(s.Scenarios) > 0.
+func (s rawTelemetrySource) representativeScenario(selectedScenarioTypes map[string]bool) int {
+	if len(selectedScenarioTypes) > 0 {
+		for i, scn := range s.Scenarios {
+			if selectedScenarioTypes[scn.ScenarioType] {
+				return i
+			}
+		}
+	}
+	return 0
 }
 
 // metadata builds the run-level ClusterMetadata from the raw source, returning
@@ -574,7 +644,7 @@ func (c ConnectionParams) tlsConfig() (*tls.Config, error) {
 	return cfg, nil
 }
 
-// QueryTelemetry connects to the Elasticsearch/OpenSearch cluster described by
+// QueryTelemetryPage connects to the Elasticsearch/OpenSearch cluster described by
 // conn and returns telemetry documents from conn.Index. size is clamped to the
 // supported bounds by the caller and from is the zero-based offset of the first
 // returned document (for pagination); together they select one page of the sorted
@@ -619,17 +689,20 @@ func (c ConnectionParams) tlsConfig() (*tls.Config, error) {
 // AND-ed, and they are applied in the query so both hits and aggregations
 // reflect them. The returned facets map carries, per category, the available
 // values (with doc counts) from a terms aggregation, used to populate the UI
-// value multi-select. On any error the returned facets are nil.
-func (c *Client) QueryTelemetry(ctx context.Context, conn ConnectionParams, size, from int, startDate, endDate string, filters map[string][]string) (docs []TelemetryDocument, total int, stats TelemetryStats, facets map[string][]FacetOption, err error) {
+// value multi-select. On any error the returned facets are nil. It also returns
+// facetsTruncated, the set of categories whose distinct values exceeded the facet
+// bucket cap; for those the facet options are a prefix, so callers should offer a
+// way to fetch the rest rather than treat the list as complete.
+func (c *Client) QueryTelemetryPage(ctx context.Context, conn ConnectionParams, size, from int, startDate, endDate string, filters map[string][]string) (docs []TelemetryDocument, total int, stats TelemetryStats, facets map[string][]FacetOption, facetsTruncated map[string]bool, err error) {
 	if conn.Index == "" {
-		return nil, 0, TelemetryStats{}, nil, fmt.Errorf("telemetry index is not configured for this Elasticsearch config")
+		return nil, 0, TelemetryStats{}, nil, nil, fmt.Errorf("telemetry index is not configured for this Elasticsearch config")
 	}
 
 	base := conn.baseURL()
 	// Never send credentials over plaintext HTTP where they could be observed on
 	// the wire. Require TLS whenever a username/password is configured.
 	if conn.Username != "" && strings.HasPrefix(base, "http://") {
-		return nil, 0, TelemetryStats{}, nil, fmt.Errorf("refusing to send credentials over plaintext HTTP; use https")
+		return nil, 0, TelemetryStats{}, nil, nil, fmt.Errorf("refusing to send credentials over plaintext HTTP; use https")
 	}
 
 	// Inline (user-supplied) connections are subject to the destination policy.
@@ -638,33 +711,43 @@ func (c *Client) QueryTelemetry(ctx context.Context, conn ConnectionParams, size
 	// resolveDoer re-checks the resolved address to close the DNS-rebinding gap.
 	if conn.RestrictDestination {
 		if err := validateInlineDestination(ctx, base); err != nil {
-			return nil, 0, TelemetryStats{}, nil, err
+			return nil, 0, TelemetryStats{}, nil, nil, err
 		}
 	}
 
 	doer, err := c.resolveDoer(conn)
 	if err != nil {
-		return nil, 0, TelemetryStats{}, nil, err
+		return nil, 0, TelemetryStats{}, nil, nil, err
 	}
 
 	payload, err := buildSearchBody(size, from, startDate, endDate, filters)
 	if err != nil {
-		return nil, 0, TelemetryStats{}, nil, err
+		return nil, 0, TelemetryStats{}, nil, nil, err
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, queryTimeout)
 	defer cancel()
 	req, err := newSearchRequest(ctx, base, conn, payload)
 	if err != nil {
-		return nil, 0, TelemetryStats{}, nil, err
+		return nil, 0, TelemetryStats{}, nil, nil, err
 	}
 
 	respBody, err := executeSearch(doer, req)
 	if err != nil {
-		return nil, 0, TelemetryStats{}, nil, err
+		return nil, 0, TelemetryStats{}, nil, nil, err
 	}
 
-	return decodeTelemetry(respBody)
+	return decodeTelemetry(respBody, filters)
+}
+
+// QueryTelemetry is a backward-compatible wrapper over QueryTelemetryPage that
+// preserves the pre-pagination signature for existing callers. It returns the
+// first page (from 0) with no facet filters, discarding the total count and facet
+// options that QueryTelemetryPage adds. New callers that need pagination,
+// filtering, the total count, or facets should call QueryTelemetryPage directly.
+func (c *Client) QueryTelemetry(ctx context.Context, conn ConnectionParams, size int, startDate, endDate string) (docs []TelemetryDocument, stats TelemetryStats, err error) {
+	docs, _, stats, _, _, err = c.QueryTelemetryPage(ctx, conn, size, 0, startDate, endDate, nil)
+	return docs, stats, err
 }
 
 // resolveDoer selects the request executor for conn: an injected Doer (tests)
@@ -748,17 +831,27 @@ func buildSearchBody(size, from int, startDate, endDate string, filters map[stri
 			},
 			map[string]any{"_doc": map[string]any{"order": "asc"}},
 		},
+		// The query carries only the date range so the facet aggregations can widen
+		// each category under the date window. The selected facet values are applied
+		// as a post_filter, which narrows the returned hits and hits.total but not
+		// the aggregations.
 		"query": map[string]any{
 			"bool": map[string]any{
-				"filter": buildFilterClauses(timestampRange, filters),
+				"filter": []any{
+					map[string]any{"range": map[string]any{"timestamp": timestampRange}},
+				},
 			},
 		},
-		// One terms aggregation per facet category so the UI can populate the
-		// value multi-select. Aggregations span the whole matched window (they are
-		// independent of the hits size limit). The job_status aggregation also
-		// feeds the pass/fail summary; a boolean field yields at most two buckets
-		// ("true"/"false").
-		"aggs": buildFacetAggs(),
+		"post_filter": map[string]any{
+			"bool": map[string]any{"filter": facetFilterClauses(filters, "")},
+		},
+		// One filtered terms aggregation per facet category so the UI can populate
+		// the value multi-select. Each category is computed under the date filter and
+		// the OTHER selected categories but not its own, so selecting a value does
+		// not hide that category's remaining options. A separate statsAggKey
+		// aggregation applies all filters to feed the pass/fail summary. Aggregations
+		// span the whole matched window (independent of the hits size limit).
+		"aggs": buildFacetAggs(filters),
 	}
 
 	payload, err := json.Marshal(body)
@@ -829,12 +922,20 @@ func executeSearch(doer Doer, req *http.Request) (body []byte, err error) {
 // shape are skipped rather than failing the whole query, so the returned slice
 // may be shorter than the reported hit count; on no hits it is non-nil and empty.
 // It also returns the total matching-document count, the pass/fail stats summary,
-// and the per-category facet options, all derived from the response aggregations
-// and total (which span the whole matched window, independent of the size cap).
-func decodeTelemetry(respBody []byte) ([]TelemetryDocument, int, TelemetryStats, map[string][]FacetOption, error) {
+// the per-category facet options, and the set of categories whose values exceeded
+// the bucket cap (truncated), all derived from the response aggregations and total
+// (which span the whole matched window, independent of the size cap).
+func decodeTelemetry(respBody []byte, filters map[string][]string) ([]TelemetryDocument, int, TelemetryStats, map[string][]FacetOption, map[string]bool, error) {
 	var parsed esSearchResponse
 	if err := json.Unmarshal(respBody, &parsed); err != nil {
-		return nil, 0, TelemetryStats{}, nil, fmt.Errorf("failed to decode Elasticsearch response: %w", err)
+		return nil, 0, TelemetryStats{}, nil, nil, fmt.Errorf("failed to decode Elasticsearch response: %w", err)
+	}
+
+	// Selected scenario types drive which scenario each run's row represents, so a
+	// filtered row's scenario_type matches the filter rather than the first scenario.
+	selectedScenarioTypes := make(map[string]bool, len(filters[scenarioTypeFacetKey]))
+	for _, v := range filters[scenarioTypeFacetKey] {
+		selectedScenarioTypes[v] = true
 	}
 
 	docs := make([]TelemetryDocument, 0, len(parsed.Hits.Hits))
@@ -845,22 +946,19 @@ func decodeTelemetry(respBody []byte) ([]TelemetryDocument, int, TelemetryStats,
 			// rather than failing the whole query.
 			continue
 		}
-		docs = append(docs, src.flatten())
+		docs = append(docs, src.flatten(selectedScenarioTypes))
 	}
 
 	total := int(parsed.Hits.Total.Value)
 	stats := statsFromBuckets(parsed)
-	facets := facetsFromBuckets(parsed)
+	facets, truncated := facetsFromBuckets(parsed)
 
-	return docs, total, stats, facets, nil
+	return docs, total, stats, facets, truncated, nil
 }
 
-// buildFilterClauses assembles the bool.filter clauses: always the timestamp
-// range, plus one terms clause per selected facet category. Values within a
-// category are OR-ed by the terms clause; separate clauses AND across
-// categories. Boolean facets (job_status) coerce "true"/"false" strings to real
-// booleans; unparseable boolean values are skipped. Empty categories contribute
-// no clause.
+// buildFilterClauses assembles the bool.filter clauses: the timestamp range plus
+// one terms clause per selected facet category. Values within a category are
+// OR-ed by the terms clause; separate clauses AND across categories.
 func buildFilterClauses(timestampRange map[string]any, filters map[string][]string) []any {
 	clauses := []any{
 		map[string]any{
@@ -869,7 +967,21 @@ func buildFilterClauses(timestampRange map[string]any, filters map[string][]stri
 			},
 		},
 	}
+	return append(clauses, facetFilterClauses(filters, "")...)
+}
+
+// facetFilterClauses builds one terms clause per selected facet category,
+// skipping the category named by exclude (empty string excludes none). Boolean
+// facets (job_status) coerce "true"/"false" strings to real booleans; unparseable
+// boolean values are skipped. Empty categories contribute no clause. Passing a
+// category's own key as exclude yields the filter context for that category's
+// facet aggregation, so the category's unselected options stay visible.
+func facetFilterClauses(filters map[string][]string, exclude string) []any {
+	clauses := make([]any, 0, len(facetFields))
 	for _, f := range facetFields {
+		if f.Key == exclude {
+			continue
+		}
 		values := filters[f.Key]
 		if len(values) == 0 {
 			continue
@@ -897,19 +1009,53 @@ func buildFilterClauses(timestampRange map[string]any, filters map[string][]stri
 	return clauses
 }
 
-// buildFacetAggs builds one terms aggregation per facet category, keyed by the
-// facet key so the response can be mapped back by category.
-func buildFacetAggs() map[string]any {
-	aggs := make(map[string]any, len(facetFields))
+// buildFacetAggs builds one filtered terms aggregation per facet category, keyed
+// by the facet key, plus a statsAggKey aggregation feeding the pass/fail summary.
+// Each facet aggregation wraps its terms sub-aggregation (named "values") in a
+// filter that applies every OTHER selected category but not its own, so selecting
+// a value does not hide the category's remaining options. The stats aggregation
+// applies all selected filters so the summary matches the returned hits.
+func buildFacetAggs(filters map[string][]string) map[string]any {
+	aggs := make(map[string]any, len(facetFields)+1)
 	for _, f := range facetFields {
-		aggs[f.Key] = map[string]any{
-			"terms": map[string]any{
-				"field": f.Field,
-				"size":  10,
-			},
-		}
+		aggs[f.Key] = filteredTermsAgg(f.Field, facetBucketSize(f), facetFilterClauses(filters, f.Key))
 	}
+	statsField := jobStatusFacetKey
+	statsSize := booleanFacetBucketSize
+	if def, ok := facetFieldByKey(jobStatusFacetKey); ok {
+		statsField = def.Field
+		statsSize = facetBucketSize(def)
+	}
+	aggs[statsAggKey] = filteredTermsAgg(statsField, statsSize, facetFilterClauses(filters, ""))
 	return aggs
+}
+
+// facetBucketSize returns the terms bucket cap for f, falling back to
+// stringFacetBucketSize when the field declares none.
+func facetBucketSize(f facetField) int {
+	if f.Size > 0 {
+		return f.Size
+	}
+	return stringFacetBucketSize
+}
+
+// filteredTermsAgg wraps a terms aggregation on field (capped at size buckets) in
+// a filter aggregation scoped by clauses. The terms sub-aggregation is named
+// "values" to match filterAggregation decoding.
+func filteredTermsAgg(field string, size int, clauses []any) map[string]any {
+	return map[string]any{
+		"filter": map[string]any{
+			"bool": map[string]any{"filter": clauses},
+		},
+		"aggs": map[string]any{
+			"values": map[string]any{
+				"terms": map[string]any{
+					"field": field,
+					"size":  size,
+				},
+			},
+		},
+	}
 }
 
 // statsFromBuckets derives the run-level pass/fail summary from the job_status
@@ -918,7 +1064,7 @@ func buildFacetAggs() map[string]any {
 // decimals) and is 0 when no runs matched, avoiding a divide-by-zero.
 func statsFromBuckets(parsed esSearchResponse) TelemetryStats {
 	var stats TelemetryStats
-	for _, b := range parsed.Aggregations[jobStatusFacetKey].Buckets {
+	for _, b := range parsed.Aggregations[statsAggKey].Values.Buckets {
 		switch b.KeyAsString {
 		case "true":
 			stats.Pass = b.DocCount
@@ -937,15 +1083,21 @@ func statsFromBuckets(parsed esSearchResponse) TelemetryStats {
 // when present (boolean/numeric fields) and otherwise its string key; keys that
 // are neither are skipped. A category with no buckets is omitted so the response
 // carries only populated facets.
-func facetsFromBuckets(parsed esSearchResponse) map[string][]FacetOption {
+//
+// It also returns the set of categories whose distinct values exceeded the bucket
+// cap (sum_other_doc_count > 0): for those, the returned options are a prefix, not
+// the complete set, so the caller can signal the UI to fetch the remainder rather
+// than treat the dropdown as exhaustive. Both results are nil when empty.
+func facetsFromBuckets(parsed esSearchResponse) (map[string][]FacetOption, map[string]bool) {
 	facets := make(map[string][]FacetOption, len(facetFields))
+	truncated := make(map[string]bool, len(facetFields))
 	for _, f := range facetFields {
 		agg, ok := parsed.Aggregations[f.Key]
-		if !ok || len(agg.Buckets) == 0 {
+		if !ok || len(agg.Values.Buckets) == 0 {
 			continue
 		}
-		options := make([]FacetOption, 0, len(agg.Buckets))
-		for _, b := range agg.Buckets {
+		options := make([]FacetOption, 0, len(agg.Values.Buckets))
+		for _, b := range agg.Values.Buckets {
 			value := b.KeyAsString
 			if value == "" {
 				var s string
@@ -960,10 +1112,16 @@ func facetsFromBuckets(parsed esSearchResponse) map[string][]FacetOption {
 		}
 		if len(options) > 0 {
 			facets[f.Key] = options
+			if agg.Values.SumOtherDocCount > 0 {
+				truncated[f.Key] = true
+			}
 		}
 	}
 	if len(facets) == 0 {
-		return nil
+		facets = nil
 	}
-	return facets
+	if len(truncated) == 0 {
+		truncated = nil
+	}
+	return facets, truncated
 }

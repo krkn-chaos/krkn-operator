@@ -1233,7 +1233,7 @@ func newEsTestSecretWithHost(name, namespace, host, telemetryIndex string) *core
 func TestQueryElasticsearchTelemetry_Success(t *testing.T) {
 	esServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"hits":{"total":{"value":1},"hits":[{"_source":{"run_uuid":"abc","job_status":true,"scenarios":[{"scenario_type":"pod","start_timestamp":100,"end_timestamp":200,"exit_status":0,"parameters":[{"config":{"namespace":"ns1"}}]}]}}]},"aggregations":{"job_status":{"buckets":[{"key":1,"key_as_string":"true","doc_count":1}]},"scenario_type":{"buckets":[{"key":"pod","doc_count":1}]}}}`))
+		_, _ = w.Write([]byte(`{"hits":{"total":{"value":1},"hits":[{"_source":{"run_uuid":"abc","job_status":true,"scenarios":[{"scenario_type":"pod","start_timestamp":100,"end_timestamp":200,"exit_status":0,"parameters":[{"config":{"namespace":"ns1"}}]}]}}]},"aggregations":{"stats_job_status":{"doc_count":1,"values":{"buckets":[{"key":1,"key_as_string":"true","doc_count":1}]}},"job_status":{"doc_count":1,"values":{"buckets":[{"key":1,"key_as_string":"true","doc_count":1}]}},"scenario_type":{"doc_count":1,"values":{"buckets":[{"key":"pod","doc_count":1}]}}}}`))
 	}))
 	defer esServer.Close()
 
@@ -1599,8 +1599,9 @@ func TestQueryElasticsearchTelemetry_Filters(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
 	// The selected filter must reach Elasticsearch as a terms clause on the
-	// category's keyword field alongside the timestamp range.
-	clauses := captured["query"].(map[string]any)["bool"].(map[string]any)["filter"].([]any)
+	// category's keyword field. Facet selections narrow the hits via post_filter so
+	// the facet aggregations can still widen; the query carries only the timestamp.
+	clauses := captured["post_filter"].(map[string]any)["bool"].(map[string]any)["filter"].([]any)
 	found := false
 	for _, c := range clauses {
 		terms, ok := c.(map[string]any)["terms"].(map[string]any)
