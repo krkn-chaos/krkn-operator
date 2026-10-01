@@ -1874,6 +1874,39 @@ var upgrader = websocket.Upgrader{
 	Subprotocols: []string{"access_token"},
 }
 
+// isReportMarkerStart returns true for lines containing ===KRKN_REPORT_*_START===.
+// Uses Contains so Kubernetes timestamp prefixes don't prevent matching.
+func isReportMarkerStart(line string) bool {
+	return strings.Contains(line, "===KRKN_REPORT_") && strings.HasSuffix(line, "_START===")
+}
+
+// isReportMarkerEnd returns true for lines containing ===KRKN_REPORT_*_END===.
+func isReportMarkerEnd(line string) bool {
+	return strings.Contains(line, "===KRKN_REPORT_") && strings.HasSuffix(line, "_END===")
+}
+
+// filterReportLines removes report marker lines and base64-encoded payload
+// lines between them. Returns only the human-readable log lines.
+func filterReportLines(lines []string) []string {
+	var out []string
+	inReportBlock := false
+	for _, line := range lines {
+		if isReportMarkerStart(line) {
+			inReportBlock = true
+			continue
+		}
+		if isReportMarkerEnd(line) {
+			inReportBlock = false
+			continue
+		}
+		if inReportBlock {
+			continue
+		}
+		out = append(out, line)
+	}
+	return out
+}
+
 // isWebSocketDisconnectError checks if an error is a normal WebSocket client disconnection
 func isWebSocketDisconnectError(err error) bool {
 	if err == nil {
@@ -2237,13 +2270,20 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 		Timestamps: timestamps,
 	}
 
-	// Parse tailLines if provided
+	// Parse tailLines. We apply the limit *after* filtering report blocks
+	// so that a tail window that starts mid-block doesn't leak base64 lines.
+	var requestedTail int64
 	if tailLinesStr != "" {
-		tailLines, err := strconv.ParseInt(tailLinesStr, 10, 64)
-		if err == nil && tailLines > 0 {
-			logOptions.TailLines = &tailLines
+		parsed, err := strconv.ParseInt(tailLinesStr, 10, 64)
+		if err == nil && parsed > 0 {
+			requestedTail = parsed
 		}
 	}
+	// Do not pass TailLines to Kubernetes for followed streams. Kubernetes
+	// applies that limit before this handler can see the report start marker,
+	// which could expose a tail beginning in the middle of encoded content.
+	// Followed streams are filtered from their beginning below. For completed
+	// streams, requestedTail is applied after filtering instead.
 
 	logger.Info("Opening log stream",
 		"scenarioRunName", scenarioRunName,
@@ -2268,41 +2308,94 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 
 	logger.Info("Streaming logs started", "scenarioRunName", scenarioRunName, "jobID", jobID, "podName", pod.Name)
 
-	// Read logs line by line and send via WebSocket
+	// Lines between report markers (===KRKN_REPORT_*_START/END===) are
+	// base64-encoded report payloads consumed by the controller; suppress
+	// them so clients see only human-readable output.
 	scanner := bufio.NewScanner(stream)
 	lineCount := 0
-	for scanner.Scan() {
-		line := scanner.Text()
-		err := conn.WriteMessage(websocket.TextMessage, []byte(line))
-		if err != nil {
-			// Check if this is a normal client disconnection
-			if isWebSocketDisconnectError(err) {
-				logger.Info("WebSocket client disconnected",
-					"scenarioRunName", scenarioRunName,
-					"jobID", jobID,
-					"podName", pod.Name,
-					"linesStreamed", lineCount)
-			} else {
-				logger.Error(err, "Unexpected WebSocket write error",
-					"scenarioRunName", scenarioRunName,
-					"jobID", jobID,
-					"podName", pod.Name,
-					"linesStreamed", lineCount)
-			}
+
+	// For non-follow requests with tailLines, we must collect all lines,
+	// filter via filterReportLines, then apply the tail limit — otherwise
+	// a tail window starting mid-block would leak base64 content.
+	// For streaming (follow) requests, filter inline as lines arrive.
+	if !follow && requestedTail > 0 {
+		var allLines []string
+		for scanner.Scan() {
+			allLines = append(allLines, scanner.Text())
+		}
+		if err := scanner.Err(); err != nil {
+			logger.Error(err, "Log stream scanner error",
+				"scenarioRunName", scenarioRunName,
+				"jobID", jobID,
+				"podName", pod.Name)
+			writeWSError(conn, logger, "ERROR: Log stream error")
 			return
 		}
-		lineCount++
-	}
-
-	// Check for scanner errors
-	if err := scanner.Err(); err != nil {
-		logger.Error(err, "Log stream scanner error",
-			"scenarioRunName", scenarioRunName,
-			"jobID", jobID,
-			"podName", pod.Name,
-			"linesStreamed", lineCount)
-		writeWSError(conn, logger, "ERROR: Log stream error")
-		return
+		filtered := filterReportLines(allLines)
+		if int64(len(filtered)) > requestedTail {
+			filtered = filtered[len(filtered)-int(requestedTail):]
+		}
+		for _, line := range filtered {
+			if err := conn.WriteMessage(websocket.TextMessage, []byte(line)); err != nil {
+				if isWebSocketDisconnectError(err) {
+					logger.Info("WebSocket client disconnected",
+						"scenarioRunName", scenarioRunName,
+						"jobID", jobID,
+						"podName", pod.Name,
+						"linesStreamed", lineCount)
+				} else {
+					logger.Error(err, "Unexpected WebSocket write error",
+						"scenarioRunName", scenarioRunName,
+						"jobID", jobID,
+						"podName", pod.Name,
+						"linesStreamed", lineCount)
+				}
+				return
+			}
+			lineCount++
+		}
+	} else {
+		inReportBlock := false
+		for scanner.Scan() {
+			line := scanner.Text()
+			if isReportMarkerStart(line) {
+				inReportBlock = true
+				continue
+			}
+			if isReportMarkerEnd(line) {
+				inReportBlock = false
+				continue
+			}
+			if inReportBlock {
+				continue
+			}
+			if err := conn.WriteMessage(websocket.TextMessage, []byte(line)); err != nil {
+				if isWebSocketDisconnectError(err) {
+					logger.Info("WebSocket client disconnected",
+						"scenarioRunName", scenarioRunName,
+						"jobID", jobID,
+						"podName", pod.Name,
+						"linesStreamed", lineCount)
+				} else {
+					logger.Error(err, "Unexpected WebSocket write error",
+						"scenarioRunName", scenarioRunName,
+						"jobID", jobID,
+						"podName", pod.Name,
+						"linesStreamed", lineCount)
+				}
+				return
+			}
+			lineCount++
+		}
+		if err := scanner.Err(); err != nil {
+			logger.Error(err, "Log stream scanner error",
+				"scenarioRunName", scenarioRunName,
+				"jobID", jobID,
+				"podName", pod.Name,
+				"linesStreamed", lineCount)
+			writeWSError(conn, logger, "ERROR: Log stream error")
+			return
+		}
 	}
 
 	logger.Info("Log streaming completed",
