@@ -280,6 +280,45 @@ curl -sS -X POST https://<operator-host>/api/v1/elasticsearch-query \
       }'
 ```
 
+## Krkn-AI Operator API
+
+Krkn-AI reconciliation is disabled by default (`krknAI.enabled: false`). Enable
+it in the operator chart to create discoveries, validate/save configs, and start
+runs. When disabled, those `POST` operations return `503`; reads for existing
+Krkn-AI resources remain available.
+
+`POST /api/v1/krkn-ai/configs/validate` checks YAML against Krkn-AI's config
+schema and returns `200 {"valid":true}` or `422 {"errors":[{"path":"…","message":"Invalid value"}]}`.
+It does not probe Prometheus, health endpoints, or a live cluster. Config
+creation runs the same validation before persisting the target-bound config.
+
+Run results are available through authenticated, target-authorized endpoints:
+
+| Endpoint | Purpose |
+|----------|---------|
+| `GET /api/v1/krkn-ai/runs` | List visible `KrknAIRun` resources. |
+| `GET /api/v1/krkn-ai/runs/{name}/results/summary` | Combine CR phase/cluster metadata with committed partial or final metrics. |
+| `GET /api/v1/krkn-ai/runs/{name}/results/scenarios` | Read a paginated typed scenario index, including the baseline artifact and matching child-run phase and Pod/job metadata. |
+| `GET /api/v1/krkn-ai/runs/{name}/results/scenarios/{generation}/{scenarioId}` | Read committed scenario parameters, fitness, measured health samples, and log path. |
+| `GET /api/v1/krkn-ai/runs/{name}/results` and `/files/{path}` | Read the raw committed manifest or download a listed attachment. |
+
+Krkn-AI run reads authorize from cluster metadata persisted in child `KrknScenarioRun` resources; they do not resolve the transient discovery request. The request remains while a run is active so the orchestrator can provision or retry.
+
+Before the first artifact manifest, summary reads report `artifactStatus:
+not_available` and scenario indexes are empty; child-run metadata can still show
+in-progress scenarios. A `503 artifact_updating` means an upload or score
+normalization crossed the committed manifest snapshot; keep the last good
+result and retry on the next poll. Target requests referenced by a Krkn-AI
+config or run cannot be deleted (`409`).
+
+The orchestrator Pod log stream is
+`GET /api/v2/ws/krkn-ai/runs/{name}/logs?follow=true&tailLines=N&timestamps=true`.
+Authenticate its WebSocket handshake with
+`Sec-WebSocket-Protocol: access_token.<JWT>`. This streams the real
+`orchestrator` container; the existing
+`/api/v2/ws/scenarios/run/{scenarioRunName}/jobs/{jobID}/logs` route remains the
+child scenario `scenario` container stream.
+
 ## Ecosystem
 
 See [DEPLOYMENT.md](DEPLOYMENT.md) for full installation options and configuration.

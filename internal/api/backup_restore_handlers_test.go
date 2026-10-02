@@ -468,5 +468,5 @@ func createMultipartBody(t *testing.T, fieldName, filename string, content []byt
 // createTestHandler creates a handler with a fake K8s client for testing.
 func createTestHandler() *Handler {
 	fakeClient := fake.NewClientBuilder().Build()
-	return NewHandler(fakeClient, nil, "default", "", &auth.SecretManager{})
+	return NewHandler(fakeClient, nil, "default", "", &auth.SecretManager{}, true)
 }
