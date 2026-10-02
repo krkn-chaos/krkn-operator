@@ -224,6 +224,15 @@ type esSearchResponse struct {
 	} `json:"aggregations"`
 }
 
+type esAlertSearchResponse struct {
+	Hits struct {
+		Hits []struct {
+			ID     string          `json:"_id"`
+			Source json.RawMessage `json:"_source"`
+		} `json:"hits"`
+	} `json:"hits"`
+}
+
 // rawTelemetrySource mirrors the subset of a krkn telemetry document _source we
 // need to populate the table columns. Scenario-level fields (type, start/end,
 // namespace) live inside the scenarios array; we surface the run's first
@@ -429,8 +438,19 @@ func redactValueWithTracking(v any) (any, bool) {
 // isSensitiveKey checks if a parameter key name matches a sensitive pattern.
 // Matching is case-insensitive to catch variations like "Password", "PASSWORD".
 func isSensitiveKey(key string) bool {
-	lower := strings.ToLower(key)
-	return sensitiveKeys[lower]
+	lower := strings.ToLower(strings.ReplaceAll(key, "-", "_"))
+	if sensitiveKeys[lower] {
+		return true
+	}
+	for _, marker := range []string{
+		"password", "passwd", "secret", "token", "authorization",
+		"credential", "api_key", "apikey", "access_key", "private_key", "cookie",
+	} {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 // namespaceFromParameters extracts the target namespace from a scenario's raw
@@ -562,47 +582,66 @@ func (c *Client) QueryTelemetry(ctx context.Context, conn ConnectionParams, size
 	if conn.Index == "" {
 		return nil, TelemetryStats{}, fmt.Errorf("telemetry index is not configured for this Elasticsearch config")
 	}
-
-	base := conn.baseURL()
-	// Never send credentials over plaintext HTTP where they could be observed on
-	// the wire. Require TLS whenever a username/password is configured.
-	if conn.Username != "" && strings.HasPrefix(base, "http://") {
-		return nil, TelemetryStats{}, fmt.Errorf("refusing to send credentials over plaintext HTTP; use https")
-	}
-
-	// Inline (user-supplied) connections are subject to the destination policy.
-	// Validate before any outbound request so a request that targets a
-	// disallowed address is rejected without probing it. The dial-time guard in
-	// resolveDoer re-checks the resolved address to close the DNS-rebinding gap.
-	if conn.RestrictDestination {
-		if err := validateInlineDestination(ctx, base); err != nil {
-			return nil, TelemetryStats{}, err
-		}
-	}
-
-	doer, err := c.resolveDoer(conn)
-	if err != nil {
-		return nil, TelemetryStats{}, err
-	}
-
-	payload, err := buildSearchBody(size, startDate, endDate)
-	if err != nil {
-		return nil, TelemetryStats{}, err
-	}
-
-	ctx, cancel := context.WithTimeout(ctx, queryTimeout)
-	defer cancel()
-	req, err := newSearchRequest(ctx, base, conn, payload)
-	if err != nil {
-		return nil, TelemetryStats{}, err
-	}
-
-	respBody, err := executeSearch(doer, req)
+	respBody, err := c.executeQuery(ctx, conn, size, startDate, endDate, buildSearchBody)
 	if err != nil {
 		return nil, TelemetryStats{}, err
 	}
 
 	return decodeTelemetry(respBody)
+}
+
+// QueryAlerts returns raw documents from an alerts index. Alert documents are
+// intentionally not flattened because their fields are deployment-specific.
+// It returns an error when the alerts index is missing, credentials would be
+// sent over plaintext HTTP, the destination policy rejects an inline target,
+// the request cannot be executed, Elasticsearch returns a non-success status,
+// the response exceeds the configured size limit, or the response cannot be
+// decoded as an Elasticsearch search response.
+func (c *Client) QueryAlerts(ctx context.Context, conn ConnectionParams, size int, startDate, endDate string) ([]AlertDocument, error) {
+	if conn.Index == "" {
+		return nil, fmt.Errorf("alerts index is not configured for this Elasticsearch config")
+	}
+	if err := validateQueryOptions(&size, startDate, endDate); err != nil {
+		return nil, err
+	}
+	respBody, err := c.executeQuery(ctx, conn, size, startDate, endDate, buildAlertsSearchBody)
+	if err != nil {
+		return nil, err
+	}
+	return decodeAlerts(respBody)
+}
+
+// executeQuery contains the shared connection, request, timeout, and response
+// handling used by all Elasticsearch document queries.
+func (c *Client) executeQuery(ctx context.Context, conn ConnectionParams, size int, startDate, endDate string, buildBody func(int, string, string) ([]byte, error)) ([]byte, error) {
+	base := conn.baseURL()
+	if conn.Username != "" && strings.HasPrefix(base, "http://") {
+		return nil, fmt.Errorf("refusing to send credentials over plaintext HTTP; use https")
+	}
+	if conn.RestrictDestination {
+		if err := validateInlineDestination(ctx, base); err != nil {
+			return nil, err
+		}
+	}
+	doer, err := c.resolveDoer(conn)
+	if err != nil {
+		return nil, err
+	}
+	payload, err := buildBody(size, startDate, endDate)
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(ctx, queryTimeout)
+	defer cancel()
+	req, err := newSearchRequest(ctx, base, conn, payload)
+	if err != nil {
+		return nil, err
+	}
+	respBody, err := executeSearch(doer, req)
+	if err != nil {
+		return nil, err
+	}
+	return respBody, nil
 }
 
 // resolveDoer selects the request executor for conn: an injected Doer (tests)
@@ -656,15 +695,7 @@ func buildSearchBody(size int, startDate, endDate string) ([]byte, error) {
 	// explicit endDate must include only that calendar day, so use an exclusive
 	// "lt" at the following midnight ("+1d/d"); an inclusive "lte" there would
 	// also match documents timestamped exactly at the next day's boundary.
-	timestampRange := map[string]any{
-		"format": "yyyy-MM-dd",
-		"gte":    gte,
-	}
-	if endDate != "" {
-		timestampRange["lt"] = endDate + "||+1d/d"
-	} else {
-		timestampRange["lte"] = "now"
-	}
+	timestampRange := buildTimestampRange(gte, endDate)
 
 	body := map[string]any{
 		"size": size,
@@ -711,6 +742,51 @@ func buildSearchBody(size int, startDate, endDate string) ([]byte, error) {
 		return nil, fmt.Errorf("failed to encode search query: %w", err)
 	}
 	return payload, nil
+}
+
+func buildAlertsSearchBody(size int, startDate, endDate string) ([]byte, error) {
+	payload, err := buildSearchBody(size, startDate, endDate)
+	if err != nil {
+		return nil, err
+	}
+	var body map[string]any
+	if err := json.Unmarshal(payload, &body); err != nil {
+		return nil, fmt.Errorf("failed to prepare alerts query: %w", err)
+	}
+	delete(body, "aggs")
+	// Alert documents use created_at for their event time, unlike telemetry
+	// documents which use timestamp.
+	timestampRange := buildTimestampRange(func() string {
+		if startDate != "" {
+			return startDate
+		}
+		return "now-30d/d"
+	}(), endDate)
+	body["sort"] = []any{
+		map[string]any{"created_at": map[string]any{"order": "desc", "unmapped_type": "date"}},
+		map[string]any{"_doc": map[string]any{"order": "asc"}},
+	}
+	body["query"] = map[string]any{
+		"bool": map[string]any{
+			"filter": []any{
+				map[string]any{"range": map[string]any{"created_at": timestampRange}},
+			},
+		},
+	}
+	return json.Marshal(body)
+}
+
+func buildTimestampRange(gte, endDate string) map[string]any {
+	rangeFilter := map[string]any{
+		"format": "yyyy-MM-dd",
+		"gte":    gte,
+	}
+	if endDate != "" {
+		rangeFilter["lt"] = endDate + "||+1d/d"
+	} else {
+		rangeFilter["lte"] = "now"
+	}
+	return rangeFilter
 }
 
 // newSearchRequest builds the POST _search request against conn.Index, setting
@@ -793,6 +869,21 @@ func decodeTelemetry(respBody []byte) (docs []TelemetryDocument, stats Telemetry
 	stats = statsFromBuckets(parsed)
 
 	return docs, stats, nil
+}
+
+func decodeAlerts(respBody []byte) ([]AlertDocument, error) {
+	var parsed esAlertSearchResponse
+	if err := json.Unmarshal(respBody, &parsed); err != nil {
+		return nil, fmt.Errorf("failed to decode Elasticsearch alerts response: %w", err)
+	}
+	docs := make([]AlertDocument, 0, len(parsed.Hits.Hits))
+	for _, hit := range parsed.Hits.Hits {
+		if len(hit.Source) == 0 || string(hit.Source) == "null" {
+			continue
+		}
+		docs = append(docs, AlertDocument{ID: hit.ID, Source: redactSensitiveParameters(hit.Source)})
+	}
+	return docs, nil
 }
 
 // statsFromBuckets derives the run-level pass/fail summary from the by_job_status

@@ -50,7 +50,7 @@ import (
 // @Produce json
 // @Param request body elasticsearch.CreateElasticsearchConfigRequest true "Elasticsearch config to create"
 // @Success 201 {object} elasticsearch.CreateElasticsearchConfigResponse "Config created"
-// @Failure 400 {object} ErrorResponse "Invalid request body or parameters"
+// @Failure 400 {object} ErrorResponse "Invalid request body, parameters, or missing alerts index"
 // @Failure 401 {object} ErrorResponse "Authentication required"
 // @Failure 403 {object} ErrorResponse "Admin privileges required"
 // @Failure 409 {object} ErrorResponse "Config with the same name already exists"
@@ -692,10 +692,99 @@ func (h *Handler) QueryElasticsearchTelemetry(w http.ResponseWriter, r *http.Req
 	})
 }
 
+// QueryElasticsearchAlerts handles POST /api/v1/elasticsearch-alerts-query.
+// Alert documents are returned without schema-specific flattening because the
+// alerts index is configured by the Elasticsearch deployment.
+//
+// @Summary Query Elasticsearch alerts
+// @Description Run an alerts search against the alerts index of a saved Elasticsearch config. Credentials are resolved server-side and alert sources are redacted before returning.
+// @Tags elasticsearch
+// @Accept json
+// @Produce json
+// @Param request body elasticsearch.QueryAlertsRequest true "Query parameters"
+// @Success 200 {object} elasticsearch.QueryAlertsResponse "Alert documents"
+// @Failure 400 {object} ErrorResponse "Invalid request body or parameters"
+// @Failure 401 {object} ErrorResponse "Authentication required"
+// @Failure 403 {object} ErrorResponse "Access denied to Elasticsearch config"
+// @Failure 404 {object} ErrorResponse "Elasticsearch config not found"
+// @Failure 405 {object} ErrorResponse "Method not allowed"
+// @Failure 500 {object} ErrorResponse "Failed to load or validate Elasticsearch config"
+// @Failure 502 {object} ErrorResponse "Elasticsearch query failed"
+// @Security BearerAuth
+// @Router /elasticsearch-alerts-query [post]
+func (h *Handler) QueryElasticsearchAlerts(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	logger := log.FromContext(ctx).WithName("query-elasticsearch-alerts")
+	if r.Method != http.MethodPost {
+		writeJSONError(w, http.StatusMethodNotAllowed, ErrorResponse{Error: "method_not_allowed", Message: "Only POST is allowed on " + ElasticsearchAlertsQueryPath})
+		return
+	}
+	var req elasticsearch.QueryAlertsRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, ErrorResponse{Error: "bad_request", Message: "Invalid request body: " + err.Error()})
+		return
+	}
+	if err := elasticsearch.ValidateAlertsQueryRequest(&req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, ErrorResponse{Error: "bad_request", Message: err.Error()})
+		return
+	}
+	secret, err := h.loadElasticsearchConfigSecret(ctx, req.ConfigName)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			writeJSONError(w, http.StatusNotFound, ErrorResponse{Error: "not_found", Message: fmt.Sprintf("Elasticsearch config '%s' not found", req.ConfigName)})
+		} else {
+			logger.Error(err, "Failed to load elasticsearch config")
+			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{Error: "internal_error", Message: "Failed to load Elasticsearch config"})
+		}
+		return
+	}
+	accessible, err := h.canAccessElasticsearchConfig(ctx, secret)
+	if err != nil {
+		logger.Error(err, "Failed to check Elasticsearch config access", "name", req.ConfigName)
+		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+			Error:   "internal_error",
+			Message: "Failed to validate Elasticsearch config access",
+		})
+		return
+	}
+	if !accessible {
+		writeJSONError(w, http.StatusForbidden, ErrorResponse{
+			Error:   "forbidden",
+			Message: fmt.Sprintf("Access denied to Elasticsearch config '%s'", req.ConfigName),
+		})
+		return
+	}
+	conn := buildConnectionParamsForIndex(secret, elasticsearch.AlertsIndexAnnotation)
+	if conn.Index == "" {
+		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+			Error:   "configuration_error",
+			Message: fmt.Sprintf("Elasticsearch config '%s' has no alerts index configured", req.ConfigName),
+		})
+		return
+	}
+	docs, err := h.esClient.QueryAlerts(ctx, conn, req.Size, req.StartDate, req.EndDate)
+	if err != nil {
+		var statusErr *elasticsearch.StatusError
+		if errors.As(err, &statusErr) {
+			logger.Error(err, "Elasticsearch returned a non-success status", "source", req.ConfigName, "status", statusErr.StatusCode)
+		} else {
+			logger.Error(err, "Failed to query elasticsearch alerts", "source", req.ConfigName)
+		}
+		writeJSONError(w, http.StatusBadGateway, ErrorResponse{Error: "upstream_error", Message: "Failed to query Elasticsearch alerts"})
+		return
+	}
+	logger.Info("Queried Elasticsearch alerts", "source", req.ConfigName, "results", len(docs))
+	writeJSON(w, http.StatusOK, elasticsearch.QueryAlertsResponse{Documents: docs, Total: len(docs)})
+}
+
 // buildConnectionParams assembles the connection parameters for a query from a
 // config Secret, reading the host/port/index from annotations and the
 // credentials from the Secret data.
 func buildConnectionParams(secret *corev1.Secret) elasticsearch.ConnectionParams {
+	return buildConnectionParamsForIndex(secret, elasticsearch.TelemetryIndexAnnotation)
+}
+
+func buildConnectionParamsForIndex(secret *corev1.Secret, indexAnnotation string) elasticsearch.ConnectionParams {
 	port := elasticsearch.DefaultPort
 	if portStr := secret.Annotations[elasticsearch.PortAnnotation]; portStr != "" {
 		if p, err := strconv.Atoi(portStr); err == nil {
@@ -721,7 +810,7 @@ func buildConnectionParams(secret *corev1.Secret) elasticsearch.ConnectionParams
 		Port:               port,
 		Username:           username,
 		Password:           password,
-		Index:              secret.Annotations[elasticsearch.TelemetryIndexAnnotation],
+		Index:              secret.Annotations[indexAnnotation],
 		CACert:             caCert,
 		InsecureSkipVerify: secret.Annotations[elasticsearch.InsecureSkipTLSVerifyAnnotation] == "true",
 	}
