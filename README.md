@@ -448,6 +448,15 @@ When resiliency scoring is enabled, the final score for a cluster is the
 weighted average of the completed node scores:
 `sum(node score * resiliencyWeight) / sum(resiliencyWeight)`.
 
+### Log streaming
+
+The WebSocket log endpoint
+(`/api/v1/scenarios/run/{name}/jobs/{jobID}/logs`) filters out base64-encoded
+report payloads (HTML and PDF) that are embedded in pod output between
+`===KRKN_REPORT_*_START===` / `===KRKN_REPORT_*_END===` markers. Clients
+receive only human-readable log lines. The operator controller still reads
+the full unfiltered logs to extract and store reports.
+
 Authenticated users can read the image-signature verification setting at
 `GET /api/v1/operator/signature-verification`. Administrators can update it
 with `PATCH` and a required boolean body, for example
