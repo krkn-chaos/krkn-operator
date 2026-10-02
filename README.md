@@ -301,6 +301,8 @@ Query alert documents from the `alertsIndex` configured on a saved Elasticsearch
 
 `size` defaults to `50` and is capped at `500`. Date bounds use `yyyy-MM-dd` and filter the alert index's `created_at` field. Results are sorted newest-first by `created_at`.
 
+If the selected saved config does not define an `alertsIndex`, the endpoint returns `400` with `error: "configuration_error"`; no Elasticsearch request is made. Elasticsearch connectivity or query failures return `502` with `error: "upstream_error"`.
+
 **Example:**
 
 ```bash

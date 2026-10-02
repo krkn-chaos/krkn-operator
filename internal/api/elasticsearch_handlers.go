@@ -50,7 +50,7 @@ import (
 // @Produce json
 // @Param request body elasticsearch.CreateElasticsearchConfigRequest true "Elasticsearch config to create"
 // @Success 201 {object} elasticsearch.CreateElasticsearchConfigResponse "Config created"
-// @Failure 400 {object} ErrorResponse "Invalid request body or parameters"
+// @Failure 400 {object} ErrorResponse "Invalid request body, parameters, or missing alerts index"
 // @Failure 401 {object} ErrorResponse "Authentication required"
 // @Failure 403 {object} ErrorResponse "Admin privileges required"
 // @Failure 409 {object} ErrorResponse "Config with the same name already exists"
@@ -755,6 +755,13 @@ func (h *Handler) QueryElasticsearchAlerts(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	conn := buildConnectionParamsForIndex(secret, elasticsearch.AlertsIndexAnnotation)
+	if conn.Index == "" {
+		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+			Error:   "configuration_error",
+			Message: fmt.Sprintf("Elasticsearch config '%s' has no alerts index configured", req.ConfigName),
+		})
+		return
+	}
 	docs, err := h.esClient.QueryAlerts(ctx, conn, req.Size, req.StartDate, req.EndDate)
 	if err != nil {
 		var statusErr *elasticsearch.StatusError

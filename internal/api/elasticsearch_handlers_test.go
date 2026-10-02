@@ -1325,6 +1325,28 @@ func TestQueryElasticsearchAlerts_DeniesInaccessibleConfig(t *testing.T) {
 	}
 }
 
+func TestQueryElasticsearchAlerts_RejectsMissingAlertsIndex(t *testing.T) {
+	secret := newEsAlertsTestSecretWithHost("missing-alerts-index", "default", "http://127.0.0.1:1", "")
+	fakeClient := fakeclient.NewClientBuilder().WithScheme(newEsScheme()).WithObjects(secret).Build()
+	handler := NewTestHandler(fakeClient, fake.NewSimpleClientset(), "default", "localhost:50051")
+	body, _ := json.Marshal(elasticsearch.QueryAlertsRequest{ConfigName: "missing-alerts-index"})
+	req := httptest.NewRequest(http.MethodPost, ElasticsearchAlertsQueryPath, bytes.NewReader(body)).WithContext(createUserContext("user@example.com"))
+	w := httptest.NewRecorder()
+
+	handler.QueryElasticsearchAlerts(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400: %s", w.Code, w.Body.String())
+	}
+	var response ErrorResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if response.Error != "configuration_error" || !strings.Contains(response.Message, "no alerts index configured") {
+		t.Fatalf("unexpected response: %+v", response)
+	}
+}
+
 func TestQueryElasticsearchTelemetry_Success(t *testing.T) {
 	esServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)

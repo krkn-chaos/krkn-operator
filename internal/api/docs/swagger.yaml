@@ -1961,7 +1961,7 @@ paths:
           schema:
             $ref: '#/definitions/github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.CreateElasticsearchConfigResponse'
         "400":
-          description: Invalid request body or parameters
+          description: Invalid request body, parameters, or missing alerts index
           schema:
             $ref: '#/definitions/internal_api.ErrorResponse'
         "401":
