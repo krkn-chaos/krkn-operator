@@ -408,7 +408,7 @@ const docTemplate = `{
                         }
                     },
                     "400": {
-                        "description": "Invalid request body or parameters",
+                        "description": "Invalid request body, parameters, or missing alerts index",
                         "schema": {
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
