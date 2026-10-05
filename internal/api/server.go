@@ -65,6 +65,7 @@ import (
 
 	httpSwagger "github.com/swaggo/http-swagger"
 	"golang.org/x/time/rate"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -116,10 +117,11 @@ const WebSocketAllowedOriginsEnv = "WEBSOCKET_ALLOWED_ORIGINS"
 //   - namespace: Operator namespace
 //   - grpcServerAddr: gRPC server address
 //   - secretManager: JWT secret manager (must be started before API server receives traffic)
+//   - dynamicClient: Kubernetes dynamic client used by backup and restore
 //
 // Returns a new Server instance
-func NewServer(port int, client client.Client, clientset kubernetes.Interface, namespace string, grpcServerAddr string, secretManager *auth.SecretManager) *Server {
-	handler := NewHandler(client, clientset, namespace, grpcServerAddr, secretManager)
+func NewServer(port int, client client.Client, clientset kubernetes.Interface, namespace string, grpcServerAddr string, secretManager *auth.SecretManager, dynamicClient dynamic.Interface) *Server {
+	handler := NewHandler(client, clientset, namespace, grpcServerAddr, secretManager, dynamicClient)
 
 	// Create auth middleware using SecretManager
 	// The SecretManager is started as a Runnable before the API server starts
@@ -355,8 +357,9 @@ func NewServer(port int, client client.Client, clientset kubernetes.Interface, n
 		http.NotFound(w, r)
 	})
 
-	// Wrap mux with middleware chain: logging -> body size limit -> routes
-	// maxBodySize is 10MB, applied only to POST/PUT/PATCH requests
+	// Wrap mux with middleware chain: logging -> body size limit -> routes.
+	// maxBodySize is the default 10 MB limit for POST/PUT/PATCH requests;
+	// POST /restore uses maxUploadSize because it accepts backup archives.
 	const maxBodySize int64 = 10 << 20 // 10 MB
 	server := &http.Server{
 		Addr:              fmt.Sprintf(":%d", port),
@@ -466,20 +469,32 @@ func maxBodySizeMiddleware(maxBytes int64) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.Method == http.MethodPost || r.Method == http.MethodPut || r.Method == http.MethodPatch {
+				limit := maxBodySizeForRequest(r, maxBytes)
 				// Fast path: reject when the declared size already exceeds the
 				// limit, returning a precise 413 without reading the body.
-				if r.ContentLength > maxBytes {
+				if r.ContentLength > limit {
 					writeJSONError(w, http.StatusRequestEntityTooLarge, ErrorResponse{
 						Error:   "request_entity_too_large",
 						Message: "Request body too large",
 					})
 					return
 				}
-				r.Body = http.MaxBytesReader(w, r.Body, maxBytes)
+				r.Body = http.MaxBytesReader(w, r.Body, limit)
 			}
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+// maxBodySizeForRequest returns the body limit for a request. Restore uploads
+// are allowed to be larger than ordinary API writes because they contain a
+// complete backup archive; all other mutating requests retain the default
+// server limit.
+func maxBodySizeForRequest(r *http.Request, defaultLimit int64) int64 {
+	if r.Method == http.MethodPost && r.URL != nil && r.URL.Path == RestorePath {
+		return maxUploadSize
+	}
+	return defaultLimit
 }
 
 // loggingMiddleware is a logging middleware for HTTP requests.

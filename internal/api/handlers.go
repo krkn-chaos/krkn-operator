@@ -47,6 +47,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -125,41 +126,36 @@ type Handler struct {
 	namespace      string
 	grpcServerAddr string
 	secretManager  *auth.SecretManager
+	backupHandler  *backupHandler
 	// scenarioProviderFactory is injectable for API tests; production handlers
 	// use the krknctl-backed factory assigned by NewHandler.
 	scenarioProviderFactory func(provider.Mode) (provider.ScenarioDataProvider, error)
 	// esClient is a long-lived, connection-pooling client shared across all
 	// telemetry queries so transports are reused rather than allocated per
 	// request.
-	esClient     *elasticsearch.Client
-	jobTracker   *JobTracker
-	restoreSlots chan struct{}
-	baseCtx      context.Context
-	baseCancel   context.CancelFunc
+	esClient *elasticsearch.Client
 }
 
 // NewHandler creates a new Handler.
 // Call Shutdown() during server teardown to cancel in-flight background jobs.
-func NewHandler(client client.Client, clientset kubernetes.Interface, namespace string, grpcServerAddr string, secretManager *auth.SecretManager) *Handler {
-	bgCtx, bgCancel := context.WithCancel(context.Background())
+func NewHandler(client client.Client, clientset kubernetes.Interface, namespace string, grpcServerAddr string, secretManager *auth.SecretManager, dynamicClient dynamic.Interface) *Handler {
 	return &Handler{
 		client:                  client,
 		clientset:               clientset,
 		namespace:               namespace,
 		grpcServerAddr:          grpcServerAddr,
 		secretManager:           secretManager,
+		backupHandler:           newBackupHandler(namespace, dynamicClient),
 		scenarioProviderFactory: createScenarioProvider,
 		esClient:                elasticsearch.NewClient(),
-		jobTracker:              NewJobTracker(),
-		restoreSlots:            make(chan struct{}, maxActiveRestores),
-		baseCtx:                 bgCtx,
-		baseCancel:              bgCancel,
 	}
 }
 
 // Shutdown cancels all in-flight background jobs.
 func (h *Handler) Shutdown() {
-	h.baseCancel()
+	if h.backupHandler != nil {
+		h.backupHandler.Shutdown()
+	}
 }
 
 // getTokenGenerator creates a TokenGenerator for JWT validation (used for WebSocket auth)
