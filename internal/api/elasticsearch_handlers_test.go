@@ -33,6 +33,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	dynamicfake "k8s.io/client-go/dynamic/fake"
 	"k8s.io/client-go/kubernetes/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	fakeclient "sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -1642,7 +1643,7 @@ func TestQueryElasticsearchTelemetry_RouteAndAuth(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 
-	server := NewServer(0, k8sClient, fake.NewSimpleClientset(), namespace, "localhost:50051", secretManager)
+	server := NewServer(0, k8sClient, fake.NewSimpleClientset(), namespace, "localhost:50051", secretManager, dynamicfake.NewSimpleDynamicClient(runtime.NewScheme()))
 	defer func() { _ = server.Shutdown() }()
 	mux := server.HTTPHandler()
 

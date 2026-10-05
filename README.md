@@ -635,19 +635,41 @@ is disabled; only the enforcement result is ignored.
 
 ## Backup and Restore
 
-Admin users can back up and restore operator configuration (users, groups, targets, credentials) for disaster recovery and cross-cluster migration using the web console.
+Administrators can back up and restore operator-managed configuration from the
+Backup & Restore tab for disaster recovery and cross-cluster migration.
 
-**To download a backup:** Click "Download Backup" in the Backup & Restore card.
+Backups include users, groups, categories, targets, completed/failed/partially
+failed scenario and graph run history (with preserved status), selected Secrets,
+cloud credentials, Elasticsearch configurations, private registries, workflow
+templates, generated reports, and provider registrations. Active runs and
+unrelated runtime state are excluded. The JWT signing Secret is excluded.
+Provider registrations are backed up for inventory but are not restored to the
+destination; standalone krknctl warns and skips provider settings, while the
+operator integration can migrate compatible provider settings. Backup archives
+contain sensitive data and must be stored securely.
 
-**To restore from a backup:** Click "Upload & Restore" in the Backup & Restore card, select your backup archive, and confirm. The console will monitor restore progress in real time.
+**To download a backup:** Click **Download Backup**. Enter an optional
+passphrase to download an encrypted `.tar.gz.enc` archive; otherwise, the
+archive is `.tar.gz`.
 
-**Important:** Restore runs asynchronously. Poll the restore job until it completes, then refresh the page if the restored settings are not visible.
+**To restore a backup:** Click **Upload & Restore**, select a `.tar.gz` or
+`.tar.gz.enc` archive, enter the passphrase if required, and confirm. Restore
+updates resources represented in the archive and creates missing resources. It
+does not delete unrelated destination resources. Verify the archive and
+destination namespace before proceeding.
+
+Restore runs asynchronously. The console polls the restore job until it
+completes or fails. Refresh the page after a successful restore if the restored
+settings are not immediately visible.
 
 **Limits:**
-- Maximum upload size: 100 MB
-- Maximum active restore: 1
-- Maximum tracked job records: 1000
-- Backup history: Not persisted — status is lost on operator restart
+
+- Maximum upload size: 100 MiB
+- Maximum active restore operations: 1
+- Maximum tracked restore job records: 1000
+- Restore job status is stored in memory and is lost when the operator restarts
+- Backup archives are downloaded to the administrator and are not retained by
+  the operator
 
 ## License
 
