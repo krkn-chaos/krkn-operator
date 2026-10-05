@@ -65,6 +65,7 @@ import (
 
 	httpSwagger "github.com/swaggo/http-swagger"
 	"golang.org/x/time/rate"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -116,10 +117,11 @@ const WebSocketAllowedOriginsEnv = "WEBSOCKET_ALLOWED_ORIGINS"
 //   - namespace: Operator namespace
 //   - grpcServerAddr: gRPC server address
 //   - secretManager: JWT secret manager (must be started before API server receives traffic)
+//   - dynamicClient: Kubernetes dynamic client used by backup and restore
 //
 // Returns a new Server instance
-func NewServer(port int, client client.Client, clientset kubernetes.Interface, namespace string, grpcServerAddr string, secretManager *auth.SecretManager) *Server {
-	handler := NewHandler(client, clientset, namespace, grpcServerAddr, secretManager)
+func NewServer(port int, client client.Client, clientset kubernetes.Interface, namespace string, grpcServerAddr string, secretManager *auth.SecretManager, dynamicClient dynamic.Interface) *Server {
+	handler := NewHandler(client, clientset, namespace, grpcServerAddr, secretManager, dynamicClient)
 
 	// Create auth middleware using SecretManager
 	// The SecretManager is started as a Runnable before the API server starts

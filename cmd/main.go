@@ -37,6 +37,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -57,7 +58,7 @@ import (
 	olmbootstrap "github.com/krkn-chaos/krkn-operator/internal/olm"
 	"github.com/krkn-chaos/krkn-operator/pkg/auth"
 	"github.com/krkn-chaos/krkn-operator/pkg/configmap"
-	"github.com/krkn-chaos/krkn-operator/pkg/configstore"
+	kvstore "github.com/krkn-chaos/krkn-operator/pkg/configstore"
 	"github.com/krkn-chaos/krkn-operator/pkg/provider"
 	// +kubebuilder:scaffold:imports
 )
@@ -314,6 +315,11 @@ func main() {
 	if err := api.RemoveElasticsearchGrafanaURLAnnotations(context.Background(), clientset, krknNamespace); err != nil {
 		setupLog.Error(err, "unable to remove retired Grafana URL annotations")
 	}
+	dynamicClient, err := dynamic.NewForConfig(config)
+	if err != nil {
+		setupLog.Error(err, "unable to create dynamic Kubernetes client")
+		os.Exit(1)
+	}
 
 	if err = (&controller.KrknScenarioRunReconciler{
 		Client:    mgr.GetClient(),
@@ -373,7 +379,7 @@ func main() {
 
 	// Setup and add REST API server
 	// SecretManager must be added to manager before API server
-	apiServer := api.NewServer(apiPort, mgr.GetClient(), clientset, krknNamespace, grpcServerAddr, jwtSecretManager)
+	apiServer := api.NewServer(apiPort, mgr.GetClient(), clientset, krknNamespace, grpcServerAddr, jwtSecretManager, dynamicClient)
 	setupLog.Info("gRPC server address", "address", grpcServerAddr)
 	if err := mgr.Add(apiServer); err != nil {
 		setupLog.Error(err, "unable to add REST API server to manager")

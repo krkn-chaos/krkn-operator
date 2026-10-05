@@ -31,7 +31,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/krkn-chaos/krkn-operator/pkg/auth"
-	"github.com/krkn-chaos/krkn-operator/pkg/backup"
+	"github.com/krkn-chaos/krknctl/pkg/backup"
 )
 
 const (
@@ -175,6 +175,13 @@ func (h *Handler) PostBackup(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	if h.dynamicClient == nil {
+		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+			Error:   "internal_error",
+			Message: "Backup Kubernetes client is not configured",
+		})
+		return
+	}
 
 	tempDir, err := os.MkdirTemp("", "krkn-backup-download-*")
 	if err != nil {
@@ -196,7 +203,7 @@ func (h *Handler) PostBackup(w http.ResponseWriter, r *http.Request) {
 
 	logger.Info("Creating backup for download", "backupName", backupName)
 
-	archivePath, err := backup.CreateBackup(ctx, h.client, config)
+	archivePath, err := backup.CreateBackup(ctx, h.dynamicClient, config)
 	if err != nil {
 		logger.Error(err, "Backup failed")
 		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
@@ -276,6 +283,13 @@ func (h *Handler) PostRestore(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusForbidden, ErrorResponse{
 			Error:   "forbidden",
 			Message: "Restore is admin-only. Please contact your administrator.",
+		})
+		return
+	}
+	if h.dynamicClient == nil {
+		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+			Error:   "internal_error",
+			Message: "Restore Kubernetes client is not configured",
 		})
 		return
 	}
@@ -394,8 +408,13 @@ func (h *Handler) PostRestore(w http.ResponseWriter, r *http.Request) {
 			BackupPath: tempPath,
 		}
 
-		if err := backup.RestoreBackup(jobCtx, h.client, restoreConfig); err != nil {
+		if err := backup.RestoreBackup(jobCtx, h.dynamicClient, restoreConfig); err != nil {
 			jobLogger.Error(err, "Restore failed", "jobID", jobID)
+			h.jobTracker.Fail(jobID, err.Error())
+			return
+		}
+		if err := refreshRestoredTargetStatuses(jobCtx, h.dynamicClient, h.namespace); err != nil {
+			jobLogger.Error(err, "Restored target status refresh failed", "jobID", jobID)
 			h.jobTracker.Fail(jobID, err.Error())
 			return
 		}
