@@ -22,6 +22,7 @@ func TestApplyCRDsCreatesMissingAndUpdatesChangedSpecs(t *testing.T) {
 
 	existing := updated.DeepCopy()
 	existing.Spec.Names.ShortNames = []string{"old"}
+	existing.Labels = map[string]string{"custom.example.dev/owner": "preserve"}
 	clientset := fake.NewSimpleClientset(existing)
 	client := clientset.ApiextensionsV1().CustomResourceDefinitions()
 
@@ -40,8 +41,18 @@ func TestApplyCRDsCreatesMissingAndUpdatesChangedSpecs(t *testing.T) {
 	if len(gotUpdated.Spec.Names.ShortNames) != 1 || gotUpdated.Spec.Names.ShortNames[0] != "widget" {
 		t.Fatalf("updated CRD short names = %v, want [widget]", gotUpdated.Spec.Names.ShortNames)
 	}
-	if _, err := client.Get(context.Background(), created.Name, v1.GetOptions{}); err != nil {
+	if gotUpdated.Labels[operatorLabelKey] != operatorLabelValue {
+		t.Fatalf("updated CRD labels = %v, want %s=%s", gotUpdated.Labels, operatorLabelKey, operatorLabelValue)
+	}
+	if gotUpdated.Labels["custom.example.dev/owner"] != "preserve" {
+		t.Fatalf("existing custom label was not preserved: %v", gotUpdated.Labels)
+	}
+	gotCreated, err := client.Get(context.Background(), created.Name, v1.GetOptions{})
+	if err != nil {
 		t.Fatalf("get newly created CRD: %v", err)
+	}
+	if gotCreated.Labels[operatorLabelKey] != operatorLabelValue {
+		t.Fatalf("created CRD labels = %v, want %s=%s", gotCreated.Labels, operatorLabelKey, operatorLabelValue)
 	}
 
 	var creates, patches int
@@ -61,6 +72,7 @@ func TestApplyCRDsCreatesMissingAndUpdatesChangedSpecs(t *testing.T) {
 func TestApplyCRDsDoesNotPatchUnchangedSpecs(t *testing.T) {
 	directory := t.TempDir()
 	desired := testCRD("widgets", "Widget")
+	desired.Labels = map[string]string{operatorLabelKey: operatorLabelValue}
 	writeCRD(t, directory, "widgets.yaml", desired)
 
 	clientset := fake.NewSimpleClientset(desired)
@@ -72,6 +84,38 @@ func TestApplyCRDsDoesNotPatchUnchangedSpecs(t *testing.T) {
 		if action.GetVerb() == "patch" || action.GetVerb() == "create" {
 			t.Fatalf("unchanged CRD caused %s action", action.GetVerb())
 		}
+	}
+}
+
+func TestApplyCRDsLabelsExistingCRDsWithoutChangingOtherLabels(t *testing.T) {
+	directory := t.TempDir()
+	desired := testCRD("widgets", "Widget")
+	writeCRD(t, directory, "widgets.yaml", desired)
+	existing := desired.DeepCopy()
+	existing.Labels = map[string]string{"custom.example.dev/owner": "preserve"}
+
+	clientset := fake.NewSimpleClientset(existing)
+	client := clientset.ApiextensionsV1().CustomResourceDefinitions()
+	if _, err := applyCRDs(context.Background(), client, directory); err != nil {
+		t.Fatalf("apply CRDs: %v", err)
+	}
+
+	got, err := client.Get(context.Background(), desired.Name, v1.GetOptions{})
+	if err != nil {
+		t.Fatalf("get labeled CRD: %v", err)
+	}
+	if got.Labels[operatorLabelKey] != operatorLabelValue || got.Labels["custom.example.dev/owner"] != "preserve" {
+		t.Fatalf("labels after sync = %v, want operator label and existing custom label", got.Labels)
+	}
+
+	var patches int
+	for _, action := range clientset.Actions() {
+		if action.GetVerb() == "patch" {
+			patches++
+		}
+	}
+	if patches != 1 {
+		t.Fatalf("got %d patches, want 1 to add the operator label", patches)
 	}
 }
 

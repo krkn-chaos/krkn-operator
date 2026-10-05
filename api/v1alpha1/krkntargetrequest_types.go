@@ -91,6 +91,7 @@ type KrknTargetRequestStatus struct {
 // +kubebuilder:printcolumn:name="UUID",type=string,JSONPath=`.spec.uuid`
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 // +kubebuilder:resource:shortName=ktr
+// +kubebuilder:metadata:labels=app.kubernetes.io/name=krkn-operator
 
 // KrknTargetRequest is the Schema for the krkntargetrequests API.
 type KrknTargetRequest struct {

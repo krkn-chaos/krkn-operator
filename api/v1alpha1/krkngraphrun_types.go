@@ -354,6 +354,7 @@ type KrknGraphRunStatus struct {
 // +kubebuilder:printcolumn:name="Failed",type=integer,JSONPath=`.status.summary.failedNodes`
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 // +kubebuilder:resource:shortName=kgr
+// +kubebuilder:metadata:labels=app.kubernetes.io/name=krkn-operator
 
 // KrknGraphRun is the Schema for the krkngraphruns API
 type KrknGraphRun struct {

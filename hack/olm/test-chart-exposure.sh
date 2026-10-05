@@ -18,6 +18,13 @@ helm template krkn-operator "$chart_dir" > "$work_dir/base.yaml"
 helm show crds "$chart_dir" > "$work_dir/crds.yaml"
 yq -e 'select(.kind == "CustomResourceDefinition")' \
   "$work_dir/crds.yaml" >/dev/null
+yq -e 'select(.kind == "CustomResourceDefinition" and .metadata.name == "krkncategories.krkn.krkn-chaos.dev") | .metadata.labels."app.kubernetes.io/name" == "krkn-operator"' \
+  "$work_dir/crds.yaml" >/dev/null
+if ! yq -e '[select(.kind == "CustomResourceDefinition" and .metadata.labels."app.kubernetes.io/name" != "krkn-operator")] | length == 0' \
+  "$work_dir/crds.yaml" >/dev/null; then
+  echo "all chart CRDs must have the operator label for uninstall cleanup" >&2
+  exit 1
+fi
 
 helm template krkn-operator "$chart_dir" --is-upgrade > "$work_dir/upgrade.yaml"
 yq -r 'select(.kind == "Job") | .metadata.annotations."helm.sh/hook"' \

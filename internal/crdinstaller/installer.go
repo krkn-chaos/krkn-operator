@@ -27,6 +27,11 @@ type crdClient interface {
 	Patch(context.Context, string, types.PatchType, []byte, metav1.PatchOptions, ...string) (*apiextensionsv1.CustomResourceDefinition, error)
 }
 
+const (
+	operatorLabelKey   = "app.kubernetes.io/name"
+	operatorLabelValue = "krkn-operator"
+)
+
 // Sync creates missing CRDs and updates changed specs from the provided directory.
 func Sync(ctx context.Context, config *rest.Config, directory string) ([]string, error) {
 	clientset, err := apiextensionsclient.NewForConfig(config)
@@ -79,6 +84,10 @@ func applyCRDs(ctx context.Context, client crdClient, directory string) ([]strin
 		if desired.APIVersion != "apiextensions.k8s.io/v1" || desired.Kind != "CustomResourceDefinition" || desired.Name == "" {
 			return nil, fmt.Errorf("manifest %q is not a named apiextensions.k8s.io/v1 CustomResourceDefinition", path)
 		}
+		if desired.Labels == nil {
+			desired.Labels = make(map[string]string, 1)
+		}
+		desired.Labels[operatorLabelKey] = operatorLabelValue
 		if err := applyCRD(ctx, client, &desired); err != nil {
 			return nil, fmt.Errorf("synchronize CRD %q from %q: %w", desired.Name, path, err)
 		}
@@ -103,15 +112,23 @@ func applyCRD(ctx context.Context, client crdClient, desired *apiextensionsv1.Cu
 	if err != nil {
 		return err
 	}
-	if apiequality.Semantic.DeepEqual(existing.Spec, desired.Spec) {
+	specChanged := !apiequality.Semantic.DeepEqual(existing.Spec, desired.Spec)
+	labelChanged := existing.Labels[operatorLabelKey] != operatorLabelValue
+	if !specChanged && !labelChanged {
 		return nil
 	}
 
-	patch, err := json.Marshal(struct {
-		Spec apiextensionsv1.CustomResourceDefinitionSpec `json:"spec"`
-	}{Spec: desired.Spec})
+	patchObject := map[string]any{
+		"metadata": map[string]any{
+			"labels": map[string]string{operatorLabelKey: operatorLabelValue},
+		},
+	}
+	if specChanged {
+		patchObject["spec"] = desired.Spec
+	}
+	patch, err := json.Marshal(patchObject)
 	if err != nil {
-		return fmt.Errorf("encode desired CRD spec: %w", err)
+		return fmt.Errorf("encode CRD patch: %w", err)
 	}
 	_, err = client.Patch(ctx, desired.Name, types.MergePatchType, patch, metav1.PatchOptions{})
 	return err

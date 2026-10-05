@@ -37,6 +37,7 @@ type KrknCategorySpec struct {
 // +kubebuilder:printcolumn:name="Color",type=string,JSONPath=`.spec.color`
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 // +kubebuilder:resource:shortName=kcat
+// +kubebuilder:metadata:labels=app.kubernetes.io/name=krkn-operator
 
 // KrknCategory is the Schema for the krkncategories API.
 // The Kubernetes resource name identifies the category. Public and group

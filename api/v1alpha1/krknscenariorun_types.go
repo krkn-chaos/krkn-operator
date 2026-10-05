@@ -310,6 +310,7 @@ type KrknScenarioRunStatus struct {
 // +kubebuilder:printcolumn:name="Failed",type=integer,JSONPath=`.status.failedJobs`
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 // +kubebuilder:resource:shortName=ksr
+// +kubebuilder:metadata:labels=app.kubernetes.io/name=krkn-operator
 
 // KrknScenarioRun is the Schema for the krknscenarioruns API.
 type KrknScenarioRun struct {

@@ -18,6 +18,16 @@ helm install krkn-operator oci://quay.io/krkn-chaos/charts/krkn-operator --versi
   -n krkn-operator-system --create-namespace
 ```
 
+**Upgrade:**
+```bash
+helm upgrade krkn-operator oci://quay.io/krkn-chaos/charts/krkn-operator --version <version> \
+  -n krkn-operator-system
+```
+
+Helm installs CRDs from the chart on a fresh install but does not upgrade files
+under `crds/`. During `helm upgrade`, the chart runs a pre-upgrade job that adds
+missing CRDs and updates changed schemas from the operator image.
+
 ### OLM / OperatorHub bundles
 
 Release automation publishes separate bundle images for generic Kubernetes and
@@ -67,6 +77,16 @@ against `k8s-operatorhub/community-operators` when the
 ```bash
 helm uninstall krkn-operator -n krkn-operator-system
 ```
+
+CRDs remain after uninstall to protect custom resources. After removing any
+custom resources you still need, remove the operator CRDs with:
+
+```bash
+kubectl delete crds -l app.kubernetes.io/name=krkn-operator
+```
+
+Upgrading an existing release applies this label to its CRDs so the selector
+also matches CRDs created by earlier releases.
 
 ## Resiliency History API
 
