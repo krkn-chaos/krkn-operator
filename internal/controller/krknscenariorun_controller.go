@@ -54,6 +54,8 @@ import (
 	"github.com/krkn-chaos/krknctl/pkg/verify"
 )
 
+const historyOnlyAnnotation = "krkn.krkn-chaos.dev/history-only"
+
 // KrknScenarioRunReconciler reconciles a KrknScenarioRun object
 type KrknScenarioRunReconciler struct {
 	client.Client
@@ -183,6 +185,10 @@ func (r *KrknScenarioRunReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	if pendingMigration {
 		logger.Info("skipping ScenarioRun while the CRD migration is pending", "scenarioRun", scenarioRun.Name)
 		return ctrl.Result{RequeueAfter: migrationGuardRequeue}, nil
+	}
+	if scenarioRun.Annotations[historyOnlyAnnotation] == "true" {
+		logger.Info("skipping restored history-only ScenarioRun", "scenarioRun", scenarioRun.Name)
+		return ctrl.Result{}, nil
 	}
 
 	// Initialize status if first reconcile

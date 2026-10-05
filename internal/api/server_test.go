@@ -151,6 +151,56 @@ func TestMaxBodySizeMiddleware(t *testing.T) {
 	})
 }
 
+func TestMaxBodySizeMiddlewareUsesRestoreUploadLimit(t *testing.T) {
+	const defaultLimit int64 = 10 << 20
+
+	called := false
+	handler := maxBodySizeMiddleware(defaultLimit)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		w.WriteHeader(http.StatusNoContent)
+	}))
+
+	// The declared request size is above the ordinary API limit but below the
+	// restore-upload limit. The route-aware middleware must allow it through.
+	req := httptest.NewRequest(http.MethodPost, RestorePath, strings.NewReader("backup"))
+	req.ContentLength = defaultLimit + 1
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("expected status %d, got %d", http.StatusNoContent, w.Code)
+	}
+	if !called {
+		t.Fatal("expected restore handler to be called")
+	}
+}
+
+func TestMaxBodySizeForRequest(t *testing.T) {
+	const defaultLimit int64 = 10 << 20
+
+	tests := []struct {
+		name   string
+		method string
+		path   string
+		want   int64
+	}{
+		{name: "restore upload", method: http.MethodPost, path: RestorePath, want: maxUploadSize},
+		{name: "restore status", method: http.MethodGet, path: RestorePath + "/job-1", want: defaultLimit},
+		{name: "other post", method: http.MethodPost, path: "/api/v1/backup", want: defaultLimit},
+		{name: "restore put", method: http.MethodPut, path: RestorePath, want: defaultLimit},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(tt.method, tt.path, nil)
+			if got := maxBodySizeForRequest(req, defaultLimit); got != tt.want {
+				t.Fatalf("maxBodySizeForRequest() = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
 // TestWorkflowsAvailableMethodGuard is a compile-time check that ensures
 // the method guard exists in server.go for /workflows/available endpoint.
 //
