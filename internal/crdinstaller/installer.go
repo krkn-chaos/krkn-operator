@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -44,7 +45,13 @@ func Sync(ctx context.Context, config *rest.Config, directory string) ([]string,
 }
 
 func applyCRDs(ctx context.Context, client crdClient, directory string) ([]string, error) {
-	entries, err := os.ReadDir(directory)
+	root, err := os.OpenRoot(directory)
+	if err != nil {
+		return nil, fmt.Errorf("open CRD directory %q: %w", directory, err)
+	}
+	defer root.Close()
+
+	entries, err := fs.ReadDir(root.FS(), ".")
 	if err != nil {
 		return nil, fmt.Errorf("read CRD directory %q: %w", directory, err)
 	}
@@ -60,7 +67,7 @@ func applyCRDs(ctx context.Context, client crdClient, directory string) ([]strin
 		}
 
 		path := filepath.Join(directory, entry.Name())
-		data, err := os.ReadFile(path)
+		data, err := root.ReadFile(entry.Name())
 		if err != nil {
 			return nil, fmt.Errorf("read CRD manifest %q: %w", path, err)
 		}
