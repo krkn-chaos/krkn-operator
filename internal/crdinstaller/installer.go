@@ -1,3 +1,4 @@
+// Package crdinstaller synchronizes Kubernetes CRDs from a bundled manifest directory.
 package crdinstaller
 
 import (
