@@ -79,6 +79,9 @@ jobs:
           echo "ACM version: ${ACM_VERSION}"
           echo "Console version: ${CONSOLE_VERSION}"
 
+      - name: Sync generated CRDs into the chart
+        run: cp config/crd/bases/*.yaml charts/krkn-operator/crds/
+
       - name: Package and Push Helm Chart
         run: |
           VERSION=${GITHUB_REF#refs/tags/v}

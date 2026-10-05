@@ -57,6 +57,10 @@ spec:
           spec:
             description: KrknScenarioRunSpec defines the desired state of KrknScenarioRun
             properties:
+              cloudCredentialRef:
+                description: CloudCredentialRef is the name of the cloud credential
+                  Secret to inject into the scenario pod
+                type: string
               customRunName:
                 description: CustomRunName is a user-provided label for the run, displayed
                   in the console
@@ -212,8 +216,8 @@ spec:
                         for this job
                       type: integer
                     maxRetriesConfigured:
-                      description: MaxRetriesConfigured indicates that MaxRetries was
-                        initialized by the current controller.
+                      description: MaxRetriesConfigured indicates that MaxRetries
+                        was initialized by the current controller.
                       type: boolean
                     message:
                       description: Message contains additional information about the
