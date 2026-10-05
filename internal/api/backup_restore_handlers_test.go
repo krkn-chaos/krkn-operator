@@ -19,14 +19,24 @@ package api
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
+	"time"
 
+	"github.com/krkn-chaos/krkn-operator/internal/kubeconfig"
 	"github.com/krkn-chaos/krkn-operator/pkg/auth"
+	"github.com/krkn-chaos/krknctl/pkg/backup"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	dynamicfake "k8s.io/client-go/dynamic/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
@@ -278,6 +288,99 @@ func TestPostRestoreAcceptsUpload(t *testing.T) {
 	}
 }
 
+func TestPostRestoreRefreshesRestoredTargetStatus(t *testing.T) {
+	dynamicClient := newTestDynamicClient()
+	const namespace = "default"
+	const targetName = "target-one"
+	const secretName = "target-secret"
+
+	kubeconfigBase64, err := kubeconfig.GenerateFromToken(targetName, "http://127.0.0.1:1", "", "token", true)
+	if err != nil {
+		t.Fatalf("GenerateFromToken() error = %v", err)
+	}
+	secretData, err := kubeconfig.MarshalSecretData(kubeconfigBase64)
+	if err != nil {
+		t.Fatalf("MarshalSecretData() error = %v", err)
+	}
+	secret := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "v1",
+		"kind":       "Secret",
+		"metadata": map[string]interface{}{
+			"name":      secretName,
+			"namespace": namespace,
+			"labels": map[string]interface{}{
+				"krkn-target-uuid": targetName,
+			},
+		},
+		"data": map[string]interface{}{
+			"kubeconfig": base64.StdEncoding.EncodeToString(secretData),
+		},
+	}}
+	_, err = dynamicClient.Resource(secretResource).Namespace(namespace).Create(context.Background(), secret, metav1.CreateOptions{})
+	if err != nil {
+		t.Fatalf("Create(secret) error = %v", err)
+	}
+	_, err = dynamicClient.Resource(krknOperatorTargetResource).Namespace(namespace).Create(context.Background(), newTargetStatusObject(targetName, secretName, true), metav1.CreateOptions{})
+	if err != nil {
+		t.Fatalf("Create(target) error = %v", err)
+	}
+
+	archivePath, err := backup.CreateBackup(context.Background(), dynamicClient, backup.BackupConfig{
+		Namespace:  namespace,
+		OutputDir:  t.TempDir(),
+		BackupName: "restore-target-status",
+	})
+	if err != nil {
+		t.Fatalf("CreateBackup() error = %v", err)
+	}
+	archive, err := os.ReadFile(archivePath)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+
+	handler := NewHandler(fake.NewClientBuilder().Build(), nil, namespace, "", &auth.SecretManager{}, dynamicClient)
+	defer handler.Shutdown()
+	body, contentType := createMultipartBody(t, "backup", "restore-target-status.tar.gz", archive)
+	req := httptest.NewRequest(http.MethodPost, RestorePath, body)
+	req.Header.Set("Content-Type", contentType)
+	req = req.WithContext(context.WithValue(req.Context(), auth.UserClaimsKey, &auth.Claims{
+		UserID: "admin",
+		Role:   "admin",
+	}))
+	w := httptest.NewRecorder()
+	handler.PostRestore(w, req)
+
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("PostRestore() status = %d, want %d: %s", w.Code, http.StatusAccepted, w.Body.String())
+	}
+	var response RestoreResponse
+	if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
+		t.Fatalf("Decode(response) error = %v", err)
+	}
+
+	var job JobStatus
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		var ok bool
+		job, ok = handler.jobTracker.Get(response.JobID)
+		if !ok {
+			t.Fatalf("restore job %q was not tracked", response.JobID)
+		}
+		if job.Status != "in_progress" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("restore job did not finish: %+v", job)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if job.Status != "completed" {
+		t.Fatalf("restore job status = %q, want completed; error = %q", job.Status, job.Error)
+	}
+
+	assertTargetStatus(t, dynamicClient, targetName, false)
+}
+
 func TestGetRestoreStatusUnknownJob(t *testing.T) {
 	handler := createTestHandler()
 
@@ -468,5 +571,19 @@ func createMultipartBody(t *testing.T, fieldName, filename string, content []byt
 // createTestHandler creates a handler with a fake K8s client for testing.
 func createTestHandler() *Handler {
 	fakeClient := fake.NewClientBuilder().Build()
-	return NewHandler(fakeClient, nil, "default", "", &auth.SecretManager{})
+	dynamicClient := newTestDynamicClient()
+	return NewHandler(fakeClient, nil, "default", "", &auth.SecretManager{}, dynamicClient)
+}
+
+func newTestDynamicClient() *dynamicfake.FakeDynamicClient {
+	scheme := runtime.NewScheme()
+	listKinds := map[schema.GroupVersionResource]string{
+		{Group: "krkn.krkn-chaos.dev", Version: "v1alpha1", Resource: "krknusers"}:                   "KrknUserList",
+		{Group: "krkn.krkn-chaos.dev", Version: "v1alpha1", Resource: "krknusergroups"}:              "KrknUserGroupList",
+		{Group: "krkn.krkn-chaos.dev", Version: "v1alpha1", Resource: "krknoperatortargets"}:         "KrknOperatorTargetList",
+		{Group: "krkn.krkn-chaos.dev", Version: "v1alpha1", Resource: "krknoperatortargetproviders"}: "KrknOperatorTargetProviderList",
+		{Group: "", Version: "v1", Resource: "secrets"}:                                              "SecretList",
+		{Group: "", Version: "v1", Resource: "configmaps"}:                                           "ConfigMapList",
+	}
+	return dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme, listKinds)
 }
