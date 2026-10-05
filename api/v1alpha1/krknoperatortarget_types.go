@@ -73,6 +73,7 @@ type KrknOperatorTargetStatus struct {
 // +kubebuilder:printcolumn:name="Ready",type=boolean,JSONPath=`.status.ready`
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 // +kubebuilder:resource:shortName=kot
+// +kubebuilder:metadata:labels=app.kubernetes.io/name=krkn-operator
 
 // KrknOperatorTarget is the Schema for the krknoperatortargets API.
 type KrknOperatorTarget struct {

@@ -75,6 +75,7 @@ type KrknUserStatus struct {
 // +kubebuilder:printcolumn:name="Active",type=boolean,JSONPath=`.status.active`
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 // +kubebuilder:resource:shortName=ku
+// +kubebuilder:metadata:labels=app.kubernetes.io/name=krkn-operator
 
 // KrknUser is the Schema for the krknusers API.
 // It represents an authentication entity for the krkn-operator REST APIs.

@@ -56,6 +56,7 @@ type KrknUserGroupSpec struct {
 // +kubebuilder:printcolumn:name="Description",type=string,JSONPath=`.spec.description`
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 // +kubebuilder:resource:shortName=kug
+// +kubebuilder:metadata:labels=app.kubernetes.io/name=krkn-operator
 
 // KrknUserGroup is the Schema for the krknusergroups API.
 // It defines cluster-level access control for groups of users.

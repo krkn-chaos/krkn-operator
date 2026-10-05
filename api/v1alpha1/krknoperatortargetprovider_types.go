@@ -45,6 +45,7 @@ type KrknOperatorTargetProviderStatus struct {
 // +kubebuilder:printcolumn:name="Last Heartbeat",type=date,JSONPath=`.status.timestamp`
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 // +kubebuilder:resource:shortName=kotp
+// +kubebuilder:metadata:labels=app.kubernetes.io/name=krkn-operator
 
 // KrknOperatorTargetProvider is the Schema for the krknoperatortargetproviders API.
 type KrknOperatorTargetProvider struct {

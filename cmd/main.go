@@ -24,6 +24,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/go-logr/logr"
 
@@ -52,6 +53,7 @@ import (
 	"github.com/krkn-chaos/krkn-operator/internal/api"
 	v2ws "github.com/krkn-chaos/krkn-operator/internal/api/v2/websocket"
 	"github.com/krkn-chaos/krkn-operator/internal/controller"
+	"github.com/krkn-chaos/krkn-operator/internal/crdinstaller"
 	olmbootstrap "github.com/krkn-chaos/krkn-operator/internal/olm"
 	"github.com/krkn-chaos/krkn-operator/pkg/auth"
 	"github.com/krkn-chaos/krkn-operator/pkg/configmap"
@@ -84,6 +86,8 @@ func main() {
 	var apiPort int
 	var grpcServerAddr string
 	var bootstrapResources bool
+	var syncCRDs bool
+	var crdDirectory string
 	var tlsOpts []func(*tls.Config)
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
 		"Use :8443 for HTTPS or :8080 for HTTP, or leave as 0 to disable the metrics service.")
@@ -105,6 +109,8 @@ func main() {
 	flag.IntVar(&apiPort, "api-port", 8080, "The port for the REST API server")
 	flag.StringVar(&grpcServerAddr, "grpc-server-address", "localhost:50051", "The address of the gRPC data provider server")
 	flag.BoolVar(&bootstrapResources, "bootstrap-resources", false, "Create resources required by OLM before starting the operator")
+	flag.BoolVar(&syncCRDs, "sync-crds", false, "Create missing CRDs and update changed CRD specs before starting the operator")
+	flag.StringVar(&crdDirectory, "crd-dir", "/crds", "Directory containing CustomResourceDefinition manifests")
 	opts := zap.Options{
 		Development: true,
 	}
@@ -112,6 +118,18 @@ func main() {
 	flag.Parse()
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
+
+	if syncCRDs {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		names, err := crdinstaller.Sync(ctx, ctrl.GetConfigOrDie(), crdDirectory)
+		cancel()
+		if err != nil {
+			setupLog.Error(err, "unable to synchronize CRDs", "directory", crdDirectory)
+			os.Exit(1)
+		}
+		setupLog.Info("CRDs synchronized", "count", len(names), "directory", crdDirectory)
+		return
+	}
 
 	// if the enable-http2 flag is false (the default), http/2 should be disabled
 	// due to its vulnerabilities. More specifically, disabling http/2 will

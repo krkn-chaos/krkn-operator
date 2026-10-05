@@ -60,6 +60,7 @@ type KrknOperatorTargetProviderConfigStatus struct {
 // +kubebuilder:printcolumn:name="UUID",type=string,JSONPath=`.spec.uuid`
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 // +kubebuilder:resource:shortName=kotpc
+// +kubebuilder:metadata:labels=app.kubernetes.io/name=krkn-operator
 
 // KrknOperatorTargetProviderConfig is the Schema for the krknoperatortargetproviderconfigs API.
 type KrknOperatorTargetProviderConfig struct {

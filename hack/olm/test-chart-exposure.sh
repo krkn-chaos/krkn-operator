@@ -4,11 +4,35 @@ set -euo pipefail
 command -v helm >/dev/null || { echo "helm is required" >&2; exit 1; }
 command -v yq >/dev/null || { echo "yq is required" >&2; exit 1; }
 
-chart_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../charts/krkn-operator" && pwd)
+chart_source_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../charts/krkn-operator" && pwd)
+repo_root=$(cd "$chart_source_dir/../.." && pwd)
 work_dir=$(mktemp -d "${TMPDIR:-/tmp}/krkn-chart-exposure.XXXXXX")
 trap 'rm -rf "$work_dir"' EXIT
+chart_dir="$work_dir/chart"
+mkdir -p "$chart_dir"
+cp -R "$chart_source_dir/." "$chart_dir/"
+cp "$repo_root"/config/crd/bases/*.yaml "$chart_dir/crds/"
 
 helm template krkn-operator "$chart_dir" > "$work_dir/base.yaml"
+
+helm show crds "$chart_dir" > "$work_dir/crds.yaml"
+yq -e 'select(.kind == "CustomResourceDefinition")' \
+  "$work_dir/crds.yaml" >/dev/null
+yq -e 'select(.kind == "CustomResourceDefinition" and .metadata.name == "krkncategories.krkn.krkn-chaos.dev") | .metadata.labels."app.kubernetes.io/name" == "krkn-operator"' \
+  "$work_dir/crds.yaml" >/dev/null
+if ! yq -e '[select(.kind == "CustomResourceDefinition" and .metadata.labels."app.kubernetes.io/name" != "krkn-operator")] | length == 0' \
+  "$work_dir/crds.yaml" >/dev/null; then
+  echo "all chart CRDs must have the operator label for uninstall cleanup" >&2
+  exit 1
+fi
+
+helm template krkn-operator "$chart_dir" --is-upgrade > "$work_dir/upgrade.yaml"
+yq -r 'select(.kind == "Job") | .metadata.annotations."helm.sh/hook"' \
+  "$work_dir/upgrade.yaml" | grep -Fxq 'pre-upgrade'
+yq -r 'select(.kind == "Job") | .spec.template.spec.containers[] | select(.name == "crd-sync") | .args[]' \
+  "$work_dir/upgrade.yaml" > "$work_dir/crd-sync-args.txt"
+grep -Fxq -- '--sync-crds' "$work_dir/crd-sync-args.txt"
+grep -Fxq -- '--crd-dir=/crds' "$work_dir/crd-sync-args.txt"
 
 yq -e 'select(.kind == "ConfigMap" and .metadata.name == "krkn-operator-console-nginx") | .data["nginx.conf"] | contains("proxy_pass http://krkn-operator-operator:8080;")' \
   "$work_dir/base.yaml" >/dev/null

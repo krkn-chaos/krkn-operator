@@ -1,0 +1,102 @@
+{{- if .Release.IsUpgrade -}}
+{{- $syncName := printf "%s-crd-sync" (include "krkn-operator.fullname" .) | trunc 63 | trimSuffix "-" -}}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $syncName }}
+  namespace: {{ include "krkn-operator.namespace" . }}
+  labels:
+    {{- include "krkn-operator.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": pre-upgrade
+    "helm.sh/hook-weight": "-3"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $syncName }}
+  labels:
+    {{- include "krkn-operator.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": pre-upgrade
+    "helm.sh/hook-weight": "-2"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+rules:
+- apiGroups:
+  - apiextensions.k8s.io
+  resources:
+  - customresourcedefinitions
+  verbs:
+  - create
+  - get
+  - patch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $syncName }}
+  labels:
+    {{- include "krkn-operator.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": pre-upgrade
+    "helm.sh/hook-weight": "-1"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ $syncName }}
+subjects:
+- kind: ServiceAccount
+  name: {{ $syncName }}
+  namespace: {{ include "krkn-operator.namespace" . }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ $syncName }}
+  namespace: {{ include "krkn-operator.namespace" . }}
+  labels:
+    {{- include "krkn-operator.labels" . | nindent 4 }}
+    app.kubernetes.io/component: crd-sync
+  annotations:
+    "helm.sh/hook": pre-upgrade
+    "helm.sh/hook-weight": "0"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  activeDeadlineSeconds: 360
+  backoffLimit: 1
+  template:
+    metadata:
+      labels:
+        {{- include "krkn-operator.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: crd-sync
+    spec:
+      {{- with .Values.images.pullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ $syncName }}
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: crd-sync
+        image: {{ .Values.images.operator.image }}
+        imagePullPolicy: {{ .Values.images.operator.pullPolicy }}
+        command:
+        - /manager
+        args:
+        - --sync-crds
+        - --crd-dir=/crds
+        resources:
+          {{- toYaml .Values.operator.resources | nindent 10 }}
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          readOnlyRootFilesystem: true
+{{- end -}}
