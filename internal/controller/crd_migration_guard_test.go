@@ -26,7 +26,7 @@ func TestScenarioRunReconcileSkipsPendingMigration(t *testing.T) {
 	run := &krknv1alpha1.KrknScenarioRun{ObjectMeta: metav1.ObjectMeta{
 		Name:      "scenario-run",
 		Namespace: "default",
-	}}
+	}, Spec: krknv1alpha1.KrknScenarioRunSpec{ScenarioName: "legacy-scenario"}}
 	guard := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: crdmigration.GuardConfigMapName, Namespace: run.Namespace}}
 	client := fakeclient.NewClientBuilder().WithScheme(scheme).WithObjects(run, guard).Build()
 	reconciler := &KrknScenarioRunReconciler{Client: client}
@@ -38,6 +38,9 @@ func TestScenarioRunReconcileSkipsPendingMigration(t *testing.T) {
 	got := &krknv1alpha1.KrknScenarioRun{}
 	if err := client.Get(context.Background(), key, got); err != nil {
 		t.Fatalf("get ScenarioRun: %v", err)
+	}
+	if got.Spec.Scenario.Name != "" {
+		t.Fatalf("staged ScenarioRun scenario = %+v, want legacy identity unchanged", got.Spec.Scenario)
 	}
 	if got.Status.Phase != "" {
 		t.Fatalf("staged ScenarioRun phase = %q, want no reconciliation", got.Status.Phase)

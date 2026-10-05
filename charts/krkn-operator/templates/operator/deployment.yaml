@@ -65,6 +65,7 @@ spec:
         - --metrics-secure=true
         - --api-port={{ .Values.operator.service.port }}
         - --grpc-server-address=localhost:{{ .Values.operator.service.grpcPort }}
+        - --enable-krkn-ai={{ .Values.krknAI.enabled }}
         ports:
         - containerPort: {{ .Values.operator.service.port }}
           name: http
@@ -80,6 +81,29 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: metadata.namespace
+        {{- if .Values.krknAI.enabled }}
+        - name: KRKNAI_ORCHESTRATOR_IMAGE
+          value: {{ .Values.images.aiOrchestrator.image | quote }}
+        - name: KRKNAI_ORCHESTRATOR_IMAGE_PULL_POLICY
+          value: {{ .Values.images.aiOrchestrator.pullPolicy | quote }}
+        - name: KRKNAI_SERVICE_IMAGE
+          value: {{ .Values.images.aiService.image | quote }}
+        - name: KRKNAI_SERVICE_IMAGE_PULL_POLICY
+          value: {{ .Values.images.aiService.pullPolicy | quote }}
+        - name: KRKNAI_SERVICE_URL
+          value: {{ printf "http://%s-ai-service:8080" (include "krkn-operator.fullname" .) | quote }}
+        - name: KRKNAI_SERVICE_TOKEN_SECRET_NAME
+          value: {{ printf "%s-ai-service-token" (include "krkn-operator.fullname" .) | quote }}
+        - name: KRKNAI_ORCHESTRATOR_SERVICE_ACCOUNT_NAME
+          value: {{ printf "%s-krkn-ai-orchestrator" (include "krkn-operator.fullname" .) | quote }}
+        - name: KRKNAI_IMAGE_PULL_SECRETS
+          value: {{ .Values.images.pullSecrets | toJson | quote }}
+        - name: KRKNAI_SERVICE_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: {{ printf "%s-ai-service-token" (include "krkn-operator.fullname" .) | quote }}
+              key: token
+        {{- end }}
         - name: JWT_SECRET
           valueFrom:
             secretKeyRef:
