@@ -31,7 +31,7 @@ func (h *Handler) rejectRunWritesDuringCRDMigration(w http.ResponseWriter, r *ht
 		return true
 	}
 	if h.client == nil {
-		log.FromContext(ctx).Error(errors.New("Kubernetes client is unavailable"), "unable to check custom resource migration guard", "namespace", h.namespace)
+		log.FromContext(ctx).Error(errors.New("kubernetes client is unavailable"), "unable to check custom resource migration guard", "namespace", h.namespace)
 		writeJSONError(w, http.StatusServiceUnavailable, ErrorResponse{Error: "service_unavailable", Message: "Run operations are temporarily unavailable during CRD migration"})
 		return true
 	}
