@@ -176,6 +176,14 @@ func (r *KrknScenarioRunReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		logger.Error(err, "unable to fetch KrknScenarioRun")
 		return ctrl.Result{}, err
 	}
+	pendingMigration, err := migrationPending(ctx, r.Client, scenarioRun.Namespace, scenarioRun.Annotations)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	if pendingMigration {
+		logger.Info("skipping ScenarioRun while the CRD migration is pending", "scenarioRun", scenarioRun.Name)
+		return ctrl.Result{RequeueAfter: migrationGuardRequeue}, nil
+	}
 
 	// Initialize status if first reconcile
 	if scenarioRun.Status.Phase == "" {
@@ -208,6 +216,11 @@ func (r *KrknScenarioRunReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	// Snapshot status BEFORE any job creation so that appended failure entries are
 	// detected as changes and persisted to the API server at the end of the reconcile.
 	originalStatus := scenarioRun.Status.DeepCopy()
+	if updated := backfillLegacyGraphResiliencyScoreStatuses(&scenarioRun); updated > 0 {
+		logger.Info("backfilled legacy graph resiliency score statuses",
+			"scenarioRun", scenarioRun.Name,
+			"updatedScores", updated)
+	}
 
 	// Collect targets that need job creation (serial — reads Status.ClusterJobs safely).
 	// getClusterAPIURL is called once per cluster here so the error-handler below can

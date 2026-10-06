@@ -6,10 +6,15 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/go-logr/logr"
+	appsv1 "k8s.io/api/apps/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	fake "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset/fake"
 	"k8s.io/apimachinery/pkg/apis/meta/v1"
+	k8sfake "k8s.io/client-go/kubernetes/fake"
 	"sigs.k8s.io/yaml"
+
+	"github.com/krkn-chaos/krkn-operator/internal/crdmigration"
 )
 
 func TestApplyCRDsCreatesMissingAndUpdatesChangedSpecs(t *testing.T) {
@@ -159,6 +164,67 @@ func TestWaitForEstablishedReturnsRejectedNames(t *testing.T) {
 
 	if err := waitForEstablished(context.Background(), client, []string{crd.Name}); err == nil {
 		t.Fatal("expected rejected CRD names to return an error")
+	}
+}
+
+func TestWaitForDeploymentReady(t *testing.T) {
+	replicas := int32(2)
+	deployment := &appsv1.Deployment{
+		ObjectMeta: v1.ObjectMeta{Name: "operator", Namespace: "operator", Generation: 4},
+		Spec:       appsv1.DeploymentSpec{Replicas: &replicas},
+		Status: appsv1.DeploymentStatus{
+			ObservedGeneration: 4,
+			Replicas:           2,
+			UpdatedReplicas:    2,
+			AvailableReplicas:  2,
+		},
+	}
+	client := k8sfake.NewSimpleClientset(deployment).AppsV1().Deployments("operator")
+	if err := waitForDeploymentReady(context.Background(), client, "operator", logr.Discard()); err != nil {
+		t.Fatalf("wait for ready operator deployment: %v", err)
+	}
+}
+
+func TestWaitForDeploymentReadyRejectsMixedRollout(t *testing.T) {
+	replicas := int32(2)
+	deployment := &appsv1.Deployment{
+		ObjectMeta: v1.ObjectMeta{Name: "operator", Namespace: "operator", Generation: 4},
+		Spec:       appsv1.DeploymentSpec{Replicas: &replicas},
+		Status: appsv1.DeploymentStatus{
+			ObservedGeneration: 4,
+			Replicas:           2,
+			UpdatedReplicas:    1,
+			AvailableReplicas:  2,
+		},
+	}
+	client := k8sfake.NewSimpleClientset(deployment).AppsV1().Deployments("operator")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := waitForDeploymentReady(ctx, client, "operator", logr.Discard()); err == nil {
+		t.Fatal("mixed operator rollout was reported ready")
+	}
+}
+
+func TestMigrationGuardLifecycleIsRetrySafe(t *testing.T) {
+	client := k8sfake.NewSimpleClientset().CoreV1().ConfigMaps("operator")
+	if err := ensureMigrationGuard(context.Background(), client); err != nil {
+		t.Fatalf("create migration guard: %v", err)
+	}
+	if err := ensureMigrationGuard(context.Background(), client); err != nil {
+		t.Fatalf("repeat migration guard creation: %v", err)
+	}
+	guard, err := client.Get(context.Background(), crdmigration.GuardConfigMapName, v1.GetOptions{})
+	if err != nil {
+		t.Fatalf("get migration guard: %v", err)
+	}
+	if guard.Data["phase"] != "crd-migration" {
+		t.Fatalf("migration guard data = %v", guard.Data)
+	}
+	if err := removeMigrationGuard(context.Background(), client); err != nil {
+		t.Fatalf("remove migration guard: %v", err)
+	}
+	if err := removeMigrationGuard(context.Background(), client); err != nil {
+		t.Fatalf("repeat migration guard removal: %v", err)
 	}
 }
 

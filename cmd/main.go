@@ -87,6 +87,7 @@ func main() {
 	var grpcServerAddr string
 	var bootstrapResources bool
 	var syncCRDs bool
+	var stageCRDMigration bool
 	var crdDirectory string
 	var tlsOpts []func(*tls.Config)
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
@@ -109,7 +110,8 @@ func main() {
 	flag.IntVar(&apiPort, "api-port", 8080, "The port for the REST API server")
 	flag.StringVar(&grpcServerAddr, "grpc-server-address", "localhost:50051", "The address of the gRPC data provider server")
 	flag.BoolVar(&bootstrapResources, "bootstrap-resources", false, "Create resources required by OLM before starting the operator")
-	flag.BoolVar(&syncCRDs, "sync-crds", false, "Create missing CRDs and update changed CRD specs before starting the operator")
+	flag.BoolVar(&stageCRDMigration, "stage-crd-migration", false, "Snapshot legacy custom-resource fields before an operator rollout")
+	flag.BoolVar(&syncCRDs, "sync-crds", false, "Synchronize CRDs and complete staged custom-resource migrations after an operator rollout")
 	flag.StringVar(&crdDirectory, "crd-dir", "/crds", "Directory containing CustomResourceDefinition manifests")
 	opts := zap.Options{
 		Development: true,
@@ -119,9 +121,32 @@ func main() {
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
-	if syncCRDs {
+	if stageCRDMigration && syncCRDs {
+		setupLog.Error(fmt.Errorf("--stage-crd-migration and --sync-crds cannot be used together"), "invalid CRD migration mode")
+		os.Exit(2)
+	}
+	if stageCRDMigration || syncCRDs {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-		names, err := crdinstaller.Sync(ctx, ctrl.GetConfigOrDie(), crdDirectory)
+		migrationNamespace := os.Getenv("KRKN_NAMESPACE")
+		if migrationNamespace == "" {
+			migrationNamespace = os.Getenv("POD_NAMESPACE")
+		}
+		if migrationNamespace == "" {
+			migrationNamespace = "krkn-operator-system"
+		}
+		var err error
+		if stageCRDMigration {
+			err = crdinstaller.Stage(ctx, ctrl.GetConfigOrDie(), migrationNamespace, setupLog.WithName("crd-migration-stage"))
+			cancel()
+			if err != nil {
+				setupLog.Error(err, "unable to stage custom-resource migration", "namespace", migrationNamespace)
+				os.Exit(1)
+			}
+			setupLog.Info("custom-resource migration staged", "namespace", migrationNamespace)
+			return
+		}
+		operatorDeployment := os.Getenv("OPERATOR_DEPLOYMENT_NAME")
+		names, err := crdinstaller.Sync(ctx, ctrl.GetConfigOrDie(), crdDirectory, migrationNamespace, operatorDeployment, setupLog.WithName("crd-sync"))
 		cancel()
 		if err != nil {
 			setupLog.Error(err, "unable to synchronize CRDs", "directory", crdDirectory)

@@ -1,5 +1,7 @@
-{{- if .Release.IsUpgrade -}}
-{{- $syncName := printf "%s-crd-sync" (include "krkn-operator.fullname" .) | trunc 63 | trimSuffix "-" -}}
+{{- if and .Release.IsUpgrade .Values.operator.enabled -}}
+{{- $hookBase := include "krkn-operator.fullname" . | trunc 45 | trimSuffix "-" -}}
+{{- $syncName := printf "%s-crd-sync" $hookBase -}}
+{{- $stageName := printf "%s-crd-stage" $hookBase -}}
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -8,7 +10,7 @@ metadata:
   labels:
     {{- include "krkn-operator.labels" . | nindent 4 }}
   annotations:
-    "helm.sh/hook": pre-upgrade
+    "helm.sh/hook": pre-upgrade,post-upgrade
     "helm.sh/hook-weight": "-3"
     "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
 ---
@@ -19,7 +21,7 @@ metadata:
   labels:
     {{- include "krkn-operator.labels" . | nindent 4 }}
   annotations:
-    "helm.sh/hook": pre-upgrade
+    "helm.sh/hook": pre-upgrade,post-upgrade
     "helm.sh/hook-weight": "-2"
     "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
 rules:
@@ -33,13 +35,55 @@ rules:
   - patch
 ---
 apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $syncName }}-runs
+  namespace: {{ include "krkn-operator.namespace" . }}
+  labels:
+    {{- include "krkn-operator.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": pre-upgrade,post-upgrade
+    "helm.sh/hook-weight": "-2"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - configmaps
+  verbs:
+  - get
+  - create
+  - delete
+- apiGroups:
+  - apps
+  resources:
+  - deployments
+  verbs:
+  - get
+- apiGroups:
+  - krkn.krkn-chaos.dev
+  resources:
+  - krknscenarioruns
+  - krkngraphruns
+  verbs:
+  - list
+  - patch
+- apiGroups:
+  - krkn.krkn-chaos.dev
+  resources:
+  - krknscenarioruns/status
+  - krkngraphruns/status
+  verbs:
+  - patch
+---
+apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
   name: {{ $syncName }}
   labels:
     {{- include "krkn-operator.labels" . | nindent 4 }}
   annotations:
-    "helm.sh/hook": pre-upgrade
+    "helm.sh/hook": pre-upgrade,post-upgrade
     "helm.sh/hook-weight": "-1"
     "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
 roleRef:
@@ -51,10 +95,30 @@ subjects:
   name: {{ $syncName }}
   namespace: {{ include "krkn-operator.namespace" . }}
 ---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $syncName }}-runs
+  namespace: {{ include "krkn-operator.namespace" . }}
+  labels:
+    {{- include "krkn-operator.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": pre-upgrade,post-upgrade
+    "helm.sh/hook-weight": "-1"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $syncName }}-runs
+subjects:
+- kind: ServiceAccount
+  name: {{ $syncName }}
+  namespace: {{ include "krkn-operator.namespace" . }}
+---
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: {{ $syncName }}
+  name: {{ $stageName }}
   namespace: {{ include "krkn-operator.namespace" . }}
   labels:
     {{- include "krkn-operator.labels" . | nindent 4 }}
@@ -89,8 +153,72 @@ spec:
         command:
         - /manager
         args:
+        - --stage-crd-migration
+        env:
+        - name: POD_NAMESPACE
+          value: {{ include "krkn-operator.namespace" . | quote }}
+        - name: OPERATOR_DEPLOYMENT_NAME
+          value: {{ include "krkn-operator.operator.fullname" . | quote }}
+        {{- with .Values.operator.extraEnv }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+        resources:
+          {{- toYaml .Values.operator.resources | nindent 10 }}
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          readOnlyRootFilesystem: true
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ $syncName }}
+  namespace: {{ include "krkn-operator.namespace" . }}
+  labels:
+    {{- include "krkn-operator.labels" . | nindent 4 }}
+    app.kubernetes.io/component: crd-sync
+  annotations:
+    "helm.sh/hook": post-upgrade
+    "helm.sh/hook-weight": "0"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  activeDeadlineSeconds: 360
+  backoffLimit: 1
+  template:
+    metadata:
+      labels:
+        {{- include "krkn-operator.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: crd-sync
+    spec:
+      {{- with .Values.images.pullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ $syncName }}
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: crd-sync
+        image: {{ .Values.images.operator.image }}
+        imagePullPolicy: {{ .Values.images.operator.pullPolicy }}
+        command:
+        - /manager
+        args:
         - --sync-crds
         - --crd-dir=/crds
+        env:
+        - name: POD_NAMESPACE
+          value: {{ include "krkn-operator.namespace" . | quote }}
+        - name: OPERATOR_DEPLOYMENT_NAME
+          value: {{ include "krkn-operator.operator.fullname" . | quote }}
+        {{- with .Values.operator.extraEnv }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
         resources:
           {{- toYaml .Values.operator.resources | nindent 10 }}
         securityContext:

@@ -154,6 +154,14 @@ func (r *KrknGraphRunReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		// Owner references will cascade delete KrknScenarioRuns
 		return ctrl.Result{}, nil
 	}
+	pendingMigration, err := migrationPending(ctx, r.Client, graphRun.Namespace, graphRun.Annotations)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	if pendingMigration {
+		logger.Info("skipping GraphRun while the CRD migration is pending", "graphRun", graphRun.Name)
+		return ctrl.Result{RequeueAfter: migrationGuardRequeue}, nil
+	}
 
 	// Add finalizer if not present
 	if !controllerutil.ContainsFinalizer(&graphRun, FinalizerName) {

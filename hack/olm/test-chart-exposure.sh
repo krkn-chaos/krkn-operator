@@ -14,6 +14,11 @@ cp -R "$chart_source_dir/." "$chart_dir/"
 cp "$repo_root"/config/crd/bases/*.yaml "$chart_dir/crds/"
 
 helm template krkn-operator "$chart_dir" > "$work_dir/base.yaml"
+if yq -e 'select(.kind == "Job" and .metadata.name == "krkn-operator-crd-sync")' \
+  "$work_dir/base.yaml" >/dev/null; then
+  echo "CRD migration hook must only render for upgrades" >&2
+  exit 1
+fi
 
 helm show crds "$chart_dir" > "$work_dir/crds.yaml"
 yq -e 'select(.kind == "CustomResourceDefinition")' \
@@ -27,12 +32,24 @@ if ! yq -e '[select(.kind == "CustomResourceDefinition" and .metadata.labels."ap
 fi
 
 helm template krkn-operator "$chart_dir" --is-upgrade > "$work_dir/upgrade.yaml"
-yq -r 'select(.kind == "Job") | .metadata.annotations."helm.sh/hook"' \
-  "$work_dir/upgrade.yaml" | grep -Fxq 'pre-upgrade'
-yq -r 'select(.kind == "Job") | .spec.template.spec.containers[] | select(.name == "crd-sync") | .args[]' \
+yq -r 'select(.kind == "Job" and .metadata.annotations."helm.sh/hook" == "pre-upgrade") | .spec.template.spec.containers[] | select(.name == "crd-sync") | .args[]' \
+  "$work_dir/upgrade.yaml" > "$work_dir/crd-stage-args.txt"
+yq -r 'select(.kind == "Job" and .metadata.annotations."helm.sh/hook" == "post-upgrade") | .spec.template.spec.containers[] | select(.name == "crd-sync") | .args[]' \
   "$work_dir/upgrade.yaml" > "$work_dir/crd-sync-args.txt"
+grep -Fxq -- '--stage-crd-migration' "$work_dir/crd-stage-args.txt"
 grep -Fxq -- '--sync-crds' "$work_dir/crd-sync-args.txt"
 grep -Fxq -- '--crd-dir=/crds' "$work_dir/crd-sync-args.txt"
+yq -r 'select(.kind == "Role" and .metadata.name == "krkn-operator-crd-sync-runs") | .rules[] | [.apiGroups[0], (.resources | join(",")), (.verbs | join(","))] | join("|")' \
+  "$work_dir/upgrade.yaml" > "$work_dir/crd-sync-rules.txt"
+grep -Fxq 'krkn.krkn-chaos.dev|krknscenarioruns,krkngraphruns|list,patch' "$work_dir/crd-sync-rules.txt"
+grep -Fxq 'krkn.krkn-chaos.dev|krknscenarioruns/status,krkngraphruns/status|patch' "$work_dir/crd-sync-rules.txt"
+grep -Fxq 'apps|deployments|get' "$work_dir/crd-sync-rules.txt"
+grep -Fxq '|configmaps|get,create,delete' "$work_dir/crd-sync-rules.txt"
+yq -r 'select(.kind == "Job") | .spec.template.spec.containers[] | select(.name == "crd-sync") | .env[] | select(.name == "POD_NAMESPACE") | .value' \
+  "$work_dir/upgrade.yaml" > "$work_dir/pod-namespaces.txt"
+grep -Fxq 'default' "$work_dir/pod-namespaces.txt"
+yq -r 'select(.kind == "Job" and .metadata.annotations."helm.sh/hook" == "post-upgrade") | .spec.template.spec.containers[] | select(.name == "crd-sync") | .env[] | select(.name == "OPERATOR_DEPLOYMENT_NAME") | .value' \
+  "$work_dir/upgrade.yaml" | grep -Fxq 'krkn-operator-operator'
 
 yq -e 'select(.kind == "ConfigMap" and .metadata.name == "krkn-operator-console-nginx") | .data["nginx.conf"] | contains("proxy_pass http://krkn-operator-operator:8080;")' \
   "$work_dir/base.yaml" >/dev/null

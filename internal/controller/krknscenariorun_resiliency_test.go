@@ -388,6 +388,54 @@ func TestHasIncompleteResiliencyScores(t *testing.T) {
 	}
 }
 
+func TestBackfillLegacyGraphResiliencyScoreStatuses(t *testing.T) {
+	tests := []struct {
+		name       string
+		labels     map[string]string
+		scores     []krknv1alpha1.ClusterResiliencyScore
+		wantScores []krknv1alpha1.ClusterResiliencyScore
+		wantCount  int
+	}{
+		{
+			name:   "backfills old graph scores",
+			labels: map[string]string{"krkn.dev/graph-run": "graph-1"},
+			scores: []krknv1alpha1.ClusterResiliencyScore{
+				{ClusterName: "cluster-a", Score: 82},
+				{ClusterName: "cluster-b", Score: 0, Status: "error", Message: "legacy error"},
+			},
+			wantScores: []krknv1alpha1.ClusterResiliencyScore{
+				{ClusterName: "cluster-a", Score: 82, Status: "calculated"},
+				{ClusterName: "cluster-b", Score: 0, Status: "error", Message: "legacy error"},
+			},
+			wantCount: 1,
+		},
+		{
+			name:   "does not alter standalone scores",
+			labels: map[string]string{},
+			scores: []krknv1alpha1.ClusterResiliencyScore{
+				{ClusterName: "cluster-a", Score: 82},
+			},
+			wantScores: []krknv1alpha1.ClusterResiliencyScore{
+				{ClusterName: "cluster-a", Score: 82},
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			run := &krknv1alpha1.KrknScenarioRun{
+				ObjectMeta: metav1.ObjectMeta{Labels: tc.labels},
+				Status:     krknv1alpha1.KrknScenarioRunStatus{ResiliencyScores: tc.scores},
+			}
+
+			if got := backfillLegacyGraphResiliencyScoreStatuses(run); got != tc.wantCount {
+				t.Fatalf("backfilled %d scores, want %d", got, tc.wantCount)
+			}
+			assert.Equal(t, tc.wantScores, run.Status.ResiliencyScores)
+		})
+	}
+}
+
 func TestResiliencyScoreEnvVarInjection(t *testing.T) {
 	tests := []struct {
 		name       string
