@@ -702,9 +702,6 @@ func planScenarioRun(plan *migrationPlan, spec, status map[string]interface{}) {
 	if len(plan.ClusterJobRetries) > 0 {
 		plan.Fields = append(plan.Fields, "legacy retry settings preserved")
 	}
-	if len(plan.ResiliencyStatuses) > 0 {
-		// Field-level messages above describe the migration details.
-	}
 }
 
 func planGraphRun(plan *migrationPlan, spec map[string]interface{}) {
