@@ -87,6 +87,7 @@ func main() {
 	var grpcServerAddr string
 	var bootstrapResources bool
 	var syncCRDs bool
+	var stageCRDMigration bool
 	var crdDirectory string
 	var tlsOpts []func(*tls.Config)
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
@@ -109,7 +110,8 @@ func main() {
 	flag.IntVar(&apiPort, "api-port", 8080, "The port for the REST API server")
 	flag.StringVar(&grpcServerAddr, "grpc-server-address", "localhost:50051", "The address of the gRPC data provider server")
 	flag.BoolVar(&bootstrapResources, "bootstrap-resources", false, "Create resources required by OLM before starting the operator")
-	flag.BoolVar(&syncCRDs, "sync-crds", false, "Create missing CRDs and update changed CRD specs before starting the operator")
+	flag.BoolVar(&stageCRDMigration, "stage-crd-migration", false, "Snapshot legacy custom-resource fields before an operator rollout")
+	flag.BoolVar(&syncCRDs, "sync-crds", false, "Synchronize CRDs and complete staged custom-resource migrations after an operator rollout")
 	flag.StringVar(&crdDirectory, "crd-dir", "/crds", "Directory containing CustomResourceDefinition manifests")
 	opts := zap.Options{
 		Development: true,
@@ -119,13 +121,41 @@ func main() {
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
-	if syncCRDs {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-		names, err := crdinstaller.Sync(ctx, ctrl.GetConfigOrDie(), crdDirectory)
-		cancel()
+	if stageCRDMigration && syncCRDs {
+		setupLog.Error(fmt.Errorf("--stage-crd-migration and --sync-crds cannot be used together"), "invalid CRD migration mode")
+		os.Exit(2)
+	}
+	if stageCRDMigration || syncCRDs {
+		migrationNamespace := resolveMigrationNamespace(os.Getenv)
+		var names []string
+		handled, err := runCRDMigrationMode(stageCRDMigration, syncCRDs, migrationNamespace, os.Getenv("OPERATOR_DEPLOYMENT_NAME"), crdDirectory,
+			func(namespace string) error {
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+				defer cancel()
+				return crdinstaller.Stage(ctx, ctrl.GetConfigOrDie(), namespace, setupLog.WithName("crd-migration-stage"))
+			},
+			func(namespace, deployment, directory string) error {
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+				defer cancel()
+				var syncErr error
+				names, syncErr = crdinstaller.Sync(ctx, ctrl.GetConfigOrDie(), directory, namespace, deployment, setupLog.WithName("crd-sync"))
+				return syncErr
+			})
+		if !handled {
+			setupLog.Error(err, "invalid CRD migration mode")
+			os.Exit(2)
+		}
 		if err != nil {
-			setupLog.Error(err, "unable to synchronize CRDs", "directory", crdDirectory)
+			if stageCRDMigration {
+				setupLog.Error(err, "unable to stage custom-resource migration", "namespace", migrationNamespace)
+			} else {
+				setupLog.Error(err, "unable to synchronize CRDs", "directory", crdDirectory)
+			}
 			os.Exit(1)
+		}
+		if stageCRDMigration {
+			setupLog.Info("custom-resource migration staged", "namespace", migrationNamespace)
+			return
 		}
 		setupLog.Info("CRDs synchronized", "count", len(names), "directory", crdDirectory)
 		return
@@ -415,6 +445,32 @@ func main() {
 		setupLog.Error(err, "problem running manager")
 		os.Exit(1)
 	}
+}
+
+func resolveMigrationNamespace(getenv func(string) string) string {
+	if namespace := getenv("POD_NAMESPACE"); namespace != "" {
+		return namespace
+	}
+	if namespace := getenv("KRKN_NAMESPACE"); namespace != "" {
+		return namespace
+	}
+	return "krkn-operator-system"
+}
+
+func runCRDMigrationMode(stage, sync bool, namespace, deployment, directory string, stageFn func(string) error, syncFn func(string, string, string) error) (bool, error) {
+	if stage && sync {
+		return false, fmt.Errorf("--stage-crd-migration and --sync-crds cannot be used together")
+	}
+	if !stage && !sync {
+		return false, nil
+	}
+	if stage {
+		return true, stageFn(namespace)
+	}
+	if deployment == "" {
+		return true, fmt.Errorf("OPERATOR_DEPLOYMENT_NAME is required when --sync-crds is set")
+	}
+	return true, syncFn(namespace, deployment, directory)
 }
 
 var (

@@ -136,6 +136,24 @@ func (r *KrknScenarioRunReconciler) calculateResiliencyScores(
 	return nil
 }
 
+// backfillLegacyGraphResiliencyScoreStatuses repairs scores persisted by older
+// GraphRun controllers, which only wrote entries after successfully parsing a
+// report and did not set Status.
+func backfillLegacyGraphResiliencyScoreStatuses(scenarioRun *krknv1alpha1.KrknScenarioRun) int {
+	if _, isGraphRun := scenarioRun.Labels["krkn.dev/graph-run"]; !isGraphRun {
+		return 0
+	}
+
+	var updated int
+	for i := range scenarioRun.Status.ResiliencyScores {
+		if scenarioRun.Status.ResiliencyScores[i].Status == "" {
+			scenarioRun.Status.ResiliencyScores[i].Status = "calculated"
+			updated++
+		}
+	}
+	return updated
+}
+
 // fetchScenarioRunPodLogs fetches logs from a specific pod with exponential backoff retry.
 func (r *KrknScenarioRunReconciler) fetchScenarioRunPodLogs(ctx context.Context, namespace, podName string) ([]byte, error) {
 	logger := log.FromContext(ctx).WithName("fetch-pod-logs")

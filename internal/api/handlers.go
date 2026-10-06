@@ -1221,9 +1221,13 @@ func (h *Handler) PostScenarioGlobals(w http.ResponseWriter, r *http.Request) {
 // @Failure 403 {object} ErrorResponse "Insufficient permissions"
 // @Failure 404 {object} ErrorResponse "Target or scenario not found"
 // @Failure 500 {object} ErrorResponse "Internal server error"
+// @Failure 503 {object} ErrorResponse "Run operations are temporarily unavailable during CRD migration"
 // @Security BearerAuth
 // @Router /scenarios/run [post]
 func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
+	if h.rejectRunWritesDuringCRDMigration(w, r) {
+		return
+	}
 	ctx := r.Context()
 	logger := log.FromContext(ctx)
 
@@ -2603,9 +2607,13 @@ func (h *Handler) GetActiveRunsOverview(w http.ResponseWriter, r *http.Request) 
 // @Failure 403 {object} ErrorResponse "Insufficient permissions"
 // @Failure 404 {object} ErrorResponse "Scenario run not found"
 // @Failure 500 {object} ErrorResponse "Internal server error"
+// @Failure 503 {object} ErrorResponse "Run operations are temporarily unavailable during CRD migration"
 // @Security BearerAuth
 // @Router /scenarios/run/{jobID} [delete]
 func (h *Handler) DeleteScenarioRun(w http.ResponseWriter, r *http.Request) {
+	if h.rejectRunWritesDuringCRDMigration(w, r) {
+		return
+	}
 	jobID, err := extractPathSuffix(r.URL.Path, ScenariosRunPath+"/")
 	if err != nil {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
@@ -2698,7 +2706,12 @@ func (h *Handler) DeleteScenarioRun(w http.ResponseWriter, r *http.Request) {
 
 // DeleteScenarioRunComplete handles DELETE /api/v1/scenarios/run/{scenarioRunName}
 // It deletes the entire KrknScenarioRun CR (all jobs)
+//
+// @Failure 503 {object} ErrorResponse "Run operations are temporarily unavailable during CRD migration"
 func (h *Handler) DeleteScenarioRunComplete(w http.ResponseWriter, r *http.Request) {
+	if h.rejectRunWritesDuringCRDMigration(w, r) {
+		return
+	}
 	scenarioRunName, err := extractPathSuffix(r.URL.Path, ScenariosRunPath+"/")
 	if err != nil {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
@@ -2787,7 +2800,12 @@ func (h *Handler) DeleteScenarioRunComplete(w http.ResponseWriter, r *http.Reque
 
 // DeleteSingleJob handles DELETE /api/v1/scenarios/run/jobs/{jobID}
 // It cancels a single job by setting CancelRequested flag and deleting the pod
+//
+// @Failure 503 {object} ErrorResponse "Run operations are temporarily unavailable during CRD migration"
 func (h *Handler) DeleteSingleJob(w http.ResponseWriter, r *http.Request) {
+	if h.rejectRunWritesDuringCRDMigration(w, r) {
+		return
+	}
 	// Parse path: /api/v1/scenarios/run/jobs/{jobID}
 	jobID, err := extractPathSuffix(r.URL.Path, ScenariosRunJobsPath+"/")
 	if err != nil {

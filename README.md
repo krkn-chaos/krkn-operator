@@ -25,8 +25,27 @@ helm upgrade krkn-operator oci://quay.io/krkn-chaos/charts/krkn-operator --versi
 ```
 
 Helm installs CRDs from the chart on a fresh install but does not upgrade files
-under `crds/`. During `helm upgrade`, the chart runs a pre-upgrade job that adds
-missing CRDs and updates changed schemas from the operator image.
+under `crds/`. During `helm upgrade`, a pre-upgrade hook snapshots legacy run
+fields and creates a migration guard in the chart release namespace. While the
+guard exists, run reconciliation pauses and the scenario and graph run creation
+and mutation API endpoints return HTTP 503. Helm then rolls out the new operator. A
+post-upgrade hook waits for that Deployment, synchronizes CRDs from `/crds`,
+completes the saved migrations, and removes the guard.
+
+The hook jobs use `POD_NAMESPACE` set from the chart namespace and the chart's
+operator Deployment name. They run `/manager --stage-crd-migration` before the
+rollout and `/manager --sync-crds --crd-dir=/crds` afterward. Their hook Role and
+ClusterRole grant access to the namespace's run resources and migration
+ConfigMap, plus the cluster-scoped CRDs. These hooks have a six-minute deadline;
+both commands can be retried safely.
+
+If the post-upgrade hook fails, the guard remains active so old controllers do
+not reconcile resources against partially updated schemas. Fix the reported
+cause and retry the same `helm upgrade`; the hooks resume from the saved
+annotations. If the operator reports an individual run as blocked, inspect the
+hook logs, restore the missing current-API scenario or graph identity (and a
+registry name for private scenarios), then retry the upgrade. A blocked run
+keeps its migration annotation until completion succeeds.
 
 ### OLM / OperatorHub bundles
 

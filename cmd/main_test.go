@@ -20,6 +20,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -31,6 +32,55 @@ import (
 	"github.com/krkn-chaos/krkn-operator/pkg/configstore"
 	"github.com/krkn-chaos/krkn-operator/pkg/provider"
 )
+
+func TestResolveMigrationNamespacePrefersHookNamespace(t *testing.T) {
+	values := map[string]string{"POD_NAMESPACE": "release-ns", "KRKN_NAMESPACE": "override-ns"}
+	got := resolveMigrationNamespace(func(key string) string { return values[key] })
+	if got != "release-ns" {
+		t.Fatalf("namespace = %q, want POD_NAMESPACE release namespace", got)
+	}
+	delete(values, "POD_NAMESPACE")
+	if got := resolveMigrationNamespace(func(key string) string { return values[key] }); got != "override-ns" {
+		t.Fatalf("namespace = %q, want KRKN_NAMESPACE override", got)
+	}
+	values = map[string]string{}
+	if got := resolveMigrationNamespace(func(key string) string { return values[key] }); got != "krkn-operator-system" {
+		t.Fatalf("namespace = %q, want default", got)
+	}
+}
+
+func TestRunCRDMigrationMode(t *testing.T) {
+	markerErr := errors.New("migration failed")
+	t.Run("stage mode", func(t *testing.T) {
+		called := false
+		handled, err := runCRDMigrationMode(true, false, "release", "", "/crds", func(namespace string) error {
+			called = namespace == "release"
+			return markerErr
+		}, func(string, string, string) error { t.Fatal("sync callback called in stage mode"); return nil })
+		if !handled || !called || !errors.Is(err, markerErr) {
+			t.Fatalf("handled=%t called=%t err=%v", handled, called, err)
+		}
+	})
+	t.Run("sync mode", func(t *testing.T) {
+		called := false
+		handled, err := runCRDMigrationMode(false, true, "release", "operator", "/crds", func(string) error { t.Fatal("stage callback called in sync mode"); return nil }, func(namespace, deployment, directory string) error {
+			called = namespace == "release" && deployment == "operator" && directory == "/crds"
+			return markerErr
+		})
+		if !handled || !called || !errors.Is(err, markerErr) {
+			t.Fatalf("handled=%t called=%t err=%v", handled, called, err)
+		}
+	})
+	if handled, err := runCRDMigrationMode(false, true, "release", "", "/crds", nil, nil); !handled || err == nil {
+		t.Fatalf("missing deployment: handled=%t err=%v", handled, err)
+	}
+	if handled, err := runCRDMigrationMode(true, true, "release", "operator", "/crds", nil, nil); handled || err == nil {
+		t.Fatalf("conflicting modes: handled=%t err=%v", handled, err)
+	}
+	if handled, err := runCRDMigrationMode(false, false, "release", "", "/crds", nil, nil); handled || err != nil {
+		t.Fatalf("normal mode: handled=%t err=%v", handled, err)
+	}
+}
 
 func TestConfigStoreInitializer_Start_Success(t *testing.T) {
 	scheme := runtime.NewScheme()
