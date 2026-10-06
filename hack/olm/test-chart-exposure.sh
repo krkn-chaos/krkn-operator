@@ -44,7 +44,7 @@ yq -r 'select(.kind == "Role" and .metadata.name == "krkn-operator-crd-sync-runs
 grep -Fxq 'krkn.krkn-chaos.dev|krknscenarioruns,krkngraphruns|list,patch' "$work_dir/crd-sync-rules.txt"
 grep -Fxq 'krkn.krkn-chaos.dev|krknscenarioruns/status,krkngraphruns/status|patch' "$work_dir/crd-sync-rules.txt"
 grep -Fxq 'apps|deployments|get' "$work_dir/crd-sync-rules.txt"
-grep -Fxq '|configmaps|get,create,delete' "$work_dir/crd-sync-rules.txt"
+grep -Fxq '|configmaps|get,create,update,delete' "$work_dir/crd-sync-rules.txt"
 yq -r 'select(.kind == "Job") | .spec.template.spec.containers[] | select(.name == "crd-sync") | .env[] | select(.name == "POD_NAMESPACE") | .value' \
   "$work_dir/upgrade.yaml" > "$work_dir/pod-namespaces.txt"
 grep -Fxq 'default' "$work_dir/pod-namespaces.txt"
