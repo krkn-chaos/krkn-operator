@@ -110,6 +110,7 @@ type CategoryEntityAssociationResponse struct {
 // @Failure 404 {object} ErrorResponse "Category or run not found"
 // @Failure 409 {object} ErrorResponse "Run changed concurrently"
 // @Failure 500 {object} ErrorResponse "Internal server error"
+// @Failure 503 {object} ErrorResponse "Run operations are temporarily unavailable during CRD migration"
 // @Security BearerAuth
 // @Router /v2/categories/{category}/entities/{entityType}/{entityName} [put]
 func (h *Handler) AssociateCategoryEntity(w http.ResponseWriter, r *http.Request, categoryName, entityType, entityName string) {
@@ -132,6 +133,7 @@ func (h *Handler) AssociateCategoryEntity(w http.ResponseWriter, r *http.Request
 // @Failure 404 {object} ErrorResponse "Category or run not found"
 // @Failure 409 {object} ErrorResponse "Run changed concurrently"
 // @Failure 500 {object} ErrorResponse "Internal server error"
+// @Failure 503 {object} ErrorResponse "Run operations are temporarily unavailable during CRD migration"
 // @Security BearerAuth
 // @Router /v2/categories/{category}/entities/{entityType}/{entityName} [delete]
 func (h *Handler) UnassociateCategoryEntity(w http.ResponseWriter, r *http.Request, categoryName, entityType, entityName string) {
@@ -144,6 +146,9 @@ func (h *Handler) changeCategoryEntityAssociation(
 	categoryName, entityType, entityName string,
 	associate bool,
 ) {
+	if h.rejectRunWritesDuringCRDMigration(w, r) {
+		return
+	}
 	ctx := r.Context()
 	claims := auth.GetClaimsFromContext(ctx)
 	if claims == nil {

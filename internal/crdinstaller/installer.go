@@ -4,6 +4,7 @@ package crdinstaller
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -41,6 +42,7 @@ type deploymentClient interface {
 type configMapClient interface {
 	Get(context.Context, string, metav1.GetOptions) (*corev1.ConfigMap, error)
 	Create(context.Context, *corev1.ConfigMap, metav1.CreateOptions) (*corev1.ConfigMap, error)
+	Update(context.Context, *corev1.ConfigMap, metav1.UpdateOptions) (*corev1.ConfigMap, error)
 	Delete(context.Context, string, metav1.DeleteOptions) error
 }
 
@@ -49,15 +51,22 @@ const (
 	operatorLabelValue = "krkn-operator"
 	guardLabelKey      = "app.kubernetes.io/component"
 	guardLabelValue    = "crd-migration"
+	guardDeadline      = 6 * time.Minute
 )
 
 // Stage records legacy custom-resource values before the operator deployment is upgraded.
+// If the post-upgrade hook fails, retry the Helm upgrade to resume synchronization.
 func Stage(ctx context.Context, config *rest.Config, namespace string, logger logr.Logger) error {
 	kubeClient, err := kubernetes.NewForConfig(config)
 	if err != nil {
 		return fmt.Errorf("create Kubernetes client for migration guard: %w", err)
 	}
 	if err := ensureMigrationGuard(ctx, kubeClient.CoreV1().ConfigMaps(namespace)); err != nil {
+		return err
+	}
+	guardClient := kubeClient.CoreV1().ConfigMaps(namespace)
+	logStaleMigrationGuard(ctx, guardClient, namespace, "stageStartedAt", logger)
+	if err := markMigrationStarted(ctx, guardClient, "stageStartedAt"); err != nil {
 		return err
 	}
 	logger.Info("custom resource migration guard is active", "namespace", namespace)
@@ -72,15 +81,21 @@ func Stage(ctx context.Context, config *rest.Config, namespace string, logger lo
 }
 
 // Sync creates missing CRDs and updates changed specs after the new operator is ready.
+// Failures leave the migration guard in place; retry the Helm upgrade to resume.
 func Sync(ctx context.Context, config *rest.Config, directory, namespace, operatorDeployment string, logger logr.Logger) ([]string, error) {
 	kubeClient, err := kubernetes.NewForConfig(config)
 	if err != nil {
 		return nil, fmt.Errorf("create Kubernetes client for operator rollout check: %w", err)
 	}
-	if err := waitForDeploymentReady(ctx, kubeClient.AppsV1().Deployments(namespace), operatorDeployment, logger); err != nil {
+	guardClient := kubeClient.CoreV1().ConfigMaps(namespace)
+	if err := ensureMigrationGuard(ctx, guardClient); err != nil {
 		return nil, err
 	}
-	if err := ensureMigrationGuard(ctx, kubeClient.CoreV1().ConfigMaps(namespace)); err != nil {
+	logStaleMigrationGuard(ctx, guardClient, namespace, "syncStartedAt", logger)
+	if err := markMigrationStarted(ctx, guardClient, "syncStartedAt"); err != nil {
+		return nil, err
+	}
+	if err := waitForDeploymentReady(ctx, kubeClient.AppsV1().Deployments(namespace), operatorDeployment, logger); err != nil {
 		return nil, err
 	}
 	dynamicClient, err := dynamic.NewForConfig(config)
@@ -140,6 +155,44 @@ func ensureMigrationGuard(ctx context.Context, client configMapClient) error {
 	}
 	if err != nil {
 		return fmt.Errorf("create custom resource migration guard ConfigMap %q: %w", crdmigration.GuardConfigMapName, err)
+	}
+	return nil
+}
+
+func logStaleMigrationGuard(ctx context.Context, client configMapClient, namespace, timestampKey string, logger logr.Logger) {
+	guard, err := client.Get(ctx, crdmigration.GuardConfigMapName, metav1.GetOptions{})
+	if err != nil {
+		logger.Error(err, "unable to inspect custom resource migration guard age", "namespace", namespace)
+		return
+	}
+	value := guard.Data[timestampKey]
+	if value == "" {
+		return
+	}
+	startedAt, err := time.Parse(time.RFC3339, value)
+	if err != nil {
+		logger.Error(err, "custom resource migration guard has an invalid start time; retry the Helm upgrade if migration is incomplete", "namespace", namespace, "timestampKey", timestampKey)
+		return
+	}
+	if age := time.Since(startedAt); age > guardDeadline {
+		logger.Error(errors.New("migration guard is older than hook deadline"), "custom resource migration guard remains active; retry the Helm upgrade to resume synchronization", "namespace", namespace, "age", age.Round(time.Second).String(), "hookDeadline", guardDeadline.String())
+	}
+}
+
+func markMigrationStarted(ctx context.Context, client configMapClient, timestampKey string) error {
+	guard, err := client.Get(ctx, crdmigration.GuardConfigMapName, metav1.GetOptions{})
+	if err != nil {
+		return fmt.Errorf("get custom resource migration guard before %s: %w", timestampKey, err)
+	}
+	if guard.Labels[operatorLabelKey] != operatorLabelValue || guard.Labels[guardLabelKey] != guardLabelValue {
+		return fmt.Errorf("ConfigMap %q is not the operator CRD migration guard", crdmigration.GuardConfigMapName)
+	}
+	if guard.Data == nil {
+		guard.Data = map[string]string{}
+	}
+	guard.Data[timestampKey] = time.Now().UTC().Format(time.RFC3339)
+	if _, err := client.Update(ctx, guard, metav1.UpdateOptions{}); err != nil {
+		return fmt.Errorf("record %s in migration guard: %w", timestampKey, err)
 	}
 	return nil
 }

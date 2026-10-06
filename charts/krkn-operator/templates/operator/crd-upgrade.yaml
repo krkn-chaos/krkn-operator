@@ -53,6 +53,7 @@ rules:
   verbs:
   - get
   - create
+  - update
   - delete
 - apiGroups:
   - apps
@@ -159,9 +160,6 @@ spec:
           value: {{ include "krkn-operator.namespace" . | quote }}
         - name: OPERATOR_DEPLOYMENT_NAME
           value: {{ include "krkn-operator.operator.fullname" . | quote }}
-        {{- with .Values.operator.extraEnv }}
-        {{- toYaml . | nindent 8 }}
-        {{- end }}
         resources:
           {{- toYaml .Values.operator.resources | nindent 10 }}
         securityContext:
@@ -216,9 +214,6 @@ spec:
           value: {{ include "krkn-operator.namespace" . | quote }}
         - name: OPERATOR_DEPLOYMENT_NAME
           value: {{ include "krkn-operator.operator.fullname" . | quote }}
-        {{- with .Values.operator.extraEnv }}
-        {{- toYaml . | nindent 8 }}
-        {{- end }}
         resources:
           {{- toYaml .Values.operator.resources | nindent 10 }}
         securityContext:

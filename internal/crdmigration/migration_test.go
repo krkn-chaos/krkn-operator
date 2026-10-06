@@ -138,6 +138,7 @@ func TestStageRefreshesSnapshotForLegacyFieldsWrittenDuringRollout(t *testing.T)
 	jobs = append(jobs, map[string]interface{}{
 		"clusterName":    "cluster-b",
 		"jobId":          "job-b",
+		"phase":          "Succeeded",
 		"podName":        "scenario-pod-b",
 		"containerImage": "quay.io/krkn/scenario:scenario-b",
 		"maxRetries":     int64(4),
@@ -165,6 +166,399 @@ func TestStageRefreshesSnapshotForLegacyFieldsWrittenDuringRollout(t *testing.T)
 	}
 	if plan.ClusterJobImages[1].Image != "quay.io/krkn/scenario:scenario-b" {
 		t.Fatalf("refreshed second cluster job image = %q", plan.ClusterJobImages[1].Image)
+	}
+}
+
+func TestCompleteUsesNewerScenarioAndGraphReferences(t *testing.T) {
+	ctx := context.Background()
+	run := scenarioRunFixture("operator", "newer-reference-run")
+	graph := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "krkn.krkn-chaos.dev/v1alpha1",
+		"kind":       "KrknGraphRun",
+		"metadata":   map[string]interface{}{"name": "newer-reference-graph", "namespace": "operator"},
+		"spec": map[string]interface{}{"graph": map[string]interface{}{
+			"node-a": map[string]interface{}{"name": "older-graph-scenario", "registryName": "saved-registry"},
+		}},
+	}}
+	client := newMigrationClient(run, graph)
+	if err := Stage(ctx, client, "operator", logr.Discard()); err != nil {
+		t.Fatalf("stage migration: %v", err)
+	}
+
+	stagedRun, err := client.Resource(resources[0].gvr).Namespace("operator").Get(ctx, run.GetName(), metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := unstructured.SetNestedMap(stagedRun.Object, map[string]interface{}{"name": "newer-scenario", "private": false}, "spec", "scenario"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.Resource(resources[0].gvr).Namespace("operator").Update(ctx, stagedRun, metav1.UpdateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	stagedGraph, err := client.Resource(resources[1].gvr).Namespace("operator").Get(ctx, graph.GetName(), metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := unstructured.SetNestedMap(stagedGraph.Object, map[string]interface{}{"name": "newer-graph-scenario", "private": false}, "spec", "graph", "node-a", "scenario"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.Resource(resources[1].gvr).Namespace("operator").Update(ctx, stagedGraph, metav1.UpdateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := Stage(ctx, client, "operator", logr.Discard()); err != nil {
+		t.Fatalf("refresh migration snapshots: %v", err)
+	}
+	refreshedRun, err := client.Resource(resources[0].gvr).Namespace("operator").Get(ctx, run.GetName(), metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	refreshedPlan := migrationPlan{}
+	if err := json.Unmarshal([]byte(refreshedRun.GetAnnotations()[AnnotationKey]), &refreshedPlan); err != nil {
+		t.Fatal(err)
+	}
+	if refreshedPlan.Scenario["name"] != "newer-scenario" {
+		t.Fatalf("Stage retained stale ScenarioRun reference: %#v", refreshedPlan.Scenario)
+	}
+	refreshedGraph, err := client.Resource(resources[1].gvr).Namespace("operator").Get(ctx, graph.GetName(), metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	refreshedPlan = migrationPlan{}
+	if err := json.Unmarshal([]byte(refreshedGraph.GetAnnotations()[AnnotationKey]), &refreshedPlan); err != nil {
+		t.Fatal(err)
+	}
+	if refreshedPlan.GraphScenarios["node-a"].(map[string]interface{})["name"] != "newer-graph-scenario" {
+		t.Fatalf("Stage retained stale GraphRun reference: %#v", refreshedPlan.GraphScenarios)
+	}
+
+	if err := unstructured.SetNestedMap(refreshedRun.Object, map[string]interface{}{"name": "latest-scenario", "private": false}, "spec", "scenario"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.Resource(resources[0].gvr).Namespace("operator").Update(ctx, refreshedRun, metav1.UpdateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := unstructured.SetNestedMap(refreshedGraph.Object, map[string]interface{}{"name": "latest-graph-scenario", "private": false}, "spec", "graph", "node-a", "scenario"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.Resource(resources[1].gvr).Namespace("operator").Update(ctx, refreshedGraph, metav1.UpdateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := Complete(ctx, client, "operator", logr.Discard()); err != nil {
+		t.Fatalf("complete migration: %v", err)
+	}
+	gotRun, err := client.Resource(resources[0].gvr).Namespace("operator").Get(ctx, run.GetName(), metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runReference, _, _ := unstructured.NestedMap(gotRun.Object, "spec", "scenario")
+	if runReference["name"] != "latest-scenario" {
+		t.Fatalf("scenario reference = %#v, want newer identity", runReference)
+	}
+	gotGraph, err := client.Resource(resources[1].gvr).Namespace("operator").Get(ctx, graph.GetName(), metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	graphReference, _, _ := unstructured.NestedMap(gotGraph.Object, "spec", "graph", "node-a", "scenario")
+	if graphReference["name"] != "latest-graph-scenario" {
+		t.Fatalf("graph reference = %#v, want newer identity", graphReference)
+	}
+}
+
+func TestCompleteKeepsUnrecoverableObjectsAnnotatedAndUnchanged(t *testing.T) {
+	t.Run("required job phase missing", func(t *testing.T) {
+		ctx := context.Background()
+		legacy := scenarioRunFixture("operator", "missing-phase-run")
+		status, _, _ := unstructured.NestedMap(legacy.Object, "status")
+		jobs, _, _ := unstructured.NestedSlice(status, "clusterJobs")
+		delete(jobs[0].(map[string]interface{}), "phase")
+		status["clusterJobs"] = jobs
+		_ = unstructured.SetNestedMap(legacy.Object, status, "status")
+		client := newMigrationClient(legacy)
+		if err := Stage(ctx, client, "operator", logr.Discard()); err != nil {
+			t.Fatal(err)
+		}
+		if err := Complete(ctx, client, "operator", logr.Discard()); err != nil {
+			t.Fatal(err)
+		}
+		got, err := client.Resource(resources[0].gvr).Namespace("operator").Get(ctx, legacy.GetName(), metav1.GetOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.GetAnnotations()[AnnotationKey] == "" {
+			t.Fatal("blocked object lost its migration marker")
+		}
+		jobs, _, _ = unstructured.NestedSlice(got.Object, "status", "clusterJobs")
+		if _, exists := jobs[0].(map[string]interface{})["scenarioImage"]; exists {
+			t.Fatal("status migration changed an object whose full job list fails the current CRD schema")
+		}
+	})
+
+	t.Run("required provider is ambiguous", func(t *testing.T) {
+		ctx := context.Background()
+		legacy := scenarioRunFixture("operator", "ambiguous-job-provider-run")
+		spec, _, _ := unstructured.NestedMap(legacy.Object, "spec")
+		spec["targetClusters"] = map[string]interface{}{
+			"provider-a": []interface{}{"cluster-a"},
+			"provider-b": []interface{}{"cluster-a"},
+		}
+		_ = unstructured.SetNestedMap(legacy.Object, spec, "spec")
+		status, _, _ := unstructured.NestedMap(legacy.Object, "status")
+		jobs, _, _ := unstructured.NestedSlice(status, "clusterJobs")
+		delete(jobs[0].(map[string]interface{}), "providerName")
+		status["clusterJobs"] = jobs
+		_ = unstructured.SetNestedMap(legacy.Object, status, "status")
+		client := newMigrationClient(legacy)
+		if err := Stage(ctx, client, "operator", logr.Discard()); err != nil {
+			t.Fatal(err)
+		}
+		if err := Complete(ctx, client, "operator", logr.Discard()); err != nil {
+			t.Fatal(err)
+		}
+		got, err := client.Resource(resources[0].gvr).Namespace("operator").Get(ctx, legacy.GetName(), metav1.GetOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.GetAnnotations()[AnnotationKey] == "" {
+			t.Fatal("job with an ambiguous provider lost its migration marker")
+		}
+		jobs, _, _ = unstructured.NestedSlice(got.Object, "status", "clusterJobs")
+		if _, exists := jobs[0].(map[string]interface{})["scenarioImage"]; exists {
+			t.Fatal("status migration guessed a provider and changed the required job list")
+		}
+	})
+
+	t.Run("scenario identity missing", func(t *testing.T) {
+		ctx := context.Background()
+		legacy := scenarioRunFixture("operator", "missing-identity-run")
+		spec, _, _ := unstructured.NestedMap(legacy.Object, "spec")
+		delete(spec, "scenarioName")
+		delete(spec, "registryName")
+		_ = unstructured.SetNestedMap(legacy.Object, spec, "spec")
+		client := newMigrationClient(legacy)
+		if err := Stage(ctx, client, "operator", logr.Discard()); err != nil {
+			t.Fatal(err)
+		}
+		if err := Complete(ctx, client, "operator", logr.Discard()); err != nil {
+			t.Fatal(err)
+		}
+		got, err := client.Resource(resources[0].gvr).Namespace("operator").Get(ctx, legacy.GetName(), metav1.GetOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.GetAnnotations()[AnnotationKey] == "" {
+			t.Fatal("unrecoverable object lost its migration marker")
+		}
+		if _, found, _ := unstructured.NestedMap(got.Object, "spec", "scenario"); found {
+			t.Fatal("migration guessed an unrecoverable scenario identity")
+		}
+	})
+
+	t.Run("private inline credentials without registry name", func(t *testing.T) {
+		ctx := context.Background()
+		legacy := scenarioRunFixture("operator", "missing-registry-run")
+		spec, _, _ := unstructured.NestedMap(legacy.Object, "spec")
+		delete(spec, "registryName")
+		spec["scenario"] = map[string]interface{}{"name": "scenario-a", "private": true}
+		_ = unstructured.SetNestedMap(legacy.Object, spec, "spec")
+		client := newMigrationClient(legacy)
+		if err := Stage(ctx, client, "operator", logr.Discard()); err != nil {
+			t.Fatal(err)
+		}
+		if err := Complete(ctx, client, "operator", logr.Discard()); err != nil {
+			t.Fatal(err)
+		}
+		got, err := client.Resource(resources[0].gvr).Namespace("operator").Get(ctx, legacy.GetName(), metav1.GetOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		gotSpec, _, _ := unstructured.NestedMap(got.Object, "spec")
+		if got.GetAnnotations()[AnnotationKey] == "" || gotSpec["token"] != "do-not-log-this-token" {
+			t.Fatal("ambiguous private credentials were removed or their migration marker was lost")
+		}
+	})
+}
+
+func TestCompleteBlocksMissingStagedGraphNodeWithoutPanicking(t *testing.T) {
+	ctx := context.Background()
+	graph := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "krkn.krkn-chaos.dev/v1alpha1",
+		"kind":       "KrknGraphRun",
+		"metadata":   map[string]interface{}{"name": "missing-node-graph", "namespace": "operator"},
+		"spec": map[string]interface{}{"graph": map[string]interface{}{
+			"node-a": map[string]interface{}{"name": "scenario-a"},
+		}},
+	}}
+	client := newMigrationClient(graph)
+	if err := Stage(ctx, client, "operator", logr.Discard()); err != nil {
+		t.Fatal(err)
+	}
+	staged, err := client.Resource(resources[1].gvr).Namespace("operator").Get(ctx, graph.GetName(), metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := unstructured.SetNestedMap(staged.Object, map[string]interface{}{}, "spec", "graph"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.Resource(resources[1].gvr).Namespace("operator").Update(ctx, staged, metav1.UpdateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := Complete(ctx, client, "operator", logr.Discard()); err != nil {
+		t.Fatalf("Complete should keep the missing-node object blocked without panicking: %v", err)
+	}
+	got, err := client.Resource(resources[1].gvr).Namespace("operator").Get(ctx, graph.GetName(), metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.GetAnnotations()[AnnotationKey] == "" {
+		t.Fatal("missing graph node lost the retry marker")
+	}
+}
+
+func TestCompleteRestoresGraphScenarioAfterSchemaPruning(t *testing.T) {
+	ctx := context.Background()
+	graph := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "krkn.krkn-chaos.dev/v1alpha1",
+		"kind":       "KrknGraphRun",
+		"metadata":   map[string]interface{}{"name": "pruned-node-graph", "namespace": "operator"},
+		"spec": map[string]interface{}{"graph": map[string]interface{}{
+			"node-a": map[string]interface{}{"name": "saved-scenario", "registryName": "saved-registry"},
+		}},
+	}}
+	client := newMigrationClient(graph)
+	if err := Stage(ctx, client, "operator", logr.Discard()); err != nil {
+		t.Fatal(err)
+	}
+	staged, err := client.Resource(resources[1].gvr).Namespace("operator").Get(ctx, graph.GetName(), metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := unstructured.SetNestedMap(staged.Object, map[string]interface{}{}, "spec", "graph", "node-a"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.Resource(resources[1].gvr).Namespace("operator").Update(ctx, staged, metav1.UpdateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := Complete(ctx, client, "operator", logr.Discard()); err != nil {
+		t.Fatalf("complete migration after graph schema pruning: %v", err)
+	}
+	got, err := client.Resource(resources[1].gvr).Namespace("operator").Get(ctx, graph.GetName(), metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.GetAnnotations()[AnnotationKey] != "" {
+		t.Fatal("migrated graph retained the retry marker")
+	}
+	reference, found, err := unstructured.NestedMap(got.Object, "spec", "graph", "node-a", "scenario")
+	if err != nil || !found {
+		t.Fatalf("restored scenario ref: found=%t err=%v", found, err)
+	}
+	if reference["name"] != "saved-scenario" || reference["private"] != true || reference["registryName"] != "saved-registry" {
+		t.Fatalf("restored graph scenario = %#v", reference)
+	}
+}
+
+func TestPlanRejectsMalformedNestedMigrationValues(t *testing.T) {
+	item := scenarioRunFixture("operator", "malformed-run")
+	item.Object["spec"].(map[string]interface{})["scenario"] = "malformed"
+	if _, err := planResource("KrknScenarioRun", item); err == nil || !strings.Contains(err.Error(), "spec.scenario") {
+		t.Fatalf("plan error = %v, want contextual malformed scenario error", err)
+	}
+}
+
+func TestProviderInferenceDoesNotChooseAnAmbiguousProvider(t *testing.T) {
+	item := scenarioRunFixture("operator", "ambiguous-provider-run")
+	spec, _, _ := unstructured.NestedMap(item.Object, "spec")
+	spec["targetClusters"] = map[string]interface{}{
+		"provider-a": []interface{}{"cluster-a"},
+		"provider-b": []interface{}{"cluster-a"},
+	}
+	_ = unstructured.SetNestedMap(item.Object, spec, "spec")
+	status, _, _ := unstructured.NestedMap(item.Object, "status")
+	scores, _, _ := unstructured.NestedSlice(status, "resiliencyScores")
+	delete(scores[0].(map[string]interface{}), "providerName")
+	status["resiliencyScores"] = scores
+	_ = unstructured.SetNestedMap(item.Object, status, "status")
+	plan, err := planResource("KrknScenarioRun", item)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.ClusterJobProviders) != 0 {
+		t.Fatalf("inferred ambiguous job providers: %#v", plan.ClusterJobProviders)
+	}
+	if !containsSubstring(plan.Warnings, "maps to multiple providers") {
+		t.Fatalf("ambiguous score provider was not reported: %#v", plan.Warnings)
+	}
+	if plan.ResiliencyStatuses[0].ProviderName != "" {
+		t.Fatalf("ambiguous score provider = %q, want empty", plan.ResiliencyStatuses[0].ProviderName)
+	}
+}
+
+func TestMigrationInfersUniqueProviderForClusterJobsAndScores(t *testing.T) {
+	ctx := context.Background()
+	legacy := scenarioRunFixture("operator", "missing-job-provider-run")
+	status, _, _ := unstructured.NestedMap(legacy.Object, "status")
+	jobs, _, _ := unstructured.NestedSlice(status, "clusterJobs")
+	delete(jobs[0].(map[string]interface{}), "providerName")
+	status["clusterJobs"] = jobs
+	scores, _, _ := unstructured.NestedSlice(status, "resiliencyScores")
+	delete(scores[0].(map[string]interface{}), "providerName")
+	status["resiliencyScores"] = scores
+	_ = unstructured.SetNestedMap(legacy.Object, status, "status")
+	client := newMigrationClient(legacy)
+	if err := Stage(ctx, client, "operator", logr.Discard()); err != nil {
+		t.Fatal(err)
+	}
+	if err := Complete(ctx, client, "operator", logr.Discard()); err != nil {
+		t.Fatal(err)
+	}
+	got, err := client.Resource(resources[0].gvr).Namespace("operator").Get(ctx, legacy.GetName(), metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	migratedStatus, _, _ := unstructured.NestedMap(got.Object, "status")
+	migratedJobs, _, _ := unstructured.NestedSlice(migratedStatus, "clusterJobs")
+	if migratedJobs[0].(map[string]interface{})["providerName"] != "provider-a" {
+		t.Fatalf("inferred cluster job provider = %#v", migratedJobs[0])
+	}
+	migratedScores, _, _ := unstructured.NestedSlice(migratedStatus, "resiliencyScores")
+	if migratedScores[0].(map[string]interface{})["providerName"] != "provider-a" {
+		t.Fatalf("inferred resiliency score provider = %#v", migratedScores[0])
+	}
+}
+
+func TestCompleteRetriesConflictingStatusAndRootPatches(t *testing.T) {
+	for _, subresource := range []string{"status", ""} {
+		t.Run(map[string]string{"status": "status patch", "": "root patch"}[subresource], func(t *testing.T) {
+			ctx := context.Background()
+			legacy := scenarioRunFixture("operator", "conflict-run")
+			client := newMigrationClient(legacy)
+			if err := Stage(ctx, client, "operator", logr.Discard()); err != nil {
+				t.Fatal(err)
+			}
+			failedOnce := false
+			client.PrependReactor("patch", resources[0].gvr.Resource, func(action ktesting.Action) (bool, runtime.Object, error) {
+				patchAction := action.(ktesting.PatchAction)
+				if patchAction.GetSubresource() == subresource && !failedOnce {
+					failedOnce = true
+					return true, nil, apierrors.NewConflict(resources[0].gvr.GroupResource(), legacy.GetName(), errors.New("concurrent update"))
+				}
+				return false, nil, nil
+			})
+			if err := Complete(ctx, client, "operator", logr.Discard()); err != nil {
+				t.Fatalf("Complete did not retry the conflicting %s: %v", subresource, err)
+			}
+			if !failedOnce {
+				t.Fatal("conflict reactor was not reached")
+			}
+			got, err := client.Resource(resources[0].gvr).Namespace("operator").Get(ctx, legacy.GetName(), metav1.GetOptions{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.GetAnnotations()[AnnotationKey] != "" {
+				t.Fatal("successful retry left the migration marker")
+			}
+		})
 	}
 }
 
@@ -218,7 +612,10 @@ func TestScenarioRunWithUnmappableInlineCredentialsIsReportedWithoutGuessing(t *
 	if err := unstructured.SetNestedMap(item.Object, spec, "spec"); err != nil {
 		t.Fatalf("set incomplete legacy spec: %v", err)
 	}
-	plan := planResource("KrknScenarioRun", item)
+	plan, err := planResource("KrknScenarioRun", item)
+	if err != nil {
+		t.Fatalf("plan migration: %v", err)
+	}
 	if plan.Scenario != nil {
 		t.Fatalf("migration guessed a scenario reference: %#v", plan.Scenario)
 	}
@@ -401,6 +798,7 @@ func scenarioRunFixture(namespace, name string) *unstructured.Unstructured {
 				"providerName":   "provider-a",
 				"clusterName":    "cluster-a",
 				"jobId":          "job-a",
+				"phase":          "Succeeded",
 				"podName":        "scenario-pod",
 				"containerImage": "quay.io/krkn/scenario:scenario-a",
 				"maxRetries":     int64(2),

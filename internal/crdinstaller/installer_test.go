@@ -2,11 +2,15 @@ package crdinstaller
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-logr/logr"
+	"github.com/go-logr/logr/funcr"
 	appsv1 "k8s.io/api/apps/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	fake "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset/fake"
@@ -219,6 +223,36 @@ func TestMigrationGuardLifecycleIsRetrySafe(t *testing.T) {
 	}
 	if guard.Data["phase"] != "crd-migration" {
 		t.Fatalf("migration guard data = %v", guard.Data)
+	}
+	if err := markMigrationStarted(context.Background(), client, "stageStartedAt"); err != nil {
+		t.Fatalf("mark migration stage start: %v", err)
+	}
+	guard, err = client.Get(context.Background(), crdmigration.GuardConfigMapName, v1.GetOptions{})
+	if err != nil {
+		t.Fatalf("get updated migration guard: %v", err)
+	}
+	if _, err := time.Parse(time.RFC3339, guard.Data["stageStartedAt"]); err != nil {
+		t.Fatalf("guard stage start timestamp = %q: %v", guard.Data["stageStartedAt"], err)
+	}
+	if err := markMigrationStarted(context.Background(), client, "syncStartedAt"); err != nil {
+		t.Fatalf("mark migration sync start: %v", err)
+	}
+	guard, err = client.Get(context.Background(), crdmigration.GuardConfigMapName, v1.GetOptions{})
+	if err != nil {
+		t.Fatalf("get sync migration guard: %v", err)
+	}
+	if _, err := time.Parse(time.RFC3339, guard.Data["syncStartedAt"]); err != nil {
+		t.Fatalf("guard sync start timestamp = %q: %v", guard.Data["syncStartedAt"], err)
+	}
+	guard.Data["syncStartedAt"] = time.Now().Add(-guardDeadline - time.Minute).UTC().Format(time.RFC3339)
+	if _, err := client.Update(context.Background(), guard, v1.UpdateOptions{}); err != nil {
+		t.Fatalf("set stale sync timestamp: %v", err)
+	}
+	var logOutput strings.Builder
+	logger := funcr.New(func(prefix, args string) { fmt.Fprintf(&logOutput, "%s%s\n", prefix, args) }, funcr.Options{})
+	logStaleMigrationGuard(context.Background(), client, "operator", "syncStartedAt", logger)
+	if !strings.Contains(logOutput.String(), "older than hook deadline") || !strings.Contains(logOutput.String(), "retry the Helm upgrade") {
+		t.Fatalf("stale guard log does not explain recovery: %s", logOutput.String())
 	}
 	if err := removeMigrationGuard(context.Background(), client); err != nil {
 		t.Fatalf("remove migration guard: %v", err)

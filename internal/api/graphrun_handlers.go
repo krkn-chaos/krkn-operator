@@ -235,9 +235,13 @@ func (h *Handler) GetGraphRun(w http.ResponseWriter, r *http.Request) {
 // @Failure 403 {object} ErrorResponse "Insufficient permissions"
 // @Failure 404 {object} ErrorResponse "Referenced resource not found"
 // @Failure 500 {object} ErrorResponse "Internal server error"
+// @Failure 503 {object} ErrorResponse "Run operations are temporarily unavailable during CRD migration"
 // @Security BearerAuth
 // @Router /graphruns [post]
 func (h *Handler) CreateGraphRun(w http.ResponseWriter, r *http.Request) {
+	if h.rejectRunWritesDuringCRDMigration(w, r) {
+		return
+	}
 	ctx := r.Context()
 	logger := log.FromContext(ctx)
 
@@ -655,9 +659,13 @@ func normalizeLegacyGraphScenarioNode(node *krknv1alpha1.GraphScenarioNode) {
 // @Failure 403 {object} ErrorResponse "Insufficient permissions"
 // @Failure 404 {object} ErrorResponse "Graph run not found"
 // @Failure 500 {object} ErrorResponse "Internal server error"
+// @Failure 503 {object} ErrorResponse "Run operations are temporarily unavailable during CRD migration"
 // @Security BearerAuth
 // @Router /graphruns/{name} [delete]
 func (h *Handler) DeleteGraphRun(w http.ResponseWriter, r *http.Request) {
+	if h.rejectRunWritesDuringCRDMigration(w, r) {
+		return
+	}
 	ctx := r.Context()
 	logger := log.FromContext(ctx)
 

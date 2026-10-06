@@ -126,31 +126,36 @@ func main() {
 		os.Exit(2)
 	}
 	if stageCRDMigration || syncCRDs {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-		migrationNamespace := os.Getenv("KRKN_NAMESPACE")
-		if migrationNamespace == "" {
-			migrationNamespace = os.Getenv("POD_NAMESPACE")
+		migrationNamespace := resolveMigrationNamespace(os.Getenv)
+		var names []string
+		handled, err := runCRDMigrationMode(stageCRDMigration, syncCRDs, migrationNamespace, os.Getenv("OPERATOR_DEPLOYMENT_NAME"), crdDirectory,
+			func(namespace string) error {
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+				defer cancel()
+				return crdinstaller.Stage(ctx, ctrl.GetConfigOrDie(), namespace, setupLog.WithName("crd-migration-stage"))
+			},
+			func(namespace, deployment, directory string) error {
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+				defer cancel()
+				var syncErr error
+				names, syncErr = crdinstaller.Sync(ctx, ctrl.GetConfigOrDie(), directory, namespace, deployment, setupLog.WithName("crd-sync"))
+				return syncErr
+			})
+		if !handled {
+			setupLog.Error(err, "invalid CRD migration mode")
+			os.Exit(2)
 		}
-		if migrationNamespace == "" {
-			migrationNamespace = "krkn-operator-system"
-		}
-		var err error
-		if stageCRDMigration {
-			err = crdinstaller.Stage(ctx, ctrl.GetConfigOrDie(), migrationNamespace, setupLog.WithName("crd-migration-stage"))
-			cancel()
-			if err != nil {
+		if err != nil {
+			if stageCRDMigration {
 				setupLog.Error(err, "unable to stage custom-resource migration", "namespace", migrationNamespace)
-				os.Exit(1)
+			} else {
+				setupLog.Error(err, "unable to synchronize CRDs", "directory", crdDirectory)
 			}
+			os.Exit(1)
+		}
+		if stageCRDMigration {
 			setupLog.Info("custom-resource migration staged", "namespace", migrationNamespace)
 			return
-		}
-		operatorDeployment := os.Getenv("OPERATOR_DEPLOYMENT_NAME")
-		names, err := crdinstaller.Sync(ctx, ctrl.GetConfigOrDie(), crdDirectory, migrationNamespace, operatorDeployment, setupLog.WithName("crd-sync"))
-		cancel()
-		if err != nil {
-			setupLog.Error(err, "unable to synchronize CRDs", "directory", crdDirectory)
-			os.Exit(1)
 		}
 		setupLog.Info("CRDs synchronized", "count", len(names), "directory", crdDirectory)
 		return
@@ -440,6 +445,32 @@ func main() {
 		setupLog.Error(err, "problem running manager")
 		os.Exit(1)
 	}
+}
+
+func resolveMigrationNamespace(getenv func(string) string) string {
+	if namespace := getenv("POD_NAMESPACE"); namespace != "" {
+		return namespace
+	}
+	if namespace := getenv("KRKN_NAMESPACE"); namespace != "" {
+		return namespace
+	}
+	return "krkn-operator-system"
+}
+
+func runCRDMigrationMode(stage, sync bool, namespace, deployment, directory string, stageFn func(string) error, syncFn func(string, string, string) error) (bool, error) {
+	if stage && sync {
+		return false, fmt.Errorf("--stage-crd-migration and --sync-crds cannot be used together")
+	}
+	if !stage && !sync {
+		return false, nil
+	}
+	if stage {
+		return true, stageFn(namespace)
+	}
+	if deployment == "" {
+		return true, fmt.Errorf("OPERATOR_DEPLOYMENT_NAME is required when --sync-crds is set")
+	}
+	return true, syncFn(namespace, deployment, directory)
 }
 
 var (
