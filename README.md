@@ -374,6 +374,23 @@ curl -sS -X POST https://<operator-host>/api/v1/elasticsearch-alerts-query \
 
 The complete request and response schema is available through the generated Swagger documentation at `/api/swagger/index.html`.
 
+### Scenario File Parameter Mount Paths
+
+Scenario detail and global-parameter responses include `mount_path` for file-type parameters. It
+identifies the absolute path where the uploaded file must be mounted in the scenario container.
+Clients should preserve this value as `mountPath` when submitting the file in a scenario run request.
+
+For example, the `resiliency-file` global parameter is described as:
+
+```json
+{
+  "name": "resiliency-file",
+  "variable": "RESILIENCY_FILE",
+  "type": "file",
+  "mount_path": "/home/krkn/resiliency-file.yaml"
+}
+```
+
 ## Ecosystem
 
 See [DEPLOYMENT.md](DEPLOYMENT.md) for full installation options and configuration.

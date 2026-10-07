@@ -957,6 +957,12 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
+                    },
+                    "503": {
+                        "description": "Run operations are temporarily unavailable during CRD migration",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
                     }
                 }
             }
@@ -1132,6 +1138,12 @@ const docTemplate = `{
                     },
                     "500": {
                         "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Run operations are temporarily unavailable during CRD migration",
                         "schema": {
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
@@ -1743,6 +1755,12 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
+                    },
+                    "503": {
+                        "description": "Run operations are temporarily unavailable during CRD migration",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
                     }
                 }
             }
@@ -1856,6 +1874,12 @@ const docTemplate = `{
                     },
                     "500": {
                         "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Run operations are temporarily unavailable during CRD migration",
                         "schema": {
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
@@ -2444,6 +2468,12 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
+                    },
+                    "503": {
+                        "description": "Run operations are temporarily unavailable during CRD migration",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
                     }
                 }
             },
@@ -2527,6 +2557,12 @@ const docTemplate = `{
                     },
                     "500": {
                         "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Run operations are temporarily unavailable during CRD migration",
                         "schema": {
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
@@ -3313,7 +3349,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "resiliencyWeight": {
-                    "description": "ResiliencyWeight controls this node's contribution to the resiliency score.\n+optional",
+                    "description": "ResiliencyWeight controls this node's contribution to the resiliency score.\n+optional\n+kubebuilder:validation:Minimum=0\n+kubebuilder:validation:ExclusiveMinimum=true",
                     "type": "number"
                 },
                 "scenario": {
@@ -4758,6 +4794,10 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "group": {
+                    "type": "string"
+                },
+                "mount_path": {
+                    "description": "MountPath is the absolute container path for file-type scenario parameters.",
                     "type": "string"
                 },
                 "mutually_excludes": {
