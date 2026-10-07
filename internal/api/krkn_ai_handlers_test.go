@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -18,6 +20,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
@@ -452,10 +455,7 @@ func TestKrknAIRunTypedResultsAuthorizeAndProxyByUID(t *testing.T) {
 		case "/v1/runs/uid-typed/summary":
 			_, _ = w.Write([]byte(`{"artifactStatus":"in_progress","completedGenerations":1,"currentGeneration":1,"bestFitness":75,"fitnessProgression":[]}`))
 		case "/v1/runs/uid-typed/scenarios":
-			if r.URL.Query().Get("page") != "2" || r.URL.Query().Get("search") != "cpu" || r.URL.Query().Get("ignored") != "" {
-				t.Errorf("unexpected forwarded query: %s", r.URL.RawQuery)
-			}
-			_, _ = w.Write([]byte(`{"scenarios":[],"pagination":{"page":2,"limit":10,"total":0,"totalPages":0}}`))
+			_, _ = w.Write([]byte(`{"scenarios":[]}`))
 		case "/v1/runs/uid-typed/scenarios/1/scenario id":
 			if !strings.HasSuffix(r.URL.EscapedPath(), "/scenario%20id") {
 				t.Errorf("scenario ID was not escaped in service route: %s", r.URL.EscapedPath())
@@ -500,7 +500,7 @@ func TestKrknAIRunTypedResultsAuthorizeAndProxyByUID(t *testing.T) {
 	}
 
 	index := httptest.NewRecorder()
-	handler.KrknAIRouter(index, adminKrknAIRequest(http.MethodGet, KrknAIPath+"/runs/typed-run/results/scenarios?page=2&search=cpu&ignored=x", ""))
+	handler.KrknAIRouter(index, adminKrknAIRequest(http.MethodGet, KrknAIPath+"/runs/typed-run/results/scenarios", ""))
 	if index.Code != http.StatusOK || serviceCalls != 2 {
 		t.Fatalf("index status/calls = %d/%d: %s", index.Code, serviceCalls, index.Body.String())
 	}
@@ -588,7 +588,7 @@ func TestKrknAITypedResultsPreserveRetryableAndCorruptStatuses(t *testing.T) {
 
 func TestKrknAIRunScenarioIndexJoinsChildRunsByGenerationAndOwnerUID(t *testing.T) {
 	service := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(`{"scenarios":[{"generation":0,"scenarioId":"baseline","scenarioType":"baseline","outcome":"succeeded","durationSeconds":60,"fitnessScore":12,"fitnessState":"final"},{"generation":1,"scenarioId":"9","scenarioType":"pod-delete","fitnessScore":0.5,"fitnessState":"final"}],"pagination":{"page":1,"limit":100,"total":2,"totalPages":1}}`))
+		_, _ = w.Write([]byte(`{"scenarios":[{"generation":0,"scenarioId":"baseline","scenarioType":"baseline","outcome":"succeeded","durationSeconds":60,"fitnessScore":12,"fitnessState":"final"},{"generation":1,"scenarioId":"9","scenarioType":"pod-delete","fitnessScore":0.5,"fitnessState":"final"}]}`))
 	}))
 	defer service.Close()
 	handler := newKrknAITestHandler(t, service.URL)
@@ -662,6 +662,284 @@ func TestKrknAIRunScenarioIndexJoinsChildRunsByGenerationAndOwnerUID(t *testing.
 	}
 }
 
+func TestKrknAIRunScenarioIndexPaginatesCompleteUnionAndValidatesQueries(t *testing.T) {
+	fixture := newKrknAIScenarioIndexFixture(t)
+	for _, invalidQuery := range []string{
+		"?page=0", "?page=abc", "?page=", "?limit=0", "?limit=501", "?limit=",
+		"?generation=-1", "?generation=abc", "?generation=",
+		"?sort=unsupported", "?sort=", "?direction=sideways", "?direction=",
+	} {
+		before := fixture.serviceCalls
+		response := fixture.request(t, invalidQuery)
+		if response.Code != http.StatusBadRequest || fixture.serviceCalls != before {
+			t.Errorf("invalid query %q status/service calls = %d/%d; want 400/no downstream request: %s",
+				invalidQuery, response.Code, fixture.serviceCalls-before, response.Body.String())
+		}
+	}
+	defaults := fixture.readIndex(t, "")
+	if defaults.Pagination.Page != 1 || defaults.Pagination.Limit != 100 || defaults.Pagination.Total != 5 {
+		t.Fatalf("default pagination = %+v, want page=1 limit=100 total=5", defaults.Pagination)
+	}
+	bounded := fixture.readIndex(t, "?limit=500&ignored=x")
+	if bounded.Pagination.Limit != 500 || bounded.Pagination.Total != 5 {
+		t.Fatalf("maximum page size or unknown-key handling failed: %+v", bounded.Pagination)
+	}
+	for page, wantID := range []string{"baseline", "2", "3", "7", "10"} {
+		index := fixture.readIndex(t, "?page="+strconv.Itoa(page+1)+"&limit=1&sort=generation&direction=asc")
+		if index.Pagination.Page != page+1 || index.Pagination.Limit != 1 ||
+			index.Pagination.Total != 5 || index.Pagination.TotalPages != 5 ||
+			len(index.Scenarios) != 1 || index.Scenarios[0].ScenarioID != wantID {
+			t.Fatalf("global page %d = %+v, want only %q and total 5", page+1, index, wantID)
+		}
+	}
+	generationFiltered := fixture.readIndex(t, "?generation=1")
+	if generationFiltered.Pagination.Total != 4 || len(generationFiltered.Scenarios) != 4 ||
+		generationFiltered.Scenarios[0].ScenarioID != "2" || generationFiltered.Scenarios[0].Phase != "Running" {
+		t.Fatalf("generation filter returned the wrong rows or lost matching child metadata: %+v", generationFiltered)
+	}
+	for _, equivalentGeneration := range []string{"?generation=01", "?generation=%2B1"} {
+		index := fixture.readIndex(t, equivalentGeneration)
+		if index.Pagination.Total != 4 {
+			t.Errorf("equivalent generation query %q matched %d rows, want 4", equivalentGeneration, index.Pagination.Total)
+		}
+	}
+}
+
+func TestKrknAIRunScenarioIndexFiltersAndSortsCompleteUnion(t *testing.T) {
+	fixture := newKrknAIScenarioIndexFixture(t)
+	filteredPage := fixture.readIndex(t, "?scenarioType=PoD&page=2&limit=1&sort=fitnessScore&direction=asc")
+	if filteredPage.Pagination.Total != 3 || filteredPage.Pagination.TotalPages != 3 ||
+		len(filteredPage.Scenarios) != 1 || filteredPage.Scenarios[0].ScenarioID != "10" {
+		t.Fatalf("filtered score page omitted rows from the global union: %+v", filteredPage)
+	}
+	filteredMissing := fixture.readIndex(t, "?scenarioType=pod&page=3&limit=1&sort=fitnessScore&direction=asc")
+	if filteredMissing.Pagination.Total != 3 || len(filteredMissing.Scenarios) != 1 ||
+		filteredMissing.Scenarios[0].ScenarioID != "3" || filteredMissing.Scenarios[0].FitnessScore != nil ||
+		filteredMissing.Scenarios[0].Phase != "Pending" {
+		t.Fatalf("missing-score child row was not retained last: %+v", filteredMissing)
+	}
+	if matching := fixture.readIndex(t, "?search=2&scenarioType=pod"); matching.Pagination.Total != 1 ||
+		len(matching.Scenarios) != 1 || matching.Scenarios[0].ChildRunName != "matching-id-2" ||
+		matching.Scenarios[0].Phase != "Running" {
+		t.Fatalf("search/type substring filters did not preserve matching child enrichment: %+v", matching)
+	}
+	for _, test := range []struct {
+		key, direction string
+		want           []string
+	}{
+		{key: "scenarioId", direction: "asc", want: []string{"baseline", "2", "3", "7", "10"}},
+		{key: "scenarioId", direction: "desc", want: []string{"10", "7", "3", "2", "baseline"}},
+		{key: "scenarioType", direction: "asc", want: []string{"baseline", "7", "2", "3", "10"}},
+		{key: "scenarioType", direction: "desc", want: []string{"2", "3", "10", "7", "baseline"}},
+		{key: "fitnessScore", direction: "asc", want: []string{"baseline", "2", "10", "3", "7"}},
+		{key: "fitnessScore", direction: "desc", want: []string{"10", "2", "baseline", "3", "7"}},
+		{key: "durationSeconds", direction: "asc", want: []string{"7", "10", "baseline", "2", "3"}},
+		{key: "durationSeconds", direction: "desc", want: []string{"baseline", "10", "7", "2", "3"}},
+		{key: "outcome", direction: "asc", want: []string{"10", "3", "2", "baseline", "7"}},
+		{key: "outcome", direction: "desc", want: []string{"baseline", "7", "2", "3", "10"}},
+	} {
+		index := fixture.readIndex(t, "?sort="+test.key+"&direction="+test.direction)
+		got := make([]string, len(index.Scenarios))
+		for i := range index.Scenarios {
+			got[i] = index.Scenarios[i].ScenarioID
+		}
+		if !reflect.DeepEqual(got, test.want) || index.Pagination.Total != 5 {
+			t.Errorf("sort %s %s = %v total=%d, want %v total=5", test.key, test.direction, got, index.Pagination.Total, test.want)
+		}
+	}
+}
+
+type krknAIScenarioIndexFixture struct {
+	handler      *Handler
+	serviceCalls int
+}
+
+func newKrknAIScenarioIndexFixture(t *testing.T) *krknAIScenarioIndexFixture {
+	t.Helper()
+	fixture := &krknAIScenarioIndexFixture{}
+	artifactIndex := `{"scenarios":[
+		{"generation":0,"scenarioId":"baseline","scenarioType":"baseline","outcome":"succeeded","durationSeconds":60,"fitnessScore":5},
+		{"generation":1,"scenarioId":"10","scenarioType":"pod-scenarios","outcome":"failed","durationSeconds":20,"fitnessScore":20},
+		{"generation":1,"scenarioId":"2","scenarioType":"pod-scenarios","outcome":"succeeded","fitnessScore":10},
+		{"generation":1,"scenarioId":"3","scenarioType":"pod-scenarios","outcome":"failed"},
+		{"generation":1,"scenarioId":"7","scenarioType":"network-latency","outcome":"succeeded","durationSeconds":7}
+	]}`
+	service := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fixture.serviceCalls++
+		if r.URL.Path != "/v1/runs/uid-union/scenarios" {
+			http.NotFound(w, r)
+			return
+		}
+		if r.URL.RawQuery != "" {
+			http.Error(w, "query parameters are not supported", http.StatusBadRequest)
+			return
+		}
+		_, _ = w.Write([]byte(artifactIndex))
+	}))
+	t.Cleanup(service.Close)
+	fixture.handler = newKrknAITestHandler(t, service.URL)
+	runUID := types.UID("uid-union")
+	run := &krknv1alpha1.KrknAIRun{
+		ObjectMeta: metav1.ObjectMeta{Name: "union-run", Namespace: "default", UID: runUID},
+		Spec:       krknv1alpha1.KrknAIRunSpec{TargetRequestID: "target", TargetClusters: map[string][]string{"provider": {"cluster"}}},
+	}
+	if err := fixture.handler.client.Create(context.Background(), run); err != nil {
+		t.Fatal(err)
+	}
+	for _, childRun := range []*krknv1alpha1.KrknScenarioRun{
+		indexChildRun("matching-id-2", "union-run", run.Name, runUID, "1", "2", "pod-scenarios", "Running"),
+		indexChildRun("matching-id-3", "union-run", run.Name, runUID, "1", "3", "pod-scenarios", "Pending"),
+	} {
+		if err := fixture.handler.client.Create(context.Background(), childRun); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return fixture
+}
+
+func indexChildRun(name, aiRunLabel, ownerName string, ownerUID types.UID, generation, scenarioID, scenarioType, phase string) *krknv1alpha1.KrknScenarioRun {
+	return &krknv1alpha1.KrknScenarioRun{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default", OwnerReferences: []metav1.OwnerReference{
+			{APIVersion: krknv1alpha1.GroupVersion.String(), Kind: "KrknAIRun", Name: ownerName, UID: ownerUID},
+		}, Labels: map[string]string{
+			"krkn.dev/ai-run": aiRunLabel, "krkn.dev/generation-id": generation,
+			"krkn.dev/scenario-id": scenarioID, "krkn.dev/scenario-name": scenarioType,
+		}},
+		Status: krknv1alpha1.KrknScenarioRunStatus{Phase: phase},
+	}
+}
+
+func (f *krknAIScenarioIndexFixture) request(t *testing.T, query string) *httptest.ResponseRecorder {
+	t.Helper()
+	response := httptest.NewRecorder()
+	f.handler.KrknAIRouter(response, adminKrknAIRequest(
+		http.MethodGet, KrknAIPath+"/runs/union-run/results/scenarios"+query, "",
+	))
+	return response
+}
+
+func (f *krknAIScenarioIndexFixture) readIndex(t *testing.T, query string) KrknAIScenarioIndexResponse {
+	t.Helper()
+	response := f.request(t, query)
+	if response.Code != http.StatusOK {
+		t.Fatalf("index status = %d: %s", response.Code, response.Body.String())
+	}
+	var result KrknAIScenarioIndexResponse
+	if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	return result
+}
+
+func TestKrknAIRunScenarioIndexReauthorizesAndRejectsRunReplacement(t *testing.T) {
+	for _, test := range []struct {
+		name           string
+		wantStatus     int
+		replaceUID     bool
+		lateDeny       bool
+		wantChildLists int
+		wantGroupReads int
+	}{
+		{name: "late target authorization denial", wantStatus: http.StatusForbidden, lateDeny: true, wantChildLists: 2, wantGroupReads: 2},
+		{name: "run UID changed", wantStatus: http.StatusConflict, replaceUID: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			serviceCalls := 0
+			service := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				serviceCalls++
+				_, _ = w.Write([]byte(`{"scenarios":[{"generation":1,"scenarioId":"artifact"}]}`))
+			}))
+			defer service.Close()
+			handler := newKrknAITestHandler(t, service.URL)
+			runUID := types.UID("initial-uid")
+			run := &krknv1alpha1.KrknAIRun{
+				ObjectMeta: metav1.ObjectMeta{Name: "changing-run", Namespace: "default", UID: runUID},
+				Spec:       krknv1alpha1.KrknAIRunSpec{TargetRequestID: "target", TargetClusters: map[string][]string{"provider": {"cluster"}}},
+			}
+			if err := handler.client.Create(context.Background(), run); err != nil {
+				t.Fatal(err)
+			}
+			if test.lateDeny {
+				owner := []metav1.OwnerReference{{APIVersion: krknv1alpha1.GroupVersion.String(), Kind: "KrknAIRun", Name: run.Name, UID: runUID}}
+				child := &krknv1alpha1.KrknScenarioRun{
+					ObjectMeta: metav1.ObjectMeta{Name: "authorization-child", Namespace: "default", OwnerReferences: owner, Labels: map[string]string{
+						"krkn.dev/ai-run": "changing-run",
+					}},
+					Spec: krknv1alpha1.KrknScenarioRunSpec{
+						TargetRequestID: "target", TargetClusters: map[string][]string{"provider": {"cluster"}},
+					},
+					Status: krknv1alpha1.KrknScenarioRunStatus{ClusterJobs: []krknv1alpha1.ClusterJobStatus{
+						{ClusterName: "cluster", ClusterAPIURL: "https://cluster.example"},
+					}},
+				}
+				viewer := &krknv1alpha1.KrknUser{ObjectMeta: metav1.ObjectMeta{
+					Name: "krknuser-viewer-example-com", Namespace: "default",
+					Labels: map[string]string{groupauth.GroupLabelKey("team"): "true"},
+				}}
+				group := &krknv1alpha1.KrknUserGroup{
+					ObjectMeta: metav1.ObjectMeta{Name: "team", Namespace: "default"},
+					Spec: krknv1alpha1.KrknUserGroupSpec{ClusterPermissions: map[string]krknv1alpha1.ClusterPermissionSet{
+						"https://cluster.example": {Actions: []string{"view"}},
+					}},
+				}
+				for _, object := range []client.Object{child, viewer, group} {
+					if err := handler.client.Create(context.Background(), object); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			trackingClient := &krknAIRunReadHookClient{Client: handler.client, replaceUID: test.replaceUID, lateDeny: test.lateDeny}
+			handler.client = trackingClient
+			response := httptest.NewRecorder()
+			request := adminKrknAIRequest(http.MethodGet, KrknAIPath+"/runs/changing-run/results/scenarios", "")
+			if test.lateDeny {
+				request = userKrknAIRequest(http.MethodGet, KrknAIPath+"/runs/changing-run/results/scenarios", "", "viewer@example.com")
+			}
+			handler.KrknAIRouter(response, request)
+			if response.Code != test.wantStatus || serviceCalls != 1 || trackingClient.runReads != 2 ||
+				trackingClient.childLists != test.wantChildLists || trackingClient.groupReads != test.wantGroupReads {
+				t.Fatalf("status/service/run reads/child lists/group reads = %d/%d/%d/%d/%d, want %d/1/2/%d/%d: %s",
+					response.Code, serviceCalls, trackingClient.runReads, trackingClient.childLists, trackingClient.groupReads,
+					test.wantStatus, test.wantChildLists, test.wantGroupReads, response.Body.String())
+			}
+		})
+	}
+}
+
+type krknAIRunReadHookClient struct {
+	client.Client
+	runReads   int
+	childLists int
+	groupReads int
+	replaceUID bool
+	lateDeny   bool
+}
+
+func (c *krknAIRunReadHookClient) Get(ctx context.Context, key client.ObjectKey, object client.Object, options ...client.GetOption) error {
+	if err := c.Client.Get(ctx, key, object, options...); err != nil {
+		return err
+	}
+	if run, ok := object.(*krknv1alpha1.KrknAIRun); ok {
+		c.runReads++
+		if c.runReads == 2 && c.replaceUID {
+			run.UID = types.UID("replacement-uid")
+		}
+	}
+	if group, ok := object.(*krknv1alpha1.KrknUserGroup); ok {
+		c.groupReads++
+		if c.lateDeny && c.groupReads == 2 {
+			group.Spec.ClusterPermissions = map[string]krknv1alpha1.ClusterPermissionSet{}
+		}
+	}
+	return nil
+}
+
+func (c *krknAIRunReadHookClient) List(ctx context.Context, list client.ObjectList, options ...client.ListOption) error {
+	if _, ok := list.(*krknv1alpha1.KrknScenarioRunList); ok {
+		c.childLists++
+	}
+	return c.Client.List(ctx, list, options...)
+}
 func TestKrknAIConfigValidationPassesThrough422AndBlocksPersistence(t *testing.T) {
 	service := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/configs/validate" {

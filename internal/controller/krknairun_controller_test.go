@@ -180,7 +180,8 @@ func assertAIRunPodRuntimeConfig(
 	}
 	var orchestratorPodName string
 	for _, env := range pod.Spec.Containers[0].Env {
-		if env.Name == "KRKNAI_ORCHESTRATOR_POD_NAME" {
+		switch env.Name {
+		case "KRKNAI_ORCHESTRATOR_POD_NAME":
 			orchestratorPodName = env.Value
 		}
 	}

@@ -10,6 +10,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
@@ -714,17 +716,17 @@ func (h *Handler) getKrknAIRunResultsSummary(w http.ResponseWriter, r *http.Requ
 }
 
 // @Summary List Krkn-AI run scenarios
-// @Description Return the authorized typed scenario index and matching child job metadata.
+// @Description Return a globally filtered, sorted, and paginated authorized scenario index merged with matching child job metadata.
 // @Tags krkn-ai
 // @Produce json
 // @Param name path string true "KrknAIRun name"
-// @Param page query int false "Page number"
-// @Param limit query int false "Page size"
+// @Param page query int false "Page number (default 1)"
+// @Param limit query int false "Page size (default 100, maximum 500)"
 // @Param generation query int false "Generation"
-// @Param scenarioType query string false "Scenario type"
-// @Param search query string false "Scenario search"
-// @Param sort query string false "Sort key"
-// @Param direction query string false "Sort direction"
+// @Param scenarioType query string false "Scenario type substring"
+// @Param search query string false "Scenario ID or type substring"
+// @Param sort query string false "generation, scenarioId, scenarioType, fitnessScore, outcome, durationSeconds"
+// @Param direction query string false "asc or desc"
 // @Success 200 {object} KrknAIScenarioIndexResponse "Scenario index"
 // @Failure 403 {object} ErrorResponse "Target access denied"
 // @Failure 404 {object} ErrorResponse "Run not found"
@@ -737,29 +739,21 @@ func (h *Handler) getKrknAIRunScenarioIndex(w http.ResponseWriter, r *http.Reque
 	if !ok {
 		return
 	}
+	query, err := parseKrknAIScenarioQuery(r.URL.Query())
+	if err != nil {
+		writeJSONError(w, http.StatusBadRequest, ErrorResponse{Error: "bad_request", Message: err.Error()})
+		return
+	}
+	initialUID := run.UID
 	const endpoint = "v1/runs/"
-	path := "/" + krknaiserver.EscapePath(endpoint+string(run.UID)+"/scenarios")
-	query := r.URL.Query()
-	for key := range query {
-		switch key {
-		case "page", "limit", "generation", "scenarioType", "search", "sort", "direction":
-		default:
-			query.Del(key)
-		}
-	}
-	if encoded := query.Encode(); encoded != "" {
-		path += "?" + encoded
-	}
+	path := "/" + krknaiserver.EscapePath(endpoint+string(initialUID)+"/scenarios")
 	response, err := h.artifactClient.Do(r.Context(), http.MethodGet, path, nil)
 	if err != nil {
 		writeKrknAIServiceUnavailable(w)
 		return
 	}
 	defer response.Body.Close()
-	index := KrknAIScenarioIndexResponse{
-		Scenarios:  []KrknAIScenarioIndexItem{},
-		Pagination: KrknAIScenarioPagination{Page: 1, Limit: 100},
-	}
+	index := KrknAIScenarioIndexResponse{Scenarios: []KrknAIScenarioIndexItem{}}
 	switch response.StatusCode {
 	case http.StatusOK:
 		if err := json.NewDecoder(response.Body).Decode(&index); err != nil {
@@ -781,10 +775,39 @@ func (h *Handler) getKrknAIRunScenarioIndex(w http.ResponseWriter, r *http.Reque
 	if !ok {
 		return
 	}
-	if err := h.mergeKrknAIChildRuns(r, run, &index, query); err != nil {
+	if run.UID != initialUID {
+		writeJSONError(w, http.StatusConflict, ErrorResponse{Error: "run_changed", Message: "Krkn-AI run changed while reading results"})
+		return
+	}
+	if err := h.mergeKrknAIChildRuns(r, run, &index); err != nil {
 		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{Error: "internal_error", Message: "failed to list Krkn-AI scenario runs"})
 		return
 	}
+	filtered := index.Scenarios[:0]
+	for _, row := range index.Scenarios {
+		if matchesKrknAIScenarioFilter(query, row.Generation, row.ScenarioID, row.ScenarioType) {
+			filtered = append(filtered, row)
+		}
+	}
+	sortKrknAIScenarios(filtered, query.sort, query.direction)
+	page, limit := query.page, query.limit
+	total := len(filtered)
+	totalPages := 0
+	if total > 0 {
+		totalPages = (total + limit - 1) / limit
+	}
+	if page > totalPages {
+		filtered = []KrknAIScenarioIndexItem{}
+	} else {
+		offset := (page - 1) * limit
+		end := offset + limit
+		if end > total {
+			end = total
+		}
+		filtered = filtered[offset:end]
+	}
+	index.Scenarios = filtered
+	index.Pagination = KrknAIScenarioPagination{Page: page, Limit: limit, Total: total, TotalPages: totalPages}
 	writeJSON(w, http.StatusOK, index)
 }
 
@@ -816,18 +839,24 @@ func (h *Handler) getKrknAIRunScenarioDetail(w http.ResponseWriter, r *http.Requ
 	copyKrknAIResponse(w, response, "application/json")
 }
 
-func (h *Handler) mergeKrknAIChildRuns(r *http.Request, run *krknv1alpha1.KrknAIRun, index *KrknAIScenarioIndexResponse, query map[string][]string) error {
+func (h *Handler) mergeKrknAIChildRuns(r *http.Request, run *krknv1alpha1.KrknAIRun, index *KrknAIScenarioIndexResponse) error {
 	var children krknv1alpha1.KrknScenarioRunList
 	if err := h.client.List(r.Context(), &children, client.InNamespace(h.namespace), client.MatchingLabels{
 		"krkn.dev/ai-run": krknAIRunLabelValue(run.Name),
 	}); err != nil {
 		return err
 	}
-	rows := make(map[string]int, len(index.Scenarios))
-	for i := range index.Scenarios {
-		rows[krknAIScenarioKey(index.Scenarios[i].Generation, index.Scenarios[i].ScenarioID)] = i
+	rows := make(map[krknAIScenarioKey]int, len(index.Scenarios))
+	unique := index.Scenarios[:0]
+	for _, scenario := range index.Scenarios {
+		key := krknAIScenarioKey{generation: scenario.Generation, scenarioID: scenario.ScenarioID}
+		if _, found := rows[key]; found {
+			continue
+		}
+		rows[key] = len(unique)
+		unique = append(unique, scenario)
 	}
-	added := 0
+	index.Scenarios = unique
 	for i := range children.Items {
 		child := &children.Items[i]
 		if !hasKrknAIRunOwnerUID(child.OwnerReferences, run.UID) {
@@ -840,16 +869,12 @@ func (h *Handler) mergeKrknAIChildRuns(r *http.Request, run *krknv1alpha1.KrknAI
 			continue
 		}
 		scenarioType := child.Labels["krkn.dev/scenario-name"]
-		if !matchesKrknAIScenarioFilter(query, generation, scenarioID, scenarioType) {
-			continue
-		}
-		key := krknAIScenarioKey(generation, scenarioID)
+		key := krknAIScenarioKey{generation: generation, scenarioID: scenarioID}
 		rowIndex, found := rows[key]
 		if !found {
 			index.Scenarios = append(index.Scenarios, KrknAIScenarioIndexItem{Generation: generation, ScenarioID: scenarioID})
 			rowIndex = len(index.Scenarios) - 1
 			rows[key] = rowIndex
-			added++
 		}
 		row := &index.Scenarios[rowIndex]
 		row.ChildRunName = child.Name
@@ -868,16 +893,6 @@ func (h *Handler) mergeKrknAIChildRuns(r *http.Request, run *krknv1alpha1.KrknAI
 				break
 			}
 		}
-	}
-	index.Pagination.Total += added
-	if index.Pagination.Page <= 0 {
-		index.Pagination.Page = 1
-	}
-	if index.Pagination.Limit <= 0 {
-		index.Pagination.Limit = 100
-	}
-	if index.Pagination.Total > 0 {
-		index.Pagination.TotalPages = (index.Pagination.Total + index.Pagination.Limit - 1) / index.Pagination.Limit
 	}
 	return nil
 }
@@ -898,30 +913,246 @@ func hasKrknAIRunOwnerUID(references []metav1.OwnerReference, uid types.UID) boo
 	return false
 }
 
-func krknAIScenarioKey(generation int, scenarioID string) string {
-	return fmt.Sprintf("%d\x00%s", generation, scenarioID)
+type krknAIScenarioKey struct {
+	generation int
+	scenarioID string
 }
 
-func matchesKrknAIScenarioFilter(query map[string][]string, generation int, scenarioID, scenarioType string) bool {
-	first := func(key string) string {
-		values := query[key]
-		if len(values) > 0 {
-			return values[0]
+const (
+	krknAIScenarioBaselineID          = "baseline"
+	krknAIScenarioSortDurationSeconds = "durationSeconds"
+	krknAIScenarioSortFitnessScore    = "fitnessScore"
+	krknAIScenarioSortGeneration      = "generation"
+	krknAIScenarioSortID              = "scenarioId"
+	krknAIScenarioSortType            = "scenarioType"
+	krknAIScenarioSortOutcome         = "outcome"
+	krknAIScenarioOutcomeFailed       = "failed"
+)
+
+type krknAIScenarioQuery struct {
+	page          int
+	limit         int
+	generation    int
+	hasGeneration bool
+	scenarioType  string
+	search        string
+	sort          string
+	direction     string
+}
+
+func parseKrknAIScenarioQuery(values url.Values) (krknAIScenarioQuery, error) {
+	query := krknAIScenarioQuery{page: 1, limit: 100, sort: krknAIScenarioSortGeneration, direction: "asc"}
+	if values.Has("page") {
+		page, err := strconv.Atoi(values.Get("page"))
+		if err != nil || page <= 0 {
+			return query, fmt.Errorf("page must be a positive integer")
 		}
-		return ""
+		query.page = page
 	}
-	if value := first("generation"); value != "" && value != strconv.Itoa(generation) {
+	if values.Has("limit") {
+		limit, err := strconv.Atoi(values.Get("limit"))
+		if err != nil || limit <= 0 || limit > 500 {
+			return query, fmt.Errorf("limit must be an integer from 1 to 500")
+		}
+		query.limit = limit
+	}
+	if values.Has(krknAIScenarioSortGeneration) {
+		generation, err := strconv.Atoi(values.Get(krknAIScenarioSortGeneration))
+		if err != nil || generation < 0 {
+			return query, fmt.Errorf("generation must be a non-negative integer")
+		}
+		query.generation = generation
+		query.hasGeneration = true
+	}
+	if values.Has(krknAIScenarioSortType) {
+		query.scenarioType = strings.ToLower(values.Get(krknAIScenarioSortType))
+	}
+	if values.Has("search") {
+		query.search = strings.ToLower(values.Get("search"))
+	}
+	if values.Has("sort") {
+		query.sort = values.Get("sort")
+		switch query.sort {
+		case krknAIScenarioSortGeneration, krknAIScenarioSortID, krknAIScenarioSortType,
+			krknAIScenarioSortFitnessScore, krknAIScenarioSortOutcome, krknAIScenarioSortDurationSeconds:
+		default:
+			return query, fmt.Errorf("sort must be one of generation, scenarioId, scenarioType, fitnessScore, outcome, durationSeconds")
+		}
+	}
+	if values.Has("direction") {
+		query.direction = values.Get("direction")
+		if query.direction != "asc" && query.direction != "desc" {
+			return query, fmt.Errorf("direction must be asc or desc")
+		}
+	}
+	return query, nil
+}
+
+func matchesKrknAIScenarioFilter(query krknAIScenarioQuery, generation int, scenarioID, scenarioType string) bool {
+	if query.hasGeneration && generation != query.generation {
 		return false
 	}
-	if value := first("scenarioType"); value != "" && !strings.EqualFold(value, scenarioType) {
+	var scenarioTypeLower string
+	if query.scenarioType != "" || query.search != "" {
+		scenarioTypeLower = strings.ToLower(scenarioType)
+	}
+	if query.scenarioType != "" && !strings.Contains(scenarioTypeLower, query.scenarioType) {
 		return false
 	}
-	if value := first("search"); value != "" &&
-		!strings.Contains(strings.ToLower(scenarioID), strings.ToLower(value)) &&
-		!strings.Contains(strings.ToLower(scenarioType), strings.ToLower(value)) {
+	if query.search != "" &&
+		!strings.Contains(strings.ToLower(scenarioID), query.search) &&
+		!strings.Contains(scenarioTypeLower, query.search) {
 		return false
 	}
 	return true
+}
+
+func sortKrknAIScenarios(scenarios []KrknAIScenarioIndexItem, sortKey, direction string) {
+	descending := direction == "desc"
+	sort.SliceStable(scenarios, func(i, j int) bool {
+		left, right := scenarios[i], scenarios[j]
+		comparison := 0
+		switch sortKey {
+		case krknAIScenarioSortGeneration:
+			comparison = compareInt(left.Generation, right.Generation)
+		case krknAIScenarioSortID:
+			comparison = compareKrknAIScenarioIDs(left.ScenarioID, right.ScenarioID)
+		case krknAIScenarioSortType:
+			comparison = compareKrknAIScenarioStrings(left.ScenarioType, right.ScenarioType)
+		case krknAIScenarioSortFitnessScore:
+			comparison = compareKrknAIScenarioMeasurements(left.FitnessScore, right.FitnessScore)
+		case krknAIScenarioSortDurationSeconds:
+			comparison = compareKrknAIScenarioMeasurements(left.DurationSeconds, right.DurationSeconds)
+		case krknAIScenarioSortOutcome:
+			comparison = compareKrknAIScenarioStrings(krknAIScenarioStatus(left), krknAIScenarioStatus(right))
+		}
+		if comparison != 0 {
+			if sortKey == krknAIScenarioSortFitnessScore && (left.FitnessScore == nil || right.FitnessScore == nil) ||
+				sortKey == krknAIScenarioSortDurationSeconds && (left.DurationSeconds == nil || right.DurationSeconds == nil) {
+				return comparison < 0
+			}
+			if descending {
+				return comparison > 0
+			}
+			return comparison < 0
+		}
+		return compareKrknAIScenarioIdentity(left, right) < 0
+	})
+}
+
+func compareInt(left, right int) int {
+	if left < right {
+		return -1
+	}
+	if left > right {
+		return 1
+	}
+	return 0
+}
+
+func compareKrknAIScenarioIDs(left, right string) int {
+	if left == krknAIScenarioBaselineID && right != krknAIScenarioBaselineID {
+		return -1
+	}
+	if right == krknAIScenarioBaselineID && left != krknAIScenarioBaselineID {
+		return 1
+	}
+	leftNumeric, rightNumeric := isKrknAIScenarioNumericID(left), isKrknAIScenarioNumericID(right)
+	if leftNumeric && rightNumeric {
+		leftSignificant, rightSignificant := left, right
+		for len(leftSignificant) > 1 && leftSignificant[0] == '0' {
+			leftSignificant = leftSignificant[1:]
+		}
+		for len(rightSignificant) > 1 && rightSignificant[0] == '0' {
+			rightSignificant = rightSignificant[1:]
+		}
+		if len(leftSignificant) < len(rightSignificant) {
+			return -1
+		}
+		if len(leftSignificant) > len(rightSignificant) {
+			return 1
+		}
+		if comparison := strings.Compare(leftSignificant, rightSignificant); comparison != 0 {
+			return comparison
+		}
+	}
+	return compareKrknAIScenarioStrings(left, right)
+}
+
+func isKrknAIScenarioNumericID(value string) bool {
+	if value == "" {
+		return false
+	}
+	for i := range value {
+		if value[i] < '0' || value[i] > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+func compareKrknAIScenarioStrings(left, right string) int {
+	leftIndex, rightIndex := 0, 0
+	for leftIndex < len(left) && rightIndex < len(right) {
+		leftRune, leftSize := utf8.DecodeRuneInString(left[leftIndex:])
+		rightRune, rightSize := utf8.DecodeRuneInString(right[rightIndex:])
+		leftRune, rightRune = unicode.ToLower(leftRune), unicode.ToLower(rightRune)
+		if leftRune < rightRune {
+			return -1
+		}
+		if leftRune > rightRune {
+			return 1
+		}
+		leftIndex += leftSize
+		rightIndex += rightSize
+	}
+	if leftIndex < len(left) {
+		return 1
+	}
+	if rightIndex < len(right) {
+		return -1
+	}
+	return strings.Compare(left, right)
+}
+
+func compareKrknAIScenarioMeasurements(left, right *float64) int {
+	if left == nil && right != nil {
+		return 1
+	}
+	if left != nil && right == nil {
+		return -1
+	}
+	if left == nil {
+		return 0
+	}
+	if *left < *right {
+		return -1
+	}
+	if *left > *right {
+		return 1
+	}
+	return 0
+}
+
+func compareKrknAIScenarioIdentity(left, right KrknAIScenarioIndexItem) int {
+	if comparison := compareInt(left.Generation, right.Generation); comparison != 0 {
+		return comparison
+	}
+	return compareKrknAIScenarioIDs(left.ScenarioID, right.ScenarioID)
+}
+
+func krknAIScenarioStatus(row KrknAIScenarioIndexItem) string {
+	if row.Phase != "" {
+		return row.Phase
+	}
+	switch row.Outcome {
+	case "succeeded":
+		return "Succeeded"
+	case krknAIScenarioOutcomeFailed:
+		return "Failed"
+	default:
+		return "Result pending"
+	}
 }
 
 func copyKrknAIResponse(w http.ResponseWriter, response *http.Response, contentType string) {

@@ -416,7 +416,7 @@ func buildOrchestratorPod(
 		{Name: "CONFIG_FILE", Value: "/input/krkn-ai.yaml"},
 		{Name: "KUBECONFIG", Value: "/input/kubeconfig"},
 		{Name: "OUTPUT_DIR", Value: "/output"},
-		{Name: "FORMAT", Value: "yaml"},
+		{Name: "FORMAT", Value: "json"},
 		{Name: "RUNNER_TYPE", Value: "operator"},
 		{Name: "VERBOSE", Value: "2"},
 		{Name: "KRKNAI_NAMESPACE", Value: options.namespace},
