@@ -248,6 +248,9 @@ func (h *Handler) GetGraphRunConfig(w http.ResponseWriter, r *http.Request) {
 		MaxRetries:      intPtr(graphRun.Spec.MaxRetries),
 		Categories:      categories,
 	}
+	if ref := h.replayableCloudCredentialRef(ctx, graphRun.Spec.CloudCredentialRef); ref != "" {
+		payload.CloudCredentialRef = ref
+	}
 
 	logger.Info("Graph run config retrieved successfully",
 		"graphRunName", graphRunName,

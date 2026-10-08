@@ -34,6 +34,7 @@ import (
 
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
 	"github.com/krkn-chaos/krkn-operator/pkg/auth"
+	"github.com/krkn-chaos/krkn-operator/pkg/cloudcreds"
 )
 
 // TestGetScenarioReplay_Success tests successful replay with admin user
@@ -77,8 +78,9 @@ func TestGetScenarioReplay_Success(t *testing.T) {
 			TargetClusters: map[string][]string{
 				"krkn-operator": {"cluster1"},
 			},
-			Scenario:   publicScenarioReference("dummy-scenario"),
-			MaxRetries: 5,
+			Scenario:           publicScenarioReference("dummy-scenario"),
+			MaxRetries:         5,
+			CloudCredentialRef: "aws-ci",
 			Environment: map[string]string{
 				"EXIT_STATUS": "0",
 			},
@@ -94,10 +96,17 @@ func TestGetScenarioReplay_Success(t *testing.T) {
 	}
 	category := runCategoryFixture("resilience", "")
 	category.Namespace = "krkn-operator-system"
+	credential := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{
+		Name: "aws-ci", Namespace: "krkn-operator-system",
+		Labels: map[string]string{
+			cloudcreds.AppComponentLabel:   cloudcreds.ComponentCloudCredential,
+			cloudcreds.AvailableToAllLabel: "true",
+		},
+	}}
 
 	fakeClient := fake.NewClientBuilder().
 		WithScheme(scheme).
-		WithObjects(pod, scenarioRun, category).
+		WithObjects(pod, scenarioRun, category, credential).
 		Build()
 
 	handler := &Handler{
@@ -137,6 +146,7 @@ func TestGetScenarioReplay_Success(t *testing.T) {
 	assert.False(t, *payload.Scenario.Private)
 	assert.Equal(t, map[string][]string{"krkn-operator": {"cluster1"}}, payload.TargetClusters)
 	assert.Equal(t, map[string]string{"EXIT_STATUS": "0"}, payload.Environment)
+	assert.Equal(t, "aws-ci", payload.CloudCredentialRef)
 
 	// Verify fileReferences reconstructed
 	require.Len(t, payload.FileReferences, 1)
