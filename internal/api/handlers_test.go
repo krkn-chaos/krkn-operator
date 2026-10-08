@@ -1487,6 +1487,25 @@ func TestConvertInputFields(t *testing.T) {
 			},
 		},
 		{
+			name: "file field with mount path",
+			input: []typing.InputField{
+				{
+					Name:      strPtr("resiliency-file"),
+					Variable:  strPtr("RESILIENCY_FILE"),
+					Type:      typing.File,
+					MountPath: strPtr("/home/krkn/resiliency-file.yaml"),
+				},
+			},
+			expected: []InputFieldResponse{
+				{
+					Name:      strPtr("resiliency-file"),
+					Variable:  strPtr("RESILIENCY_FILE"),
+					Type:      "file",
+					MountPath: strPtr("/home/krkn/resiliency-file.yaml"),
+				},
+			},
+		},
+		{
 			name: "group type field",
 			input: []typing.InputField{
 				{

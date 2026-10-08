@@ -85,6 +85,8 @@ definitions:
         description: |-
           ResiliencyWeight controls this node's contribution to the resiliency score.
           +optional
+          +kubebuilder:validation:Minimum=0
+          +kubebuilder:validation:ExclusiveMinimum=true
         type: number
       scenario:
         allOf:
@@ -1219,6 +1221,10 @@ definitions:
       description:
         type: string
       group:
+        type: string
+      mount_path:
+        description: MountPath is the absolute container path for file-type scenario
+          parameters.
         type: string
       mutually_excludes:
         type: string
@@ -2388,6 +2394,10 @@ paths:
           description: Internal server error
           schema:
             $ref: '#/definitions/internal_api.ErrorResponse'
+        "503":
+          description: Run operations are temporarily unavailable during CRD migration
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
       security:
       - BearerAuth: []
       summary: Create graph run
@@ -2465,6 +2475,10 @@ paths:
             $ref: '#/definitions/internal_api.ErrorResponse'
         "500":
           description: Internal server error
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "503":
+          description: Run operations are temporarily unavailable during CRD migration
           schema:
             $ref: '#/definitions/internal_api.ErrorResponse'
       security:
@@ -2897,6 +2911,10 @@ paths:
           description: Internal server error
           schema:
             $ref: '#/definitions/internal_api.ErrorResponse'
+        "503":
+          description: Run operations are temporarily unavailable during CRD migration
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
       security:
       - BearerAuth: []
       summary: Run chaos scenario
@@ -2932,6 +2950,10 @@ paths:
             $ref: '#/definitions/internal_api.ErrorResponse'
         "500":
           description: Internal server error
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "503":
+          description: Run operations are temporarily unavailable during CRD migration
           schema:
             $ref: '#/definitions/internal_api.ErrorResponse'
       security:
@@ -3357,6 +3379,10 @@ paths:
           description: Internal server error
           schema:
             $ref: '#/definitions/internal_api.ErrorResponse'
+        "503":
+          description: Run operations are temporarily unavailable during CRD migration
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
       security:
       - BearerAuth: []
       summary: Remove a run from a category
@@ -3413,6 +3439,10 @@ paths:
             $ref: '#/definitions/internal_api.ErrorResponse'
         "500":
           description: Internal server error
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "503":
+          description: Run operations are temporarily unavailable during CRD migration
           schema:
             $ref: '#/definitions/internal_api.ErrorResponse'
       security:
