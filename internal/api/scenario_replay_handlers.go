@@ -230,13 +230,17 @@ func (h *Handler) reconstructScenarioRunPayload(ctx context.Context, scenarioRun
 	if err != nil {
 		return nil, err
 	}
+	scenario, _, err := scenarioRun.Spec.ResolveScenarioReference()
+	if err != nil {
+		return nil, fmt.Errorf("scenario identity is unavailable: %w", err)
+	}
 
 	payload := &ScenarioRunRequest{
 		// Mandatory fields
 		TargetRequestID: scenarioRun.Spec.TargetRequestID,
 		TargetClusters:  scenarioRun.Spec.TargetClusters,
 		Categories:      categories,
-		Scenario:        scenarioRun.Spec.Scenario,
+		Scenario:        scenario,
 		// Retain the resolved image for console display and replay compatibility.
 		// The server still resolves the executable image from Scenario on submit.
 		ScenarioImage: scenarioRunImage(scenarioRun.Status.ClusterJobs),

@@ -118,6 +118,11 @@ const (
 	ElasticsearchAlertsQueryPath = APIBasePath + "/elasticsearch-alerts-query"
 )
 
+// Krkn-AI configuration, run, and artifact endpoints.
+const (
+	KrknAIPath = APIBasePath + "/krkn-ai"
+)
+
 // Backup and restore endpoints
 const (
 	// BackupPath is the endpoint for downloading operator configuration backups.

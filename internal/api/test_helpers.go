@@ -89,7 +89,7 @@ func NewTestHandler(client client.Client, clientset kubernetes.Interface, namesp
 		}
 	}
 
-	return NewHandler(client, clientset, namespace, grpcServerAddr, secretManager)
+	return NewHandler(client, clientset, namespace, grpcServerAddr, secretManager, true)
 }
 
 // WithESClient overrides the telemetry Elasticsearch client, letting tests inject

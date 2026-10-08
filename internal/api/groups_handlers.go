@@ -51,6 +51,16 @@ func (h *Handler) cleanupDiscoveryTargetRequest(ctx context.Context, discoveryUU
 	}
 
 	logger := log.FromContext(ctx).WithName("cleanup-discovery-target-request")
+
+	referenced, err := h.krknAITargetReferenced(ctx, discoveryUUID)
+	if err != nil {
+		logger.Error(err, "Failed to check whether discovery target request is referenced", "uuid", discoveryUUID)
+		return
+	}
+	if referenced {
+		logger.Info("Retaining discovery target request because a Krkn-AI config or run references it", "uuid", discoveryUUID)
+		return
+	}
 	logger.Info("Cleaning up discovery target request", "uuid", discoveryUUID)
 
 	// Delete the KrknTargetRequest CR
@@ -61,7 +71,7 @@ func (h *Handler) cleanupDiscoveryTargetRequest(ctx context.Context, discoveryUU
 		},
 	}
 
-	err := h.client.Delete(ctx, targetRequest)
+	err = h.client.Delete(ctx, targetRequest)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			// Already deleted - this is fine (idempotent)
