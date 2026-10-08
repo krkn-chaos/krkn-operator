@@ -55,8 +55,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
-
-	"github.com/krkn-chaos/krkn-operator/pkg/provider"
 )
 
 // BackupConfig holds backup configuration.
@@ -123,10 +121,6 @@ func CreateBackup(ctx context.Context, k8sClient client.Client, config BackupCon
 			gvk:      schema.GroupVersionKind{Group: "krkn.krkn-chaos.dev", Version: "v1alpha1", Kind: "KrknOperatorTarget"},
 			singular: "krknoperatortarget",
 		},
-		{
-			gvk:      schema.GroupVersionKind{Group: "krkn.krkn-chaos.dev", Version: "v1alpha1", Kind: "KrknOperatorTargetProvider"},
-			singular: "krknoperatortargetprovider",
-		},
 		// Secrets (by labels)
 		{
 			gvk:          schema.GroupVersionKind{Group: "", Version: "v1", Kind: "Secret"},
@@ -153,12 +147,6 @@ func CreateBackup(ctx context.Context, k8sClient client.Client, config BackupCon
 			gvk:      schema.GroupVersionKind{Group: "", Version: "v1", Kind: "Secret"},
 			singular: "registry-secrets",
 			selector: map[string]string{"app.kubernetes.io/component": "registry"},
-		},
-		// Provider configuration values are stored in explicitly labeled ConfigMaps.
-		{
-			gvk:      schema.GroupVersionKind{Group: "", Version: "v1", Kind: "ConfigMap"},
-			singular: "provider-configmaps",
-			selector: map[string]string{provider.ProviderConfigLabel: provider.ProviderConfigLabelValue},
 		},
 	}
 

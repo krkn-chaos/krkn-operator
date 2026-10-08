@@ -23,19 +23,17 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
 	"github.com/krkn-chaos/krkn-operator/internal/kubeconfig"
+	"github.com/krkn-chaos/krkn-operator/pkg/provider"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	fakeclient "sigs.k8s.io/controller-runtime/pkg/client/fake"
-
-	"github.com/krkn-chaos/krkn-operator/pkg/provider"
 )
 
 func TestStripMetadata(t *testing.T) {
@@ -396,8 +394,11 @@ func TestRefreshTargetStatusesMarksUnreachableTargetNotReady(t *testing.T) {
 	}
 }
 
-func TestCreateBackupIncludesLabeledProviderConfigMap(t *testing.T) {
+func TestCreateBackupExcludesProviderResources(t *testing.T) {
 	scheme := runtime.NewScheme()
+	if err := krknv1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
 	if err := corev1.AddToScheme(scheme); err != nil {
 		t.Fatal(err)
 	}
@@ -405,27 +406,40 @@ func TestCreateBackupIncludesLabeledProviderConfigMap(t *testing.T) {
 	const namespace = "krkn-operator-system"
 	k8sClient := fakeclient.NewClientBuilder().
 		WithScheme(scheme).
-		WithObjects(&corev1.ConfigMap{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      provider.LegacyProviderConfigMapName,
-				Namespace: namespace,
+		WithObjects(
+			&krknv1alpha1.KrknUser{
+				ObjectMeta: metav1.ObjectMeta{Name: "test-user", Namespace: namespace},
+				Spec:       krknv1alpha1.KrknUserSpec{UserID: "test@example.com", Name: "Test", Surname: "User"},
 			},
-			Data: map[string]string{"API_PORT": "8080"},
-		}).
+			&corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-auth-secret",
+					Namespace: namespace,
+					Labels:    map[string]string{"app.kubernetes.io/component": "authentication"},
+				},
+				Data: map[string][]byte{"password": []byte("secret")},
+			},
+			&krknv1alpha1.KrknOperatorTargetProvider{
+				ObjectMeta: metav1.ObjectMeta{Name: "test-provider", Namespace: namespace},
+				Spec:       krknv1alpha1.KrknOperatorTargetProviderSpec{OperatorName: "krkn-operator", Active: true},
+			},
+			&corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "provider-config",
+					Namespace: namespace,
+					Labels: map[string]string{
+						provider.ProviderConfigLabel: provider.ProviderConfigLabelValue,
+					},
+				},
+				Data: map[string]string{"API_PORT": "8080"},
+			},
+		).
 		Build()
-
-	changed, err := provider.BackfillLegacyProviderConfigLabel(context.Background(), k8sClient, namespace)
-	if err != nil {
-		t.Fatalf("BackfillLegacyProviderConfigLabel() error = %v", err)
-	}
-	if !changed {
-		t.Fatal("BackfillLegacyProviderConfigLabel() changed = false, want true")
-	}
 
 	archivePath, err := CreateBackup(context.Background(), k8sClient, BackupConfig{
 		Namespace:  namespace,
 		OutputDir:  t.TempDir(),
-		BackupName: "provider-config-backup",
+		BackupName: "exclude-provider-test",
 	})
 	if err != nil {
 		t.Fatalf("CreateBackup() error = %v", err)
@@ -437,14 +451,14 @@ func TestCreateBackupIncludesLabeledProviderConfigMap(t *testing.T) {
 	}
 	defer archiveFile.Close()
 
-	gzipReader, err := gzip.NewReader(archiveFile)
+	gzReader, err := gzip.NewReader(archiveFile)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer gzipReader.Close()
+	defer gzReader.Close()
 
-	tarReader := tar.NewReader(gzipReader)
-	found := false
+	tarReader := tar.NewReader(gzReader)
+	var fileNames []string
 	for {
 		header, err := tarReader.Next()
 		if err == io.EOF {
@@ -453,22 +467,25 @@ func TestCreateBackupIncludesLabeledProviderConfigMap(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if filepath.Base(header.Name) != "provider-configmaps.json" {
-			continue
+		if !header.FileInfo().IsDir() {
+			fileNames = append(fileNames, filepath.Base(header.Name))
 		}
-
-		contents, err := io.ReadAll(tarReader)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !strings.Contains(string(contents), provider.LegacyProviderConfigMapName) {
-			t.Fatalf("provider ConfigMap missing from backup: %s", contents)
-		}
-		found = true
 	}
 
-	if !found {
-		t.Fatal("provider-configmaps.json not found in backup")
+	for _, name := range fileNames {
+		if name == "krknoperatortargetprovider.json" || name == "provider-configmaps.json" {
+			t.Fatalf("backup archive should not contain provider file %q", name)
+		}
+	}
+
+	foundUser := false
+	for _, name := range fileNames {
+		if name == "krknuser.json" {
+			foundUser = true
+		}
+	}
+	if !foundUser {
+		t.Fatal("backup archive should contain krknuser.json")
 	}
 }
 
