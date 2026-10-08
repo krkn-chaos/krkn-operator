@@ -472,6 +472,80 @@ func TestCreateBackupIncludesLabeledProviderConfigMap(t *testing.T) {
 	}
 }
 
+func TestCreateBackupIncludesCloudCredentialSecrets(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := corev1.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+
+	const namespace = "krkn-operator-system"
+	k8sClient := fakeclient.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(&corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "my-aws-creds",
+				Namespace: namespace,
+				Labels: map[string]string{
+					"app.kubernetes.io/name":      "krkn-operator",
+					"app.kubernetes.io/component": "cloud-credential",
+				},
+			},
+			Data: map[string][]byte{
+				"aws-access-key-id":     []byte("AKIAIOSFODNN7EXAMPLE"),
+				"aws-secret-access-key": []byte("wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"),
+				"aws-default-region":    []byte("us-east-1"),
+			},
+		}).
+		Build()
+
+	archivePath, err := CreateBackup(context.Background(), k8sClient, BackupConfig{
+		Namespace:  namespace,
+		OutputDir:  t.TempDir(),
+		BackupName: "cloud-creds-backup",
+	})
+	if err != nil {
+		t.Fatalf("CreateBackup() error = %v", err)
+	}
+
+	archiveFile, err := os.Open(archivePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer archiveFile.Close()
+
+	gzReader, err := gzip.NewReader(archiveFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer gzReader.Close()
+
+	tarReader := tar.NewReader(gzReader)
+	found := false
+	for {
+		header, err := tarReader.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if filepath.Base(header.Name) == "cloud-credential-secrets.json" {
+			contents, err := io.ReadAll(tarReader)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(string(contents), "my-aws-creds") {
+				t.Fatalf("cloud credential Secret missing from backup: %s", contents)
+			}
+			found = true
+		}
+	}
+
+	if !found {
+		t.Fatal("cloud-credential-secrets.json not found in backup archive")
+	}
+}
+
 // CreateBackup and RestoreBackup are tested through handler-level integration tests
 // in internal/api/backup_restore_handlers_test.go which verify the full flow including
 // archive creation, extraction, resource application, and error handling.
