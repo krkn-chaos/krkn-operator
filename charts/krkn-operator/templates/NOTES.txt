@@ -12,7 +12,7 @@ App Version:     {{ .Chart.AppVersion }}
 Components Deployed:
   ✓ Operator:     {{ .Values.operator.enabled }}
   {{- if .Values.acm.enabled }}
-  ✓ ACM:          {{ .Values.acm.enabled }}
+  ✓ ACM alternative: {{ .Values.acm.enabled }}
   {{- end }}
   ✓ Console:      {{ .Values.console.enabled }}
   {{- if .Values.monitoring.enabled }}
@@ -101,30 +101,44 @@ The REST API documentation is available via Swagger UI:
 {{- end }}
 
 =============================================================================
-{{- if .Values.acm.enabled }}
-🔗 ACM INTEGRATION (Advanced Cluster Management)
+🌐 MULTI-CLUSTER MANAGEMENT (PRIMARY: OCM)
 =============================================================================
 
-The ACM component is enabled and running. This allows:
-  • Automatic discovery of managed clusters via ACM
-  • Automatic target provider creation for ACM clusters
-  • Cross-cluster chaos engineering scenarios
+The recommended multi-cluster setup uses Open Cluster Management (OCM) with
+the ManagedServiceAccount add-on enabled. This chart does not install the OCM
+add-on; install and enable it on the OCM hub before configuring managed clusters.
 
-⚠️  REQUIREMENTS:
-  1. ACM (Red Hat Advanced Cluster Management) must be installed on your cluster
-  2. ManagedCluster resources must exist for ACM integration to work
-  3. ACM ConfigMap will be auto-created by the operator API when needed
+Requirements:
+  1. Register the target clusters with the OCM hub.
+  2. Install the ManagedServiceAccount add-on on the hub and wait for it to be Ready.
+  3. Create a ManagedServiceAccount, such as application-manager, in each managed-cluster namespace.
+  4. Wait for its TokenReported condition and grant it the required permissions.
 
-To verify ACM is working:
+To verify the add-on, accounts, and discovered providers:
+  kubectl get pods -n open-cluster-management-addon
+  kubectl get managedserviceaccounts.authentication.open-cluster-management.io -A
+  kubectl get krknoperatortargetproviders -n {{ include "krkn-operator.namespace" . }}
+
+{{- if .Values.acm.enabled }}
+🔀 OPTIONAL ALTERNATIVE: ACM INTEGRATION ENABLED
+=============================================================================
+
+The optional krkn-operator-acm component is enabled. It provides ACM-based
+managed-cluster discovery as an alternative to the primary OCM setup above.
+ACM and its ManagedCluster resources must be available in the cluster.
+
+To verify ACM discovery:
   kubectl get managedclusters
   kubectl get krknoperatortargetproviders -n {{ include "krkn-operator.namespace" . }}
 
 {{- else }}
-ℹ️  ACM INTEGRATION DISABLED
+🔀 OPTIONAL ALTERNATIVE: ACM INTEGRATION DISABLED
 =============================================================================
 
-ACM (Advanced Cluster Management) integration is disabled.
-To enable it, set acm.enabled: true in values.yaml
+The recommended multi-cluster path is OCM with the ManagedServiceAccount
+add-on described above. To enable the ACM-based alternative, set
+acm.enabled=true in values.yaml. ACM and its ManagedCluster resources must
+already be available in the cluster.
 
 {{- end }}
 
@@ -134,7 +148,7 @@ To enable it, set acm.enabled: true in values.yaml
 =============================================================================
 
 Prometheus monitoring is ENABLED:
-  • ServiceMonitor resources created for operator{{ if .Values.acm.enabled }} and ACM{{ end }}
+  • ServiceMonitor resources created for operator{{ if .Values.acm.enabled }} and the optional ACM component{{ end }}
   • Metrics available at :8443/metrics (HTTPS)
 
 ⚠️  REQUIRES: Prometheus Operator must be installed on your cluster
@@ -161,7 +175,8 @@ To enable monitoring:
 
 1. Access the console (see URL above)
 2. Create your first admin user through the console UI
-3. Create a Target Provider (local cluster or ACM)
+3. For managed clusters, use OCM with the ManagedServiceAccount add-on; local
+   cluster use is also supported, and ACM is an optional alternative.
 4. Define chaos scenarios using the console or CRDs
 5. Run your first chaos experiment!
 
