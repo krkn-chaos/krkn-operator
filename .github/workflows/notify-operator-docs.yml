@@ -37,16 +37,11 @@ jobs:
           repositories: website
           permission-contents: write
 
+      - name: Check out Operator release workflow
+        uses: actions/checkout@v5
+
       - name: Dispatch published tag to website
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           OPERATOR_TAG: ${{ inputs.operator_tag || github.event.release.tag_name || github.ref_name }}
-        run: |
-          set -euo pipefail
-          test -n "$OPERATOR_TAG" || {
-            echo "Operator release tag is missing" >&2
-            exit 1
-          }
-          gh api --method POST repos/krkn-chaos/website/dispatches \
-            -f event_type=operator-docs-release-ready \
-            -F "client_payload[operator_tag]=$OPERATOR_TAG"
+        run: bash scripts/notify-operator-docs.sh

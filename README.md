@@ -10,6 +10,35 @@ Kubernetes operator for chaos engineering built on the [krkn](https://github.com
 
 📖 **[Official Documentation](https://krkn-chaos.dev/docs/krkn-operator)**
 
+### Operator release documentation snapshots
+
+Before publishing an Operator release, merge its documentation changes to the
+`krkn-chaos/website` default branch, then add `docs/website-release.yaml` to the
+release tag with the full website commit SHA and the chart version that will be
+published. The release metadata is read from the tag, so do not edit it after
+the tag is published.
+
+The website receiver must be merged and deployed before enabling the release
+notifications below. Configure `DOC_SYNC_BOT_APP_ID` as a repository variable
+and `DOC_SYNC_BOT_APP_PRIVATE_KEY` as a repository secret. The GitHub App must
+be installed for `krkn-chaos/website` and have permission to dispatch the
+website workflow; the website receiver uses the same App to open pull requests.
+Never commit the private key.
+
+The release and chart publication workflows each notify the website. The
+receiver verifies the published release, pinned website commit, and chart,
+then creates or updates one website PR for the tag. It retries while a release
+or chart is not yet available, and duplicate notifications are safe. Review the
+PR preview and merge the website PR to publish the frozen docs and move the
+unversioned links to the newest release. Auto-merge is disabled. If preparation
+fails, rerun the website's `Operator documentation release` workflow with the
+tag after fixing the reported prerequisite. Existing published snapshots are
+not refreshed by routine builds.
+
+For the initial bootstrap only, the website workflow accepts an explicit
+website commit and chart version because the already-published release tag does
+not contain `docs/website-release.yaml`.
+
 ## Quick Start
 
 **Install:**
