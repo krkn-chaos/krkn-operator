@@ -104,11 +104,6 @@ spec:
               name: {{ printf "%s-ai-service-token" (include "krkn-operator.fullname" .) | quote }}
               key: token
         {{- end }}
-        - name: JWT_SECRET
-          valueFrom:
-            secretKeyRef:
-              name: {{ include "krkn-operator.fullname" . }}-jwt
-              key: jwt-secret
         - name: JWT_EXPIRY_HOURS
           value: {{ .Values.auth.jwtExpiryHours | quote }}
         {{- with .Values.auth.trustedProxyCIDRs }}
