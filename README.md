@@ -19,11 +19,13 @@ published. The release metadata is read from the tag, so do not edit it after
 the tag is published.
 
 The website receiver must be merged and deployed before enabling the release
-notifications below. Configure `DOC_SYNC_BOT_APP_ID` as a repository variable
-and `DOC_SYNC_BOT_APP_PRIVATE_KEY` as a repository secret. The GitHub App must
-be installed for `krkn-chaos/website` and have permission to dispatch the
-website workflow; the website receiver uses the same App to open pull requests.
-Never commit the private key.
+notifications below. Configure `DOC_SYNC_BOT_APP_ID` as a repository
+variable and `DOC_SYNC_BOT_APP_PRIVATE_KEY` as a repository secret in both
+`krkn-chaos/krkn-operator` and `krkn-chaos/website`, using the same GitHub App.
+Install the App for `krkn-chaos/website` with Contents and Pull requests write
+permissions. The Operator workflow requests Contents write to dispatch the
+receiver; the website workflow requests Contents and Pull requests write to
+prepare its review PR. Never commit the private key.
 
 The release and chart publication workflows each notify the website. The
 receiver verifies the published release, pinned website commit, and chart,
