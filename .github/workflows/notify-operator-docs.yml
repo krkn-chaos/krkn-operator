@@ -1,0 +1,52 @@
+name: Notify Operator documentation website
+
+on:
+  workflow_call:
+    inputs:
+      operator_tag:
+        description: Published Operator tag
+        required: true
+        type: string
+    secrets:
+      DOC_SYNC_BOT_APP_PRIVATE_KEY:
+        required: true
+  workflow_dispatch:
+    inputs:
+      operator_tag:
+        description: Published Operator tag to retry
+        required: true
+        type: string
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  notify:
+    if: github.event_name != 'release' || github.event.action == 'published'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Mint website dispatch token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ vars.DOC_SYNC_BOT_APP_ID }}
+          private-key: ${{ secrets.DOC_SYNC_BOT_APP_PRIVATE_KEY }}
+          owner: krkn-chaos
+          repositories: website
+          permission-contents: write
+
+      - name: Dispatch published tag to website
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          OPERATOR_TAG: ${{ inputs.operator_tag || github.event.release.tag_name || github.ref_name }}
+        run: |
+          set -euo pipefail
+          test -n "$OPERATOR_TAG" || {
+            echo "Operator release tag is missing" >&2
+            exit 1
+          }
+          gh api --method POST repos/krkn-chaos/website/dispatches \
+            -f event_type=operator-docs-release-ready \
+            -F "client_payload[operator_tag]=$OPERATOR_TAG"

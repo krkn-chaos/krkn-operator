@@ -1,0 +1,6 @@
+# Set these release inputs before publishing a new Operator tag.
+# website_commit must already be present in the reviewed krkn-chaos/website main history.
+# helm_chart_version must identify the published krkn-operator OCI chart for this tag.
+schema_version: 1
+website_commit: ""
+helm_chart_version: ""
