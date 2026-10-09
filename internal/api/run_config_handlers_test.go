@@ -25,12 +25,14 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
 	"github.com/krkn-chaos/krkn-operator/pkg/auth"
+	"github.com/krkn-chaos/krkn-operator/pkg/cloudcreds"
 )
 
 // --- ScenarioRun Config Tests ---
@@ -38,6 +40,7 @@ import (
 func TestGetScenarioRunConfig_Success(t *testing.T) {
 	scheme := runtime.NewScheme()
 	require.NoError(t, krknv1alpha1.AddToScheme(scheme))
+	require.NoError(t, corev1.AddToScheme(scheme))
 
 	scenarioRunName := "my-scenario-run"
 
@@ -58,7 +61,8 @@ func TestGetScenarioRunConfig_Success(t *testing.T) {
 			Environment: map[string]string{
 				"EXIT_STATUS": "0",
 			},
-			KubeconfigPath: "/home/krkn/.kube/config",
+			KubeconfigPath:     "/home/krkn/.kube/config",
+			CloudCredentialRef: "aws-ci",
 			Files: []krknv1alpha1.FileMount{
 				{
 					Name:      "config.yaml",
@@ -76,10 +80,17 @@ func TestGetScenarioRunConfig_Success(t *testing.T) {
 	}
 	category := runCategoryFixture("network", "")
 	category.Namespace = "krkn-operator-system"
+	credential := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{
+		Name: "aws-ci", Namespace: "krkn-operator-system",
+		Labels: map[string]string{
+			cloudcreds.AppComponentLabel:   cloudcreds.ComponentCloudCredential,
+			cloudcreds.AvailableToAllLabel: "true",
+		},
+	}}
 
 	fakeClient := fake.NewClientBuilder().
 		WithScheme(scheme).
-		WithObjects(scenarioRun, category).
+		WithObjects(scenarioRun, category, credential).
 		Build()
 
 	handler := &Handler{
@@ -113,6 +124,7 @@ func TestGetScenarioRunConfig_Success(t *testing.T) {
 	assert.Equal(t, map[string][]string{"krkn-operator": {"cluster1", "cluster2"}}, payload.TargetClusters)
 	assert.Equal(t, map[string]string{"EXIT_STATUS": "0"}, payload.Environment)
 	assert.Equal(t, "/home/krkn/.kube/config", payload.KubeconfigPath)
+	assert.Equal(t, "aws-ci", payload.CloudCredentialRef)
 
 	require.Len(t, payload.FileReferences, 1)
 	assert.Equal(t, "file-uuid-001", payload.FileReferences[0].FileID)
@@ -272,6 +284,7 @@ func TestGetScenarioRunConfig_WithInlineAndRefFiles(t *testing.T) {
 func TestGetGraphRunConfig_Success(t *testing.T) {
 	scheme := runtime.NewScheme()
 	require.NoError(t, krknv1alpha1.AddToScheme(scheme))
+	require.NoError(t, corev1.AddToScheme(scheme))
 
 	graphRunName := "my-graph-run"
 
@@ -298,16 +311,24 @@ func TestGetGraphRunConfig_Success(t *testing.T) {
 			TargetClusters: map[string][]string{
 				"krkn-operator": {"cluster1"},
 			},
-			MaxRetries:  0,
-			OwnerUserID: "owner@test.com",
+			MaxRetries:         0,
+			CloudCredentialRef: "aws-ci",
+			OwnerUserID:        "owner@test.com",
 		},
 	}
 	category := runCategoryFixture("resilience", "")
 	category.Namespace = "krkn-operator-system"
+	credential := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{
+		Name: "aws-ci", Namespace: "krkn-operator-system",
+		Labels: map[string]string{
+			cloudcreds.AppComponentLabel:   cloudcreds.ComponentCloudCredential,
+			cloudcreds.AvailableToAllLabel: "true",
+		},
+	}}
 
 	fakeClient := fake.NewClientBuilder().
 		WithScheme(scheme).
-		WithObjects(graphRun, category).
+		WithObjects(graphRun, category, credential).
 		Build()
 
 	handler := &Handler{
@@ -337,6 +358,7 @@ func TestGetGraphRunConfig_Success(t *testing.T) {
 	assert.Equal(t, map[string][]string{"krkn-operator": {"cluster1"}}, payload.TargetClusters)
 	require.NotNil(t, payload.MaxRetries)
 	assert.Equal(t, 0, *payload.MaxRetries)
+	assert.Equal(t, "aws-ci", payload.CloudCredentialRef)
 
 	require.Len(t, payload.Graph, 2)
 	assert.Equal(t, "scenario-a", payload.Graph["node-1"].Scenario.Name)

@@ -37,6 +37,27 @@ import (
 
 func intPtr(value int) *int { return &value }
 
+// replayableCloudCredentialRef returns a credential reference only when the
+// requester can use it. Replay responses must not disclose restricted names.
+func (h *Handler) replayableCloudCredentialRef(ctx context.Context, ref string) string {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return ""
+	}
+
+	secret, err := h.loadCloudCredentialSecret(ctx, ref)
+	if err != nil {
+		log.FromContext(ctx).V(1).Info("omitting inaccessible cloud credential from replay", "name", ref)
+		return ""
+	}
+	allowed, err := h.canAccessCloudCredential(ctx, secret)
+	if err != nil || !allowed {
+		log.FromContext(ctx).V(1).Info("omitting inaccessible cloud credential from replay", "name", ref)
+		return ""
+	}
+	return ref
+}
+
 // GetScenarioReplay handles GET /api/v1/scenarios/run/replay/{jobId}
 // Retrieves a completed scenario job and reconstructs the payload for replay
 //
@@ -245,6 +266,9 @@ func (h *Handler) reconstructScenarioRunPayload(ctx context.Context, scenarioRun
 		Environment:    scenarioRun.Spec.Environment,
 		KubeconfigPath: scenarioRun.Spec.KubeconfigPath,
 		MaxRetries:     intPtr(scenarioRun.Spec.MaxRetries),
+	}
+	if ref := h.replayableCloudCredentialRef(ctx, scenarioRun.Spec.CloudCredentialRef); ref != "" {
+		payload.CloudCredentialRef = ref
 	}
 
 	// Reconstruct FileReferences from saved files
