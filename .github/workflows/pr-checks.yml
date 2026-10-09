@@ -15,6 +15,9 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v5
 
+      - name: Test Operator documentation dispatch contract
+        run: node --test scripts/tests/notify-operator-docs.test.js
+
       - name: Set up Go
         uses: actions/setup-go@v6
         with:

@@ -223,6 +223,7 @@ jobs:
             --title "Release $VERSION" \
             --generate-notes \
             --verify-tag
+
   publish-olm-bundles:
     name: Build and publish OLM bundles
     needs: create-manifests
