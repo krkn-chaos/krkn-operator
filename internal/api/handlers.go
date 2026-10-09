@@ -47,6 +47,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -122,6 +123,7 @@ func sanitizeRunNameLabel(name string) string {
 type Handler struct {
 	client         client.Client
 	clientset      kubernetes.Interface
+	dynamicClient  dynamic.Interface
 	namespace      string
 	grpcServerAddr string
 	secretManager  *auth.SecretManager
@@ -140,11 +142,12 @@ type Handler struct {
 
 // NewHandler creates a new Handler.
 // Call Shutdown() during server teardown to cancel in-flight background jobs.
-func NewHandler(client client.Client, clientset kubernetes.Interface, namespace string, grpcServerAddr string, secretManager *auth.SecretManager) *Handler {
+func NewHandler(client client.Client, clientset kubernetes.Interface, namespace string, grpcServerAddr string, secretManager *auth.SecretManager, dynamicClient dynamic.Interface) *Handler {
 	bgCtx, bgCancel := context.WithCancel(context.Background())
 	return &Handler{
 		client:                  client,
 		clientset:               clientset,
+		dynamicClient:           dynamicClient,
 		namespace:               namespace,
 		grpcServerAddr:          grpcServerAddr,
 		secretManager:           secretManager,

@@ -22,6 +22,8 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	dynamicfake "k8s.io/client-go/dynamic/fake"
 	"k8s.io/client-go/kubernetes"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -89,7 +91,7 @@ func NewTestHandler(client client.Client, clientset kubernetes.Interface, namesp
 		}
 	}
 
-	return NewHandler(client, clientset, namespace, grpcServerAddr, secretManager)
+	return NewHandler(client, clientset, namespace, grpcServerAddr, secretManager, dynamicfake.NewSimpleDynamicClient(runtime.NewScheme()))
 }
 
 // WithESClient overrides the telemetry Elasticsearch client, letting tests inject
