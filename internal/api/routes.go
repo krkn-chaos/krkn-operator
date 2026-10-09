@@ -131,3 +131,8 @@ const (
 	CloudCredentialsPath          = APIBasePath + "/cloud-credentials"
 	CloudCredentialsAvailablePath = CloudCredentialsPath + "/available"
 )
+
+// krkn-visualize endpoints
+const (
+	VisualizePath = APIBasePath + "/visualize"
+)

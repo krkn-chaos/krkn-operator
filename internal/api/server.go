@@ -311,6 +311,10 @@ func NewServer(port int, client client.Client, clientset kubernetes.Interface, n
 	mux.Handle(RestorePath, authMw.RequireAuth(http.HandlerFunc(handler.PostRestore)))
 	mux.Handle(RestorePath+"/", authMw.RequireAuth(http.HandlerFunc(handler.GetRestoreStatus)))
 
+	// krkn-visualize endpoints - admin only for POST/DELETE, authenticated for GET
+	mux.Handle(VisualizePath, authMw.RequireAuth(http.HandlerFunc(handler.VisualizeRouter)))
+	mux.Handle(VisualizePath+"/", authMw.RequireAuth(http.HandlerFunc(handler.VisualizeRouter)))
+
 	// ==================== API v2 Endpoints ====================
 	// Existing v2 REST resources reuse v1 handlers; v2-specific resources use dedicated handlers.
 	// v2 WebSocket endpoints provide real-time multiplexed updates
