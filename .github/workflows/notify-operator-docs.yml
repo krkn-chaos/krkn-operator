@@ -16,6 +16,9 @@ on:
         description: Published Operator tag to retry
         required: true
         type: string
+  workflow_run:
+    workflows: ["Release Helm Chart", "Release"]
+    types: [completed]
   release:
     types: [published]
 
@@ -24,7 +27,14 @@ permissions:
 
 jobs:
   notify:
-    if: github.event_name != 'release' || github.event.action == 'published'
+    # The receiver verifies the published release and chart independently.
+    if: >-
+      github.repository == 'krkn-chaos/krkn-operator' &&
+      (github.event_name != 'workflow_run' ||
+       (github.event.workflow_run.event == 'push' &&
+        github.event.workflow_run.head_repository.full_name == 'krkn-chaos/krkn-operator' &&
+        (github.event.workflow_run.conclusion == 'success' ||
+         github.event.workflow_run.name == 'Release')))
     runs-on: ubuntu-latest
     steps:
       - name: Mint website dispatch token
@@ -39,12 +49,15 @@ jobs:
 
       - name: Check out Operator release workflow
         uses: actions/checkout@v5
+        with:
+          repository: krkn-chaos/krkn-operator
+          ref: main
 
       - name: Dispatch published tag to website
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           INPUT_OPERATOR_TAG: ${{ inputs.operator_tag }}
           RELEASE_TAG: ${{ github.event.release.tag_name }}
-          PUSHED_TAG: ${{ github.ref_name }}
+          PUSHED_TAG: ${{ github.event.workflow_run.head_branch || github.ref_name }}
           RELEASE_IS_PRERELEASE: ${{ github.event.release.prerelease }}
         run: bash scripts/notify-operator-docs.sh

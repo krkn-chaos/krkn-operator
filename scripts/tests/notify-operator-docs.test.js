@@ -125,17 +125,28 @@ test('skips a published release when GitHub marks it as a prerelease', (t) => {
   assert.equal(fs.existsSync(capture), false);
 });
 
-test('the normal release path sends one notification after chart publication', () => {
+test('trusted default-branch notifications follow publication completion across release branches', () => {
   const release = fs.readFileSync(releaseWorkflow, 'utf8');
   const chart = fs.readFileSync(chartWorkflow, 'utf8');
   const notifierConfig = fs.readFileSync(notifyWorkflow, 'utf8');
 
   assert.doesNotMatch(release, /^  notify-operator-docs:/m);
-  assert.match(chart, /^  notify-operator-docs:\n    name: Notify website after chart publication\n    needs: release-chart\n    uses: \.\/\.github\/workflows\/notify-operator-docs\.yml$/m);
+  assert.doesNotMatch(chart, /^  notify-operator-docs:/m);
+  assert.match(notifierConfig, /workflow_run:/);
+  assert.match(notifierConfig, /workflows: \["Release Helm Chart", "Release"\]/);
+  assert.match(notifierConfig, /github\.event\.workflow_run\.head_repository\.full_name/);
+  assert.match(notifierConfig, /ref: main/);
   assert.match(notifierConfig, /INPUT_OPERATOR_TAG: \$\{\{ inputs\.operator_tag \}\}/);
   assert.match(notifierConfig, /RELEASE_TAG: \$\{\{ github\.event\.release\.tag_name \}\}/);
-  assert.match(notifierConfig, /PUSHED_TAG: \$\{\{ github\.ref_name \}\}/);
+  assert.match(notifierConfig, /PUSHED_TAG: \$\{\{ github\.event\.workflow_run\.head_branch \|\| github\.ref_name \}\}/);
   assert.match(notifierConfig, /RELEASE_IS_PRERELEASE: \$\{\{ github\.event\.release\.prerelease \}\}/);
+});
+
+test('the metadata template uses the same tag-keyed releases format as the Website receiver', () => {
+  const metadata = fs.readFileSync(path.join(repoRoot, 'docs/website-release.yaml'), 'utf8');
+  assert.match(metadata, /^schema_version: 1$/m);
+  assert.match(metadata, /^releases: \[\]$/m);
+  assert.doesNotMatch(metadata, /^website_commit:/m);
 });
 
 test('documents the GitHub App settings and per-tag release metadata', () => {

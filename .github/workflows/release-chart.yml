@@ -91,12 +91,3 @@ jobs:
 
           # Push to Quay.io OCI registry
           helm push krkn-operator-${VERSION}.tgz oci://${{ env.REGISTRY }}/${{ env.CHART_REPO }}
-
-  notify-operator-docs:
-    name: Notify website after chart publication
-    needs: release-chart
-    uses: ./.github/workflows/notify-operator-docs.yml
-    with:
-      operator_tag: ${{ github.ref_name }}
-    secrets:
-      DOC_SYNC_BOT_APP_PRIVATE_KEY: ${{ secrets.DOC_SYNC_BOT_APP_PRIVATE_KEY }}

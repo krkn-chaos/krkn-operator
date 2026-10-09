@@ -12,35 +12,25 @@ Kubernetes operator for chaos engineering built on the [krkn](https://github.com
 
 ### Operator release documentation snapshots
 
-Before publishing an Operator release, merge its documentation changes to the
-`krkn-chaos/website` default branch, then add `docs/website-release.yaml` to the
-release tag with the full website commit SHA and the chart version that will be
-published. The release metadata is read from the tag, so do not edit it after
-the tag is published.
+Merge the source documentation PR from `docs/operator-source/vMAJOR.MINOR.PATCH`
+into `krkn-chaos/website:main`. The Website Action automatically opens an Operator
+metadata PR against `release-MAJOR.MINOR`, recording the exact merge SHA and chart
+version in `docs/website-release.yaml`. Review and merge that PR before tagging.
+Do not rewrite published tags or manually copy commit hashes.
 
-The website receiver must be merged and deployed before enabling the release
-notifications below. Configure `DOC_SYNC_BOT_APP_ID` as a repository
-variable and `DOC_SYNC_BOT_APP_PRIVATE_KEY` as a repository secret in both
-`krkn-chaos/krkn-operator` and `krkn-chaos/website`, using the same GitHub App.
-Install the App for `krkn-chaos/website` with Contents and Pull requests write
-permissions. The Operator workflow requests Contents write to dispatch the
-receiver; the website workflow requests Contents and Pull requests write to
-prepare its review PR. Never commit the private key.
+Deploy the Website receiver before enabling notifications. Configure
+`DOC_SYNC_BOT_APP_ID` and `DOC_SYNC_BOT_APP_PRIVATE_KEY` in both repositories.
+Install the GitHub App for both repositories with Contents and Pull requests
+write permissions. Never commit its private key or substitute a personal token.
 
-After publishing the Helm chart, the chart workflow notifies the website once
-for the tag. The receiver verifies the published release, pinned website
-commit, and chart, then creates or updates one website PR. It retries while a
-release or chart is not yet available, and safely reuses the same PR if a
-published-release event or manual retry sends a duplicate notice. Review the
-PR preview and merge the website PR to publish the frozen docs and move the
-unversioned links to the newest release. Auto-merge is disabled. If preparation
-fails, rerun the website's `Operator documentation release` workflow with the
-tag after fixing the reported prerequisite. Existing published snapshots are
-not refreshed by routine builds.
-
-For the initial bootstrap only, the website workflow accepts an explicit
-website commit and chart version because the already-published release tag does
-not contain `docs/website-release.yaml`.
+The default-branch notifier observes completion of `Release Helm Chart` and
+`Release`, including tags published from existing release branches. Successful
+chart publication sends the first notification without waiting for catalog jobs.
+Release completion and genuine published-release events provide duplicate-safe
+retries. Only stable tags are captured; the Website receiver independently
+verifies the published release, pinned metadata, reviewed source commit, and
+published chart before opening a snapshot PR. Review and merge that Website PR
+to publish the new docs. Failed preparation leaves live documentation unchanged.
 
 ## Quick Start
 
