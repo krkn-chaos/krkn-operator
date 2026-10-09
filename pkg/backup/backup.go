@@ -154,6 +154,11 @@ func CreateBackup(ctx context.Context, k8sClient client.Client, config BackupCon
 			singular: "registry-secrets",
 			selector: map[string]string{"app.kubernetes.io/component": "registry"},
 		},
+		{
+			gvk:      schema.GroupVersionKind{Group: "", Version: "v1", Kind: "Secret"},
+			singular: "cloud-credential-secrets",
+			selector: map[string]string{"app.kubernetes.io/name": "krkn-operator", "app.kubernetes.io/component": "cloud-credential"},
+		},
 		// Provider configuration values are stored in explicitly labeled ConfigMaps.
 		{
 			gvk:      schema.GroupVersionKind{Group: "", Version: "v1", Kind: "ConfigMap"},

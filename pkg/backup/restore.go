@@ -467,7 +467,7 @@ func isOperatorManagedSecret(obj *unstructured.Unstructured) bool {
 	// Allow secrets with component label matching any backup selector
 	if component, ok := labels["app.kubernetes.io/component"]; ok {
 		switch component {
-		case "authentication", "user-auth", "elasticsearch-config", "registry":
+		case "authentication", "user-auth", "elasticsearch-config", "registry", "cloud-credential":
 			return true
 		}
 	}
