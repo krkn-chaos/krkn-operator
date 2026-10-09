@@ -27,10 +27,11 @@ permissions. The Operator workflow requests Contents write to dispatch the
 receiver; the website workflow requests Contents and Pull requests write to
 prepare its review PR. Never commit the private key.
 
-The release and chart publication workflows each notify the website. The
-receiver verifies the published release, pinned website commit, and chart,
-then creates or updates one website PR for the tag. It retries while a release
-or chart is not yet available, and duplicate notifications are safe. Review the
+After publishing the Helm chart, the chart workflow notifies the website once
+for the tag. The receiver verifies the published release, pinned website
+commit, and chart, then creates or updates one website PR. It retries while a
+release or chart is not yet available, and safely reuses the same PR if a
+published-release event or manual retry sends a duplicate notice. Review the
 PR preview and merge the website PR to publish the frozen docs and move the
 unversioned links to the newest release. Auto-merge is disabled. If preparation
 fails, rerun the website's `Operator documentation release` workflow with the

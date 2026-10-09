@@ -43,5 +43,7 @@ jobs:
       - name: Dispatch published tag to website
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
-          OPERATOR_TAG: ${{ inputs.operator_tag || github.event.release.tag_name || github.ref_name }}
+          INPUT_OPERATOR_TAG: ${{ inputs.operator_tag }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          PUSHED_TAG: ${{ github.ref_name }}
         run: bash scripts/notify-operator-docs.sh

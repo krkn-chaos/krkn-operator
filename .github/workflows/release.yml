@@ -224,15 +224,6 @@ jobs:
             --generate-notes \
             --verify-tag
 
-  notify-operator-docs:
-    name: Notify website after Operator release publication
-    needs: create-manifests
-    uses: ./.github/workflows/notify-operator-docs.yml
-    with:
-      operator_tag: ${{ github.ref_name }}
-    secrets:
-      DOC_SYNC_BOT_APP_PRIVATE_KEY: ${{ secrets.DOC_SYNC_BOT_APP_PRIVATE_KEY }}
-
   publish-olm-bundles:
     name: Build and publish OLM bundles
     needs: create-manifests
