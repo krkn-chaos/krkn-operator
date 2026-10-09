@@ -47,12 +47,10 @@ import (
 
 // allowedRestoreGVKs defines the set of resource types that restore is permitted to apply.
 var allowedRestoreGVKs = map[schema.GroupVersionKind]bool{
-	{Group: "krkn.krkn-chaos.dev", Version: "v1alpha1", Kind: "KrknUser"}:                   true,
-	{Group: "krkn.krkn-chaos.dev", Version: "v1alpha1", Kind: "KrknUserGroup"}:              true,
-	{Group: "krkn.krkn-chaos.dev", Version: "v1alpha1", Kind: "KrknOperatorTarget"}:         true,
-	{Group: "krkn.krkn-chaos.dev", Version: "v1alpha1", Kind: "KrknOperatorTargetProvider"}: true,
-	{Group: "", Version: "v1", Kind: "Secret"}:                                              true,
-	{Group: "", Version: "v1", Kind: "ConfigMap"}:                                           true,
+	{Group: "krkn.krkn-chaos.dev", Version: "v1alpha1", Kind: "KrknUser"}:           true,
+	{Group: "krkn.krkn-chaos.dev", Version: "v1alpha1", Kind: "KrknUserGroup"}:      true,
+	{Group: "krkn.krkn-chaos.dev", Version: "v1alpha1", Kind: "KrknOperatorTarget"}: true,
+	{Group: "", Version: "v1", Kind: "Secret"}:                                      true,
 }
 
 // RestoreConfig holds restore configuration.
@@ -192,12 +190,6 @@ func applyResourcesFromFile(ctx context.Context, k8sClient client.Client, namesp
 				continue
 			}
 		}
-		if obj.GetKind() == "ConfigMap" && !isOperatorManagedConfigMap(obj) {
-			logger.V(1).Info("Rejecting ConfigMap without provider configuration label", "name", obj.GetName())
-			failed++
-			continue
-		}
-
 		if applyErr := applyResource(ctx, k8sClient, obj); applyErr != nil {
 			logger.Error(applyErr, "Failed to apply resource", "kind", obj.GetKind(), "name", obj.GetName())
 			failed++
@@ -473,11 +465,6 @@ func isOperatorManagedSecret(obj *unstructured.Unstructured) bool {
 	}
 
 	return false
-}
-
-func isOperatorManagedConfigMap(obj *unstructured.Unstructured) bool {
-	labels := obj.GetLabels()
-	return labels != nil && labels[provider.ProviderConfigLabel] == provider.ProviderConfigLabelValue
 }
 
 func isNotFound(err error) bool {

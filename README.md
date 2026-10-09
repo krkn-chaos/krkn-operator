@@ -576,7 +576,7 @@ is disabled; only the enforcement result is ignored.
 
 ## Backup and Restore
 
-Admin users can back up and restore operator configuration (users, groups, targets, providers, credentials) for disaster recovery and cross-cluster migration using the web console.
+Admin users can back up and restore operator configuration (users, groups, targets, credentials) for disaster recovery and cross-cluster migration using the web console.
 
 **To download a backup:** Click "Download Backup" in the Backup & Restore card.
 
