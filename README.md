@@ -23,14 +23,16 @@ Deploy the Website receiver before enabling notifications. Configure
 Install the GitHub App for both repositories with Contents and Pull requests
 write permissions. Never commit its private key or substitute a personal token.
 
-The default-branch notifier observes completion of `Release Helm Chart` and
-`Release`, including tags published from existing release branches. Successful
-chart publication sends the first notification without waiting for catalog jobs.
-Release completion and genuine published-release events provide duplicate-safe
-retries. Only stable tags are captured; the Website receiver independently
-verifies the published release, pinned metadata, reviewed source commit, and
-published chart before opening a snapshot PR. Review and merge that Website PR
-to publish the new docs. Failed preparation leaves live documentation unchanged.
+Successful `Release Helm Chart` jobs call the reusable notifier with the exact
+tag, so the Website is notified only after chart publication and without waiting
+for catalog jobs. A default-branch fallback covers older release tags whose
+chart workflow does not yet contain that reusable call; it verifies the tag
+against the completed workflow's commit and skips when the direct call already
+ran. A manual workflow-dispatch input remains available for retries. Only stable
+tags are captured; the Website receiver independently verifies the published
+release, pinned metadata, reviewed source commit, and published chart before
+opening a snapshot PR. Review and merge that Website PR to publish the new docs.
+Failed preparation leaves live documentation unchanged.
 
 ## Quick Start
 
