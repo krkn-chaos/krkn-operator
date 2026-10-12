@@ -134,6 +134,7 @@ test('successful chart publication calls the reusable notifier with the exact ta
   assert.match(notifierConfig, /github\.event\.workflow_run\.event == 'push'/);
   assert.match(notifierConfig, /github\.event\.workflow_run\.conclusion == 'success'/);
   assert.match(notifierConfig, /github\.event\.workflow_run\.head_repository\.full_name/);
+  assert.doesNotMatch(notifierConfig, /^\s+GITHUB_EVENT_NAME:/m);
   assert.match(notifierConfig, /ref: main/);
   assert.match(notifierConfig, /fetch-depth: 0/);
   assert.match(notifierConfig, /INPUT_OPERATOR_TAG: \$\{\{ inputs\.operator_tag \}\}/);
