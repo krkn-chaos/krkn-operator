@@ -116,10 +116,11 @@ const WebSocketAllowedOriginsEnv = "WEBSOCKET_ALLOWED_ORIGINS"
 //   - namespace: Operator namespace
 //   - grpcServerAddr: gRPC server address
 //   - secretManager: JWT secret manager (must be started before API server receives traffic)
+//   - krknAIEnabled: Whether Krkn-AI API creation operations are enabled
 //
 // Returns a new Server instance
-func NewServer(port int, client client.Client, clientset kubernetes.Interface, namespace string, grpcServerAddr string, secretManager *auth.SecretManager) *Server {
-	handler := NewHandler(client, clientset, namespace, grpcServerAddr, secretManager)
+func NewServer(port int, client client.Client, clientset kubernetes.Interface, namespace string, grpcServerAddr string, secretManager *auth.SecretManager, krknAIEnabled bool) *Server {
+	handler := NewHandler(client, clientset, namespace, grpcServerAddr, secretManager, krknAIEnabled)
 
 	// Create auth middleware using SecretManager
 	// The SecretManager is started as a Runnable before the API server starts
@@ -291,6 +292,12 @@ func NewServer(port int, client client.Client, clientset kubernetes.Interface, n
 	// Graph Run endpoints - user and admin access (ownership-based authorization)
 	mux.Handle(GraphRunsPath, authMw.RequireAuth(http.HandlerFunc(handler.GraphRunsRouter)))
 	mux.Handle(GraphRunsPath+"/", authMw.RequireAuth(http.HandlerFunc(handler.GraphRunsRouter)))
+
+	// Krkn-AI artifacts are accessed only through the authenticated operator API.
+	mux.Handle(KrknAIPath, authMw.RequireAuth(http.HandlerFunc(handler.KrknAIRouter)))
+	mux.Handle(KrknAIPath+"/", authMw.RequireAuth(http.HandlerFunc(handler.KrknAIRouter)))
+	// Krkn-AI orchestrator logs authenticate with the JWT access_token subprotocol.
+	mux.HandleFunc("/api/v2/ws/krkn-ai/runs/", handler.GetKrknAIRunLogs)
 
 	// Swagger UI - public endpoint for API documentation
 	mux.Handle("/api/swagger/", httpSwagger.WrapHandler)

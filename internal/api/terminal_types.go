@@ -18,8 +18,12 @@ package api
 
 // TerminalRequest represents a request to execute a kubectl/oc command
 type TerminalRequest struct {
-	// ClusterID is the identifier of the target cluster
+	// ClusterID is the name of the target cluster
 	ClusterID string `json:"cluster_id" binding:"required"`
+
+	// OperatorName identifies which target provider owns ClusterID.
+	// Optional for legacy clients when the cluster name is unique.
+	OperatorName string `json:"operator_name,omitempty"`
 
 	// UUID is the KrknTargetRequest UUID containing cluster kubeconfig
 	UUID string `json:"uuid" binding:"required"`
