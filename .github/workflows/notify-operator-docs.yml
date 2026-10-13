@@ -1,0 +1,86 @@
+name: Notify Operator documentation website
+
+on:
+  workflow_call:
+    inputs:
+      operator_tag:
+        description: Published Operator tag
+        required: true
+        type: string
+    secrets:
+      DOC_SYNC_BOT_APP_PRIVATE_KEY:
+        required: true
+  workflow_dispatch:
+    inputs:
+      operator_tag:
+        description: Published Operator tag to retry
+        required: true
+        type: string
+  # Compatibility for release tags whose source commit predates the direct caller job.
+  workflow_run:
+    workflows: ["Release Helm Chart"]
+    types: [completed]
+
+permissions:
+  contents: read
+
+jobs:
+  notify:
+    if: >-
+      github.repository == 'krkn-chaos/krkn-operator' &&
+      (github.event_name != 'workflow_run' ||
+       (github.event.workflow_run.event == 'push' &&
+        github.event.workflow_run.head_repository.full_name == 'krkn-chaos/krkn-operator' &&
+        github.event.workflow_run.conclusion == 'success'))
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out trusted notifier and release tags
+        uses: actions/checkout@v5
+        with:
+          repository: krkn-chaos/krkn-operator
+          ref: main
+          fetch-depth: 0
+
+      - name: Check out the tag's chart workflow
+        if: github.event_name == 'workflow_run'
+        uses: actions/checkout@v5
+        with:
+          repository: krkn-chaos/krkn-operator
+          ref: ${{ github.event.workflow_run.head_sha }}
+          path: operator-tag-source
+
+      - name: Detect whether the tag workflow already notified directly
+        id: route
+        if: github.event_name == 'workflow_run'
+        env:
+          SOURCE_RELEASE_CHART: operator-tag-source/.github/workflows/release-chart.yml
+        run: |
+          if grep -Eq '^[[:space:]]*notify-website:[[:space:]]*$' "$SOURCE_RELEASE_CHART" && \
+             grep -Eq '^[[:space:]]*uses:[[:space:]]+\./\.github/workflows/notify-operator-docs\.yml[[:space:]]*$' "$SOURCE_RELEASE_CHART"; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "The tag's chart workflow already called the notifier directly; skipping fallback dispatch."
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Mint website dispatch token
+        id: app-token
+        if: steps.route.outputs.skip != 'true'
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ vars.DOC_SYNC_BOT_APP_ID }}
+          private-key: ${{ secrets.DOC_SYNC_BOT_APP_PRIVATE_KEY }}
+          owner: krkn-chaos
+          repositories: website
+          permission-contents: write
+
+      - name: Dispatch published tag to website
+        if: steps.route.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          INPUT_OPERATOR_TAG: ${{ inputs.operator_tag }}
+          PUSHED_TAG: ${{ github.event.workflow_run.head_branch }}
+          WORKFLOW_RUN_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          OPERATOR_REPO_ROOT: ${{ github.workspace }}
+          SOURCE_RELEASE_CHART: operator-tag-source/.github/workflows/release-chart.yml
+        run: bash scripts/notify-operator-docs.sh

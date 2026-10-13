@@ -10,6 +10,30 @@ Kubernetes operator for chaos engineering built on the [krkn](https://github.com
 
 📖 **[Official Documentation](https://krkn-chaos.dev/docs/krkn-operator)**
 
+### Operator release documentation snapshots
+
+Merge the source documentation PR from `docs/operator-source/vMAJOR.MINOR.PATCH`
+into `krkn-chaos/website:main`. The Website Action automatically opens an Operator
+metadata PR against `release-MAJOR.MINOR`, recording the exact merge SHA and chart
+version in `docs/website-release.yaml`. Review and merge that PR before tagging.
+Do not rewrite published tags or manually copy commit hashes.
+
+Deploy the Website receiver before enabling notifications. Configure
+`DOC_SYNC_BOT_APP_ID` and `DOC_SYNC_BOT_APP_PRIVATE_KEY` in both repositories.
+Install the GitHub App for both repositories with Contents and Pull requests
+write permissions. Never commit its private key or substitute a personal token.
+
+Successful `Release Helm Chart` jobs call the reusable notifier with the exact
+tag, so the Website is notified only after chart publication and without waiting
+for catalog jobs. A default-branch fallback covers older release tags whose
+chart workflow does not yet contain that reusable call; it verifies the tag
+against the completed workflow's commit and skips when the direct call already
+ran. A manual workflow-dispatch input remains available for retries. Only stable
+tags are captured; the Website receiver independently verifies the published
+release, pinned metadata, reviewed source commit, and published chart before
+opening a snapshot PR. Review and merge that Website PR to publish the new docs.
+Failed preparation leaves live documentation unchanged.
+
 ## Quick Start
 
 **Install:**

@@ -5,6 +5,9 @@ on:
     tags:
       - 'v*'
 
+permissions:
+  contents: read
+
 env:
   REGISTRY: quay.io
   CHART_REPO: krkn-chaos/charts
@@ -91,3 +94,13 @@ jobs:
 
           # Push to Quay.io OCI registry
           helm push krkn-operator-${VERSION}.tgz oci://${{ env.REGISTRY }}/${{ env.CHART_REPO }}
+
+  notify-website:
+    name: Notify Website
+    needs: release-chart
+    if: ${{ needs.release-chart.result == 'success' }}
+    uses: ./.github/workflows/notify-operator-docs.yml
+    with:
+      operator_tag: ${{ github.ref_name }}
+    secrets:
+      DOC_SYNC_BOT_APP_PRIVATE_KEY: ${{ secrets.DOC_SYNC_BOT_APP_PRIVATE_KEY }}
