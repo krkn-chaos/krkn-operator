@@ -12,27 +12,62 @@ Kubernetes operator for chaos engineering built on the [krkn](https://github.com
 
 ### Operator release documentation snapshots
 
-Merge the source documentation PR from `docs/operator-source/vMAJOR.MINOR.PATCH`
-into `krkn-chaos/website:main`. The Website Action automatically opens an Operator
-metadata PR against `release-MAJOR.MINOR`, recording the exact merge SHA and chart
-version in `docs/website-release.yaml`. Review and merge that PR before tagging.
-Do not rewrite published tags or manually copy commit hashes.
+The Website repository keeps editable Operator docs in
+`content/en/docs/krkn-operator/` and published snapshots in
+`content/en/docs/krkn-operator/versions/<tag>/`. Production serves the snapshots;
+the editable source is not published by itself.
 
-Deploy the Website receiver before enabling notifications. Configure
-`DOC_SYNC_BOT_APP_ID` and `DOC_SYNC_BOT_APP_PRIVATE_KEY` in both repositories.
-Install the GitHub App for both repositories with Contents and Pull requests
-write permissions. Never commit its private key or substitute a personal token.
+We handle one Operator documentation release at a time. Finish that release's
+docs and merge its Website snapshot PR before starting the next release's docs.
 
-Successful `Release Helm Chart` jobs call the reusable notifier with the exact
-tag, so the Website is notified only after chart publication and without waiting
-for catalog jobs. A default-branch fallback covers older release tags whose
-chart workflow does not yet contain that reusable call; it verifies the tag
-against the completed workflow's commit and skips when the direct call already
-ran. A manual workflow-dispatch input remains available for retries. Only stable
-tags are captured; the Website receiver independently verifies the published
-release, pinned metadata, reviewed source commit, and published chart before
-opening a snapshot PR. Review and merge that Website PR to publish the new docs.
-Failed preparation leaves live documentation unchanged.
+1. **Prepare the docs.** Authors update pages, images, videos, and navigation
+   under `content/en/docs/krkn-operator/` in normal Website PRs. Use any branch
+   names; the automation does not use source branch names or individual PR
+   identities. Merge all docs PRs for this release before publishing the
+   Operator release. Do not create a `versions/<tag>/` directory or a per-release
+   metadata file. There is no Operator metadata PR or manual SHA/chart entry.
+2. **Publish the Operator release and chart.** Create the stable Operator tag
+   `vX.Y.Z` and publish its Helm chart through the normal Operator release
+   process. After chart publication succeeds, the Operator workflow sends the
+   Website an `operator-docs-release-ready` notification containing only
+   `operator_tag: vX.Y.Z`. Only stable `vMAJOR.MINOR.PATCH` releases are
+   captured; prereleases are skipped.
+3. **Let the Website bot prepare the snapshot.** The Website receiver verifies
+   the published stable release and chart, checks that chart version is
+   `X.Y.Z` and its `appVersion` is `vX.Y.Z`, then pins current Website `main`.
+   It captures the complete editable docs and supported assets from that exact
+   commit into `content/en/docs/krkn-operator/versions/vX.Y.Z/`, records their
+   integrity, pins installation instructions to chart `X.Y.Z`, and opens or
+   updates a Website PR on `docs/operator-release/vX.Y.Z`. No one supplies a
+   Website commit SHA or chart version manually. Duplicate notices for the
+   same tag safely reuse the same snapshot and PR.
+4. **Review and merge the Website snapshot PR.** Check its preview, pages,
+   navigation, images/videos, install instructions, links, search, and print
+   output. Auto-merge is disabled. Merging and deploying this PR publishes the
+   version in the selector; existing unversioned links then forward to the
+   newest published stable version. Versioned links stay pinned to their tag.
+5. **Start the next release.** After this snapshot PR is merged, update the
+   same editable source tree for the next Operator release.
+
+If preparation fails because the release or chart is not available yet, fix
+the reported prerequisite and rerun the Website's `Prepare Operator
+documentation release PR` workflow with only the tag. The receiver retries
+temporary publication delays. A failed preparation does not change the live
+site.
+
+To enable automation, first merge and deploy the Website receiver. Then
+configure `DOC_SYNC_BOT_APP_ID` as a repository variable and
+`DOC_SYNC_BOT_APP_PRIVATE_KEY` as a repository secret in both repositories.
+Install the GitHub App on `krkn-chaos/website` with Contents and Pull requests
+write permissions. The Operator notifier dispatches the tag; the Website
+receiver uses the App to create its review PR. Never commit the private key or
+use a personal access token fallback.
+
+To correct an already published version, open a Website PR that edits that
+version's archived files and updates its snapshot integrity record with a dated
+correction and reason while preserving the original source provenance. If the
+fix should also apply to future versions, make the same change in the editable
+source tree.
 
 ## Quick Start
 
