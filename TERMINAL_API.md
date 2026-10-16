@@ -31,6 +31,7 @@ The token is obtained via the `/api/v1/auth/login` endpoint.
 ```json
 {
   "cluster_id": "string (required)",
+  "operator_name": "string (optional)",
   "uuid": "string (required)",
   "command": "string (required)"
 }
@@ -39,6 +40,7 @@ The token is obtained via the `/api/v1/auth/login` endpoint.
 **Fields:**
 
 - `cluster_id` (string, required): The cluster name (matches the `cluster-name` field in KrknTargetRequest)
+- `operator_name` (string, optional): The provider name in `managed-clusters` and `KrknTargetRequest.status.targetData`. Pass it to disambiguate cluster names; legacy clients may omit it when the name is unique.
 - `uuid` (string, required): The UUID of the KrknTargetRequest containing the cluster kubeconfig
 - `command` (string, required): The full command string to execute (e.g., `"kubectl get pods -n default"`)
 
