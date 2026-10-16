@@ -46,6 +46,7 @@
 | ✅ Add cluster liveness check to frontend | Surface cluster health status in the UI | [krkn-operator-console#58](https://github.com/krkn-chaos/krkn-operator-console/issues/58) |
 |✅  Weighted per-node resilience score in Chaos Studio | Assign weights to workflow nodes and calculate weighted overall resilience score | [krkn-operator#80](https://github.com/krkn-chaos/krkn-operator/issues/80) |
 | ✅ Add workflow run history and resilience score trends | View past runs of saved workflows with resilience scores to identify regressions | [krkn-operator#82](https://github.com/krkn-chaos/krkn-operator/issues/82) |
+| ✅ Add cancel/back navigation when rerunning a scenario | Let users cancel or return to the jobs list during reruns | [krkn-operator-console#95](https://github.com/krkn-chaos/krkn-operator-console/issues/95) |
 ---
 
 ## Release 3 — 2026-12-22
@@ -99,7 +100,6 @@
 | Remove kubeconfig path from environment variables | Avoid exposing the kubeconfig path through environment variables | [krkn-operator-console#165](https://github.com/krkn-chaos/krkn-operator-console/issues/165) |
 | Clarify how to use the files mount path | Make files mount path behavior clear in the UI | [krkn-operator-console#126](https://github.com/krkn-chaos/krkn-operator-console/issues/126) |
 | Harden API error handling for 500 responses and permission checks | Handle server errors and status-based authorization consistently | [krkn-operator-console#100](https://github.com/krkn-chaos/krkn-operator-console/issues/100) |
-| Add cancel/back navigation when rerunning a scenario | Let users cancel or return to the jobs list during reruns | [krkn-operator-console#95](https://github.com/krkn-chaos/krkn-operator-console/issues/95) |
 | Hide secrets in the scenario detail overview | Prevent secret values from appearing in run details | [krkn-operator-console#93](https://github.com/krkn-chaos/krkn-operator-console/issues/93) |
 | Remove the duplicate Pod label field in pod scenarios | Remove the duplicate field from pod scenario configuration | [krkn-operator-console#8](https://github.com/krkn-chaos/krkn-operator-console/issues/8) |
 
