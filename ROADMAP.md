@@ -44,6 +44,8 @@
 | ✅ Add paging to users and groups view | Paginate users and groups tables for better performance with many entries | [krkn-operator-console#89](https://github.com/krkn-chaos/krkn-operator-console/issues/89) |
 | ✅ Improve run scenario UX by displaying all execution options | Make Run Scenario and Chaos Studio clearly visible as separate execution options | [krkn-operator#81](https://github.com/krkn-chaos/krkn-operator/issues/81) |
 | ✅ Add cluster liveness check to frontend | Surface cluster health status in the UI | [krkn-operator-console#58](https://github.com/krkn-chaos/krkn-operator-console/issues/58) |
+|✅  Weighted per-node resilience score in Chaos Studio | Assign weights to workflow nodes and calculate weighted overall resilience score | [krkn-operator#80](https://github.com/krkn-chaos/krkn-operator/issues/80) |
+| ✅ Add workflow run history and resilience score trends | View past runs of saved workflows with resilience scores to identify regressions | [krkn-operator#82](https://github.com/krkn-chaos/krkn-operator/issues/82) |
 ---
 
 ## Release 3 — 2026-12-22
@@ -57,13 +59,11 @@
 | Implement cluster explorer via gRPC server | Browse cluster resources through a gRPC-backed explorer | [krkn-operator#1](https://github.com/krkn-chaos/krkn-operator/issues/1) |
 | Allowed scenarios per group configuration | Restrict which scenarios each user group can run | [krkn-operator#41](https://github.com/krkn-chaos/krkn-operator/issues/41) |
 | Metrics and alert capturing/visualization on scenario details | Embed Prometheus metrics and alerts into scenario detail view | [krkn-operator-console#59](https://github.com/krkn-chaos/krkn-operator-console/issues/59) |
-| Weighted per-node resilience score in Chaos Studio | Assign weights to workflow nodes and calculate weighted overall resilience score | [krkn-operator#80](https://github.com/krkn-chaos/krkn-operator/issues/80) |
 | Marketplace for Chaos Studio workflows | Share and discover workflow templates based on real-world outages | [krkn-operator-console#87](https://github.com/krkn-chaos/krkn-operator-console/issues/87) |
 | Increase test coverage | Expand unit and integration test suite | [krkn-operator#42](https://github.com/krkn-chaos/krkn-operator/issues/42) |
 | Improve developer READMEs | Better onboarding docs for contributors | [krkn-operator#38](https://github.com/krkn-chaos/krkn-operator/issues/38) |
 | **Bug:** Fix 403 error in deploy preview workflow | Permissions error blocks deploy preview runs | [krkn-operator#39](https://github.com/krkn-chaos/krkn-operator/issues/39) |
 | **Bug:** Duplicate logs at end of job completion | Logs repeat in UI after job completes and changes status | [krkn-operator-console#88](https://github.com/krkn-chaos/krkn-operator-console/issues/88) |
-| Add workflow run history and resilience score trends | View past runs of saved workflows with resilience scores to identify regressions | [krkn-operator#82](https://github.com/krkn-chaos/krkn-operator/issues/82) |
 | **Bug:** Zone-outages workflow failing on coral | Workflow errors during perfconf on coral cluster | [krkn-operator#40](https://github.com/krkn-chaos/krkn-operator/issues/40) |
 | Cache scenario images | Reuse pulled scenario images to reduce repeated image work | [krkn-operator#141](https://github.com/krkn-chaos/krkn-operator/issues/141) |
 | Upload a workflow | Upload workflow definitions for execution | [krkn-operator#118](https://github.com/krkn-chaos/krkn-operator/issues/118) |
