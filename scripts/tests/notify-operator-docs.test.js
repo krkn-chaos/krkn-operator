@@ -284,16 +284,20 @@ test('legacy fallback fails closed when several tags point to the run SHA and he
   assert.equal(fs.existsSync(fakeGh.capture), false);
 });
 
-test('the metadata template uses the same tag-keyed releases format as the Website receiver', () => {
-  const metadata = fs.readFileSync(path.join(repoRoot, 'docs/website-release.yaml'), 'utf8');
-  assert.match(metadata, /^schema_version: 1$/m);
-  assert.match(metadata, /^releases: \[\]$/m);
-  assert.doesNotMatch(metadata, /^website_commit:/m);
-});
-
-test('documents the GitHub App settings and per-tag release metadata', () => {
+test('documents the serial release-first snapshot flow and GitHub App settings', () => {
   const readme = fs.readFileSync(path.join(repoRoot, 'README.md'), 'utf8');
   assert.match(readme, /DOC_SYNC_BOT_APP_ID/);
   assert.match(readme, /DOC_SYNC_BOT_APP_PRIVATE_KEY/);
-  assert.match(readme, /docs\/website-release\.yaml/);
+  assert.match(readme, /content\/en\/docs\/krkn-operator\//);
+  assert.match(readme, /any branch\s+names/i);
+  assert.match(readme, /operator-docs-release-ready/);
+  assert.match(readme, /published stable release and chart/i);
+  assert.match(readme, /one Operator documentation release at a time/i);
+  assert.match(readme, /snapshot PR is merged/i);
+  assert.match(readme, /no Operator metadata PR/i);
+  assert.match(readme, /Do not create a `versions\/<tag>\/` directory or a per-release\s+metadata file/i);
+  assert.doesNotMatch(readme, /docs\/operator-source\//);
+  assert.doesNotMatch(readme, /docs\/website-release\.yaml/);
+  assert.doesNotMatch(readme, /pinned metadata/i);
+  assert.equal(fs.existsSync(path.join(repoRoot, 'docs/website-release.yaml')), false);
 });
