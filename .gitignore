@@ -37,6 +37,12 @@ venv/
 
 # bv (beads viewer) local config and caches
 .bv/
+
+# Graphify local state
+graphify-out/cache/
+graphify-out/.graphify_*
+graphify-out/cost.json
+
 # Test hook
 
 .beads
