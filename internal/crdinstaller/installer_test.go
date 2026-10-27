@@ -78,6 +78,47 @@ func TestApplyCRDsCreatesMissingAndUpdatesChangedSpecs(t *testing.T) {
 	}
 }
 
+func TestCreateMissingCRDsBeforeRolloutLeavesExistingSpecsUntouched(t *testing.T) {
+	directory := t.TempDir()
+	desiredExisting := testCRD("widgets", "Widget")
+	desiredExisting.Spec.Names.ShortNames = []string{"new"}
+	writeCRD(t, directory, "widgets.yaml", desiredExisting)
+	desiredMissing := testCRD("gadgets", "Gadget")
+	writeCRD(t, directory, "gadgets.yaml", desiredMissing)
+
+	existing := desiredExisting.DeepCopy()
+	existing.Spec.Names.ShortNames = []string{"old"}
+	clientset := fake.NewSimpleClientset(existing)
+	client := clientset.ApiextensionsV1().CustomResourceDefinitions()
+
+	names, err := createMissingCRDs(context.Background(), client, directory)
+	if err != nil {
+		t.Fatalf("create missing CRDs: %v", err)
+	}
+	if len(names) != 1 || names[0] != desiredMissing.Name {
+		t.Fatalf("created names = %v, want [%s]", names, desiredMissing.Name)
+	}
+	gotExisting, err := client.Get(context.Background(), existing.Name, v1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(gotExisting.Spec.Names.ShortNames) != 1 || gotExisting.Spec.Names.ShortNames[0] != "old" {
+		t.Fatalf("existing CRD spec changed before rollout: %v", gotExisting.Spec.Names.ShortNames)
+	}
+	gotMissing, err := client.Get(context.Background(), desiredMissing.Name, v1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotMissing.Labels[operatorLabelKey] != operatorLabelValue {
+		t.Fatalf("new CRD labels = %v", gotMissing.Labels)
+	}
+	for _, action := range clientset.Actions() {
+		if action.GetVerb() == "patch" {
+			t.Fatal("pre-upgrade CRD creation patched an existing CRD")
+		}
+	}
+}
+
 func TestApplyCRDsDoesNotPatchUnchangedSpecs(t *testing.T) {
 	directory := t.TempDir()
 	desired := testCRD("widgets", "Widget")

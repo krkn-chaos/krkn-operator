@@ -352,7 +352,7 @@ docker-buildx: ## Build and push docker image for the manager for cross-platform
 	sed -e '1 s/\(^FROM\)/FROM --platform=\$$\{BUILDPLATFORM\}/; t' -e ' 1,// s//FROM --platform=\$$\{BUILDPLATFORM\}/' Dockerfile > Dockerfile.cross
 	- $(CONTAINER_TOOL) buildx create --name krkn-operator-builder
 	$(CONTAINER_TOOL) buildx use krkn-operator-builder
-	- $(CONTAINER_TOOL) buildx build --push --platform=$(PLATFORMS) --tag ${IMG} -f Dockerfile.cross .
+	- $(CONTAINER_TOOL) buildx build --push --platform=$(PLATFORMS) --build-arg VERSION="$$COMPONENT_BUILD_VERSION" --tag ${IMG} -f Dockerfile.cross .
 	- $(CONTAINER_TOOL) buildx rm krkn-operator-builder
 	rm Dockerfile.cross
 

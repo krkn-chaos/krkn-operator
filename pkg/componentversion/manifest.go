@@ -14,6 +14,9 @@ import (
 
 // Load parses a manifest bundled with a component binary. The version comes
 // only from the embedded JSON, which tagged builds stamp before compilation.
+// It returns an error for malformed JSON, unknown fields, trailing data,
+// a blank version, an empty component list, blank component names or
+// descriptions, or duplicate component names.
 func Load(data []byte) (krknv1alpha1.ComponentManifest, error) {
 	var manifest krknv1alpha1.ComponentManifest
 	decoder := json.NewDecoder(bytes.NewReader(data))

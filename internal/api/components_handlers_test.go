@@ -82,16 +82,22 @@ func TestListComponentsRouteAndAuth(t *testing.T) {
 	secretManager := auth.NewSecretManager(k8sClient, namespace, TokenDuration, "krkn-operator")
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go func() { _ = secretManager.Start(ctx) }()
+	startResult := make(chan error, 1)
+	go func() { startResult <- secretManager.Start(ctx) }()
 	deadline := time.Now().Add(5 * time.Second)
 	for !secretManager.IsReady() {
+		select {
+		case err := <-startResult:
+			t.Fatalf("secret manager exited before becoming ready: %v", err)
+		default:
+		}
 		if time.Now().After(deadline) {
 			t.Fatal("secret manager did not become ready in time")
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
 
-	server := NewServer(0, k8sClient, fakekube.NewSimpleClientset(), "targets", namespace, "localhost:50051", secretManager)
+	server := NewServerWithComponentNamespace(0, k8sClient, fakekube.NewSimpleClientset(), "targets", namespace, "localhost:50051", secretManager)
 	defer func() { _ = server.Shutdown() }()
 	mux := server.HTTPHandler()
 

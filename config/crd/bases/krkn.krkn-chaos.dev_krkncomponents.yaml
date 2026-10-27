@@ -48,13 +48,19 @@ spec:
                     an operator binary.
                   properties:
                     components:
+                      description: Components lists the named features exposed by
+                        this build.
                       items:
                         description: ComponentDescription describes a feature exposed
                           by a Krkn operator binary.
                         properties:
                           component:
+                            description: Component is the unique feature name within
+                              this manifest.
                             type: string
                           description:
+                            description: Description explains the feature exposed
+                              by the component.
                             type: string
                         required:
                         - component
@@ -62,6 +68,8 @@ spec:
                         type: object
                       type: array
                     version:
+                      description: Version is the exact Git tag embedded in the component
+                        build.
                       type: string
                   required:
                   - components

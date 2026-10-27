@@ -114,12 +114,17 @@ const WebSocketAllowedOriginsEnv = "WEBSOCKET_ALLOWED_ORIGINS"
 //   - client: Kubernetes client
 //   - clientset: Kubernetes clientset
 //   - namespace: Namespace for Krkn resources and target providers
-//   - componentNamespace: Namespace containing KrknComponent resources
 //   - grpcServerAddr: gRPC server address
 //   - secretManager: JWT secret manager (must be started before API server receives traffic)
 //
 // Returns a new Server instance
-func NewServer(port int, client client.Client, clientset kubernetes.Interface, namespace, componentNamespace string, grpcServerAddr string, secretManager *auth.SecretManager) *Server {
+func NewServer(port int, client client.Client, clientset kubernetes.Interface, namespace, grpcServerAddr string, secretManager *auth.SecretManager) *Server {
+	return NewServerWithComponentNamespace(port, client, clientset, namespace, namespace, grpcServerAddr, secretManager)
+}
+
+// NewServerWithComponentNamespace creates a server whose component versions
+// are read from componentNamespace, independently of the Krkn resource namespace.
+func NewServerWithComponentNamespace(port int, client client.Client, clientset kubernetes.Interface, namespace, componentNamespace, grpcServerAddr string, secretManager *auth.SecretManager) *Server {
 	handler := NewHandler(client, clientset, namespace, grpcServerAddr, secretManager)
 	handler.componentNamespace = componentNamespace
 

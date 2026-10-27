@@ -54,9 +54,10 @@ const (
 	guardDeadline      = 6 * time.Minute
 )
 
-// Stage records legacy custom-resource values before the operator deployment is upgraded.
+// Stage records legacy custom-resource values and installs missing CRDs before
+// the operator deployment is upgraded. Existing CRDs are left unchanged until Sync.
 // If the post-upgrade hook fails, retry the Helm upgrade to resume synchronization.
-func Stage(ctx context.Context, config *rest.Config, namespace string, logger logr.Logger) error {
+func Stage(ctx context.Context, config *rest.Config, directory, namespace string, logger logr.Logger) error {
 	kubeClient, err := kubernetes.NewForConfig(config)
 	if err != nil {
 		return fmt.Errorf("create Kubernetes client for migration guard: %w", err)
@@ -77,6 +78,19 @@ func Stage(ctx context.Context, config *rest.Config, namespace string, logger lo
 	if err := crdmigration.Stage(ctx, dynamicClient, namespace, logger); err != nil {
 		return fmt.Errorf("stage custom resource migration before operator rollout: %w", err)
 	}
+	clientset, err := apiextensionsclient.NewForConfig(config)
+	if err != nil {
+		return fmt.Errorf("create apiextensions client before operator rollout: %w", err)
+	}
+	client := clientset.ApiextensionsV1().CustomResourceDefinitions()
+	names, err := createMissingCRDs(ctx, client, directory)
+	if err != nil {
+		return err
+	}
+	if err := waitForEstablished(ctx, client, names); err != nil {
+		return err
+	}
+	logger.Info("missing CRDs installed before operator rollout", "names", names)
 	return nil
 }
 
@@ -246,7 +260,12 @@ func waitForDeploymentReady(ctx context.Context, client deploymentClient, name s
 	}
 }
 
-func applyCRDs(ctx context.Context, client crdClient, directory string) ([]string, error) {
+type crdManifest struct {
+	path    string
+	desired *apiextensionsv1.CustomResourceDefinition
+}
+
+func readCRDManifests(directory string) ([]crdManifest, error) {
 	root, err := os.OpenRoot(directory)
 	if err != nil {
 		return nil, fmt.Errorf("open CRD directory %q: %w", directory, err)
@@ -258,7 +277,7 @@ func applyCRDs(ctx context.Context, client crdClient, directory string) ([]strin
 		return nil, fmt.Errorf("read CRD directory %q: %w", directory, err)
 	}
 
-	var names []string
+	var manifests []crdManifest
 	for _, entry := range entries {
 		if entry.IsDir() {
 			continue
@@ -284,13 +303,46 @@ func applyCRDs(ctx context.Context, client crdClient, directory string) ([]strin
 			desired.Labels = make(map[string]string, 1)
 		}
 		desired.Labels[operatorLabelKey] = operatorLabelValue
-		if err := applyCRD(ctx, client, &desired); err != nil {
-			return nil, fmt.Errorf("synchronize CRD %q from %q: %w", desired.Name, path, err)
-		}
-		names = append(names, desired.Name)
+		manifests = append(manifests, crdManifest{path: path, desired: &desired})
 	}
-	if len(names) == 0 {
+	if len(manifests) == 0 {
 		return nil, fmt.Errorf("no CRD manifests found in %q", directory)
+	}
+	return manifests, nil
+}
+
+func createMissingCRDs(ctx context.Context, client crdClient, directory string) ([]string, error) {
+	manifests, err := readCRDManifests(directory)
+	if err != nil {
+		return nil, err
+	}
+	var names []string
+	for _, manifest := range manifests {
+		name := manifest.desired.Name
+		if _, err := client.Get(ctx, name, metav1.GetOptions{}); err == nil {
+			continue
+		} else if !apierrors.IsNotFound(err) {
+			return nil, fmt.Errorf("get CRD %q before operator rollout: %w", name, err)
+		}
+		if _, err := client.Create(ctx, manifest.desired, metav1.CreateOptions{}); err != nil && !apierrors.IsAlreadyExists(err) {
+			return nil, fmt.Errorf("create missing CRD %q from %q: %w", name, manifest.path, err)
+		}
+		names = append(names, name)
+	}
+	return names, nil
+}
+
+func applyCRDs(ctx context.Context, client crdClient, directory string) ([]string, error) {
+	manifests, err := readCRDManifests(directory)
+	if err != nil {
+		return nil, err
+	}
+	var names []string
+	for _, manifest := range manifests {
+		if err := applyCRD(ctx, client, manifest.desired); err != nil {
+			return nil, fmt.Errorf("synchronize CRD %q from %q: %w", manifest.desired.Name, manifest.path, err)
+		}
+		names = append(names, manifest.desired.Name)
 	}
 	return names, nil
 }

@@ -7,13 +7,17 @@ import (
 
 // ComponentDescription describes a feature exposed by a Krkn operator binary.
 type ComponentDescription struct {
-	Component   string `json:"component"`
+	// Component is the unique feature name within this manifest.
+	Component string `json:"component"`
+	// Description explains the feature exposed by the component.
 	Description string `json:"description"`
 }
 
 // ComponentManifest is the version manifest bundled in an operator binary.
 type ComponentManifest struct {
-	Version    string                 `json:"version"`
+	// Version is the exact Git tag embedded in the component build.
+	Version string `json:"version"`
+	// Components lists the named features exposed by this build.
 	Components []ComponentDescription `json:"components"`
 }
 

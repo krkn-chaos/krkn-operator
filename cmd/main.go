@@ -114,7 +114,7 @@ func main() {
 	flag.IntVar(&apiPort, "api-port", 8080, "The port for the REST API server")
 	flag.StringVar(&grpcServerAddr, "grpc-server-address", "localhost:50051", "The address of the gRPC data provider server")
 	flag.BoolVar(&bootstrapResources, "bootstrap-resources", false, "Create resources required by OLM before starting the operator")
-	flag.BoolVar(&stageCRDMigration, "stage-crd-migration", false, "Snapshot legacy custom-resource fields before an operator rollout")
+	flag.BoolVar(&stageCRDMigration, "stage-crd-migration", false, "Snapshot legacy custom-resource fields and install missing CRDs before an operator rollout")
 	flag.BoolVar(&syncCRDs, "sync-crds", false, "Synchronize CRDs and complete staged custom-resource migrations after an operator rollout")
 	flag.StringVar(&crdDirectory, "crd-dir", "/crds", "Directory containing CustomResourceDefinition manifests")
 	opts := zap.Options{
@@ -141,7 +141,7 @@ func main() {
 			func(namespace string) error {
 				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 				defer cancel()
-				return crdinstaller.Stage(ctx, ctrl.GetConfigOrDie(), namespace, setupLog.WithName("crd-migration-stage"))
+				return crdinstaller.Stage(ctx, ctrl.GetConfigOrDie(), crdDirectory, namespace, setupLog.WithName("crd-migration-stage"))
 			},
 			func(namespace, deployment, directory string) error {
 				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
@@ -394,7 +394,7 @@ func main() {
 
 	// Setup and add REST API server
 	// SecretManager must be added to manager before API server
-	apiServer := api.NewServer(apiPort, mgr.GetClient(), clientset, krknNamespace, operatorNamespace, grpcServerAddr, jwtSecretManager)
+	apiServer := api.NewServerWithComponentNamespace(apiPort, mgr.GetClient(), clientset, krknNamespace, operatorNamespace, grpcServerAddr, jwtSecretManager)
 	setupLog.Info("gRPC server address", "address", grpcServerAddr)
 	if err := mgr.Add(apiServer); err != nil {
 		setupLog.Error(err, "unable to add REST API server to manager")
