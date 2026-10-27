@@ -1,0 +1,76 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.18.0
+  name: krkncomponents.krkn.krkn-chaos.dev
+spec:
+  group: krkn.krkn-chaos.dev
+  names:
+    kind: KrknComponent
+    listKind: KrknComponentList
+    plural: krkncomponents
+    shortNames:
+    - kc
+    singular: krkncomponent
+  scope: Namespaced
+  versions:
+  - name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: KrknComponent publishes the observed version of an operator binary.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          status:
+            description: KrknComponentStatus contains manifests published by component
+              operators.
+            properties:
+              components:
+                additionalProperties:
+                  description: ComponentManifest is the version manifest bundled in
+                    an operator binary.
+                  properties:
+                    components:
+                      items:
+                        description: ComponentDescription describes a feature exposed
+                          by a Krkn operator binary.
+                        properties:
+                          component:
+                            type: string
+                          description:
+                            type: string
+                        required:
+                        - component
+                        - description
+                        type: object
+                      type: array
+                    version:
+                      type: string
+                  required:
+                  - components
+                  - version
+                  type: object
+                type: object
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

@@ -83,6 +83,16 @@ rules:
 - apiGroups:
   - krkn.krkn-chaos.dev
   resources:
+  - krkncomponents
+  verbs:
+  - create
+  - get
+  - list
+  - watch
+- apiGroups:
+  - krkn.krkn-chaos.dev
+  resources:
+  - krkncomponents/status
   - krkngraphruns/status
   - krknoperatortargetproviderconfigs/status
   - krknoperatortargetproviders/status

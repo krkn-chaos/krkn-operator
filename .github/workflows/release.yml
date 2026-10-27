@@ -39,6 +39,7 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: quay.io/krkn-chaos/krkn-operator:${{ env.VERSION }}-amd64
+          build-args: VERSION=${{ env.VERSION }}
           cache-from: type=gha,scope=operator-amd64
           cache-to: type=gha,mode=max,scope=operator-amd64
 
@@ -74,6 +75,7 @@ jobs:
           platforms: linux/arm64
           push: true
           tags: quay.io/krkn-chaos/krkn-operator:${{ env.VERSION }}-arm64
+          build-args: VERSION=${{ env.VERSION }}
           cache-from: type=gha,scope=operator-arm64
           cache-to: type=gha,mode=max,scope=operator-arm64
 

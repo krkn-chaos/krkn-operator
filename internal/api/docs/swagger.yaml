@@ -39,6 +39,22 @@ definitions:
           +optional
         type: boolean
     type: object
+  github_com_krkn-chaos_krkn-operator_api_v1alpha1.ComponentDescription:
+    properties:
+      component:
+        type: string
+      description:
+        type: string
+    type: object
+  github_com_krkn-chaos_krkn-operator_api_v1alpha1.ComponentManifest:
+    properties:
+      components:
+        items:
+          $ref: '#/definitions/github_com_krkn-chaos_krkn-operator_api_v1alpha1.ComponentDescription'
+        type: array
+      version:
+        type: string
+    type: object
   github_com_krkn-chaos_krkn-operator_api_v1alpha1.GraphScenarioNode:
     properties:
       _comment:
@@ -1265,6 +1281,13 @@ definitions:
       totalJobs:
         type: integer
     type: object
+  internal_api.ListComponentsResponse:
+    properties:
+      components:
+        additionalProperties:
+          $ref: '#/definitions/github_com_krkn-chaos_krkn-operator_api_v1alpha1.ComponentManifest'
+        type: object
+    type: object
   internal_api.LoginRequest:
     properties:
       password:
@@ -1937,6 +1960,30 @@ paths:
       summary: List available clusters
       tags:
       - clusters
+  /components:
+    get:
+      description: Return the exact build tags and described features published by
+        Krkn operators
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_api.ListComponentsResponse'
+        "405":
+          description: Method Not Allowed
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: List installed component versions
+      tags:
+      - components
   /elasticsearch-alerts-query:
     post:
       consumes:

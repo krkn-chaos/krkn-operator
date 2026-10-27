@@ -230,6 +230,7 @@ for crd_file in "$output_dir"/manifests/*.yaml; do
 
   case "$crd_kind" in
     KrknCategory) crd_display_name="Krkn Category" ;;
+    KrknComponent) crd_display_name="Krkn Component" ;;
     KrknGraphRun) crd_display_name="Krkn Graph Run" ;;
     KrknOperatorTargetProviderConfig) crd_display_name="Krkn Operator Target Provider Config" ;;
     KrknOperatorTargetProvider) crd_display_name="Krkn Operator Target Provider" ;;

@@ -73,6 +73,10 @@ jobs:
           exit 1
         fi
         csv_file="$output_dir/manifests/krkn-operator.clusterserviceversion.yaml"
+        component_crd="$output_dir/manifests/krkn.krkn-chaos.dev_krkncomponents.yaml"
+        test -f "$component_crd"
+        test "$(yq -r '.spec.customresourcedefinitions.owned[] | select(.name == "krkncomponents.krkn.krkn-chaos.dev") | .displayName' "$csv_file")" = "Krkn Component"
+        test "$(yq -r '.metadata.annotations."alm-examples" | from_json | length' "$component_crd")" -gt 0
         test "$(yq -r '.metadata.annotations.capabilities' "$csv_file")" = "Basic Install"
         test "$(yq -r '.metadata.annotations.repository' "$csv_file")" = "https://github.com/krkn-chaos/krkn-operator"
         test "$(yq '.spec.keywords | length' "$csv_file")" -gt 0
