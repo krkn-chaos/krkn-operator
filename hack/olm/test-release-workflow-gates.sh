@@ -12,9 +12,13 @@ import sys
 workflow = sys.argv[1]
 cases = {
     "v1.1.1": True,
+    "v1.1.2": True,
     "v1.2.0": True,
+    "v2.0.0": True,
+    "v1.1.0-rc.1": False,
     "v1.2.0-rc.1": False,
     "v1.2.0-beta.2": False,
+    "v2.0.0-rc.1": False,
 }
 for job in ("submit-community-catalog", "submit-operatorhub-catalog"):
     condition = subprocess.check_output(
@@ -27,6 +31,8 @@ for job in ("submit-community-catalog", "submit-operatorhub-catalog"):
     if not match:
         raise SystemExit(f"{job} has an unsupported release gate: {condition}")
     marker = match.group(1)
+    if marker != "-":
+        raise SystemExit(f"{job} must detect prereleases on every version; got marker {marker}")
     for tag, expected in cases.items():
         actual = marker not in tag
         if actual != expected:
