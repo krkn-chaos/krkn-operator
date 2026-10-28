@@ -262,11 +262,7 @@ jobs:
           operator-sdk version
 
       - name: Install yq
-        run: |
-          curl --fail --location --retry 3 \
-            --output /tmp/yq \
-            https://github.com/mikefarah/yq/releases/download/v4.45.1/yq_linux_amd64
-          sudo install -m 0755 /tmp/yq /usr/local/bin/yq
+        run: bash hack/olm/install-yq.sh
 
       - name: Render and publish bundles
         env:
@@ -331,6 +327,7 @@ jobs:
   submit-community-catalog:
     name: Open community operators catalog PR
     needs: publish-olm-bundles
+    if: ${{ !contains(github.ref_name, '-') }}
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -339,6 +336,9 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Install yq
+        run: bash hack/olm/install-yq.sh
 
       - name: Download OCP bundle
         uses: actions/download-artifact@v4
@@ -361,7 +361,7 @@ jobs:
   submit-operatorhub-catalog:
     name: Open OperatorHub catalog PR
     needs: publish-olm-bundles
-    if: vars.KUBERNETES_OPERATORS_FORK != ''
+    if: ${{ !contains(github.ref_name, '-') }}
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -370,6 +370,9 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Install yq
+        run: bash hack/olm/install-yq.sh
 
       - name: Download Kubernetes bundle
         uses: actions/download-artifact@v4

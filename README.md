@@ -121,6 +121,8 @@ line do not replace bundles from another line. A prerelease does not change the
 package default channel; the first stable release of a newer line promotes its
 versioned channel as the default, while maintenance releases on older lines do
 not change it back.
+Prerelease tags publish bundle images for testing but do not submit bundles to
+the public Kubernetes or OpenShift catalogs.
 The OLM bundle declares Kubernetes `1.19.0` as its minimum version, matching the
 published compatibility matrix.
 For a disposable cluster with OLM installed, a published bundle can be tested
@@ -147,7 +149,8 @@ request.
 The same release workflow also prepares a Kubernetes bundle and opens a PR
 against `k8s-operatorhub/community-operators` when the
 `KUBERNETES_OPERATORS_FORK` repository variable and
-`KUBERNETES_OPERATORS_TOKEN` secret are configured.
+`KUBERNETES_OPERATORS_TOKEN` secret are configured. Stable release submission
+fails visibly when the fork is not configured.
 
 📖 For configuration, usage, compatibility, and advanced installation options, see the official documentation.📖 For configuration, usage, compatibility, and advanced installation options, see the **[official documentation](https://krkn-chaos.gateway.scarf.sh/krkn-operator/docs?source=github)**.
 

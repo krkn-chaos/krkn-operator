@@ -31,6 +31,20 @@ csv_file=$(find "$bundle_dir/manifests" -maxdepth 1 -type f \
   exit 1
 }
 
+owned_crds=$(yq -r '.spec.customresourcedefinitions.owned | length' "$csv_file")
+[[ "$owned_crds" -gt 0 ]] || {
+  echo "bundle CSV does not declare any owned CRDs" >&2
+  exit 1
+}
+missing_metadata=$(yq -r \
+  '[.spec.customresourcedefinitions.owned[] |
+    select((.displayName // "") == "" or (.description // "") == "") |
+    .name] | join(", ")' "$csv_file")
+[[ -z "$missing_metadata" ]] || {
+  echo "bundle CSV has owned CRDs without displayName or description: $missing_metadata" >&2
+  exit 1
+}
+
 : "${KUBERNETES_OPERATORS_FORK:?KUBERNETES_OPERATORS_FORK must be configured (for example, <owner>/community-operators)}"
 : "${GH_TOKEN:?GH_TOKEN must be configured with permission to push to KUBERNETES_OPERATORS_FORK and open upstream PRs}"
 
