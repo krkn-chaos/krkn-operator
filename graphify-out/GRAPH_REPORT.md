@@ -1,7 +1,7 @@
 # Graph Report - krkn-operator  (2026-10-28)
 
 ## Corpus Check
-- 322 files · ~414,541 words
+- 322 files · ~414,536 words
 - Verdict: corpus is large enough that graph structure adds value.
 - Unclassified: 18 file(s) not represented in the graph (top: (none) 12, .jsonl 2, .toml 1)
 

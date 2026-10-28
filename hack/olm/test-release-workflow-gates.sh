@@ -3,27 +3,34 @@ set -euo pipefail
 
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 workflow="$script_dir/../../.github/workflows/release.yml"
-stable_gate="\${{ !contains(github.ref_name, '-') }}"
 
-for job in submit-community-catalog submit-operatorhub-catalog; do
-  condition=$(JOB_NAME="$job" yq -r '.jobs[strenv(JOB_NAME)].if // ""' "$workflow")
-  [[ "$condition" == "$stable_gate" ]] || {
-    echo "$job must use the stable release gate; got: $condition" >&2
-    exit 1
-  }
+python3 - "$workflow" <<'PY'
+import re
+import subprocess
+import sys
 
-  for tag in v1.1.1 v1.2.0; do
-    [[ "$tag" != *-* ]] || {
-      echo "$job must run for stable tag $tag" >&2
-      exit 1
-    }
-  done
-  for tag in v1.2.0-rc.1 v1.2.0-beta.2; do
-    [[ "$tag" == *-* ]] || {
-      echo "$job must skip prerelease tag $tag" >&2
-      exit 1
-    }
-  done
-done
+workflow = sys.argv[1]
+cases = {
+    "v1.1.1": True,
+    "v1.2.0": True,
+    "v1.2.0-rc.1": False,
+    "v1.2.0-beta.2": False,
+}
+for job in ("submit-community-catalog", "submit-operatorhub-catalog"):
+    condition = subprocess.check_output(
+        ["yq", "-r", f'.jobs["{job}"].if // ""', workflow], text=True
+    ).strip()
+    match = re.fullmatch(
+        r"\$\{\{\s*!contains\(\s*github\.ref_name\s*,\s*'([^']+)'\s*\)\s*\}\}",
+        condition,
+    )
+    if not match:
+        raise SystemExit(f"{job} has an unsupported release gate: {condition}")
+    marker = match.group(1)
+    for tag, expected in cases.items():
+        actual = marker not in tag
+        if actual != expected:
+            raise SystemExit(f"{job} gate gives {actual} for {tag}; expected {expected}")
 
-echo "Public catalog release gates are valid"
+print("Public catalog release gates are valid")
+PY
