@@ -82,7 +82,7 @@ owned custom resources.
 EOF
 
 catalog_submit_open_pr \
-  "operators/krkn-operator/$version" \
   "operator: update krkn-operator bundle to $version" \
   "operator krkn-operator ($version)" \
-  "$body_file"
+  "$body_file" \
+  "operators/krkn-operator/$version"
