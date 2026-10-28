@@ -115,13 +115,13 @@
   },
   "api/v1alpha1/zz_generated.deepcopy.go": {
     "mtime": 1793182954.8253539,
-    "seen": 1793187313.526487,
+    "seen": 1793187515.6911201,
     "ast_hash": "7f30ed24dc1ddc07403060bd25fefb07",
     "semantic_hash": ""
   },
   "cmd/main.go": {
     "mtime": 1793182954.8262968,
-    "seen": 1793187313.526489,
+    "seen": 1793187515.6911218,
     "ast_hash": "709741b91831dea3d8f2065c9b7de989",
     "semantic_hash": ""
   },
@@ -180,8 +180,8 @@
     "semantic_hash": "d3d87116c35c2d50924dbaa0bf535ff4"
   },
   "hack/olm/open-kubernetes-operators-pr.sh": {
-    "mtime": 1793187304.3362923,
-    "seen": 1793187313.526498,
+    "mtime": 1793187504.9200327,
+    "seen": 1793187515.6911318,
     "ast_hash": "b94f80b3141dc2ec620349745a5991fe",
     "semantic_hash": ""
   },
@@ -193,7 +193,7 @@
   },
   "hack/olm/render-bundle.sh": {
     "mtime": 1793182954.8385854,
-    "seen": 1793187313.5265,
+    "seen": 1793187515.691133,
     "ast_hash": "5c346fc8f374824bc8a36f69baa64567",
     "semantic_hash": ""
   },
@@ -222,8 +222,8 @@
     "semantic_hash": "75bac6cdb58824c5e1b64f7c5c240c79"
   },
   "hack/olm/test-open-kubernetes-operators-pr.sh": {
-    "mtime": 1793187304.3364074,
-    "seen": 1793187313.526505,
+    "mtime": 1793187504.9201438,
+    "seen": 1793187515.691137,
     "ast_hash": "1cdddced6fa422253117438d2f5754dd",
     "semantic_hash": ""
   },
@@ -361,13 +361,13 @@
   },
   "internal/api/docs/docs.go": {
     "mtime": 1793182954.839261,
-    "seen": 1793187313.526527,
+    "seen": 1793187515.691158,
     "ast_hash": "44c129db2bf49772393979cf16960f01",
     "semantic_hash": ""
   },
   "internal/api/docs/swagger.json": {
     "mtime": 1793182954.8396764,
-    "seen": 1793187313.526528,
+    "seen": 1793187515.691159,
     "ast_hash": "147b4ad62ec775f40b2fcacf1e5d8347",
     "semantic_hash": ""
   },
@@ -451,7 +451,7 @@
   },
   "internal/api/handlers.go": {
     "mtime": 1793182954.8403249,
-    "seen": 1793187313.52654,
+    "seen": 1793187515.6911712,
     "ast_hash": "224cd73962c391d850843fc839d41cf5",
     "semantic_hash": ""
   },
@@ -589,7 +589,7 @@
   },
   "internal/api/routes.go": {
     "mtime": 1793182954.8405216,
-    "seen": 1793187313.52656,
+    "seen": 1793187515.691191,
     "ast_hash": "1449c0c0157a111ca2acf049022e1f34",
     "semantic_hash": ""
   },
@@ -691,7 +691,7 @@
   },
   "internal/api/server.go": {
     "mtime": 1793182954.8407183,
-    "seen": 1793187313.5265741,
+    "seen": 1793187515.691205,
     "ast_hash": "04df3da894c8c35254139c27fdf0fc6d",
     "semantic_hash": ""
   },
@@ -1075,13 +1075,13 @@
   },
   "internal/crdinstaller/installer.go": {
     "mtime": 1793182954.8415184,
-    "seen": 1793187313.526627,
+    "seen": 1793187515.691257,
     "ast_hash": "8170fee9bec7c600db6050102d91b146",
     "semantic_hash": ""
   },
   "internal/crdinstaller/installer_test.go": {
     "mtime": 1793182954.8418052,
-    "seen": 1793187313.526628,
+    "seen": 1793187515.6912582,
     "ast_hash": "952367d750cc8cdeb6a5daa502dadefc",
     "semantic_hash": ""
   },
@@ -1729,49 +1729,49 @@
   },
   "api/v1alpha1/krkncomponent_types.go": {
     "mtime": 1793182954.8251607,
-    "seen": 1793187313.526471,
+    "seen": 1793187515.6911051,
     "ast_hash": "9487f034ae92f9c36211f64e9ebdfc0a",
     "semantic_hash": ""
   },
   "cmd/component.json": {
     "mtime": 1793182954.8261056,
-    "seen": 1793187313.526488,
+    "seen": 1793187515.6911209,
     "ast_hash": "1f522ae5d7a309e06dc4c0c6d49adb8b",
     "semantic_hash": ""
   },
   "internal/api/components_handlers.go": {
     "mtime": 1793182954.838711,
-    "seen": 1793187313.526525,
+    "seen": 1793187515.691156,
     "ast_hash": "25b38752f9670ea4641222661f9b00d2",
     "semantic_hash": ""
   },
   "internal/api/components_handlers_test.go": {
     "mtime": 1793182954.838847,
-    "seen": 1793187313.526526,
+    "seen": 1793187515.691157,
     "ast_hash": "9ce0c5f10b0f587913f15f69e7ce0c47",
     "semantic_hash": ""
   },
   "pkg/componentversion/manifest.go": {
     "mtime": 1793182954.8420374,
-    "seen": 1793187313.526658,
+    "seen": 1793187515.691288,
     "ast_hash": "3e7527f45843c92ce110d94ad1012079",
     "semantic_hash": ""
   },
   "pkg/componentversion/manifest_test.go": {
     "mtime": 1793182954.8421433,
-    "seen": 1793187313.526659,
+    "seen": 1793187515.6912892,
     "ast_hash": "567392212325d2456f97589d79e42b54",
     "semantic_hash": ""
   },
   "pkg/componentversion/publisher.go": {
     "mtime": 1793182954.8422537,
-    "seen": 1793187313.5266602,
+    "seen": 1793187515.6912901,
     "ast_hash": "147046f658e8bcbcc228d128985b10a6",
     "semantic_hash": ""
   },
   "pkg/componentversion/publisher_test.go": {
     "mtime": 1793182954.8423953,
-    "seen": 1793187313.5266612,
+    "seen": 1793187515.6912909,
     "ast_hash": "d33143c2a3c36c9577a5f21afae65c48",
     "semantic_hash": ""
   },
@@ -1794,9 +1794,9 @@
     "semantic_hash": ""
   },
   ".github/workflows/olm-bundles.yml": {
-    "mtime": 1793187304.3358223,
-    "seen": 1793187313.5267231,
-    "ast_hash": "a63a6a7c3cd84040a039b2bbee7ed8b5",
+    "mtime": 1793187504.9195113,
+    "seen": 1793187515.691354,
+    "ast_hash": "aab661f070c89c901651272e38e9e079",
     "semantic_hash": ""
   },
   ".github/workflows/olm-integration.yml": {
@@ -1818,9 +1818,9 @@
     "semantic_hash": ""
   },
   ".github/workflows/release.yml": {
-    "mtime": 1793187304.3360345,
-    "seen": 1793187313.5267258,
-    "ast_hash": "2c49a2a0902ba1cfe06ae4ba124a5b0b",
+    "mtime": 1793187504.919771,
+    "seen": 1793187515.691357,
+    "ast_hash": "10f61af3fb9cc7cb7a4b7318d4cc50f7",
     "semantic_hash": ""
   },
   ".github/workflows/require-docs.yml": {
@@ -1890,8 +1890,8 @@
     "semantic_hash": ""
   },
   "README.md": {
-    "mtime": 1793187304.3361645,
-    "seen": 1793187313.526737,
+    "mtime": 1793187504.9199128,
+    "seen": 1793187515.6913679,
     "ast_hash": "fde5179ec475fdb5f20b8b6af94fd9fe",
     "semantic_hash": ""
   },
@@ -1945,7 +1945,7 @@
   },
   "charts/krkn-operator/crds/krkn.krkn-chaos.dev_krkncomponents.yaml": {
     "mtime": 1793182954.825487,
-    "seen": 1793187313.526745,
+    "seen": 1793187515.6913762,
     "ast_hash": "169141cb442ec180b4f7bd88393f4990",
     "semantic_hash": ""
   },
@@ -2011,7 +2011,7 @@
   },
   "charts/krkn-operator/templates/acm/rbac.yaml": {
     "mtime": 1793182954.8256488,
-    "seen": 1793187313.5267541,
+    "seen": 1793187515.691385,
     "ast_hash": "e27f7f5e02c3fb5b2bf45ee078284b4d",
     "semantic_hash": ""
   },
@@ -2071,7 +2071,7 @@
   },
   "charts/krkn-operator/templates/operator/crd-upgrade.yaml": {
     "mtime": 1793182954.82583,
-    "seen": 1793187313.526763,
+    "seen": 1793187515.691394,
     "ast_hash": "035cfb1937428472a10e9416200e309f",
     "semantic_hash": ""
   },
@@ -2083,7 +2083,7 @@
   },
   "charts/krkn-operator/templates/operator/rbac.yaml": {
     "mtime": 1793182954.825987,
-    "seen": 1793187313.526765,
+    "seen": 1793187515.691395,
     "ast_hash": "fc34d487a6e9eb466b87ac07db33966f",
     "semantic_hash": ""
   },
@@ -2131,7 +2131,7 @@
   },
   "config/crd/bases/krkn.krkn-chaos.dev_krkncomponents.yaml": {
     "mtime": 1793182954.8264287,
-    "seen": 1793187313.5267708,
+    "seen": 1793187515.691402,
     "ast_hash": "169141cb442ec180b4f7bd88393f4990",
     "semantic_hash": ""
   },
@@ -2185,7 +2185,7 @@
   },
   "config/crd/kustomization.yaml": {
     "mtime": 1793182954.8265972,
-    "seen": 1793187313.5267782,
+    "seen": 1793187515.6914089,
     "ast_hash": "15b51b7ef9927620a71da8ed7a8ed500",
     "semantic_hash": ""
   },
@@ -2275,7 +2275,7 @@
   },
   "config/olm/examples.yaml": {
     "mtime": 1793182954.8268168,
-    "seen": 1793187313.5267909,
+    "seen": 1793187515.691422,
     "ast_hash": "27817ac069f08fc3bd85891d3bed4b4c",
     "semantic_hash": ""
   },
@@ -2341,7 +2341,7 @@
   },
   "config/rbac/role.yaml": {
     "mtime": 1793182954.8269763,
-    "seen": 1793187313.5268009,
+    "seen": 1793187515.691432,
     "ast_hash": "14cbc3727a9d1cb3e203b1b5870fb266",
     "semantic_hash": ""
   },
@@ -2437,7 +2437,7 @@
   },
   "internal/api/docs/swagger.yaml": {
     "mtime": 1793182954.8400044,
-    "seen": 1793187313.526815,
+    "seen": 1793187515.6914449,
     "ast_hash": "948d367a57caeedfef66ad1706ffb373",
     "semantic_hash": ""
   },
@@ -2495,9 +2495,15 @@
     "ast_hash": "cd1d0032377a3c07f9169af47c7c8bbe",
     "semantic_hash": ""
   },
+  "hack/olm/install-yq.sh": {
+    "mtime": 1793187505.17068,
+    "seen": 1793187515.6911302,
+    "ast_hash": "0ab3145d3d5857be8c1cb7a7e194bb85",
+    "semantic_hash": ""
+  },
   "hack/olm/test-release-workflow-gates.sh": {
-    "mtime": 1793187304.3365033,
-    "seen": 1793187313.526507,
+    "mtime": 1793187504.9202492,
+    "seen": 1793187515.691139,
     "ast_hash": "ec3c2e4d30a8eda6253e5be19fc06c74",
     "semantic_hash": ""
   }

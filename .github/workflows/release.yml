@@ -262,11 +262,7 @@ jobs:
           operator-sdk version
 
       - name: Install yq
-        run: |
-          curl --fail --location --retry 3 \
-            --output /tmp/yq \
-            https://github.com/mikefarah/yq/releases/download/v4.45.1/yq_linux_amd64
-          sudo install -m 0755 /tmp/yq /usr/local/bin/yq
+        run: bash hack/olm/install-yq.sh
 
       - name: Render and publish bundles
         env:
@@ -342,11 +338,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install yq
-        run: |
-          curl --fail --location --retry 3 \
-            --output /tmp/yq \
-            https://github.com/mikefarah/yq/releases/download/v4.45.1/yq_linux_amd64
-          sudo install -m 0755 /tmp/yq /usr/local/bin/yq
+        run: bash hack/olm/install-yq.sh
 
       - name: Download OCP bundle
         uses: actions/download-artifact@v4
@@ -380,11 +372,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install yq
-        run: |
-          curl --fail --location --retry 3 \
-            --output /tmp/yq \
-            https://github.com/mikefarah/yq/releases/download/v4.45.1/yq_linux_amd64
-          sudo install -m 0755 /tmp/yq /usr/local/bin/yq
+        run: bash hack/olm/install-yq.sh
 
       - name: Download Kubernetes bundle
         uses: actions/download-artifact@v4
