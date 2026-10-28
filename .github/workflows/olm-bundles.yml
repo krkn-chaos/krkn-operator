@@ -7,6 +7,7 @@ on:
     - 'config/olm/**'
     - 'hack/olm/**'
     - '.github/workflows/olm-bundles.yml'
+    - '.github/workflows/release.yml'
   workflow_dispatch:
     inputs:
       version:
@@ -51,6 +52,9 @@ jobs:
 
     - name: Test release channel selection
       run: bash hack/olm/test-release-channel.sh
+
+    - name: Test public catalog release gates
+      run: bash hack/olm/test-release-workflow-gates.sh
 
     - name: Test chart exposure templates
       run: |

@@ -341,6 +341,13 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Install yq
+        run: |
+          curl --fail --location --retry 3 \
+            --output /tmp/yq \
+            https://github.com/mikefarah/yq/releases/download/v4.45.1/yq_linux_amd64
+          sudo install -m 0755 /tmp/yq /usr/local/bin/yq
+
       - name: Download OCP bundle
         uses: actions/download-artifact@v4
         with:
@@ -371,6 +378,13 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Install yq
+        run: |
+          curl --fail --location --retry 3 \
+            --output /tmp/yq \
+            https://github.com/mikefarah/yq/releases/download/v4.45.1/yq_linux_amd64
+          sudo install -m 0755 /tmp/yq /usr/local/bin/yq
 
       - name: Download Kubernetes bundle
         uses: actions/download-artifact@v4
