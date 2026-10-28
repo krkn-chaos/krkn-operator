@@ -368,6 +368,15 @@ definitions:
           Size is the maximum number of alert documents to return. Zero uses the
           default and values above MaxQuerySize are clamped.
         type: integer
+      sortBy:
+        description: |-
+          SortBy selects an allowlisted alert source field. It must be provided
+          together with SortOrder; omitted values retain created_at descending.
+        type: string
+      sortOrder:
+        description: SortOrder is "asc" or "desc" and must be provided together with
+          SortBy.
+        type: string
       startDate:
         description: StartDate is the inclusive lower date bound in yyyy-MM-dd format.
         type: string
@@ -418,6 +427,17 @@ definitions:
           Size is the max documents to return. Optional; 0 defaults to DefaultQuerySize
           and values above MaxQuerySize are clamped. Unit: documents.
         type: integer
+      sortBy:
+        description: |-
+          SortBy selects an allowlisted telemetry table column. Scenario-backed
+          columns use the same representative scenario value that is returned to the
+          table. It must be provided with SortOrder; omitted values retain the default
+          timestamp sort.
+        type: string
+      sortOrder:
+        description: SortOrder is "asc" or "desc" and must be provided together with
+          SortBy.
+        type: string
       startDate:
         description: |-
           StartDate and EndDate bound the search by the document timestamp. They are
@@ -1942,8 +1962,9 @@ paths:
       consumes:
       - application/json
       description: Run an alerts search against the alerts index of a saved Elasticsearch
-        config. Credentials are resolved server-side and alert sources are redacted
-        before returning.
+        config. Optional sortBy and sortOrder fields sort by allowlisted alert fields
+        before the result limit. Credentials are resolved server-side and alert sources
+        are redacted before returning.
       parameters:
       - description: Query parameters
         in: body
@@ -2194,8 +2215,10 @@ paths:
       consumes:
       - application/json
       description: Run a telemetry search against a saved Elasticsearch config or
-        an inline connection. Credentials are resolved server-side and never leave
-        the backend. Available to any authenticated user.
+        an inline connection. Optional sortBy and sortOrder fields sort by allowlisted
+        table columns using values displayed for each row before pagination. Credentials
+        are resolved server-side and never leave the backend. Available to any authenticated
+        user.
       parameters:
       - description: Query parameters (exactly one of configName or inline)
         in: body

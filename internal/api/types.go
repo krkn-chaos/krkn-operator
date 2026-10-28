@@ -127,11 +127,11 @@ type InputFieldResponse struct {
 	AllowedValues     *string `json:"allowed_values,omitempty"`
 	Required          bool    `json:"required,omitempty"`
 	// MountPath is the absolute container path for file-type scenario parameters.
-	MountPath         *string `json:"mount_path,omitempty"`
-	Requires          *string `json:"requires,omitempty"`
-	MutuallyExcludes  *string `json:"mutually_excludes,omitempty"`
-	Secret            bool    `json:"secret,omitempty"`
-	Group             *string `json:"group,omitempty"`
+	MountPath        *string `json:"mount_path,omitempty"`
+	Requires         *string `json:"requires,omitempty"`
+	MutuallyExcludes *string `json:"mutually_excludes,omitempty"`
+	Secret           bool    `json:"secret,omitempty"`
+	Group            *string `json:"group,omitempty"`
 }
 
 // ScenarioDetailResponse represents the response for POST /scenarios/detail/{scenario_name}
