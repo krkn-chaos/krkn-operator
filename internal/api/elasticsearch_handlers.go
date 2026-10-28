@@ -583,7 +583,7 @@ func (h *Handler) ElasticsearchConfigsRouter(w http.ResponseWriter, r *http.Requ
 // ListElasticsearchConfigs.
 //
 // @Summary Query Elasticsearch telemetry
-// @Description Run a telemetry search against a saved Elasticsearch config or an inline connection. Credentials are resolved server-side and never leave the backend. Available to any authenticated user.
+// @Description Run a telemetry search against a saved Elasticsearch config or an inline connection. Optional sortBy and sortOrder fields sort by allowlisted table columns using values displayed for each row before pagination. Credentials are resolved server-side and never leave the backend. Available to any authenticated user.
 // @Tags elasticsearch
 // @Accept json
 // @Produce json
@@ -656,7 +656,7 @@ func (h *Handler) QueryElasticsearchTelemetry(w http.ResponseWriter, r *http.Req
 	// Page is 1-based and defaulted/validated by ValidateQueryRequest; the
 	// Elasticsearch offset is (page-1)*size.
 	from := (req.Page - 1) * req.Size
-	docs, total, stats, facets, facetsTruncated, err := h.esClient.QueryTelemetryPage(ctx, conn, req.Size, from, req.StartDate, req.EndDate, req.Filters)
+	docs, total, stats, facets, facetsTruncated, err := h.esClient.QueryTelemetryPageWithSort(ctx, conn, req.Size, from, req.StartDate, req.EndDate, req.Filters, req.SortBy, req.SortOrder)
 	if err != nil {
 		// A rejected inline destination is a client error (the caller asked the
 		// operator to reach an address the destination policy forbids), not an
@@ -702,7 +702,7 @@ func (h *Handler) QueryElasticsearchTelemetry(w http.ResponseWriter, r *http.Req
 // alerts index is configured by the Elasticsearch deployment.
 //
 // @Summary Query Elasticsearch alerts
-// @Description Run an alerts search against the alerts index of a saved Elasticsearch config. Credentials are resolved server-side and alert sources are redacted before returning.
+// @Description Run an alerts search against the alerts index of a saved Elasticsearch config. Optional sortBy and sortOrder fields sort by allowlisted alert fields before the result limit. Credentials are resolved server-side and alert sources are redacted before returning.
 // @Tags elasticsearch
 // @Accept json
 // @Produce json
@@ -767,7 +767,7 @@ func (h *Handler) QueryElasticsearchAlerts(w http.ResponseWriter, r *http.Reques
 		})
 		return
 	}
-	docs, err := h.esClient.QueryAlerts(ctx, conn, req.Size, req.StartDate, req.EndDate)
+	docs, err := h.esClient.QueryAlertsWithSort(ctx, conn, req.Size, req.StartDate, req.EndDate, req.SortBy, req.SortOrder)
 	if err != nil {
 		var statusErr *elasticsearch.StatusError
 		if errors.As(err, &statusErr) {

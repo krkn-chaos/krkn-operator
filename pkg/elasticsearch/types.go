@@ -190,6 +190,13 @@ type QueryTelemetryRequest struct {
 	// category are OR-ed together; different categories are AND-ed. Unknown
 	// category keys are rejected by ValidateQueryRequest.
 	Filters map[string][]string `json:"filters,omitempty"`
+	// SortBy selects an allowlisted telemetry table column. Scenario-backed
+	// columns use the same representative scenario value that is returned to the
+	// table. It must be provided with SortOrder; omitted values retain the default
+	// timestamp sort.
+	SortBy string `json:"sortBy,omitempty"`
+	// SortOrder is "asc" or "desc" and must be provided together with SortBy.
+	SortOrder string `json:"sortOrder,omitempty"`
 }
 
 // ClusterMetadata holds the run-level cluster and infrastructure details
@@ -395,6 +402,11 @@ type QueryAlertsRequest struct {
 	StartDate string `json:"startDate,omitempty"`
 	// EndDate is the inclusive calendar-date upper bound in yyyy-MM-dd format.
 	EndDate string `json:"endDate,omitempty"`
+	// SortBy selects an allowlisted alert source field. It must be provided
+	// together with SortOrder; omitted values retain created_at descending.
+	SortBy string `json:"sortBy,omitempty"`
+	// SortOrder is "asc" or "desc" and must be provided together with SortBy.
+	SortOrder string `json:"sortOrder,omitempty"`
 }
 
 // AlertDocument is an alert index document. Source is returned as raw JSON
@@ -422,7 +434,10 @@ func ValidateAlertsQueryRequest(req *QueryAlertsRequest) error {
 	if req.ConfigName == "" {
 		return fmt.Errorf("configName is required")
 	}
-	return validateQueryOptions(&req.Size, req.StartDate, req.EndDate)
+	if err := validateQueryOptions(&req.Size, req.StartDate, req.EndDate); err != nil {
+		return err
+	}
+	return validateSortOptions(req.SortBy, req.SortOrder, alertSortFields)
 }
 
 func validateQueryOptions(size *int, startDate, endDate string) error {
@@ -513,7 +528,7 @@ func ValidateQueryRequest(req *QueryTelemetryRequest) error {
 	if err := validateFilters(req.Filters); err != nil {
 		return err
 	}
-	return nil
+	return validateSortOptions(req.SortBy, req.SortOrder, telemetrySortFields)
 }
 
 // validateFilters rejects filter categories that are not known facet fields and
