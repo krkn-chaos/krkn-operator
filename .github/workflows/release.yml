@@ -331,6 +331,7 @@ jobs:
   submit-community-catalog:
     name: Open community operators catalog PR
     needs: publish-olm-bundles
+    if: ${{ !contains(github.ref_name, '-') }}
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -361,7 +362,7 @@ jobs:
   submit-operatorhub-catalog:
     name: Open OperatorHub catalog PR
     needs: publish-olm-bundles
-    if: vars.KUBERNETES_OPERATORS_FORK != ''
+    if: ${{ !contains(github.ref_name, '-') }}
     runs-on: ubuntu-24.04
     permissions:
       contents: read

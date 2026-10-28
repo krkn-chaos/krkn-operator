@@ -1,9 +1,9 @@
-# Graph Report - krkn-operator  (2026-10-27)
+# Graph Report - krkn-operator  (2026-10-28)
 
 ## Corpus Check
-- 321 files · ~414,241 words
+- 321 files · ~414,569 words
 - Verdict: corpus is large enough that graph structure adds value.
-- Unclassified: 19 file(s) not represented in the graph (top: (none) 13, .jsonl 2, .toml 1)
+- Unclassified: 18 file(s) not represented in the graph (top: (none) 12, .jsonl 2, .toml 1)
 
 ## Summary
 - 3545 nodes · 13693 edges · 168 communities (141 shown, 27 thin omitted)
@@ -11,7 +11,7 @@
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `5a29e235`
+- Built from commit: `98a6f9a0`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -793,7 +793,7 @@ _Questions this graph is uniquely positioned to answer:_
 - **Should `main.go` be split into smaller, more focused modules?**
   _Cohesion score 0.09078807241746539 - nodes in this community are weakly interconnected._
 - **Why does `Handler` connect `net/http.Request` to `main.go`, `ConnectionParams`, `files/types.go`, `context.Context`, `.ExecuteTerminal`, `k8s.io/api/core/v1.Secret`, `.GetScenarioRunLogs`, `.loadCategoryResiliencyHistories`, `bootstrap.go`, `.GetScenarioReplay`, `time.Duration`, `JobTracker`, `KrknCategory`, `.PostScenarioRun`, `.UpdateRegistry`, `.PostScenarioDetail`?**
-  _High betweenness centrality (0.041) - this node is a cross-community bridge._
+  _High betweenness centrality (0.040) - this node is a cross-community bridge._
 - **Should `testing.T` be split into smaller, more focused modules?**
   _Cohesion score 0.016271021795883675 - nodes in this community are weakly interconnected._
 - **Why does `Deployment Guide` connect `Deployment Guide` to `krkn-operator`, `Option 1: Helm (Recommended)`, `Deployment`, `Available Make Targets`, `Building Images`, `Troubleshooting`, `Pushing Images`?**
