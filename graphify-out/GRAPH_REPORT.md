@@ -224,7 +224,7 @@ Nodes (42): clusterJobImage, clusterJobProvider, clusterJobRetries, graphScenari
 
 ### Community 13 - "Community 13"
 Cohesion: 0.11
-Nodes (42): addAdminContext(), addUserContext(), createTestAdminUser(), setupFilesTestHandler(), TestCanAccessFile(), TestCreateFile(), TestCreateFile_DefaultFilePurpose(), TestCreateFile_DuplicateName() (+34 more)
+Nodes (43): addAdminContext(), addUserContext(), createTestAdminUser(), setupFilesTestHandler(), TestCanAccessFile(), TestCreateFile(), TestCreateFile_DefaultFilePurpose(), TestCreateFile_DuplicateName() (+35 more)
 
 ### Community 14 - "Community 14"
 Cohesion: 0.07
@@ -260,7 +260,7 @@ Nodes (34): createTestUser(), kvValue(), setupUserTestHandler(), TestChangePassw
 
 ### Community 22 - "Community 22"
 Cohesion: 0.10
-Nodes (23): doerFunc, roundTripperFunc, NewClient(), scenarioParametersSchema(), TestBaseURL(), TestClientTransportDefaultNotHTTPTransport(), TestClientTransportPooling(), TestConnectionParamsTLSConfig() (+15 more)
+Nodes (22): doerFunc, roundTripperFunc, NewClient(), scenarioParametersSchema(), TestBaseURL(), TestClientTransportDefaultNotHTTPTransport(), TestClientTransportPooling(), TestConnectionParamsTLSConfig() (+14 more)
 
 ### Community 23 - "Community 23"
 Cohesion: 0.14

@@ -34,7 +34,16 @@ expect_failure "does not contain a ClusterServiceVersion" "${submit_script[@]}" 
 
 cat > "$test_dir/manifests/operator.clusterserviceversion.yaml" <<'EOF'
 kind: ClusterServiceVersion
+spec:
+  customresourcedefinitions:
+    owned:
+      - name: krkngraphruns.krkn.krkn-chaos.dev
+        description: Krkn graph runs
 EOF
+expect_failure "without displayName or description: krkngraphruns.krkn.krkn-chaos.dev" "${submit_script[@]}" 1.1.0 "$test_dir"
+
+yq -i '.spec.customresourcedefinitions.owned[0].displayName = "Krkn Graph Run"' \
+  "$test_dir/manifests/operator.clusterserviceversion.yaml"
 expect_failure "KUBERNETES_OPERATORS_FORK must be configured" "${submit_script[@]}" 1.1.0 "$test_dir"
 
 echo "Kubernetes catalog submission validation tests passed"
