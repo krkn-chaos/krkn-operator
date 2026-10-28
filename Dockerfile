@@ -2,8 +2,10 @@
 FROM docker.io/library/golang:1.26 AS builder
 ARG TARGETOS
 ARG TARGETARCH
+ARG VERSION=0.0.0
 
 WORKDIR /workspace
+RUN apt-get update && apt-get install -y --no-install-recommends jq && rm -rf /var/lib/apt/lists/*
 # Copy the Go Modules manifests
 COPY go.mod go.mod
 COPY go.sum go.sum
@@ -17,10 +19,15 @@ RUN go install github.com/swaggo/swag/cmd/swag@latest
 
 # Copy the go source
 COPY cmd/main.go cmd/main.go
+COPY cmd/component.json cmd/component.json
 COPY api/ api/
 COPY internal/ internal/
 COPY pkg/ pkg/
 COPY proto/ proto/
+
+# Stamp the exact image tag into the JSON consumed by go:embed.
+RUN jq --arg version "${VERSION}" '.version = $version' cmd/component.json > cmd/component.stamped.json && \
+    mv cmd/component.stamped.json cmd/component.json
 
 # Generate Swagger documentation (BEFORE building binary)
 # This ensures docs are always up-to-date in every built image

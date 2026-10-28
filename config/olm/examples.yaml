@@ -6,6 +6,11 @@
     color: '#4C9AFF'
 
 - apiVersion: krkn.krkn-chaos.dev/v1alpha1
+  kind: KrknComponent
+  metadata:
+    name: krkn-operator
+
+- apiVersion: krkn.krkn-chaos.dev/v1alpha1
   kind: KrknGraphRun
   metadata:
     name: example-graph-run

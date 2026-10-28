@@ -41,6 +41,7 @@ const (
 // Core resource endpoints
 const (
 	HealthPath                    = APIBasePath + "/health"
+	ComponentsPath                = APIBasePath + "/components"
 	ClustersPath                  = APIBasePath + "/clusters"
 	NodesPath                     = APIBasePath + "/nodes"
 	TerminalPath                  = APIBasePath + "/terminal"

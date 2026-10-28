@@ -255,6 +255,43 @@ const docTemplate = `{
                 }
             }
         },
+        "/components": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Return the exact build tags and described features published by Krkn operators",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "components"
+                ],
+                "summary": "List installed component versions",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ListComponentsResponse"
+                        }
+                    },
+                    "405": {
+                        "description": "Method Not Allowed",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/elasticsearch-alerts-query": {
             "post": {
                 "security": [
@@ -3314,6 +3351,31 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_krkn-chaos_krkn-operator_api_v1alpha1.ComponentDescription": {
+            "type": "object",
+            "properties": {
+                "component": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_krkn-chaos_krkn-operator_api_v1alpha1.ComponentManifest": {
+            "type": "object",
+            "properties": {
+                "components": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_krkn-chaos_krkn-operator_api_v1alpha1.ComponentDescription"
+                    }
+                },
+                "version": {
+                    "type": "string"
+                }
+            }
+        },
         "github_com_krkn-chaos_krkn-operator_api_v1alpha1.GraphScenarioNode": {
             "type": "object",
             "properties": {
@@ -4856,6 +4918,17 @@ const docTemplate = `{
                 },
                 "totalJobs": {
                     "type": "integer"
+                }
+            }
+        },
+        "internal_api.ListComponentsResponse": {
+            "type": "object",
+            "properties": {
+                "components": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "$ref": "#/definitions/github_com_krkn-chaos_krkn-operator_api_v1alpha1.ComponentManifest"
+                    }
                 }
             }
         },

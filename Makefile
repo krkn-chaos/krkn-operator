@@ -58,6 +58,8 @@ REGISTRY ?= krkn-chaos.docker.scarf.sh/krkn-chaos
 
 # Git tag detection for versioning
 GIT_TAG ?= $(shell git describe --tags --exact-match 2>/dev/null)
+COMPONENT_BUILD_VERSION ?= $(if $(GIT_TAG),$(GIT_TAG),0.0.0)
+export COMPONENT_BUILD_VERSION
 
 # Image names
 IMG_NAME ?= $(COMPONENT)
@@ -172,11 +174,19 @@ lint-config: golangci-lint ## Verify golangci-lint linter configuration
 
 .PHONY: build
 build: manifests generate fmt vet ## Build manager binary.
-	go build -o bin/manager cmd/main.go
+	@set -eu; tmp_dir=$$(mktemp -d .component-build.XXXXXX); trap 'rm -rf "$$tmp_dir"' EXIT; \
+		cp cmd/main.go cmd/component.json "$$tmp_dir/"; \
+		jq --arg version "$$COMPONENT_BUILD_VERSION" '.version = $$version' "$$tmp_dir/component.json" > "$$tmp_dir/stamped.json"; \
+		mv "$$tmp_dir/stamped.json" "$$tmp_dir/component.json"; \
+		go build -o bin/manager "$$tmp_dir/main.go"
 
 .PHONY: run
 run: manifests generate fmt vet ## Run a controller from your host.
-	go run ./cmd/main.go
+	@set -eu; tmp_dir=$$(mktemp -d .component-build.XXXXXX); trap 'rm -rf "$$tmp_dir"' EXIT; \
+		cp cmd/main.go cmd/component.json "$$tmp_dir/"; \
+		jq --arg version "$$COMPONENT_BUILD_VERSION" '.version = $$version' "$$tmp_dir/component.json" > "$$tmp_dir/stamped.json"; \
+		mv "$$tmp_dir/stamped.json" "$$tmp_dir/component.json"; \
+		go run "$$tmp_dir/main.go"
 
 # If you wish to build the manager image targeting other platforms you can use the --platform flag.
 # (i.e. docker build --platform linux/arm64). However, you must enable docker buildKit for it.
@@ -187,11 +197,11 @@ docker-build: ## Build docker image with the manager.
 ifeq ($(origin IMG), command line)
 ifneq ($(strip $(IMG)),)
 	@echo "Building with overridden image: $(IMG)"
-	$(CONTAINER_TOOL) build -t $(IMG) .
+	$(CONTAINER_TOOL) build --build-arg VERSION="$$COMPONENT_BUILD_VERSION" -t $(IMG) .
 	@echo "✓ Built and tagged: $(IMG)"
 else
 # Default mode: build :latest and optionally :git-tag
-	$(CONTAINER_TOOL) build -t $(REGISTRY)/$(IMG_NAME):latest .
+	$(CONTAINER_TOOL) build --build-arg VERSION="$$COMPONENT_BUILD_VERSION" -t $(REGISTRY)/$(IMG_NAME):latest .
 ifneq ($(strip $(GIT_TAG)),)
 	$(CONTAINER_TOOL) tag $(REGISTRY)/$(IMG_NAME):latest $(REGISTRY)/$(IMG_NAME):$(GIT_TAG)
 	@echo "✓ Built and tagged: latest and $(GIT_TAG)"
@@ -201,7 +211,7 @@ endif
 endif
 else
 # Default mode: build :latest and optionally :git-tag
-	$(CONTAINER_TOOL) build -t $(REGISTRY)/$(IMG_NAME):latest .
+	$(CONTAINER_TOOL) build --build-arg VERSION="$$COMPONENT_BUILD_VERSION" -t $(REGISTRY)/$(IMG_NAME):latest .
 ifneq ($(strip $(GIT_TAG)),)
 	$(CONTAINER_TOOL) tag $(REGISTRY)/$(IMG_NAME):latest $(REGISTRY)/$(IMG_NAME):$(GIT_TAG)
 	@echo "✓ Built and tagged: latest and $(GIT_TAG)"
@@ -342,7 +352,7 @@ docker-buildx: ## Build and push docker image for the manager for cross-platform
 	sed -e '1 s/\(^FROM\)/FROM --platform=\$$\{BUILDPLATFORM\}/; t' -e ' 1,// s//FROM --platform=\$$\{BUILDPLATFORM\}/' Dockerfile > Dockerfile.cross
 	- $(CONTAINER_TOOL) buildx create --name krkn-operator-builder
 	$(CONTAINER_TOOL) buildx use krkn-operator-builder
-	- $(CONTAINER_TOOL) buildx build --push --platform=$(PLATFORMS) --tag ${IMG} -f Dockerfile.cross .
+	- $(CONTAINER_TOOL) buildx build --push --platform=$(PLATFORMS) --build-arg VERSION="$$COMPONENT_BUILD_VERSION" --tag ${IMG} -f Dockerfile.cross .
 	- $(CONTAINER_TOOL) buildx rm krkn-operator-builder
 	rm Dockerfile.cross
 

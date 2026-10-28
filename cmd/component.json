@@ -1,0 +1,13 @@
+{
+  "version": "0.0.0",
+  "components": [
+    {
+      "component": "rest-api",
+      "description": "REST API used by the Krkn operator console and integrations"
+    },
+    {
+      "component": "default-target-provider",
+      "description": "Default target provider for clusters managed by the Krkn operator"
+    }
+  ]
+}

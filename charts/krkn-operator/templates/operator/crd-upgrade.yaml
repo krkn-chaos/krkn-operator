@@ -155,6 +155,7 @@ spec:
         - /manager
         args:
         - --stage-crd-migration
+        - --crd-dir=/crds
         env:
         - name: POD_NAMESPACE
           value: {{ include "krkn-operator.namespace" . | quote }}

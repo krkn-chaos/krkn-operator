@@ -19,6 +19,7 @@ package main
 import (
 	"context"
 	"crypto/tls"
+	_ "embed"
 	"flag"
 	"fmt"
 	"net/http"
@@ -56,6 +57,7 @@ import (
 	"github.com/krkn-chaos/krkn-operator/internal/crdinstaller"
 	olmbootstrap "github.com/krkn-chaos/krkn-operator/internal/olm"
 	"github.com/krkn-chaos/krkn-operator/pkg/auth"
+	"github.com/krkn-chaos/krkn-operator/pkg/componentversion"
 	"github.com/krkn-chaos/krkn-operator/pkg/configmap"
 	"github.com/krkn-chaos/krkn-operator/pkg/configstore"
 	"github.com/krkn-chaos/krkn-operator/pkg/provider"
@@ -65,6 +67,8 @@ import (
 var (
 	scheme   = runtime.NewScheme()
 	setupLog = ctrl.Log.WithName("setup")
+	//go:embed component.json
+	componentManifestJSON []byte
 )
 
 func init() {
@@ -110,7 +114,7 @@ func main() {
 	flag.IntVar(&apiPort, "api-port", 8080, "The port for the REST API server")
 	flag.StringVar(&grpcServerAddr, "grpc-server-address", "localhost:50051", "The address of the gRPC data provider server")
 	flag.BoolVar(&bootstrapResources, "bootstrap-resources", false, "Create resources required by OLM before starting the operator")
-	flag.BoolVar(&stageCRDMigration, "stage-crd-migration", false, "Snapshot legacy custom-resource fields before an operator rollout")
+	flag.BoolVar(&stageCRDMigration, "stage-crd-migration", false, "Snapshot legacy custom-resource fields and install missing CRDs before an operator rollout")
 	flag.BoolVar(&syncCRDs, "sync-crds", false, "Synchronize CRDs and complete staged custom-resource migrations after an operator rollout")
 	flag.StringVar(&crdDirectory, "crd-dir", "/crds", "Directory containing CustomResourceDefinition manifests")
 	opts := zap.Options{
@@ -120,6 +124,11 @@ func main() {
 	flag.Parse()
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
+	componentManifest, err := componentversion.Load(componentManifestJSON)
+	if err != nil {
+		setupLog.Error(err, "invalid embedded component manifest")
+		os.Exit(1)
+	}
 
 	if stageCRDMigration && syncCRDs {
 		setupLog.Error(fmt.Errorf("--stage-crd-migration and --sync-crds cannot be used together"), "invalid CRD migration mode")
@@ -132,7 +141,7 @@ func main() {
 			func(namespace string) error {
 				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 				defer cancel()
-				return crdinstaller.Stage(ctx, ctrl.GetConfigOrDie(), namespace, setupLog.WithName("crd-migration-stage"))
+				return crdinstaller.Stage(ctx, ctrl.GetConfigOrDie(), crdDirectory, namespace, setupLog.WithName("crd-migration-stage"))
 			},
 			func(namespace, deployment, directory string) error {
 				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
@@ -303,6 +312,18 @@ func main() {
 		setupLog.Error(err, "unable to start manager")
 		os.Exit(1)
 	}
+	componentPublisher := &componentversion.Publisher{
+		Client: mgr.GetClient(), Namespace: operatorNamespace,
+		Name: "krkn-operator", Manifest: componentManifest,
+	}
+	if err := componentPublisher.SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create KrknComponent controller")
+		os.Exit(1)
+	}
+	if err := mgr.Add(componentPublisher); err != nil {
+		setupLog.Error(err, "unable to add KrknComponent publisher")
+		os.Exit(1)
+	}
 
 	// Create Kubernetes clientset (needed by controller before API server creation)
 	config := ctrl.GetConfigOrDie()
@@ -373,7 +394,7 @@ func main() {
 
 	// Setup and add REST API server
 	// SecretManager must be added to manager before API server
-	apiServer := api.NewServer(apiPort, mgr.GetClient(), clientset, krknNamespace, grpcServerAddr, jwtSecretManager)
+	apiServer := api.NewServerWithComponentNamespace(apiPort, mgr.GetClient(), clientset, krknNamespace, operatorNamespace, grpcServerAddr, jwtSecretManager)
 	setupLog.Info("gRPC server address", "address", grpcServerAddr)
 	if err := mgr.Add(apiServer); err != nil {
 		setupLog.Error(err, "unable to add REST API server to manager")

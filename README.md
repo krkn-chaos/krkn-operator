@@ -496,6 +496,30 @@ make run
 
 The REST API is available at `http://localhost:8080`.
 
+Authenticated users can read the versions published by installed operators at
+`GET /api/v1/components`. The response contains a `components` map keyed by
+operator name. Each value has the exact build tag in `version` and a list of
+named components with descriptions. For example:
+
+```json
+{
+  "components": {
+    "krkn-operator": {
+      "version": "v1.1.0-rc4",
+      "components": [
+        {"component": "rest-api", "description": "REST API used by the Krkn operator console and integrations"}
+      ]
+    }
+  }
+}
+```
+
+Each operator publishes its own namespaced `KrknComponent` resource. Builds
+from a Git tag write that tag unchanged into the embedded `cmd/component.json`
+before compilation. The Docker builder and local `make build`/`make run` use
+`jq` on a build-only copy, leaving the tracked development manifest at `0.0.0`.
+The runtime reads its version only from the embedded JSON.
+
 
 Alternatively, use the helper script which also installs CRDs, service account and builds the binary:
 

@@ -113,13 +113,20 @@ const WebSocketAllowedOriginsEnv = "WEBSOCKET_ALLOWED_ORIGINS"
 //   - port: HTTP port to listen on
 //   - client: Kubernetes client
 //   - clientset: Kubernetes clientset
-//   - namespace: Operator namespace
+//   - namespace: Namespace for Krkn resources and target providers
 //   - grpcServerAddr: gRPC server address
 //   - secretManager: JWT secret manager (must be started before API server receives traffic)
 //
 // Returns a new Server instance
-func NewServer(port int, client client.Client, clientset kubernetes.Interface, namespace string, grpcServerAddr string, secretManager *auth.SecretManager) *Server {
+func NewServer(port int, client client.Client, clientset kubernetes.Interface, namespace, grpcServerAddr string, secretManager *auth.SecretManager) *Server {
+	return NewServerWithComponentNamespace(port, client, clientset, namespace, namespace, grpcServerAddr, secretManager)
+}
+
+// NewServerWithComponentNamespace creates a server whose component versions
+// are read from componentNamespace, independently of the Krkn resource namespace.
+func NewServerWithComponentNamespace(port int, client client.Client, clientset kubernetes.Interface, namespace, componentNamespace, grpcServerAddr string, secretManager *auth.SecretManager) *Server {
 	handler := NewHandler(client, clientset, namespace, grpcServerAddr, secretManager)
+	handler.componentNamespace = componentNamespace
 
 	// Create auth middleware using SecretManager
 	// The SecretManager is started as a Runnable before the API server starts
@@ -208,6 +215,7 @@ func NewServer(port int, client client.Client, clientset kubernetes.Interface, n
 
 	// Authenticated endpoints - user and admin access
 	mux.Handle(HealthPath, authMw.RequireAuth(http.HandlerFunc(handler.HealthCheck)))
+	mux.Handle(ComponentsPath, authMw.RequireAuth(http.HandlerFunc(handler.ListComponents)))
 	mux.Handle(ClustersPath, authMw.RequireAuth(http.HandlerFunc(handler.GetClusters)))
 	mux.Handle(NodesPath, authMw.RequireAuth(http.HandlerFunc(handler.GetNodes)))
 	mux.Handle(TerminalPath, authMw.RequireAuth(http.HandlerFunc(handler.ExecuteTerminal)))
