@@ -97,37 +97,54 @@ func TestListComponentsRouteAndAuth(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 
-	server := NewServerWithComponentNamespace(0, k8sClient, fakekube.NewSimpleClientset(), "targets", namespace, "localhost:50051", secretManager)
-	defer func() { _ = server.Shutdown() }()
-	mux := server.HTTPHandler()
+	for _, enabled := range []bool{false, true} {
+		server := NewServerWithComponentNamespace(0, k8sClient, fakekube.NewSimpleClientset(), "targets", namespace, "localhost:50051", secretManager, enabled)
+		defer func() { _ = server.Shutdown() }()
+		mux := server.HTTPHandler()
 
-	request := httptest.NewRequest(http.MethodGet, ComponentsPath, nil)
-	w := httptest.NewRecorder()
-	mux.ServeHTTP(w, request)
-	if w.Code != http.StatusUnauthorized {
-		t.Fatalf("anonymous status = %d, want 401", w.Code)
-	}
+		request := httptest.NewRequest(http.MethodGet, ComponentsPath, nil)
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, request)
+		if w.Code != http.StatusUnauthorized {
+			t.Fatalf("anonymous status = %d, want 401", w.Code)
+		}
 
-	tokenGen, err := secretManager.GetTokenGenerator()
-	if err != nil {
-		t.Fatal(err)
-	}
-	token, err := tokenGen.GenerateToken(userID, "user", "Regular", "User", "Org")
-	if err != nil {
-		t.Fatal(err)
-	}
-	request = httptest.NewRequest(http.MethodGet, ComponentsPath, nil)
-	request.Header.Set("Authorization", "Bearer "+token)
-	w = httptest.NewRecorder()
-	mux.ServeHTTP(w, request)
-	if w.Code != http.StatusOK {
-		t.Fatalf("authenticated status = %d, body = %s", w.Code, w.Body.String())
-	}
-	var response ListComponentsResponse
-	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
-		t.Fatal(err)
-	}
-	if len(response.Components) != 2 || response.Components["krkn-operator"].Version != "v1.1.0-rc4" || response.Components["krkn-operator-acm"].Version != "v1.1.0" {
-		t.Fatalf("components = %#v", response.Components)
+		tokenGen, err := secretManager.GetTokenGenerator()
+		if err != nil {
+			t.Fatal(err)
+		}
+		token, err := tokenGen.GenerateToken(userID, "user", "Regular", "User", "Org")
+		if err != nil {
+			t.Fatal(err)
+		}
+		request = httptest.NewRequest(http.MethodGet, ComponentsPath, nil)
+		request.Header.Set("Authorization", "Bearer "+token)
+		w = httptest.NewRecorder()
+		mux.ServeHTTP(w, request)
+		if w.Code != http.StatusOK {
+			t.Fatalf("authenticated status = %d, body = %s", w.Code, w.Body.String())
+		}
+		var response ListComponentsResponse
+		if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+			t.Fatal(err)
+		}
+		if len(response.Components) != 2 || response.Components["krkn-operator"].Version != "v1.1.0-rc4" || response.Components["krkn-operator-acm"].Version != "v1.1.0" {
+			t.Fatalf("components = %#v", response.Components)
+		}
+
+		request = httptest.NewRequest(http.MethodGet, KrknAIPath+"/status", nil)
+		request.Header.Set("Authorization", "Bearer "+token)
+		w = httptest.NewRecorder()
+		mux.ServeHTTP(w, request)
+		if w.Code != http.StatusOK {
+			t.Fatalf("Krkn-AI status = %d, body = %s", w.Code, w.Body.String())
+		}
+		var status KrknAIStatusResponse
+		if err := json.Unmarshal(w.Body.Bytes(), &status); err != nil {
+			t.Fatal(err)
+		}
+		if status.Enabled != enabled {
+			t.Fatalf("Krkn-AI enabled = %t, want %t", status.Enabled, enabled)
+		}
 	}
 }

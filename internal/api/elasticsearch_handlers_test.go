@@ -1642,7 +1642,7 @@ func TestQueryElasticsearchTelemetry_RouteAndAuth(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 
-	server := NewServer(0, k8sClient, fake.NewSimpleClientset(), namespace, "localhost:50051", secretManager)
+	server := NewServer(0, k8sClient, fake.NewSimpleClientset(), namespace, "localhost:50051", secretManager, false)
 	defer func() { _ = server.Shutdown() }()
 	mux := server.HTTPHandler()
 

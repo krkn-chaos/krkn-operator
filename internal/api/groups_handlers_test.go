@@ -926,6 +926,38 @@ func TestCleanupDiscoveryTargetRequest_EmptyUUID(t *testing.T) {
 	// If we get here without panic, the test passes
 }
 
+func TestCleanupDiscoveryTargetRequestRetainsRunReference(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := krknv1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	if err := corev1.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	const discoveryUUID = "referenced-target"
+	run := &krknv1alpha1.KrknAIRun{
+		ObjectMeta: metav1.ObjectMeta{Name: "referencing-run", Namespace: "default"},
+		Spec:       krknv1alpha1.KrknAIRunSpec{TargetRequestID: discoveryUUID},
+	}
+	targetRequest := &krknv1alpha1.KrknTargetRequest{
+		ObjectMeta: metav1.ObjectMeta{Name: discoveryUUID, Namespace: "default"},
+		Spec:       krknv1alpha1.KrknTargetRequestSpec{UUID: discoveryUUID},
+		Status:     krknv1alpha1.KrknTargetRequestStatus{Status: "completed"},
+	}
+	fakeClient := fakeclient.NewClientBuilder().
+		WithScheme(scheme).
+		WithRuntimeObjects(targetRequest, run).
+		Build()
+	handler := NewTestHandler(fakeClient, fake.NewSimpleClientset(), "default", "localhost:50051")
+
+	handler.cleanupDiscoveryTargetRequest(context.Background(), discoveryUUID)
+
+	var remaining krknv1alpha1.KrknTargetRequest
+	if err := fakeClient.Get(context.Background(), client.ObjectKey{Name: discoveryUUID, Namespace: "default"}, &remaining); err != nil {
+		t.Fatalf("cleanup deleted a target referenced by KrknAIRun: %v", err)
+	}
+}
+
 func TestCleanupDiscoveryTargetRequest_Success(t *testing.T) {
 	scheme := runtime.NewScheme()
 	_ = krknv1alpha1.AddToScheme(scheme)
