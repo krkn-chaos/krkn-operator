@@ -190,12 +190,10 @@ type QueryTelemetryRequest struct {
 	// category are OR-ed together; different categories are AND-ed. Unknown
 	// category keys are rejected by ValidateQueryRequest.
 	Filters map[string][]string `json:"filters,omitempty"`
-	// SortBy selects an allowlisted telemetry table column. Every column is
-	// scenario-backed and sorts on the same representative scenario value returned
-	// to the table, including when a scenario_type filter changes which scenario is
-	// representative, so the order and page window match the displayed value. It
-	// must be provided with SortOrder; omitted values retain the default timestamp
-	// sort.
+	// SortBy selects scenario_type, start_timestamp, end_timestamp, or status.
+	// Scenario-backed columns use Elasticsearch multi-value sorting (minimum value
+	// ascending, maximum descending); status sorts job_status. It must be provided
+	// with SortOrder; omitted values retain the default timestamp-descending sort.
 	SortBy string `json:"sortBy,omitempty"`
 	// SortOrder is "asc" or "desc" and must be provided together with SortBy.
 	SortOrder string `json:"sortOrder,omitempty"`
@@ -426,6 +424,10 @@ type QueryAlertsResponse struct {
 	Documents []AlertDocument `json:"documents"`
 	// Total is the number of documents returned in Documents.
 	Total int `json:"total"`
+	// SortBy echoes the requested sort only after the operator has validated and applied it.
+	SortBy string `json:"sortBy,omitempty"`
+	// SortOrder echoes the requested sort direction only after the operator has applied it.
+	SortOrder string `json:"sortOrder,omitempty"`
 }
 
 // ValidateAlertsQueryRequest validates and normalizes an alerts query.

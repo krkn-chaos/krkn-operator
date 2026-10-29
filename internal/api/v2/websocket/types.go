@@ -140,6 +140,8 @@ type ClientMessage struct {
 	Page           *int     `json:"page,omitempty"`           // page number for paginated subscriptions (1-based)
 	Limit          *int     `json:"limit,omitempty"`          // items per page for paginated subscriptions
 	Categories     []string `json:"categories,omitempty"`     // any matching category for jobs subscriptions
+	SortBy         string   `json:"sortBy,omitempty"`         // jobs sort field: createdAt, status, name, or owner
+	SortOrder      string   `json:"sortOrder,omitempty"`      // jobs sort direction: asc or desc
 	SubscriptionID string   `json:"subscriptionId,omitempty"` // request correlation for jobs snapshots
 }
 

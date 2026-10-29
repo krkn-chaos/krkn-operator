@@ -583,7 +583,7 @@ func (h *Handler) ElasticsearchConfigsRouter(w http.ResponseWriter, r *http.Requ
 // ListElasticsearchConfigs.
 //
 // @Summary Query Elasticsearch telemetry
-// @Description Run a telemetry search against a saved Elasticsearch config or an inline connection. Optional sortBy and sortOrder fields sort by allowlisted table columns using values displayed for each row before pagination. Credentials are resolved server-side and never leave the backend. Available to any authenticated user.
+// @Description Run a telemetry search against a saved Elasticsearch config or an inline connection. Optional sortBy and sortOrder fields sort by allowlisted mapped Elasticsearch fields before pagination. Credentials are resolved server-side and never leave the backend. Available to any authenticated user.
 // @Tags elasticsearch
 // @Accept json
 // @Produce json
@@ -779,7 +779,12 @@ func (h *Handler) QueryElasticsearchAlerts(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	logger.Info("Queried Elasticsearch alerts", "source", req.ConfigName, "results", len(docs))
-	writeJSON(w, http.StatusOK, elasticsearch.QueryAlertsResponse{Documents: docs, Total: len(docs)})
+	writeJSON(w, http.StatusOK, elasticsearch.QueryAlertsResponse{
+		Documents: docs,
+		Total:     len(docs),
+		SortBy:    req.SortBy,
+		SortOrder: req.SortOrder,
+	})
 }
 
 // buildConnectionParams assembles the connection parameters for a query from a

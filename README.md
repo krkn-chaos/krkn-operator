@@ -266,7 +266,7 @@ In both modes credentials never leave the backend beyond the connection to the t
 | `sortBy`     | string | no       | Table column to sort by. Must be one of `scenario_type`, `start_timestamp`, `end_timestamp`, `status`. Must be supplied together with `sortOrder`. |
 | `sortOrder`  | string | no       | Sort direction: `asc` or `desc`. Must be supplied together with `sortBy`. |
 
-When `sortBy`/`sortOrder` are omitted, results are sorted newest-first by timestamp. When supplied, results are sorted by the chosen column in the given direction (scenario-backed columns use the value displayed for each row). The `page`/`size` window is applied after sorting. Supplying only one of `sortBy`/`sortOrder`, an unknown `sortBy`, or a `sortOrder` other than `asc`/`desc` returns `400`.
+When `sortBy`/`sortOrder` are omitted, results are sorted newest-first by timestamp. When supplied, results are sorted by the chosen mapped field before pagination. Scenario fields are multi-valued: Elasticsearch uses the minimum value for ascending order and maximum for descending order. `status` sorts on top-level `job_status`, which can differ from displayed status derived from scenario exit status. Supplying only one of `sortBy`/`sortOrder`, an unknown `sortBy`, or a `sortOrder` other than `asc`/`desc` returns `400`.
 
 **Response `200` shape:**
 

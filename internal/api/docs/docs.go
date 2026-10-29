@@ -647,7 +647,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Run a telemetry search against a saved Elasticsearch config or an inline connection. Optional sortBy and sortOrder fields sort by allowlisted table columns using values displayed for each row before pagination. Credentials are resolved server-side and never leave the backend. Available to any authenticated user.",
+                "description": "Run a telemetry search against a saved Elasticsearch config or an inline connection. Optional sortBy and sortOrder fields sort by allowlisted mapped Elasticsearch fields before pagination. Credentials are resolved server-side and never leave the backend. Available to any authenticated user.",
                 "consumes": [
                     "application/json"
                 ],
@@ -3714,6 +3714,14 @@ const docTemplate = `{
                         "$ref": "#/definitions/github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.AlertDocument"
                     }
                 },
+                "sortBy": {
+                    "description": "SortBy echoes the requested sort only after the operator has validated and applied it.",
+                    "type": "string"
+                },
+                "sortOrder": {
+                    "description": "SortOrder echoes the requested sort direction only after the operator has applied it.",
+                    "type": "string"
+                },
                 "total": {
                     "description": "Total is the number of documents returned in Documents.",
                     "type": "integer"
@@ -3757,7 +3765,7 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "sortBy": {
-                    "description": "SortBy selects an allowlisted telemetry table column. Scenario-backed\ncolumns use the same representative scenario value that is returned to the\ntable. It must be provided with SortOrder; omitted values retain the default\ntimestamp sort.",
+                    "description": "SortBy selects scenario_type, start_timestamp, end_timestamp, or status.\nScenario-backed columns use Elasticsearch multi-value sorting (minimum\nvalue ascending, maximum descending); status sorts job_status. It must be\nprovided with SortOrder; omitted values retain the default timestamp-descending\nsort.",
                     "type": "string"
                 },
                 "sortOrder": {

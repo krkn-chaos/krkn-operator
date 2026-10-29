@@ -388,6 +388,14 @@ definitions:
         items:
           $ref: '#/definitions/github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.AlertDocument'
         type: array
+      sortBy:
+        description: SortBy echoes the requested sort only after the operator has
+          validated and applied it.
+        type: string
+      sortOrder:
+        description: SortOrder echoes the requested sort direction only after the
+          operator has applied it.
+        type: string
       total:
         description: Total is the number of documents returned in Documents.
         type: integer
@@ -429,10 +437,11 @@ definitions:
         type: integer
       sortBy:
         description: |-
-          SortBy selects an allowlisted telemetry table column. Scenario-backed
-          columns use the same representative scenario value that is returned to the
-          table. It must be provided with SortOrder; omitted values retain the default
-          timestamp sort.
+          SortBy selects scenario_type, start_timestamp, end_timestamp, or status.
+          Scenario-backed columns use Elasticsearch multi-value sorting (minimum
+          value ascending, maximum descending); status sorts job_status. It must be
+          provided with SortOrder; omitted values retain the default timestamp-
+          descending sort.
         type: string
       sortOrder:
         description: SortOrder is "asc" or "desc" and must be provided together with
@@ -2216,9 +2225,8 @@ paths:
       - application/json
       description: Run a telemetry search against a saved Elasticsearch config or
         an inline connection. Optional sortBy and sortOrder fields sort by allowlisted
-        table columns using values displayed for each row before pagination. Credentials
-        are resolved server-side and never leave the backend. Available to any authenticated
-        user.
+        mapped Elasticsearch fields before pagination. Credentials are resolved
+        server-side and never leave the backend. Available to any authenticated user.
       parameters:
       - description: Query parameters (exactly one of configName or inline)
         in: body
