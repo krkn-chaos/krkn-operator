@@ -190,10 +190,12 @@ type QueryTelemetryRequest struct {
 	// category are OR-ed together; different categories are AND-ed. Unknown
 	// category keys are rejected by ValidateQueryRequest.
 	Filters map[string][]string `json:"filters,omitempty"`
-	// SortBy selects an allowlisted telemetry table column. Scenario-backed
-	// columns use the same representative scenario value that is returned to the
-	// table. It must be provided with SortOrder; omitted values retain the default
-	// timestamp sort.
+	// SortBy selects an allowlisted telemetry table column. Every column is
+	// scenario-backed and sorts on the same representative scenario value returned
+	// to the table, including when a scenario_type filter changes which scenario is
+	// representative, so the order and page window match the displayed value. It
+	// must be provided with SortOrder; omitted values retain the default timestamp
+	// sort.
 	SortBy string `json:"sortBy,omitempty"`
 	// SortOrder is "asc" or "desc" and must be provided together with SortBy.
 	SortOrder string `json:"sortOrder,omitempty"`

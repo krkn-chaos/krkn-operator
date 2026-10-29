@@ -263,8 +263,10 @@ In both modes credentials never leave the backend beyond the connection to the t
 | `startDate`  | string | no       | Inclusive lower bound on the run timestamp, `yyyy-MM-dd`. Defaults to 30 days ago. |
 | `endDate`    | string | no       | Upper bound on the run timestamp, `yyyy-MM-dd`. Includes only the selected calendar day. Defaults to the current instant. |
 | `filters`    | object | no       | Map of facet category to selected values. Keys must be known facet categories (`scenario_type`, `job_status`, `cloud_infrastructure`, `cloud_type`, `major_version`, `network_plugins`); unknown keys are rejected. Values within a category are OR-ed; categories are AND-ed. `job_status` values must be `"true"` or `"false"`. |
+| `sortBy`     | string | no       | Table column to sort by. Must be one of `scenario_type`, `start_timestamp`, `end_timestamp`, `status`. Must be supplied together with `sortOrder`. |
+| `sortOrder`  | string | no       | Sort direction: `asc` or `desc`. Must be supplied together with `sortBy`. |
 
-Results are sorted newest-first by timestamp, then the `page`/`size` window is applied.
+When `sortBy`/`sortOrder` are omitted, results are sorted newest-first by timestamp. When supplied, results are sorted by the chosen column in the given direction (scenario-backed columns use the value displayed for each row). The `page`/`size` window is applied after sorting. Supplying only one of `sortBy`/`sortOrder`, an unknown `sortBy`, or a `sortOrder` other than `asc`/`desc` returns `400`.
 
 **Response `200` shape:**
 
@@ -395,7 +397,9 @@ curl -sS -X POST https://<operator-host>/api/v1/elasticsearch-query \
         "configName": "prod-es",
         "size": 25,
         "startDate": "2026-08-01",
-        "endDate": "2026-08-26"
+        "endDate": "2026-08-26",
+        "sortBy": "start_timestamp",
+        "sortOrder": "desc"
       }'
 ```
 
@@ -414,11 +418,15 @@ Query alert documents from the `alertsIndex` configured on a saved Elasticsearch
   "configName": "prod-es",
   "size": 50,
   "startDate": "2026-08-01",
-  "endDate": "2026-08-26"
+  "endDate": "2026-08-26",
+  "sortBy": "severity",
+  "sortOrder": "desc"
 }
 ```
 
-`size` defaults to `50` and is capped at `500`. Date bounds use `yyyy-MM-dd` and filter the alert index's `created_at` field. Results are sorted newest-first by `created_at`.
+`size` defaults to `50` and is capped at `500`. Date bounds use `yyyy-MM-dd` and filter the alert index's `created_at` field.
+
+Optional `sortBy`/`sortOrder` sort the results. `sortBy` must be one of `uuid`, `phase`, `created_at`, `severity`; `sortOrder` must be `asc` or `desc`. The two must be supplied together. When omitted, results are sorted newest-first by `created_at`. Supplying only one, an unknown `sortBy`, or an invalid `sortOrder` returns `400`.
 
 If the selected saved config does not define an `alertsIndex`, the endpoint returns `400` with `error: "configuration_error"`; no Elasticsearch request is made. Elasticsearch connectivity or query failures return `502` with `error: "upstream_error"`.
 
@@ -428,7 +436,7 @@ If the selected saved config does not define an `alertsIndex`, the endpoint retu
 curl -sS -X POST https://<operator-host>/api/v1/elasticsearch-alerts-query \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"configName":"prod-es","size":50,"startDate":"2026-08-01","endDate":"2026-08-26"}'
+  -d '{"configName":"prod-es","size":50,"startDate":"2026-08-01","endDate":"2026-08-26","sortBy":"severity","sortOrder":"desc"}'
 ```
 
 The complete request and response schema is available through the generated Swagger documentation at `/api/swagger/index.html`.
