@@ -1244,9 +1244,13 @@ func newEsAlertsTestSecretWithHost(name, namespace, host, alertsIndex string) *c
 }
 
 func TestQueryElasticsearchAlerts_Success(t *testing.T) {
+	var searchBody map[string]any
 	esServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !strings.HasSuffix(r.URL.Path, "/krkn-alerts/_search") {
 			t.Errorf("query path = %q, want configured alerts index", r.URL.Path)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&searchBody); err != nil {
+			t.Errorf("decode search body: %v", err)
 		}
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"hits":{"hits":[{"_id":"alert-1","_source":{"run_uuid":"run-1","phase":"Running","created_at":"2026-09-25T14:32:18Z","severity":"critical","alertname":"APIDown"}}]}}`))
@@ -1256,7 +1260,7 @@ func TestQueryElasticsearchAlerts_Success(t *testing.T) {
 	secret := newEsAlertsTestSecretWithHost("prod-es", "default", esServer.URL, "krkn-alerts")
 	fakeClient := fakeclient.NewClientBuilder().WithScheme(newEsScheme()).WithObjects(secret).Build()
 	handler := NewTestHandler(fakeClient, fake.NewSimpleClientset(), "default", "localhost:50051")
-	body, _ := json.Marshal(elasticsearch.QueryAlertsRequest{ConfigName: "prod-es"})
+	body, _ := json.Marshal(elasticsearch.QueryAlertsRequest{ConfigName: "prod-es", SortBy: "uuid", SortOrder: "asc"})
 	req := httptest.NewRequest(http.MethodPost, ElasticsearchAlertsQueryPath, bytes.NewReader(body)).WithContext(createUserContext("user@example.com"))
 	w := httptest.NewRecorder()
 
@@ -1271,6 +1275,10 @@ func TestQueryElasticsearchAlerts_Success(t *testing.T) {
 	}
 	if response.Total != 1 || response.Documents[0].ID != "alert-1" {
 		t.Fatalf("unexpected response: %+v", response)
+	}
+	sort := searchBody["sort"].([]any)
+	if got := sort[0].(map[string]any)["run_uuid.keyword"].(map[string]any)["order"]; got != "asc" {
+		t.Errorf("alerts sort order = %v, want asc", got)
 	}
 }
 
@@ -1348,7 +1356,11 @@ func TestQueryElasticsearchAlerts_RejectsMissingAlertsIndex(t *testing.T) {
 }
 
 func TestQueryElasticsearchTelemetry_Success(t *testing.T) {
+	var searchBody map[string]any
 	esServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&searchBody); err != nil {
+			t.Errorf("decode search body: %v", err)
+		}
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"hits":{"total":{"value":1},"hits":[{"_source":{"run_uuid":"abc","job_status":true,"scenarios":[{"scenario_type":"pod","start_timestamp":100,"end_timestamp":200,"exit_status":0,"parameters":[{"config":{"namespace":"ns1"}}]}]}}]},"aggregations":{"stats_job_status":{"doc_count":1,"values":{"buckets":[{"key":1,"key_as_string":"true","doc_count":1}]}},"job_status":{"doc_count":1,"values":{"buckets":[{"key":1,"key_as_string":"true","doc_count":1}]}},"scenario_type":{"doc_count":1,"values":{"buckets":[{"key":"pod","doc_count":1}]}}}}`))
 	}))
@@ -1358,7 +1370,7 @@ func TestQueryElasticsearchTelemetry_Success(t *testing.T) {
 	fakeClient := fakeclient.NewClientBuilder().WithScheme(newEsScheme()).WithObjects(secret).Build()
 	handler := NewTestHandler(fakeClient, fake.NewSimpleClientset(), "default", "localhost:50051")
 
-	body, _ := json.Marshal(elasticsearch.QueryTelemetryRequest{ConfigName: "prod-es"})
+	body, _ := json.Marshal(elasticsearch.QueryTelemetryRequest{ConfigName: "prod-es", SortBy: "status", SortOrder: "desc"})
 	req := httptest.NewRequest(http.MethodPost, ElasticsearchQueryPath, bytes.NewReader(body))
 	req = req.WithContext(createUserContext("user@example.com"))
 	w := httptest.NewRecorder()
@@ -1389,6 +1401,11 @@ func TestQueryElasticsearchTelemetry_Success(t *testing.T) {
 	}
 	if jobStatusFacet := resp.Facets["job_status"]; len(jobStatusFacet) != 1 || jobStatusFacet[0].Value != "true" {
 		t.Errorf("got job_status facet %+v, want [{true 1}]", jobStatusFacet)
+	}
+	sort := searchBody["sort"].([]any)
+	statusSort := sort[0].(map[string]any)["job_status"].(map[string]any)
+	if statusSort["order"] != "desc" {
+		t.Errorf("telemetry status sort order = %v, want desc", statusSort["order"])
 	}
 }
 

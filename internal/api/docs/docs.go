@@ -299,7 +299,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Run an alerts search against the alerts index of a saved Elasticsearch config. Credentials are resolved server-side and alert sources are redacted before returning.",
+                "description": "Run an alerts search against the alerts index of a saved Elasticsearch config. Optional sortBy and sortOrder fields sort by allowlisted alert fields before the result limit. Credentials are resolved server-side and alert sources are redacted before returning.",
                 "consumes": [
                     "application/json"
                 ],
@@ -684,7 +684,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Run a telemetry search against a saved Elasticsearch config or an inline connection. Credentials are resolved server-side and never leave the backend. Available to any authenticated user.",
+                "description": "Run a telemetry search against a saved Elasticsearch config or an inline connection. Optional sortBy and sortOrder fields sort by allowlisted mapped Elasticsearch fields before pagination. Credentials are resolved server-side and never leave the backend. Available to any authenticated user.",
                 "consumes": [
                     "application/json"
                 ],
@@ -3752,6 +3752,14 @@ const docTemplate = `{
                     "description": "Size is the maximum number of alert documents to return. Zero uses the\ndefault and values above MaxQuerySize are clamped.",
                     "type": "integer"
                 },
+                "sortBy": {
+                    "description": "SortBy selects an allowlisted alert source field. It must be provided\ntogether with SortOrder; omitted values retain created_at descending.",
+                    "type": "string"
+                },
+                "sortOrder": {
+                    "description": "SortOrder is \"asc\" or \"desc\" and must be provided together with SortBy.",
+                    "type": "string"
+                },
                 "startDate": {
                     "description": "StartDate is the inclusive lower date bound in yyyy-MM-dd format.",
                     "type": "string"
@@ -3767,6 +3775,14 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.AlertDocument"
                     }
+                },
+                "sortBy": {
+                    "description": "SortBy echoes the requested sort only after the operator has validated and applied it.",
+                    "type": "string"
+                },
+                "sortOrder": {
+                    "description": "SortOrder echoes the requested sort direction only after the operator has applied it.",
+                    "type": "string"
                 },
                 "total": {
                     "description": "Total is the number of documents returned in Documents.",
@@ -3809,6 +3825,14 @@ const docTemplate = `{
                 "size": {
                     "description": "Size is the max documents to return. Optional; 0 defaults to DefaultQuerySize\nand values above MaxQuerySize are clamped. Unit: documents.",
                     "type": "integer"
+                },
+                "sortBy": {
+                    "description": "SortBy selects scenario_type, start_timestamp, end_timestamp, or status.\nScenario-backed columns use Elasticsearch multi-value sorting (minimum\nvalue ascending, maximum descending); status sorts job_status. It must be\nprovided with SortOrder; omitted values retain the default timestamp-descending\nsort.",
+                    "type": "string"
+                },
+                "sortOrder": {
+                    "description": "SortOrder is \"asc\" or \"desc\" and must be provided together with SortBy.",
+                    "type": "string"
                 },
                 "startDate": {
                     "description": "StartDate and EndDate bound the search by the document timestamp. They are\n\"yyyy-MM-dd\" date strings (as produced by the UI date pickers). Empty\nvalues fall back to a default trailing window in the query client.",
