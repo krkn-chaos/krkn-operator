@@ -20,6 +20,7 @@ import (
 	"context"
 	"crypto/tls"
 	_ "embed"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"net/http"
@@ -93,6 +94,7 @@ func main() {
 	var syncCRDs bool
 	var stageCRDMigration bool
 	var crdDirectory string
+	var enableKrknAI bool
 	var tlsOpts []func(*tls.Config)
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
 		"Use :8443 for HTTPS or :8080 for HTTP, or leave as 0 to disable the metrics service.")
@@ -117,6 +119,7 @@ func main() {
 	flag.BoolVar(&stageCRDMigration, "stage-crd-migration", false, "Snapshot legacy custom-resource fields and install missing CRDs before an operator rollout")
 	flag.BoolVar(&syncCRDs, "sync-crds", false, "Synchronize CRDs and complete staged custom-resource migrations after an operator rollout")
 	flag.StringVar(&crdDirectory, "crd-dir", "/crds", "Directory containing CustomResourceDefinition manifests")
+	flag.BoolVar(&enableKrknAI, "enable-krkn-ai", false, "Enable Krkn-AI controllers")
 	opts := zap.Options{
 		Development: true,
 	}
@@ -375,6 +378,34 @@ func main() {
 		setupLog.Error(err, "unable to create controller", "controller", "KrknOperatorTargetProviderConfig")
 		os.Exit(1)
 	}
+	if enableKrknAI {
+		var imagePullSecrets []corev1.LocalObjectReference
+		if raw := os.Getenv("KRKNAI_IMAGE_PULL_SECRETS"); raw != "" {
+			if err := json.Unmarshal([]byte(raw), &imagePullSecrets); err != nil {
+				setupLog.Error(err, "invalid KRKNAI_IMAGE_PULL_SECRETS")
+				os.Exit(1)
+			}
+		}
+		if err = (&controller.KrknAIRunReconciler{
+			Client:                         mgr.GetClient(),
+			APIReader:                      mgr.GetAPIReader(),
+			Scheme:                         mgr.GetScheme(),
+			Clientset:                      clientset,
+			Namespace:                      krknNamespace,
+			OrchestratorImage:              os.Getenv("KRKNAI_ORCHESTRATOR_IMAGE"),
+			OrchestratorImagePullPolicy:    corev1.PullPolicy(os.Getenv("KRKNAI_ORCHESTRATOR_IMAGE_PULL_POLICY")),
+			ServiceImage:                   os.Getenv("KRKNAI_SERVICE_IMAGE"),
+			ServiceImagePullPolicy:         corev1.PullPolicy(os.Getenv("KRKNAI_SERVICE_IMAGE_PULL_POLICY")),
+			ServiceURL:                     os.Getenv("KRKNAI_SERVICE_URL"),
+			ServiceTokenSecretName:         os.Getenv("KRKNAI_SERVICE_TOKEN_SECRET_NAME"),
+			OrchestratorServiceAccountName: os.Getenv("KRKNAI_ORCHESTRATOR_SERVICE_ACCOUNT_NAME"),
+			ImagePullSecrets:               imagePullSecrets,
+		}).SetupWithManager(mgr); err != nil {
+			setupLog.Error(err, "unable to create controller", "controller", "KrknAIRun")
+			os.Exit(1)
+		}
+	}
+
 	// +kubebuilder:scaffold:builder
 
 	// Setup JWT SecretManager (must start BEFORE API server)
@@ -394,7 +425,7 @@ func main() {
 
 	// Setup and add REST API server
 	// SecretManager must be added to manager before API server
-	apiServer := api.NewServerWithComponentNamespace(apiPort, mgr.GetClient(), clientset, krknNamespace, operatorNamespace, grpcServerAddr, jwtSecretManager)
+	apiServer := api.NewServerWithComponentNamespace(apiPort, mgr.GetClient(), clientset, krknNamespace, operatorNamespace, grpcServerAddr, jwtSecretManager, enableKrknAI)
 	setupLog.Info("gRPC server address", "address", grpcServerAddr)
 	if err := mgr.Add(apiServer); err != nil {
 		setupLog.Error(err, "unable to add REST API server to manager")
