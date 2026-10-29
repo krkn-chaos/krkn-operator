@@ -239,15 +239,20 @@ func TestQueryTelemetryPageWithSortSendsMappedSort(t *testing.T) {
 	if err != nil {
 		t.Fatalf("query failed: %v", err)
 	}
+	// scenario_type is scenario-backed, so it sorts via an _script clause that
+	// emits the representative scenario's value, not a direct scenarios.* field.
 	sort := request["sort"].([]any)
-	field := sort[0].(map[string]any)["scenarios.scenario_type.keyword"].(map[string]any)
-	if field["order"] != "asc" || field["unmapped_type"] != "keyword" || field["mode"] != "min" {
-		t.Errorf("unexpected scenario sort: %v", field)
+	scriptSort := sort[0].(map[string]any)["_script"].(map[string]any)
+	if scriptSort["order"] != "asc" || scriptSort["type"] != "string" {
+		t.Errorf("unexpected scenario_type sort: %v", scriptSort)
+	}
+	if src := scriptSort["script"].(map[string]any)["source"].(string); !strings.Contains(src, "scenario_type") {
+		t.Errorf("scenario_type sort script must emit the representative scenario_type: %s", src)
 	}
 	if sort[1].(map[string]any)["_doc"].(map[string]any)["order"] != "asc" {
 		t.Errorf("missing _doc tie-breaker: %v", sort)
 	}
-	// The sort is a direct mapped-field sort; no runtime scripted field is sent.
+	// _script sort is inline in the sort clause; no runtime_mappings are sent.
 	if _, ok := request["runtime_mappings"]; ok {
 		t.Errorf("unexpected runtime_mappings in telemetry sort request: %v", request["runtime_mappings"])
 	}
@@ -286,11 +291,10 @@ func TestBuildSearchSortMappingsAndDefaults(t *testing.T) {
 		fields                                                      map[string]sortField
 		defaultField, defaultOrder                                  string
 	}{
+		// Telemetry explicit columns sort via _script (see
+		// TestBuildTelemetryScenarioSortsUseRepresentativeScript); only the default
+		// (timestamp) uses buildSortClause.
 		{name: "telemetry default", fields: telemetrySortFields, defaultField: "timestamp", defaultOrder: "desc", wantField: "timestamp", wantOrder: "desc", wantUnmapped: "date"},
-		{name: "telemetry start time", sortBy: "start_timestamp", sortOrder: "asc", fields: telemetrySortFields, defaultField: "timestamp", defaultOrder: "desc", wantField: "scenarios.start_timestamp", wantOrder: "asc", wantUnmapped: "double"},
-		{name: "telemetry end time", sortBy: "end_timestamp", sortOrder: "desc", fields: telemetrySortFields, defaultField: "timestamp", defaultOrder: "desc", wantField: "scenarios.end_timestamp", wantOrder: "desc", wantUnmapped: "double"},
-		{name: "telemetry namespace", sortBy: "namespace", sortOrder: "asc", fields: telemetrySortFields, defaultField: "timestamp", defaultOrder: "desc", wantField: "scenarios.parameters.config.namespace.keyword", wantOrder: "asc", wantUnmapped: "keyword"},
-		{name: "telemetry status", sortBy: "status", sortOrder: "desc", fields: telemetrySortFields, defaultField: "timestamp", defaultOrder: "desc", wantField: "job_status", wantOrder: "desc", wantUnmapped: "boolean"},
 		{name: "alerts default", fields: alertSortFields, defaultField: "created_at", defaultOrder: "desc", wantField: "created_at", wantOrder: "desc", wantUnmapped: "date"},
 		{name: "alerts uuid", sortBy: "uuid", sortOrder: "asc", fields: alertSortFields, defaultField: "created_at", defaultOrder: "desc", wantField: "run_uuid.keyword", wantOrder: "asc", wantUnmapped: "keyword"},
 		{name: "alerts phase", sortBy: "phase", sortOrder: "desc", fields: alertSortFields, defaultField: "created_at", defaultOrder: "desc", wantField: "phase.keyword", wantOrder: "desc", wantUnmapped: "keyword"},
@@ -309,6 +313,93 @@ func TestBuildSearchSortMappingsAndDefaults(t *testing.T) {
 			}
 			if sort[1].(map[string]any)["_doc"].(map[string]any)["order"] != "asc" {
 				t.Errorf("sort missing _doc tie-breaker: %v", sort)
+			}
+		})
+	}
+}
+
+func TestBuildTelemetryScenarioSortsUseRepresentativeScript(t *testing.T) {
+	// Every allowlisted telemetry column is scenario-backed and must sort via an
+	// _script clause that selects the representative scenario (prelude) and emits
+	// the same value flatten surfaces, for both directions. The active scenario_type
+	// filter must be forwarded so the script picks the same representative scenario.
+	filters := map[string][]string{"scenario_type": {"pod_disruption_scenarios"}}
+	cases := []struct {
+		field, wantType string
+		wantContains    []string
+	}{
+		{"scenario_type", "string", []string{"scenario_type"}},
+		{"start_timestamp", "number", []string{"start_timestamp"}},
+		{"end_timestamp", "number", []string{"end_timestamp"}},
+		{"status", "number", []string{"job_status", "exit_status"}},
+	}
+	for _, tc := range cases {
+		for _, order := range []string{"asc", "desc"} {
+			t.Run(tc.field+"_"+order, func(t *testing.T) {
+				sort, err := buildTelemetrySortClause(tc.field, order, filters)
+				if err != nil {
+					t.Fatalf("build sort: %v", err)
+				}
+				scriptSort, ok := sort[0].(map[string]any)["_script"].(map[string]any)
+				if !ok {
+					t.Fatalf("%s sort[0] is not an _script clause: %v", tc.field, sort[0])
+				}
+				if scriptSort["order"] != order || scriptSort["type"] != tc.wantType {
+					t.Errorf("%s _script sort = %v, want order %s type %s", tc.field, scriptSort, order, tc.wantType)
+				}
+				script := scriptSort["script"].(map[string]any)
+				src := script["source"].(string)
+				if !strings.Contains(src, "params.selectedScenarioTypes") {
+					t.Errorf("%s sort script must select the representative scenario: %s", tc.field, src)
+				}
+				for _, want := range tc.wantContains {
+					if !strings.Contains(src, want) {
+						t.Errorf("%s sort script missing %q: %s", tc.field, want, src)
+					}
+				}
+				params := script["params"].(map[string]any)["selectedScenarioTypes"].([]string)
+				if len(params) != 1 || params[0] != "pod_disruption_scenarios" {
+					t.Errorf("%s sort params selectedScenarioTypes = %v, want [pod_disruption_scenarios]", tc.field, params)
+				}
+				if sort[1].(map[string]any)["_doc"].(map[string]any)["order"] != "asc" {
+					t.Errorf("%s sort missing _doc tie-breaker: %v", tc.field, sort)
+				}
+			})
+		}
+	}
+}
+
+// TestQueryTelemetryPaginatedSortForwardsWindow verifies that an explicit sort and
+// the page window are sent together: Elasticsearch sorts by the representative
+// scenario value first, then applies from/size, so the returned page is consistent
+// with the displayed sort for multi-scenario runs. (Painless ordering itself runs
+// in Elasticsearch and is covered end-to-end against a live cluster.)
+func TestQueryTelemetryPaginatedSortForwardsWindow(t *testing.T) {
+	for _, order := range []string{"asc", "desc"} {
+		t.Run(order, func(t *testing.T) {
+			var request map[string]any
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+					t.Fatalf("decode request: %v", err)
+				}
+				_, _ = w.Write([]byte(`{"hits":{"total":{"value":0},"hits":[]}}`))
+			}))
+			defer srv.Close()
+
+			// Second page of 20 (from = 20).
+			_, _, _, _, _, err := NewClient().QueryTelemetryPageWithSort(
+				context.Background(), ConnectionParams{Host: srv.URL, Index: "telemetry"},
+				20, 20, "", "", nil, "start_timestamp", order,
+			)
+			if err != nil {
+				t.Fatalf("query failed: %v", err)
+			}
+			if request["from"].(float64) != 20 || request["size"].(float64) != 20 {
+				t.Errorf("window = from %v size %v, want from 20 size 20", request["from"], request["size"])
+			}
+			scriptSort := request["sort"].([]any)[0].(map[string]any)["_script"].(map[string]any)
+			if scriptSort["order"] != order {
+				t.Errorf("sort order = %v, want %s", scriptSort["order"], order)
 			}
 		})
 	}
@@ -951,7 +1042,7 @@ func TestValidateQueryRequest(t *testing.T) {
 		{"valid sort options", QueryTelemetryRequest{ConfigName: "c", SortBy: "scenario_type", SortOrder: "asc"}, false, DefaultQuerySize},
 		{"unsupported sort field", QueryTelemetryRequest{ConfigName: "c", SortBy: "uuid", SortOrder: "asc"}, true, DefaultQuerySize},
 		{"unsupported sort order", QueryTelemetryRequest{ConfigName: "c", SortBy: "status", SortOrder: "sideways"}, true, DefaultQuerySize},
-		{"sort field without order", QueryTelemetryRequest{ConfigName: "c", SortBy: "namespace"}, true, DefaultQuerySize},
+		{"sort field without order", QueryTelemetryRequest{ConfigName: "c", SortBy: "status"}, true, DefaultQuerySize},
 		{"sort order without field", QueryTelemetryRequest{ConfigName: "c", SortOrder: "asc"}, true, DefaultQuerySize},
 		{"invalid job_status value", QueryTelemetryRequest{ConfigName: "c", Filters: map[string][]string{"job_status": {"maybe"}}}, true, 0},
 		{"mixed valid and invalid job_status", QueryTelemetryRequest{ConfigName: "c", Filters: map[string][]string{"job_status": {"true", "yes"}}}, true, 0},

@@ -1402,12 +1402,19 @@ func TestQueryElasticsearchTelemetry_Success(t *testing.T) {
 	if jobStatusFacet := resp.Facets["job_status"]; len(jobStatusFacet) != 1 || jobStatusFacet[0].Value != "true" {
 		t.Errorf("got job_status facet %+v, want [{true 1}]", jobStatusFacet)
 	}
+	// Status sorts via an _script clause that reproduces the displayed status
+	// (job_status folded with the representative scenario's exit_status), not a
+	// direct job_status sort.
 	sort := searchBody["sort"].([]any)
-	statusSort := sort[0].(map[string]any)["job_status"].(map[string]any)
-	if statusSort["order"] != "desc" || statusSort["mode"] != "max" {
-		t.Errorf("telemetry status sort = %v, want order desc mode max on job_status", statusSort)
+	statusSort := sort[0].(map[string]any)["_script"].(map[string]any)
+	if statusSort["order"] != "desc" {
+		t.Errorf("telemetry status sort order = %v, want desc", statusSort["order"])
 	}
-	// Status sorts directly on the mapped job_status field; no runtime script.
+	script := statusSort["script"].(map[string]any)["source"].(string)
+	if !strings.Contains(script, "exit_status") {
+		t.Errorf("status sort script must fold in representative exit_status: %s", script)
+	}
+	// _script sort is inline in the sort clause; no runtime_mappings are sent.
 	if _, ok := searchBody["runtime_mappings"]; ok {
 		t.Errorf("unexpected runtime_mappings in telemetry sort request: %v", searchBody["runtime_mappings"])
 	}
