@@ -69,13 +69,12 @@ type sortField struct {
 	UnmappedType string
 }
 
-// telemetrySortFields is the allowlist of sortable telemetry columns. Only the map
-// keys are significant (they gate validateSortOptions); the actual sort key for
-// each column is produced by telemetryScriptSorts, which emits the representative
-// scenario's value so ordering matches the flattened row. The Field values are
-// retained for reference (the mapped source field each column derives from).
+// telemetrySortFields is the allowlist and Elasticsearch field mapping for
+// sortable telemetry columns. Scenario fields are multi-valued because scenarios
+// are stored as an array; buildSortClause selects the minimum value for ascending
+// order and maximum for descending order.
 var telemetrySortFields = map[string]sortField{
-	"scenario_type":   {Field: "scenarios.scenario_type", UnmappedType: "keyword"},
+	"scenario_type":   {Field: "scenarios.scenario_type.keyword", UnmappedType: "keyword"},
 	"start_timestamp": {Field: "scenarios.start_timestamp", UnmappedType: "double"},
 	"end_timestamp":   {Field: "scenarios.end_timestamp", UnmappedType: "double"},
 	"status":          {Field: "job_status", UnmappedType: "boolean"},
@@ -121,13 +120,10 @@ func buildSortClause(sortBy, sortOrder string, fields map[string]sortField, defa
 	if field.UnmappedType != "" {
 		fieldSort["unmapped_type"] = field.UnmappedType
 	}
-	// A field that is a multi-valued array has one sort value per element. Pick a
-	// deterministic element per document - lowest for ascending, highest for
-	// descending - so ordering is stable. Single-valued fields ignore mode, so it
-	// is safe to set for every explicit field sort; the default (top-level
-	// timestamp) stays single-valued. Telemetry scenario-backed columns do not use
-	// this path (they sort via representative-scenario _script clauses); this
-	// applies to the alerts fields and any future direct field sort.
+	// A multi-valued field has one sort value per element. Pick a deterministic
+	// element per document - lowest for ascending, highest for descending - so
+	// ordering is stable. Single-valued fields ignore mode, so it is safe to set
+	// for every explicit field sort; the default timestamp stays single-valued.
 	if sortBy != "" || sortOrder != "" {
 		if order == "asc" {
 			fieldSort["mode"] = "min"
@@ -141,109 +137,14 @@ func buildSortClause(sortBy, sortOrder string, fields map[string]sortField, defa
 	}, nil
 }
 
-// representativeScenarioPrelude selects the scenario that represents a run in the
-// flattened row, mirroring rawTelemetrySource.representativeScenario: the first
-// scenario whose scenario_type is in params.selectedScenarioTypes (the active
-// scenario_type filter), or the first scenario when no such filter is set. It
-// leaves `representative` null when the run has no scenarios. Scenario-backed sort
-// scripts append their field extraction to this prelude so the sort key matches
-// the value shown in the response.
-const representativeScenarioPrelude = `
-def scenarios = params._source['scenarios'];
-def representative = null;
-if (scenarios instanceof List && !scenarios.isEmpty()) {
-	representative = scenarios[0];
-	def selected = params.selectedScenarioTypes;
-	if (selected != null && !selected.isEmpty()) {
-		for (def candidate : scenarios) {
-			if (candidate instanceof Map && selected.contains(candidate['scenario_type'])) {
-				representative = candidate;
-				break;
-			}
-		}
-	}
-}
-`
-
-// telemetryScriptSort is an Elasticsearch _script sort for a scenario-backed
-// telemetry column. Type is the _script sort type ("string" or "number"); Source
-// is the Painless source (representativeScenarioPrelude plus a field extraction).
-type telemetryScriptSort struct {
-	Type   string
-	Source string
-}
-
-// telemetryScriptSorts maps each scenario-backed telemetry column to a _script
-// sort that emits the same value flatten surfaces for that column, so ordering and
-// pagination stay consistent with the displayed value even for multi-scenario runs
-// and when a scenario_type filter changes the representative scenario. Direct
-// scenarios.* field sorts are not used because Elasticsearch would order by the
-// array-wide min/max rather than the representative scenario's value. status folds
-// job_status with the representative scenario's exit_status (0 fail, 1 pass, so
-// numeric order is false-before-true), matching flatten's status computation. The
-// zero fallbacks (""/0) mirror flatten's values for a run with no scenarios.
-var telemetryScriptSorts = map[string]telemetryScriptSort{
-	"scenario_type": {Type: "string", Source: representativeScenarioPrelude + `
-if (representative instanceof Map && representative['scenario_type'] != null) {
-	return representative['scenario_type'].toString();
-}
-return '';`},
-	"start_timestamp": {Type: "number", Source: representativeScenarioPrelude + `
-if (representative instanceof Map && representative['start_timestamp'] instanceof Number) {
-	return ((Number) representative['start_timestamp']).doubleValue();
-}
-return 0;`},
-	"end_timestamp": {Type: "number", Source: representativeScenarioPrelude + `
-if (representative instanceof Map && representative['end_timestamp'] instanceof Number) {
-	return ((Number) representative['end_timestamp']).doubleValue();
-}
-return 0;`},
-	"status": {Type: "number", Source: representativeScenarioPrelude + `
-boolean passed = params._source['job_status'] == true;
-if (representative instanceof Map) {
-	def exitStatus = representative['exit_status'];
-	if (exitStatus instanceof Number && ((Number) exitStatus).intValue() != 0) {
-		passed = false;
-	}
-}
-return passed ? 1 : 0;`},
-}
-
-// buildTelemetrySortClause builds the Elasticsearch sort clause for a telemetry
-// query. With no sort requested it preserves the default (timestamp descending).
-// Every allowlisted telemetry column is scenario-backed, so an explicit sort uses
-// an _script clause (telemetryScriptSorts) that emits the representative
-// scenario's value - the same value flatten returns to the UI - so ordering and
-// the page window match the displayed column even for multi-scenario runs and when
-// a scenario_type filter changes the representative scenario. The scenario_type
-// filter is forwarded to the script as params.selectedScenarioTypes. _script sort
-// is used rather than a runtime scripted field, which did not resolve
-// params._source at sort time on the target clusters. A _doc tie-breaker keeps
-// equal-keyed documents in a stable order across pages.
-func buildTelemetrySortClause(sortBy, sortOrder string, filters map[string][]string) ([]any, error) {
-	if sortBy == "" && sortOrder == "" {
-		return buildSortClause("", "", telemetrySortFields, "timestamp", "desc")
-	}
-	if err := validateSortOptions(sortBy, sortOrder, telemetrySortFields); err != nil {
-		return nil, err
-	}
-	scriptSort, ok := telemetryScriptSorts[sortBy]
-	if !ok {
-		// Defensive: validateSortOptions already rejected unknown fields, and every
-		// allowlisted telemetry field has a script entry.
-		return nil, fmt.Errorf("no telemetry sort script for %q", sortBy)
-	}
-	return []any{
-		map[string]any{"_script": map[string]any{
-			"type":  scriptSort.Type,
-			"order": sortOrder,
-			"script": map[string]any{
-				"source": scriptSort.Source,
-				"params": map[string]any{"selectedScenarioTypes": filters[scenarioTypeFacetKey]},
-			},
-		}},
-		map[string]any{"_doc": map[string]any{"order": "asc"}},
-	}, nil
+// buildTelemetrySortClause maps requested table columns to concrete Elasticsearch
+// fields. When no sort is requested it preserves timestamp-descending default.
+// Sorting by mapped fields avoids Painless script sorts, whose sort context cannot
+// access _source. Elasticsearch applies scenario arrays' min/max sort semantics;
+// status sorts the top-level job_status field. The _doc tie-breaker keeps equal
+// keys stable across pages.
+func buildTelemetrySortClause(sortBy, sortOrder string) ([]any, error) {
+	return buildSortClause(sortBy, sortOrder, telemetrySortFields, "timestamp", "desc")
 }
 
 // facetFields is the single source of truth for the filterable categories. It
@@ -907,14 +808,11 @@ func (c *Client) QueryTelemetryPage(ctx context.Context, conn ConnectionParams, 
 // sortBy and sortOrder must be supplied together: pass both or neither. When both
 // are empty the default ordering (timestamp descending) is preserved. When set,
 // sortBy must be an allowlisted telemetry column (scenario_type, start_timestamp,
-// end_timestamp, status) and sortOrder must be "asc" or "desc". Every allowlisted
-// column is scenario-backed and sorts on the representative scenario's value - the
-// same value returned in each row (and, for status, job_status folded with the
-// representative scenario's exit_status) - so ordering and the page window stay
-// consistent with the displayed column, including when a scenario_type filter in
-// filters changes which scenario is representative. A missing field, an invalid
-// direction, or only one of the two being set returns an error before any request
-// is made.
+// end_timestamp, status) and sortOrder must be "asc" or "desc". Scenario columns
+// sort on their mapped fields; Elasticsearch selects the minimum array value for
+// ascending order and maximum for descending order. Status sorts on job_status.
+// A missing field, an invalid direction, or only one of the two being set returns
+// an error before any request is made.
 //
 // It also returns an error when the telemetry index is not configured on conn,
 // when credentials would be sent over plaintext HTTP, when the destination policy
@@ -1101,7 +999,7 @@ func buildSearchBody(size, from int, startDate, endDate string, filters map[stri
 }
 
 func buildSearchBodyWithSort(size, from int, startDate, endDate string, filters map[string][]string, sortBy, sortOrder string) ([]byte, error) {
-	sort, err := buildTelemetrySortClause(sortBy, sortOrder, filters)
+	sort, err := buildTelemetrySortClause(sortBy, sortOrder)
 	if err != nil {
 		return nil, err
 	}

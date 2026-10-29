@@ -145,6 +145,8 @@ type ClientMessage struct {
 	Limit          *int     `json:"limit,omitempty"`          // items per page for paginated subscriptions
 	Categories     []string `json:"categories,omitempty"`     // any matching category for jobs subscriptions
 	GroupRollbacks bool     `json:"groupRollbacks,omitempty"` // nest rollback runs under their visible source run
+	SortBy         string   `json:"sortBy,omitempty"`         // jobs sort field: createdAt, status, name, or owner
+	SortOrder      string   `json:"sortOrder,omitempty"`      // jobs sort direction: asc or desc
 	SubscriptionID string   `json:"subscriptionId,omitempty"` // request correlation for jobs snapshots
 }
 

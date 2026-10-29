@@ -320,6 +320,8 @@ func (h *Handler) handleClientMessage(client *Client, msg *ClientMessage) {
 				Limit:          limit,
 				Categories:     append([]string(nil), msg.Categories...),
 				GroupRollbacks: msg.GroupRollbacks,
+				SortBy:         msg.SortBy,
+				SortOrder:      msg.SortOrder,
 				SubscriptionID: msg.SubscriptionID,
 			}
 			client.mu.Unlock()
@@ -650,6 +652,7 @@ func (h *Handler) sendJobsSnapshot(ctx context.Context, client *Client, logger l
 		limit = state.Limit
 	}
 	allJobs = filterJobsByCategories(allJobs, state.Categories)
+	sortUnifiedJobItems(allJobs, state.SortBy, state.SortOrder)
 
 	// Compute stats from the full list before pagination
 	stats := computeWSJobStats(allJobs)

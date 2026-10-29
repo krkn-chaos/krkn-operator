@@ -379,6 +379,7 @@ func (b *Broadcaster) BroadcastJobsPageUpdate(ctx context.Context) {
 			return
 		}
 		allJobs = filterJobsByCategories(allJobs, state.Categories)
+		sortUnifiedJobItems(allJobs, state.SortBy, state.SortOrder)
 
 		// Compute stats from the full list before pagination
 		stats := computeWSJobStats(allJobs)
