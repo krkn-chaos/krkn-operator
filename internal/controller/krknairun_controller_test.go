@@ -15,6 +15,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
 func newAIRunFixture(t *testing.T) (*KrknAIRunReconciler, client.Client, *krknv1alpha1.KrknAIRun) {
@@ -75,11 +76,27 @@ func TestReconcileProvisionsPublicRunLifecycle(t *testing.T) {
 	if _, err := reconciler.Reconcile(context.Background(), request); err != nil {
 		t.Fatalf("initial Reconcile failed: %v", err)
 	}
+	var persisted krknv1alpha1.KrknAIRun
+	if err := fakeClient.Get(context.Background(), request.NamespacedName, &persisted); err != nil {
+		t.Fatal(err)
+	}
+	if !controllerutil.ContainsFinalizer(&persisted, krknAIRunFinalizer) {
+		t.Fatal("cleanup finalizer was not installed before provisioning")
+	}
+	var pods corev1.PodList
+	if err := fakeClient.List(context.Background(), &pods, client.InNamespace(aiRun.Namespace)); err != nil {
+		t.Fatal(err)
+	}
+	if len(pods.Items) != 0 {
+		t.Fatalf("workloads were provisioned before finalizer installation: %+v", pods.Items)
+	}
+	if _, err := reconciler.Reconcile(context.Background(), request); err != nil {
+		t.Fatalf("status initialization Reconcile failed: %v", err)
+	}
 	if _, err := reconciler.Reconcile(context.Background(), request); err != nil {
 		t.Fatalf("provisioning Reconcile failed: %v", err)
 	}
 
-	var persisted krknv1alpha1.KrknAIRun
 	if err := fakeClient.Get(context.Background(), request.NamespacedName, &persisted); err != nil {
 		t.Fatal(err)
 	}
@@ -107,12 +124,24 @@ func TestReconcileTerminalAndUnsupportedPhases(t *testing.T) {
 		if err != nil || result != (ctrl.Result{}) {
 			t.Fatalf("terminal Reconcile result=%+v error=%v", result, err)
 		}
+		var persisted krknv1alpha1.KrknAIRun
+		if err := fakeClient.Get(context.Background(), types.NamespacedName{Name: aiRun.Name, Namespace: aiRun.Namespace}, &persisted); err != nil {
+			t.Fatal(err)
+		}
+		if !controllerutil.ContainsFinalizer(&persisted, krknAIRunFinalizer) {
+			t.Fatal("terminal run was not protected by the cleanup finalizer")
+		}
 	})
 
 	t.Run("unsupported phase is recorded as failure", func(t *testing.T) {
 		reconciler, fakeClient, aiRun := newAIRunFixture(t)
 		aiRun.Status.Phase = "Unknown"
 		if err := fakeClient.Status().Update(context.Background(), aiRun); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := reconciler.Reconcile(context.Background(), ctrl.Request{
+			NamespacedName: types.NamespacedName{Name: aiRun.Name, Namespace: aiRun.Namespace},
+		}); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := reconciler.Reconcile(context.Background(), ctrl.Request{

@@ -590,6 +590,9 @@ func (h *Handler) listKrknAIRuns(w http.ResponseWriter, r *http.Request) {
 	visible := make([]krknv1alpha1.KrknAIRun, 0, len(runs.Items))
 	for i := range runs.Items {
 		run := &runs.Items[i]
+		if !run.DeletionTimestamp.IsZero() {
+			continue
+		}
 		if err := h.authorizeKrknAIRunTarget(r.Context(), run, groupauth.ActionView); err == nil {
 			visible = append(visible, *run)
 		}
@@ -629,7 +632,7 @@ func (h *Handler) deleteKrknAIRun(w http.ResponseWriter, r *http.Request, name s
 	if !ok {
 		return
 	}
-	if err := h.client.Delete(r.Context(), run); err != nil {
+	if err := h.client.Delete(r.Context(), run, client.Preconditions{UID: &run.UID}); err != nil {
 		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{Error: "internal_error", Message: "failed to delete run"})
 		return
 	}
@@ -639,6 +642,10 @@ func (h *Handler) deleteKrknAIRun(w http.ResponseWriter, r *http.Request, name s
 func (h *Handler) authorizeKrknAIRun(w http.ResponseWriter, r *http.Request, name string, action groupauth.Action) (*krknv1alpha1.KrknAIRun, bool) {
 	var run krknv1alpha1.KrknAIRun
 	if err := h.client.Get(r.Context(), client.ObjectKey{Name: name, Namespace: h.namespace}, &run); err != nil {
+		writeJSONError(w, http.StatusNotFound, ErrorResponse{Error: "not_found", Message: "run not found"})
+		return nil, false
+	}
+	if action == groupauth.ActionView && !run.DeletionTimestamp.IsZero() {
 		writeJSONError(w, http.StatusNotFound, ErrorResponse{Error: "not_found", Message: "run not found"})
 		return nil, false
 	}
@@ -1157,6 +1164,10 @@ func krknAIScenarioStatus(row KrknAIScenarioIndexItem) string {
 
 func copyKrknAIResponse(w http.ResponseWriter, response *http.Response, contentType string) {
 	defer response.Body.Close()
+	if response.StatusCode == http.StatusGone {
+		writeJSONError(w, http.StatusNotFound, ErrorResponse{Error: "not_found", Message: "run not found"})
+		return
+	}
 	w.Header().Set("Content-Type", contentType)
 	w.WriteHeader(response.StatusCode)
 	_, _ = io.Copy(w, response.Body)
@@ -1186,6 +1197,10 @@ func (h *Handler) proxyKrknAIArtifact(w http.ResponseWriter, r *http.Request, na
 		writeJSONError(w, http.StatusServiceUnavailable, ErrorResponse{Error: "service_unavailable", Message: "Krkn-AI artifact service is unavailable"})
 		return
 	}
+	if response.StatusCode == http.StatusGone {
+		copyKrknAIResponse(w, response, "application/json")
+		return
+	}
 	defer response.Body.Close()
 
 	if artifactPath == "results" {
@@ -1203,6 +1218,10 @@ func (h *Handler) proxyKrknAIRequest(w http.ResponseWriter, r *http.Request, met
 	response, err := h.artifactClient.Do(r.Context(), method, path, payload)
 	if err != nil {
 		writeJSONError(w, http.StatusServiceUnavailable, ErrorResponse{Error: "service_unavailable", Message: "Krkn-AI artifact service is unavailable"})
+		return
+	}
+	if response.StatusCode == http.StatusGone {
+		copyKrknAIResponse(w, response, "application/json")
 		return
 	}
 	defer response.Body.Close()

@@ -20,7 +20,9 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"net/http"
 	"reflect"
+	"sort"
 	"strings"
 	"time"
 
@@ -39,6 +41,7 @@ import (
 
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
 	"github.com/krkn-chaos/krkn-operator/pkg/files"
+	"github.com/krkn-chaos/krkn-operator/pkg/krknaiserver"
 )
 
 // KrknAIRunReconciler drives a run from Pending through provisioning and Pod
@@ -60,11 +63,13 @@ type KrknAIRunReconciler struct {
 	ImagePullSecrets               []corev1.LocalObjectReference
 }
 
-// +kubebuilder:rbac:groups=krkn.krkn-chaos.dev,resources=krknairuns,verbs=get;list;watch;create;delete
+// +kubebuilder:rbac:groups=krkn.krkn-chaos.dev,resources=krknairuns,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=krkn.krkn-chaos.dev,resources=krknairuns/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=krkn.krkn-chaos.dev,resources=krknscenarioruns,verbs=get;list;watch
+// +kubebuilder:rbac:groups=krkn.krkn-chaos.dev,resources=krknairuns/finalizers,verbs=update
+// +kubebuilder:rbac:groups=krkn.krkn-chaos.dev,resources=krknscenarioruns,verbs=get;list;watch;delete
 // +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups="",resources=secrets,verbs=get
 // +kubebuilder:rbac:groups="",resources=serviceaccounts,verbs=get
 
 const (
@@ -75,11 +80,14 @@ const (
 	aiRunPhaseSucceeded                     = "Succeeded"
 	aiRunPhaseFailed                        = "Failed"
 	aiRunPhaseCancelled                     = "Cancelled"
+	krknAIRunFinalizer                      = "krkn.krkn-chaos.dev/ai-run-cleanup"
+	krknAIRunChildUIDsAnnotation            = "krkn.krkn-chaos.dev/ai-run-cleanup-child-uids"
+	krknAIRunDeletionCondition              = "DeletionCleanup"
+	krknAIRunDeleteTimeout                  = 15 * time.Second
 )
 
-// Reconcile initializes status, provisions one orchestrator Pod, observes both
-// runner and uploader termination, and records terminal status only after the
-// uploader has had an opportunity to commit artifacts.
+// Reconcile installs the cleanup finalizer before provisioning, then drives a
+// run through provisioning, observation, and terminal status.
 func (r *KrknAIRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 	var aiRun krknv1alpha1.KrknAIRun
@@ -88,6 +96,20 @@ func (r *KrknAIRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			return ctrl.Result{}, nil
 		}
 		return ctrl.Result{}, err
+	}
+
+	if !aiRun.DeletionTimestamp.IsZero() {
+		if !controllerutil.ContainsFinalizer(&aiRun, krknAIRunFinalizer) {
+			return ctrl.Result{}, nil
+		}
+		return r.reconcileDeletion(ctx, &aiRun)
+	}
+	if !controllerutil.ContainsFinalizer(&aiRun, krknAIRunFinalizer) {
+		controllerutil.AddFinalizer(&aiRun, krknAIRunFinalizer)
+		if err := r.Update(ctx, &aiRun); err != nil {
+			return ctrl.Result{}, fmt.Errorf("add KrknAIRun cleanup finalizer: %w", err)
+		}
+		return ctrl.Result{}, nil
 	}
 
 	if aiRun.Status.Phase == "" {
@@ -118,6 +140,331 @@ func (r *KrknAIRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		resultErr := r.fail(ctx, &aiRun, "unsupported phase "+aiRun.Status.Phase)
 		return ctrl.Result{}, resultErr
 	}
+}
+
+func (r *KrknAIRunReconciler) reconcileDeletion(
+	ctx context.Context,
+	aiRun *krknv1alpha1.KrknAIRun,
+) (ctrl.Result, error) {
+	pending, err := r.deleteOwnedRunPods(ctx, aiRun)
+	if err != nil {
+		return r.deletionFailure(ctx, aiRun, err)
+	}
+	if pending {
+		return r.deletionPending(ctx, aiRun, "Waiting for the Krkn-AI orchestrator Pod to stop.")
+	}
+
+	var children krknv1alpha1.KrknScenarioRunList
+	if err := r.List(ctx, &children, client.InNamespace(aiRun.Namespace)); err != nil {
+		return r.deletionFailure(ctx, aiRun, fmt.Errorf("list KrknScenarioRuns for cleanup: %w", err))
+	}
+	childUIDs := parseUIDAnnotation(aiRun.Annotations[krknAIRunChildUIDsAnnotation])
+	ownedChildCount := 0
+	for i := range children.Items {
+		child := &children.Items[i]
+		if hasAIRunOwner(child.OwnerReferences, aiRun.UID) {
+			ownedChildCount++
+			if child.UID != "" {
+				childUIDs = append(childUIDs, child.UID)
+			}
+		}
+	}
+	childUIDs = uniqueUIDs(childUIDs)
+	if !sameUIDs(parseUIDAnnotation(aiRun.Annotations[krknAIRunChildUIDsAnnotation]), childUIDs) {
+		if aiRun.Annotations == nil {
+			aiRun.Annotations = make(map[string]string)
+		}
+		aiRun.Annotations[krknAIRunChildUIDsAnnotation] = formatUIDAnnotation(childUIDs)
+		if err := r.Update(ctx, aiRun); err != nil {
+			return r.deletionFailure(ctx, aiRun, fmt.Errorf("save KrknScenarioRun owner UIDs for cleanup: %w", err))
+		}
+		return r.deletionPending(ctx, aiRun, "Recording KrknScenarioRun owners before deleting their workloads.")
+	}
+
+	for i := range children.Items {
+		child := &children.Items[i]
+		if !hasAIRunOwner(child.OwnerReferences, aiRun.UID) {
+			continue
+		}
+		uid := child.UID
+		if err := r.Delete(ctx, child, client.Preconditions{UID: &uid}); err != nil && !apierrors.IsNotFound(err) {
+			return r.deletionFailure(ctx, aiRun, fmt.Errorf("delete owned KrknScenarioRun %q: %w", child.Name, err))
+		}
+	}
+
+	pending, err = r.deleteScenarioRunWorkloads(ctx, aiRun.Namespace, childUIDs)
+	if err != nil {
+		return r.deletionFailure(ctx, aiRun, err)
+	}
+	if pending {
+		return r.deletionPending(ctx, aiRun, "Waiting for owned KrknScenarioRun Pods and ConfigMaps to stop.")
+	}
+
+	if ownedChildCount > 0 {
+		return r.deletionPending(ctx, aiRun, "Waiting for owned KrknScenarioRuns to be deleted.")
+	}
+
+	pending, err = r.deleteOwnedRunConfigMaps(ctx, aiRun)
+	if err != nil {
+		return r.deletionFailure(ctx, aiRun, err)
+	}
+	if pending {
+		return r.deletionPending(ctx, aiRun, "Waiting for the owned kubeconfig ConfigMap to be deleted.")
+	}
+
+	if err := r.deleteArtifactRun(ctx, aiRun); err != nil {
+		return r.deletionFailure(ctx, aiRun, err)
+	}
+	meta.SetStatusCondition(&aiRun.Status.Conditions, metav1.Condition{
+		Type:               krknAIRunDeletionCondition,
+		Status:             metav1.ConditionTrue,
+		Reason:             "CleanupSucceeded",
+		Message:            "Owned workloads and uploaded run artifacts were deleted.",
+		ObservedGeneration: aiRun.Generation,
+	})
+	if err := r.Status().Update(ctx, aiRun); err != nil {
+		return ctrl.Result{}, fmt.Errorf("record KrknAIRun cleanup success: %w", err)
+	}
+	if aiRun.Annotations != nil {
+		delete(aiRun.Annotations, krknAIRunChildUIDsAnnotation)
+		if len(aiRun.Annotations) == 0 {
+			aiRun.Annotations = nil
+		}
+	}
+	controllerutil.RemoveFinalizer(aiRun, krknAIRunFinalizer)
+	if err := r.Update(ctx, aiRun); err != nil {
+		return ctrl.Result{}, fmt.Errorf("remove KrknAIRun cleanup finalizer: %w", err)
+	}
+	return ctrl.Result{}, nil
+}
+
+func (r *KrknAIRunReconciler) deleteOwnedRunPods(
+	ctx context.Context,
+	aiRun *krknv1alpha1.KrknAIRun,
+) (bool, error) {
+	var pods corev1.PodList
+	if err := r.List(ctx, &pods, client.InNamespace(aiRun.Namespace)); err != nil {
+		return false, fmt.Errorf("list Pods owned by KrknAIRun: %w", err)
+	}
+	found := false
+	for i := range pods.Items {
+		pod := &pods.Items[i]
+		if !hasAIRunOwner(pod.OwnerReferences, aiRun.UID) {
+			continue
+		}
+		found = true
+		uid := pod.UID
+		if err := r.Delete(ctx, pod, client.Preconditions{UID: &uid}); err != nil && !apierrors.IsNotFound(err) {
+			return false, fmt.Errorf("delete owned orchestrator Pod %q: %w", pod.Name, err)
+		}
+	}
+	return found, nil
+}
+
+func (r *KrknAIRunReconciler) deleteScenarioRunWorkloads(
+	ctx context.Context,
+	namespace string,
+	childUIDs []types.UID,
+) (bool, error) {
+	if len(childUIDs) == 0 {
+		return false, nil
+	}
+	uidSet := make(map[types.UID]struct{}, len(childUIDs))
+	for _, uid := range childUIDs {
+		uidSet[uid] = struct{}{}
+	}
+	pending := false
+	var pods corev1.PodList
+	if err := r.List(ctx, &pods, client.InNamespace(namespace)); err != nil {
+		return false, fmt.Errorf("list Pods owned by KrknScenarioRuns: %w", err)
+	}
+	for i := range pods.Items {
+		pod := &pods.Items[i]
+		if !hasScenarioRunOwner(pod.OwnerReferences, uidSet) {
+			continue
+		}
+		pending = true
+		uid := pod.UID
+		if err := r.Delete(ctx, pod, client.Preconditions{UID: &uid}); err != nil && !apierrors.IsNotFound(err) {
+			return false, fmt.Errorf("delete owned scenario Pod %q: %w", pod.Name, err)
+		}
+	}
+	var configMaps corev1.ConfigMapList
+	if err := r.List(ctx, &configMaps, client.InNamespace(namespace)); err != nil {
+		return false, fmt.Errorf("list ConfigMaps owned by KrknScenarioRuns: %w", err)
+	}
+	for i := range configMaps.Items {
+		configMap := &configMaps.Items[i]
+		if !hasScenarioRunOwner(configMap.OwnerReferences, uidSet) {
+			continue
+		}
+		pending = true
+		uid := configMap.UID
+		if err := r.Delete(ctx, configMap, client.Preconditions{UID: &uid}); err != nil && !apierrors.IsNotFound(err) {
+			return false, fmt.Errorf("delete owned scenario ConfigMap %q: %w", configMap.Name, err)
+		}
+	}
+	return pending, nil
+}
+
+func (r *KrknAIRunReconciler) deleteOwnedRunConfigMaps(
+	ctx context.Context,
+	aiRun *krknv1alpha1.KrknAIRun,
+) (bool, error) {
+	var configMaps corev1.ConfigMapList
+	if err := r.List(ctx, &configMaps, client.InNamespace(aiRun.Namespace)); err != nil {
+		return false, fmt.Errorf("list ConfigMaps owned by KrknAIRun: %w", err)
+	}
+	found := false
+	for i := range configMaps.Items {
+		configMap := &configMaps.Items[i]
+		if !hasAIRunOwner(configMap.OwnerReferences, aiRun.UID) {
+			continue
+		}
+		found = true
+		uid := configMap.UID
+		if err := r.Delete(ctx, configMap, client.Preconditions{UID: &uid}); err != nil && !apierrors.IsNotFound(err) {
+			return false, fmt.Errorf("delete owned run ConfigMap %q: %w", configMap.Name, err)
+		}
+	}
+	return found, nil
+}
+
+func (r *KrknAIRunReconciler) deleteArtifactRun(
+	ctx context.Context,
+	aiRun *krknv1alpha1.KrknAIRun,
+) error {
+	var tokenSecret corev1.Secret
+	if err := r.Get(ctx, types.NamespacedName{
+		Name: r.ServiceTokenSecretName, Namespace: aiRun.Namespace,
+	}, &tokenSecret); err != nil {
+		return fmt.Errorf("read artifact service token Secret: %w", err)
+	}
+	token := string(tokenSecret.Data["token"])
+	if token == "" {
+		return fmt.Errorf("artifact service token Secret has no non-empty token key")
+	}
+	endpoint := krknaiserver.EscapePath("/v1/runs/" + string(aiRun.UID))
+	requestCtx, cancel := context.WithTimeout(ctx, krknAIRunDeleteTimeout)
+	defer cancel()
+	response, err := krknaiserver.New(r.ServiceURL, token).Do(
+		requestCtx, http.MethodDelete, endpoint, nil,
+	)
+	if err != nil {
+		return fmt.Errorf("delete uploaded artifacts for run UID %q: %w", aiRun.UID, err)
+	}
+	closeErr := response.Body.Close()
+	if response.StatusCode != http.StatusNoContent {
+		return fmt.Errorf("artifact service DELETE for run UID %q returned HTTP %d", aiRun.UID, response.StatusCode)
+	}
+	if closeErr != nil {
+		return fmt.Errorf("close artifact run deletion response: %w", closeErr)
+	}
+	return nil
+}
+
+func (r *KrknAIRunReconciler) deletionPending(
+	ctx context.Context,
+	aiRun *krknv1alpha1.KrknAIRun,
+	message string,
+) (ctrl.Result, error) {
+	meta.SetStatusCondition(&aiRun.Status.Conditions, metav1.Condition{
+		Type:               krknAIRunDeletionCondition,
+		Status:             metav1.ConditionFalse,
+		Reason:             "CleanupPending",
+		Message:            message,
+		ObservedGeneration: aiRun.Generation,
+	})
+	if err := r.Status().Update(ctx, aiRun); err != nil {
+		return ctrl.Result{}, fmt.Errorf("record KrknAIRun cleanup progress: %w", err)
+	}
+	return ctrl.Result{RequeueAfter: time.Second}, nil
+}
+
+func (r *KrknAIRunReconciler) deletionFailure(
+	ctx context.Context,
+	aiRun *krknv1alpha1.KrknAIRun,
+	cleanupErr error,
+) (ctrl.Result, error) {
+	meta.SetStatusCondition(&aiRun.Status.Conditions, metav1.Condition{
+		Type:               krknAIRunDeletionCondition,
+		Status:             metav1.ConditionFalse,
+		Reason:             "CleanupFailed",
+		Message:            cleanupErr.Error(),
+		ObservedGeneration: aiRun.Generation,
+	})
+	if err := r.Status().Update(ctx, aiRun); err != nil {
+		return ctrl.Result{}, fmt.Errorf("%v; record KrknAIRun cleanup failure: %w", cleanupErr, err)
+	}
+	return ctrl.Result{}, cleanupErr
+}
+
+func hasAIRunOwner(owners []metav1.OwnerReference, uid types.UID) bool {
+	for _, owner := range owners {
+		if owner.APIVersion == krknv1alpha1.GroupVersion.String() &&
+			owner.Kind == "KrknAIRun" && owner.UID == uid {
+			return true
+		}
+	}
+	return false
+}
+
+func hasScenarioRunOwner(owners []metav1.OwnerReference, uids map[types.UID]struct{}) bool {
+	for _, owner := range owners {
+		if owner.APIVersion != krknv1alpha1.GroupVersion.String() || owner.Kind != "KrknScenarioRun" {
+			continue
+		}
+		if _, ok := uids[owner.UID]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+func parseUIDAnnotation(value string) []types.UID {
+	if value == "" {
+		return nil
+	}
+	parts := strings.Split(value, ",")
+	uids := make([]types.UID, 0, len(parts))
+	for _, part := range parts {
+		if part != "" {
+			uids = append(uids, types.UID(part))
+		}
+	}
+	return uniqueUIDs(uids)
+}
+
+func uniqueUIDs(uids []types.UID) []types.UID {
+	sort.Slice(uids, func(i, j int) bool { return uids[i] < uids[j] })
+	unique := uids[:0]
+	for _, uid := range uids {
+		if uid == "" || (len(unique) > 0 && unique[len(unique)-1] == uid) {
+			continue
+		}
+		unique = append(unique, uid)
+	}
+	return unique
+}
+
+func sameUIDs(a, b []types.UID) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func formatUIDAnnotation(uids []types.UID) string {
+	parts := make([]string, len(uids))
+	for i, uid := range uids {
+		parts[i] = string(uid)
+	}
+	return strings.Join(parts, ",")
 }
 
 func (r *KrknAIRunReconciler) ensureProvisioned(ctx context.Context, aiRun *krknv1alpha1.KrknAIRun) error {

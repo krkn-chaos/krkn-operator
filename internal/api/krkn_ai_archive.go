@@ -214,14 +214,11 @@ func safeKrknAIArchivePath(name string) bool {
 }
 
 func copyKrknAIArchiveServiceError(w http.ResponseWriter, response *http.Response) {
-	defer response.Body.Close()
 	contentType := response.Header.Get("Content-Type")
 	if contentType == "" {
 		contentType = "application/json"
 	}
-	w.Header().Set("Content-Type", contentType)
-	w.WriteHeader(response.StatusCode)
-	_, _ = io.Copy(w, response.Body)
+	copyKrknAIResponse(w, response, contentType)
 }
 
 func writeKrknAIArchiveCorrupt(w http.ResponseWriter, message string) {

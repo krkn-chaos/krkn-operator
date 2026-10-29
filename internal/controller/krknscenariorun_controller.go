@@ -177,6 +177,9 @@ func (r *KrknScenarioRunReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		logger.Error(err, "unable to fetch KrknScenarioRun")
 		return ctrl.Result{}, err
 	}
+	if !scenarioRun.DeletionTimestamp.IsZero() {
+		return ctrl.Result{}, nil
+	}
 	pendingMigration, err := migrationPending(ctx, r.Client, scenarioRun.Namespace, scenarioRun.Annotations)
 	if err != nil {
 		return ctrl.Result{}, err
