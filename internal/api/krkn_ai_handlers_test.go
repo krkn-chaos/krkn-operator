@@ -1063,3 +1063,37 @@ func TestKrknAIDisabledRejectsCreateEndpoints(t *testing.T) {
 		}
 	}
 }
+
+func TestKrknAIDisabledRetainsExistingRunArtifacts(t *testing.T) {
+	service := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/v1/runs/retained-uid/results" ||
+			r.Header.Get("Authorization") != "Bearer retained-token" {
+			http.Error(w, "unexpected artifact request", http.StatusForbidden)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"files":[]}`))
+	}))
+	defer service.Close()
+	fixture := newKrknAITestHandler(t, service.URL)
+	handler := NewHandler(fixture.client, nil, fixture.namespace, "", nil, KrknAIServiceConfig{
+		URL: service.URL, Token: "retained-token",
+	})
+	defer handler.Shutdown()
+	run := &krknv1alpha1.KrknAIRun{ObjectMeta: metav1.ObjectMeta{
+		Name: "retained-run", Namespace: handler.namespace, UID: "retained-uid",
+	}}
+	if err := handler.client.Create(context.Background(), run); err != nil {
+		t.Fatal(err)
+	}
+	read := httptest.NewRecorder()
+	handler.KrknAIRouter(read, adminKrknAIRequest(http.MethodGet, KrknAIPath+"/runs/retained-run/results", ""))
+	if read.Code != http.StatusOK || read.Body.String() != `{"files":[]}` {
+		t.Fatalf("disabled installation lost artifact access: %d %s", read.Code, read.Body.String())
+	}
+	create := httptest.NewRecorder()
+	handler.KrknAIRouter(create, adminKrknAIRequest(http.MethodPost, KrknAIPath+"/runs", `{}`))
+	if create.Code != http.StatusServiceUnavailable {
+		t.Fatalf("disabled installation accepted new run: %d %s", create.Code, create.Body.String())
+	}
+}

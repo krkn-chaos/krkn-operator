@@ -111,6 +111,72 @@ func TestReconcileProvisionsPublicRunLifecycle(t *testing.T) {
 	}
 }
 
+func TestReconcileDisabledRejectsUnstartedRuns(t *testing.T) {
+	for _, phase := range []string{"", aiRunPhasePending} {
+		t.Run("phase="+phase, func(t *testing.T) {
+			reconciler, fakeClient, aiRun := newAIRunFixture(t)
+			reconciler.RejectNewRuns = true
+			aiRun.Status.Phase = phase
+			if err := fakeClient.Status().Update(context.Background(), aiRun); err != nil {
+				t.Fatal(err)
+			}
+			key := client.ObjectKeyFromObject(aiRun)
+			if _, err := reconciler.Reconcile(context.Background(), ctrl.Request{NamespacedName: key}); err != nil {
+				t.Fatal(err)
+			}
+			var persisted krknv1alpha1.KrknAIRun
+			if err := fakeClient.Get(context.Background(), key, &persisted); err != nil {
+				t.Fatal(err)
+			}
+			if persisted.Status.Phase != aiRunPhaseFailed || !strings.Contains(persisted.Status.FailureReason, "disabled") {
+				t.Fatalf("unstarted run was not rejected: %+v", persisted.Status)
+			}
+			var pods corev1.PodList
+			if err := fakeClient.List(context.Background(), &pods); err != nil {
+				t.Fatal(err)
+			}
+			if len(pods.Items) != 0 || persisted.Status.OrchestratorPodName != "" {
+				t.Fatal("disabled installation provisioned an orchestrator")
+			}
+		})
+	}
+}
+
+func TestReconcileDisabledCompletesExistingRun(t *testing.T) {
+	reconciler, fakeClient, aiRun := newAIRunFixture(t)
+	reconciler.RejectNewRuns = true
+	controllerutil.AddFinalizer(aiRun, krknAIRunFinalizer)
+	if err := fakeClient.Update(context.Background(), aiRun); err != nil {
+		t.Fatal(err)
+	}
+	aiRun.Status.Phase = aiRunPhaseRunning
+	aiRun.Status.OrchestratorPodName = "started-orchestrator"
+	if err := fakeClient.Status().Update(context.Background(), aiRun); err != nil {
+		t.Fatal(err)
+	}
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: aiRun.Status.OrchestratorPodName, Namespace: aiRun.Namespace},
+		Status: corev1.PodStatus{Phase: corev1.PodSucceeded, ContainerStatuses: []corev1.ContainerStatus{
+			{Name: "orchestrator", State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{ExitCode: 0}}},
+			{Name: "result-uploader", State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{ExitCode: 0}}},
+		}},
+	}
+	if err := fakeClient.Create(context.Background(), pod); err != nil {
+		t.Fatal(err)
+	}
+	key := client.ObjectKeyFromObject(aiRun)
+	if _, err := reconciler.Reconcile(context.Background(), ctrl.Request{NamespacedName: key}); err != nil {
+		t.Fatal(err)
+	}
+	var completed krknv1alpha1.KrknAIRun
+	if err := fakeClient.Get(context.Background(), key, &completed); err != nil {
+		t.Fatal(err)
+	}
+	if completed.Status.Phase != aiRunPhaseSucceeded || completed.Status.FailureReason != "" {
+		t.Fatalf("disabling interrupted an existing run: %+v", completed.Status)
+	}
+}
+
 func TestReconcileTerminalAndUnsupportedPhases(t *testing.T) {
 	t.Run("terminal run does not requeue", func(t *testing.T) {
 		reconciler, fakeClient, aiRun := newAIRunFixture(t)

@@ -11,7 +11,10 @@ trap 'rm -rf "$work_dir"' EXIT
 chart_dir="$work_dir/chart"
 mkdir -p "$chart_dir"
 cp -R "$chart_source_dir/." "$chart_dir/"
-cp "$repo_root"/config/crd/bases/*.yaml "$chart_dir/crds/"
+while IFS= read -r crd_file; do
+  [[ "$(basename "$crd_file")" == "krkn.krkn-chaos.dev_krknairuns.yaml" ]] && continue
+  cp "$crd_file" "$chart_dir/crds/"
+done < <(find "$repo_root/config/crd/bases" -maxdepth 1 -type f -name '*.yaml' -print)
 
 helm template krkn-operator "$chart_dir" > "$work_dir/base.yaml"
 if yq -e 'select(.kind == "Job" and .metadata.name == "krkn-operator-crd-sync")' \
@@ -23,6 +26,11 @@ fi
 helm show crds "$chart_dir" > "$work_dir/crds.yaml"
 yq -e 'select(.kind == "CustomResourceDefinition")' \
   "$work_dir/crds.yaml" >/dev/null
+if yq -e 'select(.kind == "CustomResourceDefinition" and .metadata.name == "krknairuns.krkn.krkn-chaos.dev")' \
+  "$work_dir/crds.yaml" >/dev/null; then
+  echo "Krkn-AI CRD must remain opt-in for standard Helm installs" >&2
+  exit 1
+fi
 yq -e 'select(.kind == "CustomResourceDefinition" and .metadata.name == "krkncategories.krkn.krkn-chaos.dev") | .metadata.labels."app.kubernetes.io/name" == "krkn-operator"' \
   "$work_dir/crds.yaml" >/dev/null
 if ! yq -e '[select(.kind == "CustomResourceDefinition" and .metadata.labels."app.kubernetes.io/name" != "krkn-operator")] | length == 0' \
@@ -45,9 +53,6 @@ grep -Fxq 'krkn.krkn-chaos.dev|krknscenarioruns,krkngraphruns|list,patch' "$work
 grep -Fxq 'krkn.krkn-chaos.dev|krknscenarioruns/status,krkngraphruns/status|patch' "$work_dir/crd-sync-rules.txt"
 grep -Fxq 'apps|deployments|get' "$work_dir/crd-sync-rules.txt"
 grep -Fxq '|configmaps|get,create,update,delete' "$work_dir/crd-sync-rules.txt"
-yq -r 'select(.kind == "Job") | .spec.template.spec.containers[] | select(.name == "crd-sync") | .env[] | select(.name == "POD_NAMESPACE") | .value' \
-  "$work_dir/upgrade.yaml" > "$work_dir/pod-namespaces.txt"
-grep -Fxq 'default' "$work_dir/pod-namespaces.txt"
 yq -r 'select(.kind == "Job" and .metadata.annotations."helm.sh/hook" == "post-upgrade") | .spec.template.spec.containers[] | select(.name == "crd-sync") | .env[] | select(.name == "OPERATOR_DEPLOYMENT_NAME") | .value' \
   "$work_dir/upgrade.yaml" | grep -Fxq 'krkn-operator-operator'
 
@@ -89,7 +94,8 @@ fi
 
 helm template krkn-operator "$chart_dir" \
   --values "$chart_dir/values-olm-ocp.yaml" \
-  --api-versions security.openshift.io/v1/SecurityContextConstraints > "$work_dir/olm-ocp.yaml"
+  --api-versions security.openshift.io/v1/SecurityContextConstraints \
+  --set krknAI.enabled=true > "$work_dir/olm-ocp.yaml"
 
 if yq -e 'select(.kind == "Secret" and .metadata.name == "krkn-operator-jwt")' \
   "$work_dir/olm-ocp.yaml" >/dev/null; then
@@ -102,10 +108,57 @@ if grep -Eq 'scenario-runner|krkn-scenario-runner' "$work_dir/olm-ocp.yaml"; the
   exit 1
 fi
 
-if grep -Eq 'krkn-operator-ai-service|krkn-operator-krkn-ai-orchestrator|krknairuns.krkn.krkn-chaos.dev' "$work_dir/olm-ocp.yaml"; then
-  echo "OLM profile must not expose the Helm-only Krkn-AI beta" >&2
+if yq -e 'select((.kind == "Deployment" and .metadata.name == "krkn-operator-ai-service") or
+  (.kind == "Service" and .metadata.name == "krkn-operator-ai-service") or
+  (.kind == "PersistentVolumeClaim" and .metadata.name == "krkn-operator-ai-service") or
+  (.kind == "Secret" and .metadata.name == "krkn-operator-ai-service-token") or
+  (.kind == "ServiceAccount" and .metadata.name == "krkn-operator-ai-service") or
+  (.kind == "ServiceAccount" and .metadata.name == "krkn-operator-krkn-ai-orchestrator") or
+  (.kind == "Role" and .metadata.name == "krkn-operator-krkn-ai-orchestrator") or
+  (.kind == "RoleBinding" and .metadata.name == "krkn-operator-krkn-ai-orchestrator") or
+  (.kind == "ClusterRoleBinding" and (.metadata.name | test("krkn-operator-ai-orchestrator-anyuid"))) or
+  (.kind == "NetworkPolicy" and .metadata.name == "krkn-operator-ai-service"))' \
+  "$work_dir/olm-ocp.yaml" >/dev/null; then
+  echo "OLM profile must never render runtime-managed Krkn-AI resources" >&2
   exit 1
 fi
+if yq -e 'select(.kind == "CustomResourceDefinition" and .metadata.name == "krknairuns.krkn.krkn-chaos.dev")' \
+  "$work_dir/olm-ocp.yaml" >/dev/null; then
+  echo "OLM bundle renderer, not chart templates, owns the optional AI CRD" >&2
+  exit 1
+fi
+
+if grep -Fq -- '--enable-krkn-ai=' "$work_dir/olm-ocp.yaml"; then
+  echo "OLM manager must use KRKNAI_ENABLED instead of a hard-coded argument" >&2
+  exit 1
+fi
+
+manager_env="$work_dir/olm-manager-env.yaml"
+yq -r 'select(.kind == "Deployment" and .metadata.name == "krkn-operator-operator") |
+  .spec.template.spec.containers[] | select(.name == "manager") | .env[] |
+  select(.name | test("^(KRKN_OLM_ENABLED|KRKN_OLM_OPENSHIFT|KRKNAI_ENABLED|KRKNAI_ORCHESTRATOR_IMAGE|KRKNAI_ORCHESTRATOR_IMAGE_PULL_POLICY|KRKNAI_SERVICE_IMAGE|KRKNAI_SERVICE_IMAGE_PULL_POLICY|KRKNAI_IMAGE_PULL_SECRETS|KRKNAI_STORAGE_EXISTING_CLAIM|KRKNAI_STORAGE_CLASS_NAME|KRKNAI_STORAGE_SIZE|KRKNAI_SERVICE_RESOURCES|KRKNAI_NETWORK_POLICY_ENABLED)$")) |
+  [.name, .value] | @tsv' "$work_dir/olm-ocp.yaml" > "$manager_env"
+grep -Fq $'KRKN_OLM_ENABLED\ttrue' "$manager_env"
+grep -Fq $'KRKN_OLM_OPENSHIFT\ttrue' "$manager_env"
+grep -Fq $'KRKNAI_ENABLED\tfalse' "$manager_env"
+for env_name in \
+  KRKNAI_ORCHESTRATOR_IMAGE \
+  KRKNAI_ORCHESTRATOR_IMAGE_PULL_POLICY \
+  KRKNAI_SERVICE_IMAGE \
+  KRKNAI_SERVICE_IMAGE_PULL_POLICY \
+  KRKNAI_IMAGE_PULL_SECRETS \
+  KRKNAI_STORAGE_EXISTING_CLAIM \
+  KRKNAI_STORAGE_CLASS_NAME \
+  KRKNAI_STORAGE_SIZE \
+  KRKNAI_SERVICE_RESOURCES \
+  KRKNAI_NETWORK_POLICY_ENABLED; do
+  grep -Fq "$env_name"$'\t' "$manager_env"
+done
+if grep -Eq 'KRKNAI_SERVICE_(TOKEN|URL)' "$work_dir/olm-ocp.yaml"; then
+  echo "OLM manager must not depend on a runtime token Secret or service URL env" >&2
+  exit 1
+fi
+
 
 helm template krkn-operator "$chart_dir" \
   --set console.ingress.enabled=true \

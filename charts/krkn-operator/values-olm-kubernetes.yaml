@@ -21,3 +21,5 @@ console:
     enabled: false
   route:
     enabled: false
+krknAI:
+  enabled: false

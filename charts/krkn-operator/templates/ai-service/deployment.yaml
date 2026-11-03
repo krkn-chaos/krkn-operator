@@ -1,4 +1,4 @@
-{{- if .Values.krknAI.enabled }}
+{{- if and .Values.krknAI.enabled (not .Values.operator.olmBootstrap) }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:

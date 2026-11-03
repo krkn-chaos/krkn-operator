@@ -288,7 +288,7 @@ func (h *Handler) writeKrknAIDisabled(w http.ResponseWriter) bool {
 	return true
 }
 
-// getKrknAIStatus reports the Helm feature flag without requiring the optional KrknAIRun CRD.
+// getKrknAIStatus reports installation enablement without requiring the optional KrknAIRun CRD.
 //
 // @Summary Get Krkn-AI feature availability
 // @Description Report whether Krkn-AI is enabled in this operator deployment.

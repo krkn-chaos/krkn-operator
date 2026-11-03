@@ -65,6 +65,7 @@ func TestReconcileDeletionCleansOnlyUIDOwnedResources(t *testing.T) {
 
 	reconciler, fakeClient, aiRun := newAIRunFixture(t)
 	reconciler.ServiceURL = server.URL
+	reconciler.RejectNewRuns = true
 	if err := fakeClient.Create(context.Background(), &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{Name: reconciler.ServiceTokenSecretName, Namespace: aiRun.Namespace},
 		Data:       map[string][]byte{"token": []byte("test-token")},

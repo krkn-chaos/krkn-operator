@@ -98,7 +98,7 @@ func TestListComponentsRouteAndAuth(t *testing.T) {
 	}
 
 	for _, enabled := range []bool{false, true} {
-		server := NewServerWithComponentNamespace(0, k8sClient, fakekube.NewSimpleClientset(), "targets", namespace, "localhost:50051", secretManager, enabled)
+		server := NewServerWithComponentNamespace(0, k8sClient, fakekube.NewSimpleClientset(), "targets", namespace, "localhost:50051", secretManager, KrknAIServiceConfig{Enabled: enabled})
 		defer func() { _ = server.Shutdown() }()
 		mux := server.HTTPHandler()
 

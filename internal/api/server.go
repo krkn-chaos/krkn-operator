@@ -111,22 +111,22 @@ const WebSocketAllowedOriginsEnv = "WEBSOCKET_ALLOWED_ORIGINS"
 //
 // Parameters:
 //   - port: HTTP port to listen on
-//   - client: Kubernetes client
+//   - k8sClient: Kubernetes client
 //   - clientset: Kubernetes clientset
 //   - namespace: Namespace for Krkn resources and target providers
 //   - grpcServerAddr: gRPC server address
 //   - secretManager: JWT secret manager (must be started before API server receives traffic)
-//   - krknAIEnabled: Whether Krkn-AI API creation operations are enabled
+//   - krknAI: Krkn-AI creation state and installation-level artifact service credentials
 //
 // Returns a new Server instance
-func NewServer(port int, client client.Client, clientset kubernetes.Interface, namespace, grpcServerAddr string, secretManager *auth.SecretManager, krknAIEnabled bool) *Server {
-	return NewServerWithComponentNamespace(port, client, clientset, namespace, namespace, grpcServerAddr, secretManager, krknAIEnabled)
+func NewServer(port int, k8sClient client.Client, clientset kubernetes.Interface, namespace, grpcServerAddr string, secretManager *auth.SecretManager, krknAI KrknAIServiceConfig) *Server {
+	return NewServerWithComponentNamespace(port, k8sClient, clientset, namespace, namespace, grpcServerAddr, secretManager, krknAI)
 }
 
 // NewServerWithComponentNamespace creates a server whose component versions
 // are read from componentNamespace, independently of the Krkn resource namespace.
-func NewServerWithComponentNamespace(port int, client client.Client, clientset kubernetes.Interface, namespace, componentNamespace, grpcServerAddr string, secretManager *auth.SecretManager, krknAIEnabled bool) *Server {
-	handler := NewHandler(client, clientset, namespace, grpcServerAddr, secretManager, krknAIEnabled)
+func NewServerWithComponentNamespace(port int, k8sClient client.Client, clientset kubernetes.Interface, namespace, componentNamespace, grpcServerAddr string, secretManager *auth.SecretManager, krknAI KrknAIServiceConfig) *Server {
+	handler := NewHandler(k8sClient, clientset, namespace, grpcServerAddr, secretManager, krknAI)
 	handler.componentNamespace = componentNamespace
 
 	// Create auth middleware using SecretManager
@@ -147,7 +147,7 @@ func NewServerWithComponentNamespace(port int, client client.Client, clientset k
 	// Set up user active status check: after JWT validation, verify the user account
 	// is still active by looking up the KrknUser CR. Uses a 1-minute TTL cache to
 	// avoid hitting the API server on every request.
-	userChecker := newK8sUserStatusChecker(client, namespace)
+	userChecker := newK8sUserStatusChecker(k8sClient, namespace)
 	cachedChecker := auth.NewCachedUserStatusChecker(userChecker, 1*time.Minute)
 	authMw.SetUserStatusChecker(cachedChecker)
 
@@ -155,7 +155,7 @@ func NewServerWithComponentNamespace(port int, client client.Client, clientset k
 	getTokenGenCtx := func(ctx context.Context) (*auth.TokenGenerator, error) {
 		return secretManager.GetTokenGenerator()
 	}
-	v2Handler := v2.NewHandler(client, namespace, handler, getTokenGenCtx) // handler implements AuthorizationChecker
+	v2Handler := v2.NewHandler(k8sClient, namespace, handler, getTokenGenCtx) // handler implements AuthorizationChecker
 
 	// Strict per-IP rate limiter for the login endpoint only: 5 requests per
 	// minute, burst of 10. Login is the password brute-force surface, so it is

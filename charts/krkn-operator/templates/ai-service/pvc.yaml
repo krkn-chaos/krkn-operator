@@ -1,4 +1,4 @@
-{{- if and .Values.krknAI.enabled (not .Values.aiService.storage.existingClaim) }}
+{{- if and .Values.krknAI.enabled (not .Values.operator.olmBootstrap) (not .Values.aiService.storage.existingClaim) }}
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:

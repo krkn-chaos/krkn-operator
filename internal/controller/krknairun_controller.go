@@ -61,6 +61,8 @@ type KrknAIRunReconciler struct {
 	ServiceTokenSecretName         string
 	OrchestratorServiceAccountName string
 	ImagePullSecrets               []corev1.LocalObjectReference
+	// RejectNewRuns blocks unstarted runs without stopping existing runs or finalizer cleanup.
+	RejectNewRuns bool
 }
 
 // +kubebuilder:rbac:groups=krkn.krkn-chaos.dev,resources=krknairuns,verbs=get;list;watch;create;update;patch;delete
@@ -103,6 +105,10 @@ func (r *KrknAIRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			return ctrl.Result{}, nil
 		}
 		return r.reconcileDeletion(ctx, &aiRun)
+	}
+	if r.RejectNewRuns && aiRun.Status.OrchestratorPodName == "" &&
+		(aiRun.Status.Phase == "" || aiRun.Status.Phase == aiRunPhasePending) {
+		return ctrl.Result{}, r.fail(ctx, &aiRun, "Krkn-AI is disabled; new runs are not accepted")
 	}
 	if !controllerutil.ContainsFinalizer(&aiRun, krknAIRunFinalizer) {
 		controllerutil.AddFinalizer(&aiRun, krknAIRunFinalizer)

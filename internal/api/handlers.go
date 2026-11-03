@@ -25,7 +25,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -146,18 +145,26 @@ type Handler struct {
 	baseCancel   context.CancelFunc
 }
 
+// KrknAIServiceConfig supplies installation-level feature state and artifact credentials.
+// Disabled installations may retain service access for existing runs and results.
+type KrknAIServiceConfig struct {
+	Enabled bool
+	URL     string
+	Token   string
+}
+
 // NewHandler creates a new Handler.
 // Call Shutdown() during server teardown to cancel in-flight background jobs.
-func NewHandler(client client.Client, clientset kubernetes.Interface, namespace string, grpcServerAddr string, secretManager *auth.SecretManager, krknAIEnabled bool) *Handler {
+func NewHandler(k8sClient client.Client, clientset kubernetes.Interface, namespace string, grpcServerAddr string, secretManager *auth.SecretManager, krknAI KrknAIServiceConfig) *Handler {
 	bgCtx, bgCancel := context.WithCancel(context.Background())
 	return &Handler{
-		client:                  client,
+		client:                  k8sClient,
 		clientset:               clientset,
 		namespace:               namespace,
 		grpcServerAddr:          grpcServerAddr,
 		secretManager:           secretManager,
-		artifactClient:          krknaiserver.New(os.Getenv("KRKNAI_SERVICE_URL"), os.Getenv("KRKNAI_SERVICE_TOKEN")),
-		krknAIEnabled:           krknAIEnabled,
+		artifactClient:          krknaiserver.New(krknAI.URL, krknAI.Token),
+		krknAIEnabled:           krknAI.Enabled,
 		scenarioProviderFactory: createScenarioProvider,
 		esClient:                elasticsearch.NewClient(),
 		jobTracker:              NewJobTracker(),

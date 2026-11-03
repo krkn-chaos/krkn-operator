@@ -172,7 +172,7 @@ func TestKrknAIOrchestratorLogsWebSocketAuthorizationAndContainers(t *testing.T)
 		t.Fatal(err)
 	}
 
-	apiServer := NewServer(0, k8sClient, clientset, namespace, "", secretManager, false)
+	apiServer := NewServer(0, k8sClient, clientset, namespace, "", secretManager, KrknAIServiceConfig{})
 	defer func() { _ = apiServer.Shutdown() }()
 	server := httptest.NewServer(apiServer.HTTPHandler())
 	defer server.Close()

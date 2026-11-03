@@ -52,12 +52,20 @@ jobs:
           echo "console=${CONSOLE_VERSION}" >> $GITHUB_OUTPUT
           echo "Compatible console version: ${CONSOLE_VERSION}"
 
+          AI_RELEASE=$(hack/olm/select-compatible-release.sh krkn-chaos/krkn-ai latest-stable)
+          AI_VERSION="${AI_RELEASE#v}"
+          docker manifest inspect "quay.io/krkn-chaos/krkn-ai-operator:${AI_VERSION}" >/dev/null
+          docker manifest inspect "quay.io/krkn-chaos/krkn-ai-service:${AI_VERSION}" >/dev/null
+          echo "ai=${AI_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Selected stable Krkn-AI release: ${AI_RELEASE}"
+
       - name: Update Chart metadata and image tags
         run: |
           VERSION=${GITHUB_REF#refs/tags/v}
           OPERATOR_VERSION=${{ steps.versions.outputs.operator }}
           ACM_VERSION=${{ steps.versions.outputs.acm }}
           CONSOLE_VERSION=${{ steps.versions.outputs.console }}
+          AI_VERSION=${{ steps.versions.outputs.ai }}
           IMAGE_REGISTRY="${{ env.IMAGE_REGISTRY }}"
 
           # Update chart version and appVersion
@@ -77,13 +85,25 @@ jobs:
           yq eval -i ".images.console.image = \"${IMAGE_REGISTRY}/krkn-operator-console:${CONSOLE_VERSION}\"" charts/krkn-operator/values.yaml
           yq eval -i ".images.console.pullPolicy = \"IfNotPresent\"" charts/krkn-operator/values.yaml
 
+          yq eval -i ".images.aiOrchestrator.image = \"quay.io/krkn-chaos/krkn-ai-operator:${AI_VERSION}\"" charts/krkn-operator/values.yaml
+          yq eval -i ".images.aiOrchestrator.pullPolicy = \"IfNotPresent\"" charts/krkn-operator/values.yaml
+          yq eval -i ".images.aiService.image = \"quay.io/krkn-chaos/krkn-ai-service:${AI_VERSION}\"" charts/krkn-operator/values.yaml
+          yq eval -i ".images.aiService.pullPolicy = \"IfNotPresent\"" charts/krkn-operator/values.yaml
+
           echo "Chart version: ${VERSION}"
           echo "Operator version: ${OPERATOR_VERSION}"
           echo "ACM version: ${ACM_VERSION}"
           echo "Console version: ${CONSOLE_VERSION}"
+          echo "Krkn-AI version: ${AI_VERSION}"
 
       - name: Sync generated CRDs into the chart
-        run: cp config/crd/bases/*.yaml charts/krkn-operator/crds/
+        run: |
+          while IFS= read -r crd_file; do
+            [[ "$(basename "$crd_file")" == "krkn.krkn-chaos.dev_krknairuns.yaml" ]] && continue
+            cp "$crd_file" charts/krkn-operator/crds/
+          done < <(find config/crd/bases -maxdepth 1 -type f -name '*.yaml' -print)
+          cp config/crd/bases/krkn.krkn-chaos.dev_krknairuns.yaml \
+            charts/krkn-operator/files/krknairun-crd.yaml
 
       - name: Package and Push Helm Chart
         run: |

@@ -87,3 +87,13 @@
     surname: Administrator
     role: admin
     passwordSecretRef: example-password
+- apiVersion: krkn.krkn-chaos.dev/v1alpha1
+  kind: KrknAIRun
+  metadata:
+    name: example-krkn-ai-run
+  spec:
+    configMapName: example-krkn-ai-config
+    targetRequestId: example-target-request
+    targetClusters:
+      krkn-operator:
+      - cluster-1

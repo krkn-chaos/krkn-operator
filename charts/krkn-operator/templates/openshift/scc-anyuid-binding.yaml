@@ -17,7 +17,7 @@ subjects:
   name: {{ include "krkn-operator.fullname" . }}-krkn-scenario-runner
   namespace: {{ include "krkn-operator.namespace" . }}
 ---
-{{- if .Values.krknAI.enabled }}
+{{- if and .Values.krknAI.enabled (not .Values.operator.olmBootstrap) }}
 # Grants OpenShift's built-in anyuid SCC to the krkn-ai orchestrator ServiceAccount.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
