@@ -124,6 +124,8 @@ const (
 	BackupPath = APIBasePath + "/backup"
 	// RestorePath is the endpoint for uploading backups to restore and querying restore job status.
 	RestorePath = APIBasePath + "/restore"
+	// RestoreFromURLPath is the endpoint for restoring from a remote HTTPS URL or S3 URI.
+	RestoreFromURLPath = RestorePath + "/url"
 )
 
 // Cloud credential endpoints

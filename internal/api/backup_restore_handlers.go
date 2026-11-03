@@ -19,12 +19,16 @@ package api
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -37,6 +41,7 @@ import (
 	"github.com/krkn-chaos/krkn-operator/pkg/auth"
 	operatorprovider "github.com/krkn-chaos/krkn-operator/pkg/provider"
 	"github.com/krkn-chaos/krknctl/pkg/backup"
+	"github.com/krkn-chaos/krknctl/pkg/backupstore"
 	"k8s.io/client-go/dynamic"
 )
 
@@ -52,17 +57,19 @@ const (
 type backupHandler struct {
 	dynamicClient dynamic.Interface
 	namespace     string
+	backupStore   backupstore.Store // nil when S3 is disabled
 	jobTracker    *JobTracker
 	restoreSlots  chan struct{}
 	baseCtx       context.Context
 	baseCancel    context.CancelFunc
 }
 
-func newBackupHandler(namespace string, dynamicClient dynamic.Interface) *backupHandler {
+func newBackupHandler(namespace string, dynamicClient dynamic.Interface, store backupstore.Store) *backupHandler {
 	baseCtx, baseCancel := context.WithCancel(context.Background())
 	return &backupHandler{
 		dynamicClient: dynamicClient,
 		namespace:     namespace,
+		backupStore:   store,
 		jobTracker:    NewJobTracker(),
 		restoreSlots:  make(chan struct{}, maxActiveRestores),
 		baseCtx:       baseCtx,
@@ -84,6 +91,12 @@ func (h *Handler) PostBackup(w http.ResponseWriter, r *http.Request) {
 // work to the backup-specific handler.
 func (h *Handler) PostRestore(w http.ResponseWriter, r *http.Request) {
 	h.backupHandler.PostRestore(w, r)
+}
+
+// PostRestoreFromURL keeps the existing API Handler method while delegating
+// URL-based restore to the backup-specific handler.
+func (h *Handler) PostRestoreFromURL(w http.ResponseWriter, r *http.Request) {
+	h.backupHandler.PostRestoreFromURL(w, r)
 }
 
 // GetRestoreStatus keeps the existing API Handler method while delegating
@@ -195,15 +208,26 @@ type RestoreResponse struct {
 	Message   string    `json:"message"`
 }
 
+// BackupDownloadResponse describes an externally stored backup archive.
+// DownloadURL is a short-lived, presigned URL and must be treated as a
+// bearer capability by clients.
+type BackupDownloadResponse struct {
+	DownloadURL string `json:"downloadUrl"`
+	Filename    string `json:"filename"`
+}
+
 // PostBackup handles POST /api/v1/backup endpoint.
-// Creates and streams a backup archive for download (admin-only).
+// Creates a backup archive for download (admin-only). When S3 storage is
+// configured, the response contains a short-lived presigned download URL;
+// otherwise the archive is streamed directly in the response.
 //
 // @Summary Download operator configuration backup
-// @Description Create and download a backup archive of all operator configuration (admin-only). Pass the X-Backup-Passphrase header to encrypt the archive with AES-256-GCM.
+// @Description Create and download a backup archive of all operator configuration (admin-only). Pass the X-Backup-Passphrase header (Base64-encoded) to encrypt the archive with AES-256-GCM. When S3 storage is configured, the response is a JSON object with a short-lived presigned download URL; otherwise the archive is streamed directly.
 // @Tags backup
 // @Produce application/gzip
-// @Param X-Backup-Passphrase header string false "Passphrase to encrypt the archive"
-// @Success 200 {file} binary "Backup archive (tar.gz or tar.gz.enc)"
+// @Produce application/json
+// @Param X-Backup-Passphrase header string false "Base64-encoded passphrase to encrypt the archive"
+// @Success 200 {object} BackupDownloadResponse "Presigned download URL (S3 mode) or streamed archive (direct mode)"
 // @Failure 403 {object} ErrorResponse "Forbidden - admin access required"
 // @Failure 405 {object} ErrorResponse "Method not allowed"
 // @Failure 500 {object} ErrorResponse "Internal server error"
@@ -250,19 +274,15 @@ func (h *backupHandler) PostBackup(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	passphrase := r.Header.Get("X-Backup-Passphrase")
-	if passphrase != "" {
-		decoded, err := base64.StdEncoding.DecodeString(passphrase)
-		if err != nil {
-			writeJSONError(w, http.StatusBadRequest, ErrorResponse{
-				Error:   "invalid_passphrase",
-				Message: "X-Backup-Passphrase header must be Base64-encoded",
-			})
-			return
-		}
-		passphrase = string(decoded)
+	passphrase, err := decodePassphraseHeader(r)
+	if err != nil {
+		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+			Error:   "invalid_passphrase",
+			Message: err.Error(),
+		})
+		return
 	}
-	backupName := fmt.Sprintf("krkn-backup-%s", time.Now().Format("2006-01-02-150405"))
+	backupName := fmt.Sprintf("krkn-backup-%s-%s", time.Now().Format("20060102-150405.000000000"), uuid.New().String()[:8])
 
 	config := backup.BackupConfig{
 		Namespace:  h.namespace,
@@ -273,7 +293,7 @@ func (h *backupHandler) PostBackup(w http.ResponseWriter, r *http.Request) {
 
 	logger.Info("Creating backup for download", "backupName", backupName)
 
-	archivePath, err := backup.CreateBackup(ctx, h.dynamicClient, config)
+	result, err := backup.CreateBackupAndStore(ctx, h.dynamicClient, config, h.backupStore)
 	if err != nil {
 		logger.Error(err, "Backup failed")
 		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
@@ -283,7 +303,17 @@ func (h *backupHandler) PostBackup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	archiveFile, err := os.Open(archivePath) // #nosec G304 -- archivePath is returned by CreateBackup in the operator-created temporary directory
+	if result.Location != nil {
+		logger.Info("Backup uploaded to S3", "backupName", backupName, "key", result.Location.Key)
+		w.Header().Set("Cache-Control", "no-store")
+		writeJSON(w, http.StatusOK, BackupDownloadResponse{
+			DownloadURL: result.Location.DownloadURL,
+			Filename:    filepath.Base(result.ArchivePath),
+		})
+		return
+	}
+
+	archiveFile, err := os.Open(result.ArchivePath) // #nosec G304 -- path from CreateBackupAndStore in operator-created temporary directory
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
 			Error:   "internal_error",
@@ -330,12 +360,12 @@ func (h *backupHandler) PostBackup(w http.ResponseWriter, r *http.Request) {
 // Accepts a backup archive upload and starts async restore (admin-only).
 //
 // @Summary Restore operator configuration from uploaded backup
-// @Description Upload a backup archive and restore all operator configuration (admin-only). Restore runs asynchronously and rechecks restored target connectivity when complete. For encrypted archives (.tar.gz.enc), include the passphrase in the X-Backup-Passphrase header.
+// @Description Upload a backup archive and restore all operator configuration (admin-only). Restore runs asynchronously and rechecks restored target connectivity when complete. For encrypted archives (.tar.gz.enc), include the Base64-encoded passphrase in the X-Backup-Passphrase header.
 // @Tags backup
 // @Accept multipart/form-data
 // @Produce json
 // @Param backup formData file true "Backup archive (tar.gz or tar.gz.enc)"
-// @Param X-Backup-Passphrase header string false "Passphrase to decrypt an encrypted archive"
+// @Param X-Backup-Passphrase header string false "Base64-encoded passphrase to decrypt an encrypted archive"
 // @Success 202 {object} RestoreResponse "Restore started"
 // @Failure 400 {object} ErrorResponse "Invalid request or missing file"
 // @Failure 403 {object} ErrorResponse "Forbidden - admin access required"
@@ -479,25 +509,22 @@ func (h *backupHandler) PostRestore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	passphrase := r.Header.Get("X-Backup-Passphrase")
-	if passphrase != "" {
-		decoded, err := base64.StdEncoding.DecodeString(passphrase)
-		if err != nil {
-			removeTempFile()
-			writeJSONError(w, http.StatusBadRequest, ErrorResponse{
-				Error:   "invalid_passphrase",
-				Message: "X-Backup-Passphrase header must be Base64-encoded",
-			})
-			return
-		}
-		passphrase = string(decoded)
+	passphrase, err := decodePassphraseHeader(r)
+	if err != nil {
+		removeTempFile()
+		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+			Error:   "invalid_passphrase",
+			Message: err.Error(),
+		})
+		return
 	}
 
 	jobID := uuid.New().String()
 
 	logger.Info("Restore requested", "jobID", jobID, "filename", header.Filename, "encrypted", passphrase != "")
 
-	if err := h.jobTracker.Start(jobID, "restore"); err != nil {
+	resp, err := h.startRestore(jobID, tempPath, passphrase)
+	if err != nil {
 		removeTempFile()
 		writeJSONError(w, http.StatusServiceUnavailable, ErrorResponse{
 			Error:   "service_unavailable",
@@ -507,12 +534,43 @@ func (h *backupHandler) PostRestore(w http.ResponseWriter, r *http.Request) {
 	}
 	slotTransferred = true
 
+	writeJSON(w, http.StatusAccepted, resp)
+}
+
+// decodePassphraseHeader reads and base64-decodes the X-Backup-Passphrase
+// header. Returns the decoded passphrase (empty if header is absent) and
+// any decoding error.
+func decodePassphraseHeader(r *http.Request) (string, error) {
+	raw := r.Header.Get("X-Backup-Passphrase")
+	if raw == "" {
+		return "", nil
+	}
+	decoded, err := base64.StdEncoding.DecodeString(raw)
+	if err != nil {
+		return "", fmt.Errorf("X-Backup-Passphrase header must be Base64-encoded")
+	}
+	return string(decoded), nil
+}
+
+func isRequestBodyTooLarge(err error) bool {
+	var maxBytesErr *http.MaxBytesError
+	return errors.Is(err, multipart.ErrMessageTooLarge) || errors.As(err, &maxBytesErr)
+}
+
+// startRestore registers a restore job and launches the async restore
+// goroutine. The caller must have already acquired a restore slot; ownership
+// of the slot and tempPath cleanup are transferred to the goroutine on
+// success. Returns the HTTP response payload or an error if the job tracker
+// is at capacity.
+func (h *backupHandler) startRestore(jobID, tempPath, passphrase string) (RestoreResponse, error) {
+	if err := h.jobTracker.Start(jobID, "restore"); err != nil {
+		return RestoreResponse{}, err
+	}
+
 	go func() {
 		jobCtx := h.baseCtx
 		jobLogger := log.FromContext(jobCtx)
-		defer func() {
-			<-h.restoreSlots
-		}()
+		defer func() { <-h.restoreSlots }()
 		defer func() {
 			if removeErr := os.Remove(tempPath); removeErr != nil && !os.IsNotExist(removeErr) {
 				jobLogger.Error(removeErr, "Failed to remove temporary restore file", "path", tempPath, "jobID", jobID)
@@ -542,19 +600,254 @@ func (h *backupHandler) PostRestore(w http.ResponseWriter, r *http.Request) {
 		h.jobTracker.Complete(jobID)
 	}()
 
-	response := RestoreResponse{
+	return RestoreResponse{
 		JobID:     jobID,
 		Status:    "in_progress",
 		StartedAt: time.Now(),
 		Message:   "Restore started. Check the restore status, then refresh the page if the restored settings are not visible.",
-	}
-
-	writeJSON(w, http.StatusAccepted, response)
+	}, nil
 }
 
-func isRequestBodyTooLarge(err error) bool {
-	var maxBytesErr *http.MaxBytesError
-	return errors.Is(err, multipart.ErrMessageTooLarge) || errors.As(err, &maxBytesErr)
+// RestoreFromURLRequest is the JSON request body for POST /api/v1/restore/url.
+type RestoreFromURLRequest struct {
+	URL string `json:"url"`
+}
+
+// redactURL strips query parameters from a URL for safe logging.
+// Presigned S3 URLs carry credentials in query params (X-Amz-Signature, etc.)
+// that must not appear in logs.
+func redactURL(raw string) string {
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return "<invalid-url>"
+	}
+	parsed.RawQuery = ""
+	parsed.Fragment = ""
+	return parsed.String()
+}
+
+// PostRestoreFromURL handles POST /api/v1/restore/url endpoint.
+// Accepts a remote backup URL or S3 URI and starts async download + restore (admin-only).
+//
+// @Summary Restore from a remote backup URL or S3 object
+// @Description Accept a remote backup URL or S3 URI and start an async download and restore of operator configuration (admin-only). The download runs asynchronously as part of the restore job. S3 objects must use the configured backup bucket. Pass the X-Backup-Passphrase header (Base64-encoded) to decrypt encrypted archives.
+// @Tags backup
+// @Accept json
+// @Produce json
+// @Param body body RestoreFromURLRequest true "Remote backup URL or S3 object"
+// @Param X-Backup-Passphrase header string false "Base64-encoded passphrase to decrypt an encrypted archive"
+// @Success 202 {object} RestoreResponse "Restore started"
+// @Failure 400 {object} ErrorResponse "Invalid request or URL"
+// @Failure 403 {object} ErrorResponse "Forbidden - admin access required"
+// @Failure 405 {object} ErrorResponse "Method not allowed"
+// @Failure 429 {object} ErrorResponse "Another restore in progress"
+// @Failure 500 {object} ErrorResponse "Internal server error"
+// @Security BearerAuth
+// @Router /restore/url [post]
+func (h *backupHandler) PostRestoreFromURL(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	logger := log.FromContext(ctx)
+
+	if r.Method != http.MethodPost {
+		writeJSONError(w, http.StatusMethodNotAllowed, ErrorResponse{
+			Error:   "method_not_allowed",
+			Message: "Only POST is allowed",
+		})
+		return
+	}
+
+	if !auth.IsAdmin(ctx) {
+		writeJSONError(w, http.StatusForbidden, ErrorResponse{
+			Error:   "forbidden",
+			Message: "Restore is admin-only. Please contact your administrator.",
+		})
+		return
+	}
+	if h.dynamicClient == nil {
+		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+			Error:   "internal_error",
+			Message: "Restore Kubernetes client is not configured",
+		})
+		return
+	}
+
+	var reqBody RestoreFromURLRequest
+	if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil {
+		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+			Error:   "bad_request",
+			Message: "Invalid JSON body",
+		})
+		return
+	}
+
+	remoteSource := strings.TrimSpace(reqBody.URL)
+	if remoteSource == "" {
+		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+			Error:   "bad_request",
+			Message: "A backup URL or S3 URI is required",
+		})
+		return
+	}
+
+	var (
+		sourceDescription string
+		downloadArchive   func(ctx context.Context) (string, func(), error)
+	)
+	if strings.HasPrefix(strings.ToLower(remoteSource), "s3://") {
+		object, err := backupstore.ParseS3URI(remoteSource)
+		if err != nil {
+			writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+				Error:   "bad_request",
+				Message: "Invalid S3 backup URI",
+			})
+			return
+		}
+		configuredBucket := strings.TrimSpace(os.Getenv(backupstore.BucketEnv))
+		if h.backupStore == nil || configuredBucket == "" {
+			writeJSONError(w, http.StatusUnprocessableEntity, ErrorResponse{
+				Error:   "s3_restore_unavailable",
+				Message: "S3 restore is not configured",
+			})
+			return
+		}
+		if object.Bucket != configuredBucket {
+			writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+				Error:   "bad_request",
+				Message: "S3 backup URI must use the configured backup bucket",
+			})
+			return
+		}
+		reader, ok := h.backupStore.(backupstore.Reader)
+		if !ok {
+			writeJSONError(w, http.StatusUnprocessableEntity, ErrorResponse{
+				Error:   "s3_restore_unavailable",
+				Message: "Configured backup store does not support restore downloads",
+			})
+			return
+		}
+		sourceDescription = "s3://" + object.Bucket + "/" + object.Key
+		downloadArchive = func(dlCtx context.Context) (string, func(), error) {
+			return backup.DownloadArchiveFromStore(dlCtx, reader, object.Key, backup.DefaultMaxDownloadSize, backup.DefaultDownloadTimeout)
+		}
+	} else {
+		parsed, err := url.Parse(remoteSource)
+		if err != nil || parsed.Host == "" {
+			writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+				Error:   "bad_request",
+				Message: "Invalid URL",
+			})
+			return
+		}
+		if parsed.Scheme != "https" {
+			writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+				Error:   "bad_request",
+				Message: "Only HTTPS URLs or S3 URIs are allowed",
+			})
+			return
+		}
+		hostname := parsed.Hostname()
+		if ip := net.ParseIP(hostname); ip != nil {
+			if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
+				writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+					Error:   "bad_request",
+					Message: "Restore URLs must not target loopback, private, or link-local addresses",
+				})
+				return
+			}
+		}
+		if hostname == "localhost" {
+			writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+				Error:   "bad_request",
+				Message: "Restore URLs must not target localhost",
+			})
+			return
+		}
+		sourceDescription = redactURL(remoteSource)
+		downloadArchive = func(dlCtx context.Context) (string, func(), error) {
+			return backup.DownloadArchive(dlCtx, remoteSource, backup.DefaultMaxDownloadSize, backup.DefaultDownloadTimeout)
+		}
+	}
+
+	passphrase, err := decodePassphraseHeader(r)
+	if err != nil {
+		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+			Error:   "invalid_passphrase",
+			Message: err.Error(),
+		})
+		return
+	}
+
+	select {
+	case h.restoreSlots <- struct{}{}:
+	default:
+		writeJSONError(w, http.StatusTooManyRequests, ErrorResponse{
+			Error:   "restore_in_progress",
+			Message: "Another restore is already in progress. Try again later.",
+		})
+		return
+	}
+
+	jobID := uuid.New().String()
+	if err := h.jobTracker.Start(jobID, "restore"); err != nil {
+		<-h.restoreSlots
+		writeJSONError(w, http.StatusServiceUnavailable, ErrorResponse{
+			Error:   "service_unavailable",
+			Message: err.Error(),
+		})
+		return
+	}
+
+	logger.Info("Remote restore accepted", "jobID", jobID, "source", sourceDescription)
+
+	go func() {
+		jobCtx := h.baseCtx
+		jobLogger := log.FromContext(jobCtx)
+		defer func() { <-h.restoreSlots }()
+
+		jobLogger.Info("Downloading backup archive", "jobID", jobID, "source", sourceDescription)
+
+		tempPath, cleanup, dlErr := downloadArchive(jobCtx)
+		if dlErr != nil {
+			jobLogger.Error(dlErr, "Failed to download backup archive", "jobID", jobID, "source", sourceDescription)
+			h.jobTracker.Fail(jobID, "Failed to download backup archive")
+			return
+		}
+		defer func() {
+			if cleanup != nil {
+				cleanup()
+			}
+		}()
+
+		jobLogger.Info("Download complete, starting restore", "jobID", jobID)
+
+		restoreConfig := backup.RestoreConfig{
+			Namespace:  h.namespace,
+			BackupPath: tempPath,
+			Passphrase: passphrase,
+			LegacyProviderConfigHandler: func(ctx context.Context, configs []backup.LegacyProviderConfig) error {
+				return operatorprovider.RestoreLegacyProviderConfigs(ctx, h.dynamicClient, h.namespace, configs)
+			},
+			RefreshTargetReadiness: true,
+			WarningHandler: func(message string) {
+				jobLogger.Info("Restore warning", "jobID", jobID, "message", message)
+			},
+		}
+
+		if err := backup.RestoreBackup(jobCtx, h.dynamicClient, restoreConfig); err != nil {
+			jobLogger.Error(err, "Restore failed", "jobID", jobID)
+			h.jobTracker.Fail(jobID, err.Error())
+			return
+		}
+		jobLogger.Info("Restore completed successfully", "jobID", jobID)
+		h.jobTracker.Complete(jobID)
+	}()
+
+	writeJSON(w, http.StatusAccepted, RestoreResponse{
+		JobID:     jobID,
+		Status:    "in_progress",
+		StartedAt: time.Now(),
+		Message:   "Restore started. Download and restore run in the background. Check the restore status, then refresh the page if the restored settings are not visible.",
+	})
 }
 
 // GetRestoreStatus handles GET /api/v1/restore/{jobID} endpoint.
@@ -575,7 +868,10 @@ func (h *backupHandler) GetRestoreStatus(w http.ResponseWriter, r *http.Request)
 	ctx := r.Context()
 
 	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		writeJSONError(w, http.StatusMethodNotAllowed, ErrorResponse{
+			Error:   "method_not_allowed",
+			Message: "Only GET is allowed",
+		})
 		return
 	}
 

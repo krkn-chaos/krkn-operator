@@ -668,8 +668,8 @@ settings are not immediately visible.
 - Maximum active restore operations: 1
 - Maximum tracked restore job records: 1000
 - Restore job status is stored in memory and is lost when the operator restarts
-- Backup archives are downloaded to the administrator and are not retained by
-  the operator
+- Without S3, backup archives are streamed directly to the administrator. With
+  S3 enabled, archives are stored in the configured bucket
 
 ## License
 

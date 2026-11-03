@@ -278,6 +278,12 @@ func applyLegacyDestinationConfigMap(ctx context.Context, dynClient dynamic.Inte
 	if err := unstructured.SetNestedStringMap(configMap.Object, current, "data"); err != nil {
 		return err
 	}
+	labels := configMap.GetLabels()
+	if labels == nil {
+		labels = map[string]string{}
+	}
+	labels[ProviderConfigLabel] = ProviderConfigLabelValue
+	configMap.SetLabels(labels)
 	_, err = resource.Update(ctx, configMap, metav1.UpdateOptions{})
 	return err
 }

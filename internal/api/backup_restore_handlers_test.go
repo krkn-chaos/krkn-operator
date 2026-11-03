@@ -22,17 +22,20 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/krkn-chaos/krkn-operator/internal/kubeconfig"
 	"github.com/krkn-chaos/krkn-operator/pkg/auth"
 	"github.com/krkn-chaos/krknctl/pkg/backup"
+	"github.com/krkn-chaos/krknctl/pkg/backupstore"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -95,6 +98,64 @@ func TestPostBackupReturnsErrorOnEmptyCluster(t *testing.T) {
 
 	if w.Code != http.StatusInternalServerError {
 		t.Errorf("Expected 500 Internal Server Error on empty cluster, got %d", w.Code)
+	}
+}
+
+func TestPostBackupS3ReturnsPresignedDownloadJSON(t *testing.T) {
+	dynamicClient := newTestDynamicClient()
+	_, err := dynamicClient.Resource(schema.GroupVersionResource{
+		Group: "krkn.krkn-chaos.dev", Version: "v1alpha1", Resource: "krknusers",
+	}).Namespace("default").Create(context.Background(), &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "krkn.krkn-chaos.dev/v1alpha1",
+		"kind":       "KrknUser",
+		"metadata": map[string]interface{}{
+			"name":      "backup-user",
+			"namespace": "default",
+		},
+	}}, metav1.CreateOptions{})
+	if err != nil {
+		t.Fatalf("failed to create backup fixture: %v", err)
+	}
+
+	store := &recordingBackupStore{location: backupstore.Location{
+		Key:         "krkn-operator/backups/backup.tar.gz",
+		DownloadURL: "https://s3.example.test/backup.tar.gz?signature=test",
+	}}
+	handler := NewHandler(
+		fake.NewClientBuilder().Build(),
+		nil,
+		"default",
+		"",
+		&auth.SecretManager{},
+		dynamicClient,
+		store,
+	)
+	defer handler.Shutdown()
+
+	req := httptest.NewRequest(http.MethodPost, BackupPath, nil)
+	req = req.WithContext(context.WithValue(req.Context(), auth.UserClaimsKey, &auth.Claims{
+		UserID: "admin",
+		Role:   "admin",
+	}))
+	w := httptest.NewRecorder()
+
+	handler.PostBackup(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("S3 backup status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
+	}
+	var response BackupDownloadResponse
+	if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
+		t.Fatalf("decode S3 backup response: %v", err)
+	}
+	if response.DownloadURL != store.location.DownloadURL {
+		t.Errorf("download URL = %q, want %q", response.DownloadURL, store.location.DownloadURL)
+	}
+	if response.Filename == "" {
+		t.Error("backup filename should not be empty")
+	}
+	if len(store.uploaded) == 0 {
+		t.Error("S3 store received an empty archive")
 	}
 }
 
@@ -215,7 +276,7 @@ func TestPostRestoreInvalidExtension(t *testing.T) {
 
 	var errResp ErrorResponse
 	json.NewDecoder(w.Body).Decode(&errResp)
-	if errResp.Message != "Backup file must be a .tar.gz archive" {
+	if errResp.Message != "Backup file must be a .tar.gz or .tar.gz.enc archive" {
 		t.Errorf("Expected extension validation error, got: %s", errResp.Message)
 	}
 }
@@ -399,7 +460,7 @@ func TestPostRestoreRefreshesRestoredTargetStatus(t *testing.T) {
 		t.Fatalf("ReadFile() error = %v", err)
 	}
 
-	handler := NewHandler(fake.NewClientBuilder().Build(), nil, namespace, "", &auth.SecretManager{}, dynamicClient)
+	handler := NewHandler(fake.NewClientBuilder().Build(), nil, namespace, "", &auth.SecretManager{}, dynamicClient, nil)
 	defer handler.Shutdown()
 	body, contentType := createMultipartBody(t, "backup", "restore-target-status.tar.gz", archive)
 	req := httptest.NewRequest(http.MethodPost, RestorePath, body)
@@ -440,6 +501,251 @@ func TestPostRestoreRefreshesRestoredTargetStatus(t *testing.T) {
 	}
 
 	assertTargetStatus(t, dynamicClient, targetName, false)
+}
+
+func TestPostRestoreFromURLMethodNotAllowed(t *testing.T) {
+	handler := createTestHandler()
+
+	req := httptest.NewRequest("GET", RestoreFromURLPath, nil)
+	w := httptest.NewRecorder()
+	req = req.WithContext(context.WithValue(req.Context(), auth.UserClaimsKey, &auth.Claims{
+		UserID: "admin",
+		Role:   "admin",
+	}))
+
+	handler.PostRestoreFromURL(w, req)
+
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Errorf("Expected 405 Method Not Allowed, got %d", w.Code)
+	}
+}
+
+func TestPostRestoreFromURLAdminOnly(t *testing.T) {
+	handler := createTestHandler()
+
+	body, _ := json.Marshal(RestoreFromURLRequest{URL: "https://example.com/backup.tar.gz"})
+	req := httptest.NewRequest("POST", RestoreFromURLPath, bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	req = req.WithContext(context.WithValue(req.Context(), auth.UserClaimsKey, &auth.Claims{
+		UserID: "user1",
+		Role:   "user",
+	}))
+
+	handler.PostRestoreFromURL(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Errorf("Expected 403 Forbidden, got %d", w.Code)
+	}
+}
+
+func TestPostRestoreFromURLRejectsHTTP(t *testing.T) {
+	handler := createTestHandler()
+
+	body, _ := json.Marshal(RestoreFromURLRequest{URL: "http://example.com/backup.tar.gz"})
+	req := httptest.NewRequest("POST", RestoreFromURLPath, bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	req = req.WithContext(context.WithValue(req.Context(), auth.UserClaimsKey, &auth.Claims{
+		UserID: "admin",
+		Role:   "admin",
+	}))
+
+	handler.PostRestoreFromURL(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("Expected 400 Bad Request for HTTP URL, got %d", w.Code)
+	}
+	var errResp ErrorResponse
+	json.NewDecoder(w.Body).Decode(&errResp)
+	if errResp.Message != "Only HTTPS URLs or S3 URIs are allowed" {
+		t.Errorf("Expected HTTPS-only error, got: %s", errResp.Message)
+	}
+}
+
+func TestPostRestoreFromURLDownloadsS3Object(t *testing.T) {
+	t.Setenv(backupstore.BucketEnv, "backup-bucket")
+	store := &recordingBackupStore{archive: []byte("not a valid archive")}
+	handler := NewHandler(
+		fake.NewClientBuilder().Build(),
+		nil,
+		"default",
+		"",
+		&auth.SecretManager{},
+		newTestDynamicClient(),
+		store,
+	)
+	defer handler.Shutdown()
+
+	body, _ := json.Marshal(RestoreFromURLRequest{URL: "s3://backup-bucket/krkn-operator/backups/backup.tar.gz"})
+	req := httptest.NewRequest("POST", RestoreFromURLPath, bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req = req.WithContext(context.WithValue(req.Context(), auth.UserClaimsKey, &auth.Claims{
+		UserID: "admin",
+		Role:   "admin",
+	}))
+	w := httptest.NewRecorder()
+
+	handler.PostRestoreFromURL(w, req)
+
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("Expected 202 Accepted for S3 restore, got %d: %s", w.Code, w.Body.String())
+	}
+	// Download is async — wait briefly for the goroutine to call Get()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if store.requestedKey != "" {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if store.requestedKey != "krkn-operator/backups/backup.tar.gz" {
+		t.Fatalf("S3 restore requested key %q", store.requestedKey)
+	}
+}
+
+func TestPostRestoreFromURLRejectsUnconfiguredS3Bucket(t *testing.T) {
+	t.Setenv(backupstore.BucketEnv, "configured-bucket")
+	handler := createTestHandler()
+	defer handler.Shutdown()
+
+	body, _ := json.Marshal(RestoreFromURLRequest{URL: "s3://other-bucket/backup.tar.gz"})
+	req := httptest.NewRequest("POST", RestoreFromURLPath, bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req = req.WithContext(context.WithValue(req.Context(), auth.UserClaimsKey, &auth.Claims{
+		UserID: "admin",
+		Role:   "admin",
+	}))
+	w := httptest.NewRecorder()
+
+	handler.PostRestoreFromURL(w, req)
+
+	if w.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("Expected 422 for unconfigured S3 restore, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestPostRestoreFromURLRejectsInvalidURL(t *testing.T) {
+	handler := createTestHandler()
+
+	body, _ := json.Marshal(RestoreFromURLRequest{URL: "not-a-url"})
+	req := httptest.NewRequest("POST", RestoreFromURLPath, bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	req = req.WithContext(context.WithValue(req.Context(), auth.UserClaimsKey, &auth.Claims{
+		UserID: "admin",
+		Role:   "admin",
+	}))
+
+	handler.PostRestoreFromURL(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("Expected 400 Bad Request for invalid URL, got %d", w.Code)
+	}
+}
+
+func TestPostRestoreFromURLRejectsEmptyBody(t *testing.T) {
+	handler := createTestHandler()
+
+	req := httptest.NewRequest("POST", RestoreFromURLPath, bytes.NewReader([]byte("{}")))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	req = req.WithContext(context.WithValue(req.Context(), auth.UserClaimsKey, &auth.Claims{
+		UserID: "admin",
+		Role:   "admin",
+	}))
+
+	handler.PostRestoreFromURL(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("Expected 400 Bad Request for empty URL, got %d", w.Code)
+	}
+}
+
+func TestPostRestoreFromURLRejectsWhenRestoreActive(t *testing.T) {
+	handler := createTestHandler()
+	handler.backupHandler.restoreSlots <- struct{}{}
+
+	body, _ := json.Marshal(RestoreFromURLRequest{URL: "https://example.com/backup.tar.gz"})
+	req := httptest.NewRequest("POST", RestoreFromURLPath, bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	req = req.WithContext(context.WithValue(req.Context(), auth.UserClaimsKey, &auth.Claims{
+		UserID: "admin",
+		Role:   "admin",
+	}))
+
+	handler.PostRestoreFromURL(w, req)
+
+	if w.Code != http.StatusTooManyRequests {
+		t.Fatalf("Expected 429 Too Many Requests, got %d", w.Code)
+	}
+}
+
+func TestPostRestoreFromURLRejectsLoopback(t *testing.T) {
+	handler := createTestHandler()
+	defer handler.Shutdown()
+
+	for _, addr := range []string{"https://127.0.0.1/backup.tar.gz", "https://localhost/backup.tar.gz", "https://[::1]/backup.tar.gz"} {
+		body, _ := json.Marshal(RestoreFromURLRequest{URL: addr})
+		req := httptest.NewRequest("POST", RestoreFromURLPath, bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		req = req.WithContext(context.WithValue(req.Context(), auth.UserClaimsKey, &auth.Claims{
+			UserID: "admin",
+			Role:   "admin",
+		}))
+		w := httptest.NewRecorder()
+
+		handler.PostRestoreFromURL(w, req)
+
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("Expected 400 for %q, got %d: %s", addr, w.Code, w.Body.String())
+		}
+	}
+}
+
+func TestPostRestoreFromURLRejectsPrivateIP(t *testing.T) {
+	handler := createTestHandler()
+	defer handler.Shutdown()
+
+	for _, addr := range []string{"https://10.0.0.1/backup.tar.gz", "https://192.168.1.1/backup.tar.gz", "https://169.254.169.254/latest"} {
+		body, _ := json.Marshal(RestoreFromURLRequest{URL: addr})
+		req := httptest.NewRequest("POST", RestoreFromURLPath, bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		req = req.WithContext(context.WithValue(req.Context(), auth.UserClaimsKey, &auth.Claims{
+			UserID: "admin",
+			Role:   "admin",
+		}))
+		w := httptest.NewRecorder()
+
+		handler.PostRestoreFromURL(w, req)
+
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("Expected 400 for %q, got %d: %s", addr, w.Code, w.Body.String())
+		}
+	}
+}
+
+func TestPostRestoreFromURLAcceptsPublicURL(t *testing.T) {
+	handler := createTestHandler()
+	defer handler.Shutdown()
+
+	body, _ := json.Marshal(RestoreFromURLRequest{URL: "https://s3.amazonaws.com/bucket/backup.tar.gz"})
+	req := httptest.NewRequest("POST", RestoreFromURLPath, bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req = req.WithContext(context.WithValue(req.Context(), auth.UserClaimsKey, &auth.Claims{
+		UserID: "admin",
+		Role:   "admin",
+	}))
+	w := httptest.NewRecorder()
+
+	handler.PostRestoreFromURL(w, req)
+
+	// 202 means it passed validation and started the async job
+	// (the download will fail in the background since it's not a real URL)
+	if w.Code != http.StatusAccepted {
+		t.Errorf("Expected 202 for public URL, got %d: %s", w.Code, w.Body.String())
+	}
 }
 
 func TestGetRestoreStatusUnknownJob(t *testing.T) {
@@ -633,12 +939,15 @@ func createMultipartBody(t *testing.T, fieldName, filename string, content []byt
 func createTestHandler() *Handler {
 	fakeClient := fake.NewClientBuilder().Build()
 	dynamicClient := newTestDynamicClient()
-	return NewHandler(fakeClient, nil, "default", "", &auth.SecretManager{}, dynamicClient)
+	return NewHandler(fakeClient, nil, "default", "", &auth.SecretManager{}, dynamicClient, nil)
 }
 
 func newTestDynamicClient() *dynamicfake.FakeDynamicClient {
 	scheme := runtime.NewScheme()
 	listKinds := map[schema.GroupVersionResource]string{
+		{Group: "krkn.krkn-chaos.dev", Version: "v1alpha1", Resource: "krkncategories"}:              "KrknCategoryList",
+		{Group: "krkn.krkn-chaos.dev", Version: "v1alpha1", Resource: "krkngraphruns"}:               "KrknGraphRunList",
+		{Group: "krkn.krkn-chaos.dev", Version: "v1alpha1", Resource: "krknscenarioruns"}:            "KrknScenarioRunList",
 		{Group: "krkn.krkn-chaos.dev", Version: "v1alpha1", Resource: "krknusers"}:                   "KrknUserList",
 		{Group: "krkn.krkn-chaos.dev", Version: "v1alpha1", Resource: "krknusergroups"}:              "KrknUserGroupList",
 		{Group: "krkn.krkn-chaos.dev", Version: "v1alpha1", Resource: "krknoperatortargets"}:         "KrknOperatorTargetList",
@@ -647,4 +956,25 @@ func newTestDynamicClient() *dynamicfake.FakeDynamicClient {
 		{Group: "", Version: "v1", Resource: "configmaps"}:                                           "ConfigMapList",
 	}
 	return dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme, listKinds)
+}
+
+type recordingBackupStore struct {
+	location     backupstore.Location
+	uploaded     []byte
+	archive      []byte
+	requestedKey string
+}
+
+func (s *recordingBackupStore) Put(_ context.Context, _ string, source io.Reader, _ int64) (backupstore.Location, error) {
+	data, err := io.ReadAll(source)
+	if err != nil {
+		return backupstore.Location{}, err
+	}
+	s.uploaded = data
+	return s.location, nil
+}
+
+func (s *recordingBackupStore) Get(_ context.Context, key string) (io.ReadCloser, int64, error) {
+	s.requestedKey = key
+	return io.NopCloser(strings.NewReader(string(s.archive))), int64(len(s.archive)), nil
 }

@@ -167,19 +167,28 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Create and download a backup archive of all operator configuration (admin-only)",
+                "description": "Create and download a backup archive of all operator configuration (admin-only). Pass the X-Backup-Passphrase header (Base64-encoded) to encrypt the archive with AES-256-GCM. When S3 storage is configured, the response is a JSON object with a short-lived presigned download URL; otherwise the archive is streamed directly.",
                 "produces": [
-                    "application/gzip"
+                    "application/gzip",
+                    "application/json"
                 ],
                 "tags": [
                     "backup"
                 ],
                 "summary": "Download operator configuration backup",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Base64-encoded passphrase to encrypt the archive",
+                        "name": "X-Backup-Passphrase",
+                        "in": "header"
+                    }
+                ],
                 "responses": {
                     "200": {
-                        "description": "Backup archive (tar.gz)",
+                        "description": "Presigned download URL (S3 mode) or streamed archive (direct mode)",
                         "schema": {
-                            "type": "file"
+                            "$ref": "#/definitions/internal_api.BackupDownloadResponse"
                         }
                     },
                     "403": {
@@ -1359,7 +1368,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Upload a backup archive and restore all operator configuration (admin-only). Restore runs asynchronously and rechecks restored target connectivity when complete.",
+                "description": "Upload a backup archive and restore all operator configuration (admin-only). Restore runs asynchronously and rechecks restored target connectivity when complete. For encrypted archives (.tar.gz.enc), include the Base64-encoded passphrase in the X-Backup-Passphrase header.",
                 "consumes": [
                     "multipart/form-data"
                 ],
@@ -1373,10 +1382,16 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "file",
-                        "description": "Backup archive (tar.gz)",
+                        "description": "Backup archive (tar.gz or tar.gz.enc)",
                         "name": "backup",
                         "in": "formData",
                         "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Base64-encoded passphrase to decrypt an encrypted archive",
+                        "name": "X-Backup-Passphrase",
+                        "in": "header"
                     }
                 ],
                 "responses": {
@@ -1400,6 +1415,81 @@ const docTemplate = `{
                     },
                     "405": {
                         "description": "Method not allowed",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/restore/url": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Accept a remote backup URL or S3 URI and start an async download and restore of operator configuration (admin-only). The download runs asynchronously as part of the restore job. S3 objects must use the configured backup bucket. Pass the X-Backup-Passphrase header (Base64-encoded) to decrypt encrypted archives.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "backup"
+                ],
+                "summary": "Restore from a remote backup URL or S3 object",
+                "parameters": [
+                    {
+                        "description": "Remote backup URL or S3 object",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.RestoreFromURLRequest"
+                        }
+                    },
+                    {
+                        "type": "string",
+                        "description": "Base64-encoded passphrase to decrypt an encrypted archive",
+                        "name": "X-Backup-Passphrase",
+                        "in": "header"
+                    }
+                ],
+                "responses": {
+                    "202": {
+                        "description": "Restore started",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.RestoreResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request or URL",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden - admin access required",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "429": {
+                        "description": "Another restore in progress",
                         "schema": {
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
@@ -4335,6 +4425,17 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_api.BackupDownloadResponse": {
+            "type": "object",
+            "properties": {
+                "downloadUrl": {
+                    "type": "string"
+                },
+                "filename": {
+                    "type": "string"
+                }
+            }
+        },
         "internal_api.CategoryConfigurationGroup": {
             "type": "object",
             "properties": {
@@ -5063,6 +5164,14 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api.CategoryConfigurationGroup"
                         }
                     }
+                }
+            }
+        },
+        "internal_api.RestoreFromURLRequest": {
+            "type": "object",
+            "properties": {
+                "url": {
+                    "type": "string"
                 }
             }
         },

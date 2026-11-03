@@ -899,6 +899,13 @@ definitions:
         description: WorkflowName is a human-readable name for the workflow
         type: string
     type: object
+  internal_api.BackupDownloadResponse:
+    properties:
+      downloadUrl:
+        type: string
+      filename:
+        type: string
+    type: object
   internal_api.CategoryConfigurationGroup:
     properties:
       parameterProfileFingerprint:
@@ -1413,6 +1420,11 @@ definitions:
           IDs.
         type: object
     type: object
+  internal_api.RestoreFromURLRequest:
+    properties:
+      url:
+        type: string
+    type: object
   internal_api.RestoreResponse:
     properties:
       jobId:
@@ -1879,14 +1891,24 @@ paths:
   /backup:
     post:
       description: Create and download a backup archive of all operator configuration
-        (admin-only)
+        (admin-only). Pass the X-Backup-Passphrase header (Base64-encoded) to encrypt
+        the archive with AES-256-GCM. When S3 storage is configured, the response
+        is a JSON object with a short-lived presigned download URL; otherwise the
+        archive is streamed directly.
+      parameters:
+      - description: Base64-encoded passphrase to encrypt the archive
+        in: header
+        name: X-Backup-Passphrase
+        type: string
       produces:
       - application/gzip
+      - application/json
       responses:
         "200":
-          description: Backup archive (tar.gz)
+          description: Presigned download URL (S3 mode) or streamed archive (direct
+            mode)
           schema:
-            type: file
+            $ref: '#/definitions/internal_api.BackupDownloadResponse'
         "403":
           description: Forbidden - admin access required
           schema:
@@ -2658,13 +2680,18 @@ paths:
       - multipart/form-data
       description: Upload a backup archive and restore all operator configuration
         (admin-only). Restore runs asynchronously and rechecks restored target connectivity
-        when complete.
+        when complete. For encrypted archives (.tar.gz.enc), include the Base64-encoded
+        passphrase in the X-Backup-Passphrase header.
       parameters:
-      - description: Backup archive (tar.gz)
+      - description: Backup archive (tar.gz or tar.gz.enc)
         in: formData
         name: backup
         required: true
         type: file
+      - description: Base64-encoded passphrase to decrypt an encrypted archive
+        in: header
+        name: X-Backup-Passphrase
+        type: string
       produces:
       - application/json
       responses:
@@ -2724,6 +2751,58 @@ paths:
       security:
       - BearerAuth: []
       summary: Get restore job status
+      tags:
+      - backup
+  /restore/url:
+    post:
+      consumes:
+      - application/json
+      description: Accept a remote backup URL or S3 URI and start an async download
+        and restore of operator configuration (admin-only). The download runs asynchronously
+        as part of the restore job. S3 objects must use the configured backup bucket.
+        Pass the X-Backup-Passphrase header (Base64-encoded) to decrypt encrypted
+        archives.
+      parameters:
+      - description: Remote backup URL or S3 object
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_api.RestoreFromURLRequest'
+      - description: Base64-encoded passphrase to decrypt an encrypted archive
+        in: header
+        name: X-Backup-Passphrase
+        type: string
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: Restore started
+          schema:
+            $ref: '#/definitions/internal_api.RestoreResponse'
+        "400":
+          description: Invalid request or URL
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "403":
+          description: Forbidden - admin access required
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "405":
+          description: Method not allowed
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "429":
+          description: Another restore in progress
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Restore from a remote backup URL or S3 object
       tags:
       - backup
   /scenarios:

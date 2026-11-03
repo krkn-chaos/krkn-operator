@@ -93,6 +93,34 @@ spec:
         {{- with .Values.operator.extraEnv }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
+        {{- with .Values.backup.s3.bucket }}
+        - name: KRKN_BACKUP_S3_BUCKET
+          value: {{ . | quote }}
+        {{- end }}
+        {{- with .Values.backup.s3.prefix }}
+        - name: KRKN_BACKUP_S3_PREFIX
+          value: {{ . | quote }}
+        {{- end }}
+        {{- with .Values.backup.s3.region }}
+        - name: KRKN_BACKUP_S3_REGION
+          value: {{ . | quote }}
+        {{- end }}
+        {{- with .Values.backup.s3.endpoint }}
+        - name: KRKN_BACKUP_S3_ENDPOINT
+          value: {{ . | quote }}
+        {{- end }}
+        {{- if .Values.backup.s3.forcePathStyle }}
+        - name: KRKN_BACKUP_S3_FORCE_PATH_STYLE
+          value: "true"
+        {{- end }}
+        {{- with .Values.backup.s3.presignTTL }}
+        - name: KRKN_BACKUP_S3_PRESIGN_TTL
+          value: {{ . | quote }}
+        {{- end }}
+        {{- with .Values.backup.s3.kmsKeyID }}
+        - name: KRKN_BACKUP_S3_KMS_KEY_ID
+          value: {{ . | quote }}
+        {{- end }}
         resources:
           {{- toYaml .Values.operator.resources | nindent 10 }}
         livenessProbe:

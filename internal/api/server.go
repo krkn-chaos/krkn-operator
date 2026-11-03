@@ -74,6 +74,7 @@ import (
 	v2 "github.com/krkn-chaos/krkn-operator/internal/api/v2"
 	"github.com/krkn-chaos/krkn-operator/pkg/auth"
 	"github.com/krkn-chaos/krkn-operator/pkg/wsorigin"
+	"github.com/krkn-chaos/krknctl/pkg/backupstore"
 )
 
 // Server represents the REST API server
@@ -120,8 +121,8 @@ const WebSocketAllowedOriginsEnv = "WEBSOCKET_ALLOWED_ORIGINS"
 //   - dynamicClient: Kubernetes dynamic client used by backup and restore
 //
 // Returns a new Server instance
-func NewServer(port int, client client.Client, clientset kubernetes.Interface, namespace string, grpcServerAddr string, secretManager *auth.SecretManager, dynamicClient dynamic.Interface) *Server {
-	handler := NewHandler(client, clientset, namespace, grpcServerAddr, secretManager, dynamicClient)
+func NewServer(port int, client client.Client, clientset kubernetes.Interface, namespace string, grpcServerAddr string, secretManager *auth.SecretManager, dynamicClient dynamic.Interface, backupStore backupstore.Store) *Server {
+	handler := NewHandler(client, clientset, namespace, grpcServerAddr, secretManager, dynamicClient, backupStore)
 
 	// Create auth middleware using SecretManager
 	// The SecretManager is started as a Runnable before the API server starts
@@ -311,6 +312,7 @@ func NewServer(port int, client client.Client, clientset kubernetes.Interface, n
 	// Backup and restore endpoints - admin only
 	mux.Handle(BackupPath, authMw.RequireAuth(http.HandlerFunc(handler.PostBackup)))
 	mux.Handle(RestorePath, authMw.RequireAuth(http.HandlerFunc(handler.PostRestore)))
+	mux.Handle(RestoreFromURLPath, authMw.RequireAuth(http.HandlerFunc(handler.PostRestoreFromURL)))
 	mux.Handle(RestorePath+"/", authMw.RequireAuth(http.HandlerFunc(handler.GetRestoreStatus)))
 
 	// ==================== API v2 Endpoints ====================

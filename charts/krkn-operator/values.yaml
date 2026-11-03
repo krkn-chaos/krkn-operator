@@ -308,3 +308,24 @@ commonAnnotations: {}
 ## Name overrides
 nameOverride: ""
 fullnameOverride: ""
+
+## Backup & Restore (optional s3 support)
+backup:
+  # S3/S3-compatible storage for backup archives.
+  # When enabled, POST /backup returns a JSON response with a short-lived
+  # presigned download URL instead of streaming the archive through the API server.
+  s3: 
+    # Set to a bucket name to enable S3 backup storage
+    bucket: ""
+    # Object key prefix (default: krkn-operator/backups)
+    prefix: ""
+    # AWS region (default: us-east-1)
+    region: ""
+    # Custom S3 endpoint for S3-compatible services (e.g., MinIO)
+    endpoint: ""
+    # Use path-style addressing (required for MinIO and some S3-compatible services)
+    forcePathStyle: false
+    # Presigned download URL TTL (Go duration, e.g., "15m", max "24h", default: "15m")
+    presignTTL: ""
+    # KMS key ID for server-side encryption (optional; defaults to AES-256)
+    kmsKeyID: ""

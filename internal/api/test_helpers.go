@@ -91,7 +91,7 @@ func NewTestHandler(client client.Client, clientset kubernetes.Interface, namesp
 		}
 	}
 
-	return NewHandler(client, clientset, namespace, grpcServerAddr, secretManager, dynamicfake.NewSimpleDynamicClient(runtime.NewScheme()))
+	return NewHandler(client, clientset, namespace, grpcServerAddr, secretManager, dynamicfake.NewSimpleDynamicClient(runtime.NewScheme()), nil)
 }
 
 // WithESClient overrides the telemetry Elasticsearch client, letting tests inject

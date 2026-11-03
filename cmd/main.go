@@ -60,6 +60,7 @@ import (
 	"github.com/krkn-chaos/krkn-operator/pkg/configmap"
 	kvstore "github.com/krkn-chaos/krkn-operator/pkg/configstore"
 	"github.com/krkn-chaos/krkn-operator/pkg/provider"
+	"github.com/krkn-chaos/krknctl/pkg/backupstore"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -377,9 +378,19 @@ func main() {
 	}
 	setupLog.Info("JWT secret manager configured", "namespace", krknNamespace)
 
+	// Initialize optional S3 backup store
+	backupStore, err := backupstore.NewFromEnv(context.Background())
+	if err != nil {
+		setupLog.Error(err, "unable to initialize S3 backup store")
+		os.Exit(1)
+	}
+	if backupStore != nil {
+		setupLog.Info("S3 backup store enabled")
+	}
+
 	// Setup and add REST API server
 	// SecretManager must be added to manager before API server
-	apiServer := api.NewServer(apiPort, mgr.GetClient(), clientset, krknNamespace, grpcServerAddr, jwtSecretManager, dynamicClient)
+	apiServer := api.NewServer(apiPort, mgr.GetClient(), clientset, krknNamespace, grpcServerAddr, jwtSecretManager, dynamicClient, backupStore)
 	setupLog.Info("gRPC server address", "address", grpcServerAddr)
 	if err := mgr.Add(apiServer); err != nil {
 		setupLog.Error(err, "unable to add REST API server to manager")

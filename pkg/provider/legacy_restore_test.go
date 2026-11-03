@@ -39,11 +39,13 @@ func TestRestoreLegacyProviderConfigs_AppliesCompatibleSettingsToDestinationConf
         {"name":"setting","variable":"SETTING","type":"string","required":"false"},
         {"name":"port","variable":"PORT","type":"number","required":"false"}
     ]`
+	destination := legacyConfigMap(destinationNamespace, destinationConfigMap, map[string]string{
+		"KEEP": "existing",
+	})
+	destination.SetLabels(nil)
 	client := newLegacyRestoreDynamicClient(
 		legacyProvider("krkn-operator", true),
-		legacyConfigMap(destinationNamespace, destinationConfigMap, map[string]string{
-			"KEEP": "existing",
-		}),
+		destination,
 	)
 	client.PrependReactor("get", legacyProviderConfigRequestResource.Resource, func(action ktesting.Action) (bool, runtime.Object, error) {
 		getAction := action.(ktesting.GetAction)
@@ -76,6 +78,9 @@ func TestRestoreLegacyProviderConfigs_AppliesCompatibleSettingsToDestinationConf
 	}
 	if data["KEEP"] != "existing" {
 		t.Fatalf("KEEP = %q, want %q", data["KEEP"], "existing")
+	}
+	if got := configMap.GetLabels()[ProviderConfigLabel]; got != ProviderConfigLabelValue {
+		t.Fatalf("provider label = %q, want %q", got, ProviderConfigLabelValue)
 	}
 	if _, found := data["PORT"]; found {
 		t.Fatal("incompatible PORT setting was applied")

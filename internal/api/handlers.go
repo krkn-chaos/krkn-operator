@@ -60,6 +60,7 @@ import (
 	"github.com/krkn-chaos/krkn-operator/pkg/groupauth"
 	"github.com/krkn-chaos/krkn-operator/pkg/registry"
 	pb "github.com/krkn-chaos/krkn-operator/proto/dataprovider"
+	"github.com/krkn-chaos/krknctl/pkg/backupstore"
 )
 
 // Package-level compiled regexes for sanitization functions.
@@ -138,14 +139,14 @@ type Handler struct {
 
 // NewHandler creates a new Handler.
 // Call Shutdown() during server teardown to cancel in-flight background jobs.
-func NewHandler(client client.Client, clientset kubernetes.Interface, namespace string, grpcServerAddr string, secretManager *auth.SecretManager, dynamicClient dynamic.Interface) *Handler {
+func NewHandler(client client.Client, clientset kubernetes.Interface, namespace string, grpcServerAddr string, secretManager *auth.SecretManager, dynamicClient dynamic.Interface, backupStore backupstore.Store) *Handler {
 	return &Handler{
 		client:                  client,
 		clientset:               clientset,
 		namespace:               namespace,
 		grpcServerAddr:          grpcServerAddr,
 		secretManager:           secretManager,
-		backupHandler:           newBackupHandler(namespace, dynamicClient),
+		backupHandler:           newBackupHandler(namespace, dynamicClient, backupStore),
 		scenarioProviderFactory: createScenarioProvider,
 		esClient:                elasticsearch.NewClient(),
 	}
