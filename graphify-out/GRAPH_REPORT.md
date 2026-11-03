@@ -1,17 +1,17 @@
 # Graph Report - krkn-operator  (2026-11-03)
 
 ## Corpus Check
-- 439 files · ~459,204 words
+- 439 files · ~457,920 words
 - Verdict: corpus is large enough that graph structure adds value.
 - Unclassified: 18 file(s) not represented in the graph (top: (none) 12, .jsonl 2, .toml 1)
 
 ## Summary
-- 5591 nodes · 17093 edges · 263 communities (224 shown, 39 thin omitted)
-- Extraction: 92% EXTRACTED · 8% INFERRED · 0% AMBIGUOUS · INFERRED: 1352 edges (avg confidence: 0.85)
+- 5591 nodes · 17088 edges · 273 communities (232 shown, 41 thin omitted)
+- Extraction: 92% EXTRACTED · 8% INFERRED · 0% AMBIGUOUS · INFERRED: 1347 edges (avg confidence: 0.85)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `d6fc7ade`
+- Built from commit: `aedcf1d6`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -52,8 +52,7 @@
 - .QueryTelemetryPage
 - KrknOperatorTargetProviderConfig
 - wsorigin.go
-- .DeepCopy
-- k8s.io/api/core/v1.Secret
+- .UpdateCloudCredential
 - krkn_ai_types.go
 - newKrknAITestHandler
 - k8s.io/apimachinery/pkg/apis/meta/v1.Time
@@ -64,7 +63,7 @@
 - k8s.io/apimachinery/pkg/runtime.Scheme
 - notify-operator-docs.test.js
 - API Changes
-- createAdminContext
+- installer_test.go
 - time.Time
 - with
 - WorkflowResponse
@@ -164,7 +163,7 @@
 - install-yq.sh
 - test-release-workflow-gates.sh
 - Deployment
-- Available Make Targets
+- KrknUser
 - Building Images
 - versions
 - versions
@@ -179,7 +178,7 @@
 - containers
 - notify-website
 - Server
-- net/http.Request
+- .createKrknAIConfig
 - render-and-validate
 - steps
 - steps
@@ -204,7 +203,7 @@
 - leader_election_role_binding.yaml
 - role_binding.yaml
 - stale.yml
-- AIConfig
+- net/http.Response
 - aiDeploymentFieldsMatch
 - acm
 - default/kustomization.yaml
@@ -241,7 +240,7 @@
 - contents
 - submit-community-catalog
 - buildClusterAPIURLMap
-- CategoryResiliencyHistoryResponse
+- Hub
 - service
 - entries
 - seccompProfile
@@ -249,10 +248,11 @@
 - auth
 - updateStrategy
 - file_proto_dataprovider_proto_rawDescGZIP
+- Optional Krkn-AI with OLM on OpenShift
 - steps
 - steps
-- GraphClusterScore
-- Setup
+- time.Duration
+- ComponentManifest
 - CreateBackup
 - livenessProbe
 - readinessProbe
@@ -276,6 +276,16 @@
 - krkngraphrun_controller_sanitization_test.go
 - StripCloudEnvVars
 - KrknGraphRunSpec
+- Publisher
+- 🔧 TODO: Pod Recreation and Retry Logic
+- CleanupOldResources
+- KrknOperatorTargetProviderConfigStatus
+- GetEnabled
+- Troubleshooting
+- Troubleshooting
+- RestoreBackup
+- strings.Builder
+- normalizeLegacyGraphScenarioNode
 
 ## God Nodes (most connected - your core abstractions)
 1. `Handler` - 226 edges
@@ -285,7 +295,7 @@
 5. `createAdminContext()` - 92 edges
 6. `GetClaimsFromContext()` - 64 edges
 7. `newEsScheme()` - 57 edges
-8. `KrknScenarioRun` - 55 edges
+8. `KrknScenarioRun` - 53 edges
 9. `createUserContext()` - 43 edges
 10. `KrknGraphRun` - 41 edges
 
@@ -296,15 +306,15 @@
   spec.orig/REQUIREMENTS.md → api/v1alpha1/krknoperatortarget_types.go
 - `Overview` --references--> `KrknOperatorTarget`  [INFERRED]
   spec.orig/REQUIREMENTS.md → api/v1alpha1/krknoperatortarget_types.go
-- `1. List Providers` --references--> `KrknOperatorTargetProvider`  [INFERRED]
-  docs/api-provider-config-spec.md → api/v1alpha1/krknoperatortargetprovider_types.go
+- `3. Create Provider Config Request` --references--> `KrknOperatorTargetProviderConfig`  [INFERRED]
+  docs/api-provider-config-spec.md → api/v1alpha1/krknoperatortargetproviderconfig_types.go
 - `Overview` --references--> `KrknOperatorTargetProviderConfig`  [INFERRED]
   docs/api-provider-config-spec.md → api/v1alpha1/krknoperatortargetproviderconfig_types.go
 
 ## Import Cycles
 - None detected.
 
-## Communities (263 total, 39 thin omitted)
+## Communities (273 total, 41 thin omitted)
 
 ### Community 0 - "main.go"
 Cohesion: 0.09
@@ -312,39 +322,39 @@ Nodes (15): CategoryEntityAssociationResponse, CreateCategoryRequest, krknAIScen
 
 ### Community 1 - "testing.T"
 Cohesion: 0.01
-Nodes (254): TestKrknUserCreation(), TestKrknUserList(), TestKrknUserRoles(), TestKrknUserStatus(), TestKrknUserValidation(), TestScenarioReferenceValidate(), setupAuthTestHandler(), TestIsRegistered_MethodNotAllowed() (+246 more)
+Nodes (253): TestKrknUserCreation(), TestKrknUserList(), TestKrknUserRoles(), TestKrknUserStatus(), TestKrknUserValidation(), TestScenarioReferenceValidate(), setupAuthTestHandler(), TestIsRegistered_MethodNotAllowed() (+245 more)
 
 ### Community 2 - "Handler"
 Cohesion: 0.07
-Nodes (19): writeScenarioRunAccessError(), writeCategoryRunNotFoundOrInternalError(), buildCloudCredentialResponse(), convertGraphClusterScores(), buildUserGroupResponse(), extractGroupNameAndUserIDFromPath(), extractGroupNameFromMembersPath(), extractPathSuffix() (+11 more)
+Nodes (25): writeScenarioRunAccessError(), writeCategoryRunNotFoundOrInternalError(), buildCloudCredentialResponse(), convertGraphClusterScores(), buildUserGroupResponse(), extractGroupNameAndUserIDFromPath(), extractGroupNameFromMembersPath(), extractPathSuffix() (+17 more)
 
 ### Community 3 - ".DeepCopyInto"
-Cohesion: 0.04
-Nodes (19): filterUsers(), GraphRunSummary, GraphScenario, KrknAIRunList, KrknAIRunStatus, KrknCategoryList, KrknCategorySpec, KrknComponentList (+11 more)
+Cohesion: 0.06
+Nodes (12): GraphScenario, KrknAIRunList, KrknCategoryList, KrknComponent, KrknComponentList, KrknGraphRunList, KrknOperatorTargetList, KrknOperatorTargetProviderConfigList (+4 more)
 
 ### Community 4 - ".UpdateFile"
-Cohesion: 0.06
-Nodes (40): AvailableFilesResponse, ListFilesResponse, buildFileInfo(), buildFileResponse(), deriveLogicalName(), extractLogicalName(), validateCreateFileRequest(), validateUpdateFileRequest() (+32 more)
+Cohesion: 0.07
+Nodes (32): AvailableFilesResponse, ListFilesResponse, buildFileInfo(), buildFileResponse(), extractLogicalName(), validateUpdateFileRequest(), convertConfigMapToWorkflowInfo(), convertFileResponseToWorkflow() (+24 more)
 
 ### Community 5 - "sigs.k8s.io/controller-runtime/pkg/client.Client"
-Cohesion: 0.07
-Nodes (33): historyQueryCountingClient, k8sUserStatusChecker, KrknAIServiceConfig, RestoreConfig, removeGroupFromAllMembers(), NewHandler(), TestKrknAIOrchestratorLogsWebSocketAuthorizationAndContainers(), NewServer() (+25 more)
+Cohesion: 0.11
+Nodes (18): k8sUserStatusChecker, KrknAIServiceConfig, removeGroupFromAllMembers(), NewHandler(), TestKrknAIOrchestratorLogsWebSocketAuthorizationAndContainers(), NewServer(), NewServerWithComponentNamespace(), newK8sUserStatusChecker() (+10 more)
 
 ### Community 6 - "NewTestHandler"
-Cohesion: 0.07
-Nodes (103): countingGetClient, esDoerFunc, TestCloudCredentialContract_ConsolePayloadToCRDToSecretKeyRef(), TestCloudCredentialContract_GraphRunStripsNodeEnv(), boolPtr(), newEsAlertsTestSecretWithHost(), newEsScheme(), newEsTestSecret() (+95 more)
+Cohesion: 0.06
+Nodes (130): countingGetClient, esDoerFunc, TestCloudCredentialContract_ConsolePayloadToCRDToSecretKeyRef(), TestCloudCredentialContract_GraphRunStripsNodeEnv(), newAWSTestSecret(), newCloudCredScheme(), newGCPTestSecret(), newGroupedAWSSecret() (+122 more)
 
 ### Community 7 - "KrknAIRun"
-Cohesion: 0.05
-Nodes (48): holdChildPodDeleteClient, KrknAIRunReconciler, 1. Build a bundle containing your local changes, 2. Install the development bundle with AI disabled, 3. Enable AI through the Subscription, 4. Exercise the API and an actual run, 5. Verify disable and upgrade retention, OLM configuration (+40 more)
+Cohesion: 0.07
+Nodes (35): mockUserStatusChecker, holdChildPodDeleteClient, KrknAIRunReconciler, removeCategoryLabel(), hasKrknAIRunOwnerUID(), indexChildRun(), aiOrchestratorPodName(), aiResourceName() (+27 more)
 
 ### Community 8 - "utils.go"
 Cohesion: 0.16
 Nodes (16): tokenRequest, TestE2E(), getMetricsOutput(), GetNonEmptyLines(), GetProjectDir(), InstallCertManager(), InstallPrometheusOperator(), IsCertManagerCRDsInstalled() (+8 more)
 
 ### Community 9 - "KrknScenarioRun"
-Cohesion: 0.06
-Nodes (36): addKnownTypes(), KrknScenarioRunReconciler, preparedJobResources, TestAppendCloudCredentialInjection_EmptyRefNoop(), TestAppendCloudCredentialInjection_UsesSecretKeyRef(), TestScenarioRunReconcileSkipsPendingMigration(), countJobPhaseChanges(), extractDelimitedContent() (+28 more)
+Cohesion: 0.05
+Nodes (43): addKnownTypes(), imageResolver, imageSignatureVerifier, KrknScenarioRunReconciler, TestScenarioRunReconcileSkipsPendingMigration(), backfillLegacyMaxRetries(), countJobPhaseChanges(), extractDelimitedContent() (+35 more)
 
 ### Community 10 - "api/types.go"
 Cohesion: 0.05
@@ -367,8 +377,8 @@ Cohesion: 0.27
 Nodes (12): makeGraphRun(), makeScenarioRun(), TestListJobs_IncludesStats(), TestListJobs_LimitOnlyReturnsAll(), TestListJobs_NoPagination(), TestListJobs_Paginated(), TestListJobs_SkipsGraphRunChildren(), TestListJobs_TypeDiscriminator() (+4 more)
 
 ### Community 15 - "GetClaimsFromContext"
-Cohesion: 0.12
-Nodes (15): CategoryListResponse, CategoryResponse, buildCategoryResponse(), buildCategoryVisibilityLabels(), categoryErrorCode(), categoryGroups(), categoryIsPublic(), categoryVisibleToUser() (+7 more)
+Cohesion: 0.13
+Nodes (16): CategoryListResponse, CategoryResponse, ErrorResponse, buildCategoryResponse(), buildCategoryVisibilityLabels(), categoryErrorCode(), categoryGroups(), categoryIsPublic() (+8 more)
 
 ### Community 16 - "render-bundle.sh"
 Cohesion: 0.06
@@ -379,7 +389,7 @@ Cohesion: 0.06
 Nodes (6): add_DataProviderServiceServicer_to_server(), DataProviderService, DataProviderServiceServicer, DataProviderServiceStub, DataProviderServicer, serve()
 
 ### Community 18 - "Store"
-Cohesion: 0.13
+Cohesion: 0.14
 Nodes (10): ConfigStoreInitializer, NewConfigStoreInitializer(), TestConfigStoreInitializer_NeedLeaderElection(), TestConfigStoreInitializer_Start_ConfigMapNotFound(), TestConfigStoreInitializer_Start_Success(), Store, Get(), BackfillLegacyProviderConfigLabel() (+2 more)
 
 ### Community 19 - "handler_test.go"
@@ -399,28 +409,28 @@ Cohesion: 0.09
 Nodes (30): doerFunc, roundTripperFunc, NewClient(), intPtr(), scenarioParametersSchema(), TestBaseURL(), TestClientTransportDefaultNotHTTPTransport(), TestClientTransportPooling() (+22 more)
 
 ### Community 23 - "KrknGraphRun"
-Cohesion: 0.11
-Nodes (14): imageResolver, imageSignatureVerifier, KrknGraphRunReconciler, migrationPending(), TestGraphRunReconcileSkipsPendingMigration(), TestLoadFileConfigMapByID(), TestTranslateVolumesToFileMounts(), sanitizeNodeID() (+6 more)
+Cohesion: 0.14
+Nodes (10): KrknGraphRunReconciler, migrationPending(), TestGraphRunReconcileSkipsPendingMigration(), TestLoadFileConfigMapByID(), TestTranslateVolumesToFileMounts(), sanitizeNodeID(), TestCalculateResiliencyScore_StoresNodeScores(), overrideRef() (+2 more)
 
 ### Community 24 - "elasticsearch/types.go"
 Cohesion: 0.15
 Nodes (19): AffectedPods, CreateElasticsearchConfigResponse, DeleteElasticsearchConfigResponse, ListElasticsearchConfigsResponse, QueryAlertsRequest, QueryTelemetryRequest, RawJSON, RecoveredPod (+11 more)
 
 ### Community 25 - "InjectCredentials"
-Cohesion: 0.23
-Nodes (19): injectAWS(), injectAzure(), injectBaremetal(), InjectCredentials(), injectGCP(), injectIBMCloud(), injectOpenStack(), injectVMware() (+11 more)
+Cohesion: 0.17
+Nodes (22): preparedJobResources, TestAppendCloudCredentialInjection_EmptyRefNoop(), TestAppendCloudCredentialInjection_UsesSecretKeyRef(), injectAWS(), injectAzure(), injectBaremetal(), InjectCredentials(), injectGCP() (+14 more)
 
 ### Community 26 - "installer.go"
-Cohesion: 0.09
-Nodes (28): configMapClient, crdClient, crdManifest, deploymentClient, applyCRD(), applyCRDs(), createMissingCRDs(), ensureMigrationGuard() (+20 more)
+Cohesion: 0.13
+Nodes (16): configMapClient, crdClient, crdManifest, deploymentClient, applyCRD(), createMissingCRDs(), ensureMigrationGuard(), logStaleMigrationGuard() (+8 more)
 
 ### Community 27 - "migration_test.go"
-Cohesion: 0.14
-Nodes (33): migrationResult, migrationStats, resourceDefinition, checkAnnotationSize(), Complete(), forEachResource(), logSummary(), patchMigrationResourceWithRetry() (+25 more)
+Cohesion: 0.21
+Nodes (25): Complete(), Stage(), containsSubstring(), countPatchActions(), jsonMarshal(), migrationTestLogger(), newMigrationClient(), scenarioRunFixture() (+17 more)
 
 ### Community 28 - "KrknTargetRequest"
-Cohesion: 0.08
-Nodes (17): ClustersResponse, KrknOperatorTargetProviderConfigReconciler, KrknTargetRequestReconciler, Architecture Decision, Components Requiring Leader Election (Leader-Only), Components Running on All Replicas (Multi-Active), isConflictError(), checkProviderActive() (+9 more)
+Cohesion: 0.10
+Nodes (9): ClustersResponse, KrknTargetRequestReconciler, ClusterHealthStatus, ClusterTarget, KrknOperatorTarget, KrknOperatorTargetSpec, KrknTargetRequest, KrknTargetRequestSpec (+1 more)
 
 ### Community 29 - "elasticsearch/client.go"
 Cohesion: 0.14
@@ -435,24 +445,24 @@ Cohesion: 0.09
 Nodes (25): setupTestHandler(), TestCreateTarget_DuplicateClusterName(), TestCreateTarget_MissingRequiredFields(), TestCreateTarget_WithCredentials(), TestCreateTarget_WithKubeconfig(), TestCreateTarget_WithToken(), TestDeleteQuietly_MissingObjectIsNoOp(), TestDeleteQuietly_RunsWithCanceledContext() (+17 more)
 
 ### Community 32 - "Broadcaster"
-Cohesion: 0.12
-Nodes (10): hashBytes(), roleFromAdmin(), AuthorizationCheckFunc, Broadcaster, BroadcastMessage, Client, graphRunEventHandler, Hub (+2 more)
+Cohesion: 0.15
+Nodes (8): hashBytes(), visibleCategoryNames(), AuthorizationChecker, AuthorizationCheckFunc, Broadcaster, categoryVisibilityChecker, graphRunEventHandler, scenarioRunEventHandler
 
 ### Community 33 - ".QueryTelemetryPage"
 Cohesion: 0.22
 Nodes (8): Doer, executeSearch(), Client, ConnectionParams, newSearchRequest(), TestTransportKey(), transportKey(), validateInlineDestination()
 
 ### Community 34 - "KrknOperatorTargetProviderConfig"
-Cohesion: 0.11
-Nodes (17): 1. List Providers, 2. Get Provider Config Status, 2. Update Provider Status, 3. Create Provider Config Request, 3. Update Provider Configuration, API Endpoints, CreateProviderConfigRequest(), UpdateProviderConfig() (+9 more)
+Cohesion: 0.09
+Nodes (19): KrknOperatorTargetProviderConfigReconciler, Architecture Decision, Components Requiring Leader Election (Leader-Only), Components Running on All Replicas (Multi-Active), isConflictError(), checkProviderActive(), countActiveProviders(), CreateProviderConfigRequest() (+11 more)
 
 ### Community 35 - "wsorigin.go"
 Cohesion: 0.14
 Nodes (17): checkWebSocketOriginV2(), TestCheckWebSocketOriginV2(), checkWebSocketOrigin(), TestCheckWebSocketOrigin(), guardedCheckRedirect(), TestGuardedCheckRedirect(), TestValidateDestinationURL(), validateDestinationURL() (+9 more)
 
-### Community 37 - "k8s.io/api/core/v1.Secret"
-Cohesion: 0.15
-Nodes (11): updateCloudCredentialSecretData(), buildConnectionParams(), buildConnectionParamsForIndex(), buildElasticsearchConfigResponse(), canAccessElasticsearchConfig(), UpdateCloudCredentialRequest, TestValidateUpdateRequest(), ValidateUpdateRequest() (+3 more)
+### Community 37 - ".UpdateCloudCredential"
+Cohesion: 0.50
+Nodes (4): updateCloudCredentialSecretData(), UpdateCloudCredentialRequest, TestValidateUpdateRequest(), ValidateUpdateRequest()
 
 ### Community 38 - "krkn_ai_types.go"
 Cohesion: 0.12
@@ -464,7 +474,7 @@ Nodes (32): krknAIArchiveTestFile, krknAIRunReadHookClient, krknAIScenarioIndexF
 
 ### Community 40 - "k8s.io/apimachinery/pkg/apis/meta/v1.Time"
 Cohesion: 0.09
-Nodes (10): GraphRunListItem, GraphRunListResponse, GraphRunStatusResponse, getProviderNames(), timeEqual(), KrknOperatorTargetProviderConfigStatus, KrknOperatorTargetProviderStatus, KrknOperatorTargetStatus (+2 more)
+Nodes (9): GraphRunListItem, GraphRunListResponse, GraphRunStatusResponse, GraphRunSummary, KrknAIRunStatus, KrknGraphRunStatus, KrknOperatorTargetStatus, NodeStatus (+1 more)
 
 ### Community 41 - "k8s.io/client-go/kubernetes.Interface"
 Cohesion: 0.13
@@ -472,15 +482,11 @@ Nodes (13): categoryEnvironmentParameter, aiOrchestratorSCCBindingName(), ensure
 
 ### Community 42 - "UnifiedJobItem"
 Cohesion: 0.14
-Nodes (8): JobStatsSummary, PaginationMeta, ScenarioRunListItem, ScenarioRunListResponse, UnifiedJobItem, UnifiedJobsResponse, ComputeJobStats(), TestComputeJobStats()
+Nodes (7): JobStatsSummary, PaginationMeta, ScenarioRunListResponse, UnifiedJobItem, UnifiedJobsResponse, ComputeJobStats(), TestComputeJobStats()
 
 ### Community 43 - "TokenGenerator"
-Cohesion: 0.11
-Nodes (13): Claims, Role, loggingMiddleware(), maxBodySizeMiddleware(), TestMaxBodySizeMiddleware(), mockTokenGen(), mockTokenGenInvalid(), TokenGenerator (+5 more)
-
-### Community 44 - "github.com/go-logr/logr.Logger"
 Cohesion: 0.24
-Nodes (4): visibleCategoryNames(), AuthorizationChecker, categoryVisibilityChecker, Handler
+Nodes (5): Claims, mockTokenGen(), mockTokenGenInvalid(), TokenGenerator, NewLazyMiddleware()
 
 ### Community 45 - "k8s.io/apimachinery/pkg/runtime.Scheme"
 Cohesion: 0.32
@@ -494,13 +500,13 @@ Nodes (11): assert, chartWorkflow, { execFileSync, spawnSync }, fs, notifier, no
 Cohesion: 0.29
 Nodes (7): GraphRunDetailResponse, GraphRunSpecResponse, 1.1 Resiliency weight per graph node, 1. Request - Create GraphRun (POST /api/v1/graphruns), 2. Response - List GraphRuns (GET /api/v1/graphruns), 3. Response - Get GraphRun Detail (GET /api/v1/graphruns/:name), API Changes
 
-### Community 48 - "createAdminContext"
-Cohesion: 0.11
-Nodes (39): newAWSTestSecret(), newCloudCredScheme(), newGCPTestSecret(), newGroupedAWSSecret(), TestCloudCredentialsRouter_MethodNotAllowed(), TestCloudCredentialsRouter_SubpathMethodNotAllowed(), TestCreateCloudCredential_AWS_Success(), TestCreateCloudCredential_DuplicateName() (+31 more)
+### Community 48 - "installer_test.go"
+Cohesion: 0.21
+Nodes (12): applyCRDs(), TestApplyCRDsCreatesMissingAndUpdatesChangedSpecs(), TestApplyCRDsDoesNotPatchUnchangedSpecs(), TestApplyCRDsLabelsExistingCRDsWithoutChangingOtherLabels(), TestApplyCRDsRejectsNonCRDManifest(), testCRD(), TestCreateMissingCRDsBeforeRolloutLeavesExistingSpecsUntouched(), TestWaitForDeploymentReady() (+4 more)
 
 ### Community 49 - "time.Time"
 Cohesion: 0.15
-Nodes (12): ClusterJobStatusResponse, ListTargetsResponse, NodeStatusResponse, RestoreResponse, ScenarioRunStatusResponse, TargetResponse, convertClusterJobs(), convertMetaTime() (+4 more)
+Nodes (13): ClusterJobStatusResponse, ListTargetsResponse, NodeStatusResponse, RestoreResponse, ScenarioRunListItem, ScenarioRunStatusResponse, TargetResponse, convertClusterJobs() (+5 more)
 
 ### Community 50 - "with"
 Cohesion: 0.04
@@ -511,20 +517,20 @@ Cohesion: 0.67
 Nodes (3): workflowResponsesHaveCategories(), WorkflowResponse, ListWorkflowsResponse
 
 ### Community 52 - "time.Duration"
-Cohesion: 0.18
-Nodes (10): CachedUserStatusChecker, countingUserStatusChecker, userStatusCacheEntry, UserStatusChecker, NewCachedUserStatusChecker(), TestCachedUserStatusChecker(), TestCachedUserStatusChecker_EvictsExpiredEntries(), TestCachedUserStatusChecker_Invalidation() (+2 more)
+Cohesion: 0.09
+Nodes (18): CachedUserStatusChecker, countingUserStatusChecker, Role, userStatusCacheEntry, UserStatusChecker, loggingMiddleware(), maxBodySizeMiddleware(), TestMaxBodySizeMiddleware() (+10 more)
 
 ### Community 53 - "ScenarioReference"
-Cohesion: 0.29
-Nodes (10): buildContainerImage(), buildContainerImageFromReference(), getTestConfig(), privateReference(), publicReference(), TestBuildContainerImage_PublicRegistryUsesKrknctl(), TestBuildContainerImage_RejectsPrivateWithoutResolvedRegistry(), TestBuildContainerImageFromReference_PrivateRegistry() (+2 more)
+Cohesion: 0.22
+Nodes (15): publicScenarioReference(), TestCreateScenarioRun_ResiliencyScore(), buildContainerImage(), buildContainerImageFromReference(), getTestConfig(), privateReference(), publicReference(), TestBuildContainerImage_PublicRegistryUsesKrknctl() (+7 more)
 
 ### Community 54 - "versions"
 Cohesion: 0.05
 Nodes (37): jsonPath, name, type, controller-gen.kubebuilder.io/version, apiVersion, kind, app.kubernetes.io/name, metadata (+29 more)
 
 ### Community 55 - "github.com/krkn-chaos/krknctl/pkg/provider/models.RegistryV2"
-Cohesion: 0.19
-Nodes (7): mockScenarioProvider, InvalidImageSignatureError, resolveImageSignature(), resolveImmutableImage(), resolvePrivateImageDigest(), scenarioTagForImage(), TestResolvePrivateImageDigestUsesManifestDigest()
+Cohesion: 0.21
+Nodes (5): mockScenarioProvider, InvalidImageSignatureError, resolveImmutableImage(), resolvePrivateImageDigest(), TestResolvePrivateImageDigestUsesManifestDigest()
 
 ### Community 56 - "cloudcreds/types.go"
 Cohesion: 0.17
@@ -539,8 +545,8 @@ Cohesion: 0.13
 Nodes (5): UnimplementedDataProviderServiceServer, UnsafeDataProviderServiceServer, _DataProviderService_ExecuteKubectl_Handler(), _DataProviderService_GetNodes_Handler(), RegisterDataProviderServiceServer()
 
 ### Community 59 - "GroupLabelKey"
-Cohesion: 0.06
-Nodes (63): newCategoryRequest(), newCategoryRequestAs(), newCategoryTestGroup(), newCategoryTestHandler(), newCategoryTestUser(), TestCategoriesRouterCRUD(), TestCategoriesRouterGroupCreationRequiresMembership(), TestCategoriesRouterGroupVisibility() (+55 more)
+Cohesion: 0.05
+Nodes (72): CategoryResiliencyDataPoint, newCategoryRequest(), newCategoryRequestAs(), newCategoryTestGroup(), newCategoryTestHandler(), newCategoryTestUser(), TestCategoriesRouterCRUD(), TestCategoriesRouterGroupCreationRequiresMembership() (+64 more)
 
 ### Community 60 - "converter_test.go"
 Cohesion: 0.20
@@ -555,24 +561,24 @@ Cohesion: 0.16
 Nodes (15): Phase 12: Scenario Job Management - /scenarios/run Endpoints ✅, Phase 9: POST /scenarios Endpoint ✅, FileMount, GlobalsRequest, JobsListResponse, JobStatusResponse, ScenarioRunRequest, ScenarioRunResponse (+7 more)
 
 ### Community 63 - "category_run_configuration.go"
-Cohesion: 0.15
-Nodes (26): scenarioFileBehavior, GraphScenarioNode, writeCategoryProfileField(), appendGraphSignaturePart(), compareCategoryRunConfigurations(), compareGraphConfigurations(), compareGraphConfigurationsWithStableNodeIDs(), compareGraphNodeConfigurations() (+18 more)
+Cohesion: 0.20
+Nodes (23): scenarioFileBehavior, GraphScenarioNode, appendGraphSignaturePart(), compareCategoryRunConfigurations(), compareGraphConfigurations(), compareGraphConfigurationsWithStableNodeIDs(), compareGraphNodeConfigurations(), compareGraphRunConfigurations() (+15 more)
 
 ### Community 64 - "versions"
 Cohesion: 0.05
 Nodes (37): jsonPath, name, type, controller-gen.kubebuilder.io/version, apiVersion, kind, app.kubernetes.io/name, metadata (+29 more)
 
 ### Community 65 - "ResolveGraph"
-Cohesion: 0.15
-Nodes (13): FromKrknctlScenarioSet(), publicScenarioReference(), publicScenario(), TestFromKrknctlScenarioSetCreatesPublicReferences(), TestToKrknctlScenarioSetUsesScenarioReference(), ToKrknctlScenarioSet(), MapScenarioNodeToScenarioRunSpec(), ResolveGraph() (+5 more)
+Cohesion: 0.17
+Nodes (12): FromKrknctlScenarioSet(), publicScenarioReference(), publicScenario(), TestFromKrknctlScenarioSetCreatesPublicReferences(), TestToKrknctlScenarioSetUsesScenarioReference(), ToKrknctlScenarioSet(), ResolveGraph(), contains() (+4 more)
 
 ### Community 66 - "versions"
 Cohesion: 0.05
 Nodes (37): jsonPath, name, type, controller-gen.kubebuilder.io/version, apiVersion, kind, app.kubernetes.io/name, metadata (+29 more)
 
 ### Community 67 - "time.Duration"
-Cohesion: 0.11
-Nodes (14): getTokenDuration(), TestGetTokenDuration(), API Reference, CreateProviderConfigRequest, Interfaces, NewProviderRegistration, NewProviderRegistrationWithConfig, Provider Configuration Functions (+6 more)
+Cohesion: 0.15
+Nodes (12): API Reference, CreateProviderConfigRequest, Interfaces, NewProviderRegistration, NewProviderRegistrationWithConfig, Provider Configuration Functions, Provider Registration Functions, UpdateProviderConfig (+4 more)
 
 ### Community 68 - "rate_limiter_test.go"
 Cohesion: 0.13
@@ -587,8 +593,8 @@ Cohesion: 0.41
 Nodes (12): build_operator(), check_prerequisites(), cleanup(), create_service_account(), install_crds(), main(), print_error(), print_info() (+4 more)
 
 ### Community 72 - "KrknUserGroup"
-Cohesion: 0.22
-Nodes (15): categoryHistoryRun, categoryHistoryScore, buildCategoryResiliencyHistory(), categoryBehaviorConfigurationSignature(), categoryRunScenarioNames(), containsString(), filterCategoryHistoryScoresByCluster(), filterGraphHistoryScoresByPermission() (+7 more)
+Cohesion: 0.11
+Nodes (22): CategoryConfigurationGroup, categoryHistoryRun, categoryHistoryScore, CategoryResiliencyHistoryResponse, ResiliencyHistoryQueryResponse, buildCategoryResiliencyHistory(), categoryBehaviorConfigurationSignature(), categoryRunScenarioNames() (+14 more)
 
 ### Community 73 - "PROGRESS-MVP.md"
 Cohesion: 0.04
@@ -603,11 +609,11 @@ Cohesion: 0.23
 Nodes (8): averageResiliencyScore(), buildScenarioRunDetailResponse(), buildScenarioRunResponse(), convertClusterResiliencyScoresWS(), sanitizedClusterJobs(), TestBuildScenarioRunResponse_IncludesClusterJobs(), TestBuildScenarioRunResponse_NoClusterJobs(), ClusterResiliencyScore
 
 ### Community 76 - "KrknOperatorTargetProvider"
-Cohesion: 0.08
-Nodes (21): Completed, Current Status, In Progress, Pending, CheckClusterLiveness(), Basic Usage (Default Configuration), CleanupOldResources, Config Struct (+13 more)
+Cohesion: 0.06
+Nodes (28): Completed, Current Status, In Progress, Pending, 1. List Providers, 2. Get Provider Config Status, 2. Update Provider Status, 3. Create Provider Config Request (+20 more)
 
 ### Community 77 - ".UpdateRegistry"
-Cohesion: 0.10
+Cohesion: 0.09
 Nodes (18): buildRegistryInfo(), buildRegistryResponse(), validateCreateRegistryRequest(), validateUpdateRegistryRequest(), BuildRegistryLabels(), ExtractGroupsFromLabels(), TestExtractGroupsFromLabels(), CreateRegistryRequest (+10 more)
 
 ### Community 78 - "test-api.sh"
@@ -631,8 +637,8 @@ Cohesion: 0.05
 Nodes (37): jsonPath, name, type, controller-gen.kubebuilder.io/version, apiVersion, kind, app.kubernetes.io/name, metadata (+29 more)
 
 ### Community 86 - "HashPassword"
-Cohesion: 0.24
-Nodes (10): TestLogin_InactiveUser(), TestLogin_InvalidCredentials(), TestLogin_Success(), HashPassword(), TestHashAndVerify_Integration(), TestHashPassword(), TestHashPassword_Uniqueness(), TestVerifyPassword() (+2 more)
+Cohesion: 0.13
+Nodes (19): TestLogin_InactiveUser(), TestLogin_InvalidCredentials(), TestLogin_Success(), TestDeleteTargetByUUID_AdminCanDeleteAnyResource(), TestDeleteTargetByUUID_InvalidUUID(), TestDeleteTargetByUUID_NotFound(), TestDeleteTargetByUUID_Success(), TestTargetsHandler_DELETE() (+11 more)
 
 ### Community 87 - "versions"
 Cohesion: 0.05
@@ -667,8 +673,8 @@ Cohesion: 0.05
 Nodes (37): jsonPath, name, type, controller-gen.kubebuilder.io/version, apiVersion, kind, app.kubernetes.io/name, metadata (+29 more)
 
 ### Community 96 - "Provider Configuration API Specification"
-Cohesion: 0.05
-Nodes (35): ListComponentsResponse, Publisher, 1. List Available Providers (Optional), 2. Create Config Request, 3. Poll for Completion, 4. Parse Schemas and Build UI, 5. Submit Configuration, Base URL (+27 more)
+Cohesion: 0.08
+Nodes (24): 1. List Available Providers (Optional), 2. Create Config Request, 3. Poll for Completion, 4. Parse Schemas and Build UI, 5. Submit Configuration, Base URL, Change Log, Common Error Patterns (+16 more)
 
 ### Community 97 - "versions"
 Cohesion: 0.05
@@ -720,7 +726,7 @@ Nodes (3): OLM_CHANNEL_NAME, OLM_PACKAGE_NAME, channel-head.sh script
 
 ### Community 111 - "Running gRPC Data Provider Locally for Development"
 Cohesion: 0.10
-Nodes (21): 1. Login and Get JWT Token, 2. Create KrknTargetRequest (or use existing UUID), 3. Test Terminal Command, Cleanup, Configure Operator to Use Local gRPC Server, Debug gRPC Server in PyCharm, Development Workflow, Error: "Command not found: kubectl" (+13 more)
+Nodes (21): 1. Create Virtual Environment (Python 3.11), 1. Login and Get JWT Token, 2. Create KrknTargetRequest (or use existing UUID), 2. Install Dependencies, 3. Test Terminal Command, 3. Verify Generated Stubs, 4. Start gRPC Server, Cleanup (+13 more)
 
 ### Community 112 - "versions"
 Cohesion: 0.05
@@ -748,7 +754,7 @@ Nodes (19): Alerts Query API, API compatibility notes, Backup and Restore, Docum
 
 ### Community 132 - "Deployment Guide"
 Cohesion: 0.11
-Nodes (18): Architecture, Build Installer Bundle, Deployment Guide, Environment Variables, Git Tag Support, Git Tag Workflow, gRPC Connection Issues, Image Names (Auto-Generated) (+10 more)
+Nodes (18): Architecture, Available Make Targets, Build Installer Bundle, Build Targets, Deployment Guide, Deployment Targets, Environment Variables, Git Tag Support (+10 more)
 
 ### Community 133 - "Quick Start - Terminal API Local Testing"
 Cohesion: 0.12
@@ -771,8 +777,8 @@ Cohesion: 0.17
 Nodes (11): API, Dependencies, Development, GetNodes, Installation, krkn-operator-data-provider, Overview, Prerequisites (+3 more)
 
 ### Community 138 - "🔧 TODO: Pod Recreation and Retry Logic"
-Cohesion: 0.10
-Nodes (21): API and operator refactoring to support multiple clusters, API Endpoints Structure (Nested Approach), BREAKING CHANGES, Configuration, Current Behavior, Implementation Details, Implementation Plan (TODO), ✅ Implemented (+13 more)
+Cohesion: 0.17
+Nodes (12): API and operator refactoring to support multiple clusters, API Endpoints Structure (Nested Approach), BREAKING CHANGES, Implementation Details, ✅ Implemented, KrknTargetRequest controller in operator, Moving from direct scenario creation to CRD approach, Overview (+4 more)
 
 ### Community 139 - "API Workflow Test"
 Cohesion: 0.18
@@ -798,9 +804,9 @@ Nodes (7): 1. Start the gRPC data provider, 2. Run the operator, 3. Create an ad
 Cohesion: 0.33
 Nodes (6): Custom Images, Custom Namespace, Deployment, Install CRDs Only, OpenShift Deployment, Quick Deploy
 
-### Community 150 - "Available Make Targets"
-Cohesion: 0.40
-Nodes (5): Available Make Targets, Build Targets, Deployment Targets, Other Targets, Push Targets
+### Community 150 - "KrknUser"
+Cohesion: 0.11
+Nodes (6): filterUsers(), KrknAIRunSpec, KrknCategorySpec, KrknUser, KrknUserSpec, KrknUserStatus
 
 ### Community 151 - "Building Images"
 Cohesion: 0.40
@@ -823,12 +829,12 @@ Cohesion: 0.06
 Nodes (35): jsonPath, name, type, controller-gen.kubebuilder.io/version, apiVersion, kind, app.kubernetes.io/name, metadata (+27 more)
 
 ### Community 156 - "context.Context"
-Cohesion: 0.06
-Nodes (29): cloudCredentialAccessContext, ErrorResponse, TerminalRequest, TerminalResponse, mockUserStatusChecker, removeCategoryLabel(), validateClusterPermissions(), resolveManagedClusterKubeconfig() (+21 more)
+Cohesion: 0.08
+Nodes (21): TerminalRequest, TerminalResponse, validateClusterPermissions(), ExtractGroupNamesFromLabels(), TestExtractGroupNamesFromLabels(), AggregateClusterPermissions(), CanPerformAction(), GetUserGroups() (+13 more)
 
 ### Community 158 - "Handler"
-Cohesion: 0.13
-Nodes (6): Handler, createScenarioProvider(), getScenarioSignatureStatus(), intPtr(), Client, New()
+Cohesion: 0.09
+Nodes (12): cloudCredentialAccessContext, Handler, buildConnectionParams(), buildConnectionParamsForIndex(), buildElasticsearchConfigResponse(), canAccessElasticsearchConfig(), createScenarioProvider(), getScenarioSignatureStatus() (+4 more)
 
 ### Community 159 - "spec"
 Cohesion: 0.06
@@ -850,9 +856,9 @@ Nodes (29): apiVersion, image, imagePullPolicy, livenessProbe, name, ports, read
 Cohesion: 0.07
 Nodes (29): env, CHART_REPO, GH_TOKEN, IMAGE_REGISTRY, REGISTRY, jobs, notify-website, release-chart (+21 more)
 
-### Community 165 - "net/http.Request"
-Cohesion: 0.08
-Nodes (19): krknAIArchiveManifest, krknAIArchiveManifestFile, krknAIArchiveServiceError, krknAIScenarioQuery, copyKrknAIArchiveServiceError(), safeKrknAIArchivePath(), copyKrknAIResponse(), decodeKrknAIRequest() (+11 more)
+### Community 165 - ".createKrknAIConfig"
+Cohesion: 0.13
+Nodes (14): deriveLogicalName(), validateCreateFileRequest(), decodeKrknAIRequest(), krknAIRunLabelValue(), TestKrknAIConfigOwnerCanListAndReadSavedConfig(), validateKrknAIRunName(), validateKubernetesResourceName(), BuildFileAnnotations() (+6 more)
 
 ### Community 166 - "render-and-validate"
 Cohesion: 0.07
@@ -867,8 +873,8 @@ Cohesion: 0.08
 Nodes (23): concurrency, cancel-in-progress, group, COLOR, jobs, test, name, on (+15 more)
 
 ### Community 169 - "ai_test.go"
-Cohesion: 0.23
-Nodes (9): newAITokenSecret(), testAIConfig(), TestAIResourcesLeavesUserPVCUnchanged(), TestAIResourcesPreservesDefaultedDeploymentFields(), TestAIResourcesReconcilesNetworkPolicyDrift(), TestAIResourcesRefusesForeignObjectsAndPropagatesAPIErrors(), TestAIResourcesRejectsManagedClaimConflictsWithoutMutation(), TestAIResourcesStableTokenAndReconcilesDeploymentDrift() (+1 more)
+Cohesion: 0.16
+Nodes (12): newAITokenSecret(), testAIConfig(), TestAIConfigFromEnvDefaultsOffWithoutImages(), TestAIConfigFromEnvRejectsInvalidInputs(), TestAIResourcesLeavesUserPVCUnchanged(), TestAIResourcesPreservesDefaultedDeploymentFields(), TestAIResourcesReconcilesNetworkPolicyDrift(), TestAIResourcesRefusesForeignObjectsAndPropagatesAPIErrors() (+4 more)
 
 ### Community 170 - "steps"
 Cohesion: 0.09
@@ -887,7 +893,7 @@ Cohesion: 0.09
 Nodes (21): apiVersion, bearerTokenFile, path, port, scheme, tlsConfig, kind, app.kubernetes.io/managed-by (+13 more)
 
 ### Community 174 - "ai.go"
-Cohesion: 0.37
+Cohesion: 0.34
 Nodes (16): aiCreateRace(), aiDeployment(), aiLabels(), aiPodLabels(), applyLabels(), ensureAIDeployment(), ensureAINetworkPolicy(), ensureAIOrchestratorRole() (+8 more)
 
 ### Community 175 - "images"
@@ -946,13 +952,13 @@ Nodes (15): apiVersion, kind, app.kubernetes.io/managed-by, app.kubernetes.io/na
 Cohesion: 0.12
 Nodes (15): concurrency, cancel-in-progress, group, jobs, stale, name, on, schedule (+7 more)
 
-### Community 190 - "AIConfig"
-Cohesion: 0.15
-Nodes (15): krknAIPodOptions, defaultPullPolicy(), AIConfigFromEnv(), decodeStrictJSON(), defaultAIServiceResources(), localObjectReferencesEqual(), parseImagePullSecrets(), parsePullPolicy() (+7 more)
+### Community 190 - "net/http.Response"
+Cohesion: 0.14
+Nodes (7): krknAIArchiveManifest, krknAIArchiveManifestFile, krknAIArchiveServiceError, krknAIScenarioQuery, matchesKrknAIScenarioFilter(), parseKrknAIScenarioQuery(), ReadBody()
 
 ### Community 191 - "aiDeploymentFieldsMatch"
-Cohesion: 0.17
-Nodes (14): aiContainerMatches(), aiDeploymentFieldsMatch(), hasExactlyOneAIContainer(), hasExactlyOneAIVolume(), hasExactlyOneNamedValue(), podSecurityContextMatches(), reconcileAIContainer(), reconcileAIDeployment() (+6 more)
+Cohesion: 0.10
+Nodes (27): krknAIPodOptions, defaultPullPolicy(), AIConfigFromEnv(), aiContainerMatches(), aiDeploymentFieldsMatch(), decodeStrictJSON(), defaultAIServiceResources(), hasExactlyOneAIContainer() (+19 more)
 
 ### Community 192 - "acm"
 Cohesion: 0.16
@@ -995,8 +1001,8 @@ Cohesion: 0.17
 Nodes (11): apiVersion, kind, app.kubernetes.io/managed-by, app.kubernetes.io/name, metadata, labels, name, rules (+3 more)
 
 ### Community 202 - "AIResources"
-Cohesion: 0.22
-Nodes (4): containsAccessMode(), requireOwnedLabels(), validateAIClaim(), AIResources
+Cohesion: 0.33
+Nodes (3): containsAccessMode(), requireOwnedLabels(), validateAIClaim()
 
 ### Community 203 - "target"
 Cohesion: 0.18
@@ -1028,7 +1034,7 @@ Nodes (10): name, needs, permissions, runs-on, jobs, create-manifests, name, on 
 
 ### Community 210 - "KrknScenarioRunSpec"
 Cohesion: 0.22
-Nodes (7): KrknScenarioRunSpec, TestLegacyScenarioIdentityRemainsDecodable(), TestResolveScenarioReferenceMigratesOnlyLegacyIdentity(), publicScenarioReference(), TestCreateScenarioRun_ResiliencyScore(), FileMount, ScenarioReference
+Nodes (5): KrknScenarioRunSpec, TestLegacyScenarioIdentityRemainsDecodable(), TestResolveScenarioReferenceMigratesOnlyLegacyIdentity(), MapScenarioNodeToScenarioRunSpec(), FileMount
 
 ### Community 211 - "gateway"
 Cohesion: 0.22
@@ -1043,8 +1049,8 @@ Cohesion: 0.22
 Nodes (9): operator, affinity, enabled, extraEnv, nodeSelector, olmBootstrap, olmOpenShift, replicaCount (+1 more)
 
 ### Community 214 - "main"
-Cohesion: 0.18
-Nodes (11): bootstrapOLMResources(), main(), resolveKrknAIEnabled(), resolveMigrationNamespace(), runCRDMigrationMode(), TestResolveKrknAIEnabledPrecedence(), TestResolveMigrationNamespacePrefersHookNamespace(), TestRunCRDMigrationMode() (+3 more)
+Cohesion: 0.14
+Nodes (14): bootstrapOLMResources(), main(), resolveKrknAIEnabled(), resolveMigrationNamespace(), runCRDMigrationMode(), TestResolveKrknAIEnabledPrecedence(), TestResolveMigrationNamespacePrefersHookNamespace(), TestRunCRDMigrationMode() (+6 more)
 
 ### Community 215 - "containers"
 Cohesion: 0.22
@@ -1094,9 +1100,9 @@ Nodes (6): submit-community-catalog, if, name, needs, runs-on, steps
 Cohesion: 0.25
 Nodes (8): buildClusterAPIURLMap(), contains(), containsInMiddle(), TestBuildClusterAPIURLMap(), TestBuildClusterAPIURLMap_Collision(), TestBuildClusterAPIURLMap_SameNameSameURL(), TestValidateScenarioRunAccess(), TestValidateScenarioRunAccess_NoGroups()
 
-### Community 227 - "CategoryResiliencyHistoryResponse"
-Cohesion: 0.38
-Nodes (7): CategoryConfigurationGroup, CategoryResiliencyDataPoint, CategoryResiliencyHistoryResponse, ResiliencyHistoryQueryResponse, datapointForRunID(), datapointRunIDs(), assembleResiliencyHistoryQueryResponse()
+### Community 227 - "Hub"
+Cohesion: 0.31
+Nodes (4): BroadcastMessage, Client, Hub, PaginationClientState
 
 ### Community 228 - "service"
 Cohesion: 0.43
@@ -1122,6 +1128,10 @@ Nodes (5): auth, jwtExpiryHours, jwtSecret, trustedProxyCIDRs, websocketAllowedO
 Cohesion: 0.40
 Nodes (5): maxSurge, maxUnavailable, updateStrategy, rollingUpdate, type
 
+### Community 235 - "Optional Krkn-AI with OLM on OpenShift"
+Cohesion: 0.14
+Nodes (9): 1. Build a development bundle, 2. Install with AI disabled, 3. Enable AI, 4. Verify a run, Disable, upgrade, and remove, Optional Krkn-AI with OLM on OpenShift, Prerequisites, Reset a disposable test installation (+1 more)
+
 ### Community 236 - "steps"
 Cohesion: 0.40
 Nodes (5): name, permissions, runs-on, steps, build-data-provider-arm64
@@ -1130,13 +1140,13 @@ Nodes (5): name, permissions, runs-on, steps, build-data-provider-arm64
 Cohesion: 0.40
 Nodes (5): name, permissions, runs-on, steps, build-operator-arm64
 
-### Community 238 - "GraphClusterScore"
-Cohesion: 0.22
-Nodes (4): convertNodeStatusesWithScores(), convertNodeStatusesWithScores(), GraphClusterScore, NodeStatus
+### Community 238 - "time.Duration"
+Cohesion: 0.27
+Nodes (6): getTokenDuration(), TestGetTokenDuration(), newResiliencyTestScheme(), newTestClientsetWithLogs(), TestCalculateResiliencyScores(), TestReconcile_ResiliencyScoreFailure_DoesNotBlockTerminalPhase()
 
-### Community 239 - "Setup"
-Cohesion: 0.40
-Nodes (5): 1. Create Virtual Environment (Python 3.11), 2. Install Dependencies, 3. Verify Generated Stubs, 4. Start gRPC Server, Setup
+### Community 239 - "ComponentManifest"
+Cohesion: 0.20
+Nodes (4): ListComponentsResponse, ComponentDescription, ComponentManifest, KrknComponentStatus
 
 ### Community 240 - "CreateBackup"
 Cohesion: 0.22
@@ -1179,8 +1189,8 @@ Cohesion: 0.25
 Nodes (8): RELEASE_TAG, submit-operatorhub-catalog, env, env, if, name, needs, runs-on
 
 ### Community 255 - "k8s.io/apimachinery/pkg/apis/meta/v1/unstructured.Unstructured"
-Cohesion: 0.36
-Nodes (7): TestApplyResourceRestoresArchivedStatus(), applyResource(), applyResourcesFromFile(), isKrknCRD(), isNotFound(), isOperatorManagedSecret(), restoreArchivedStatus()
+Cohesion: 0.16
+Nodes (15): migrationResult, migrationStats, resourceDefinition, checkAnnotationSize(), forEachResource(), logSummary(), patchMigrationResourceWithRetry(), writeMigrationAnnotation() (+7 more)
 
 ### Community 256 - "sync_test.go"
 Cohesion: 0.36
@@ -1202,25 +1212,57 @@ Nodes (3): isAlphanumeric(), isValidLabelChar(), TestSanitizeNodeID()
 Cohesion: 0.50
 Nodes (4): IsCloudEnvVar(), StripCloudEnvVars(), TestIsCloudEnvVar(), TestStripCloudEnvVars()
 
+### Community 263 - "Publisher"
+Cohesion: 0.28
+Nodes (5): Publisher, TestPublisherReconcile(), TestPublisherReconcileReturnsTransientErrors(), TestPublisherRecoversFromConcurrentCreateAndDelete(), TestPublisherStartRetriesAndReturnsCancellation()
+
+### Community 264 - "🔧 TODO: Pod Recreation and Retry Logic"
+Cohesion: 0.22
+Nodes (9): Configuration, Current Behavior, Implementation Plan (TODO), Option A: Cancellation Field in Status (Recommended), Option B: Finalizers for Cancellation Tracking, Option C: Separate CancellationRequest CR, Proposed Solution Options, Requirements (+1 more)
+
+### Community 265 - "CleanupOldResources"
+Cohesion: 0.33
+Nodes (5): historyQueryCountingClient, CleanupOldResources(), extractItemsFromList(), TestExtractItemsFromList(), CreatedTimeExtractor
+
+### Community 266 - "KrknOperatorTargetProviderConfigStatus"
+Cohesion: 0.29
+Nodes (3): getProviderNames(), KrknOperatorTargetProviderConfigStatus, ProviderConfigData
+
+### Community 267 - "GetEnabled"
+Cohesion: 0.47
+Nodes (6): GetEnabled(), SetEnabled(), fakeClient(), TestGetEnabledDefaultsToTrue(), TestGetEnabledRejectsInvalidValue(), TestSetEnabledPersistsAndReadsValue()
+
+### Community 268 - "Troubleshooting"
+Cohesion: 0.40
+Nodes (5): gRPC Connection Issues, Image Pull Errors, Namespace Issues, Pod Not Starting, Troubleshooting
+
+### Community 269 - "Troubleshooting"
+Cohesion: 0.40
+Nodes (5): Error: "Command not found: kubectl", Error: "failed to connect to gRPC server", Error: "Failed to get kubeconfig", Error: "no module named 'krkn_lib'", Troubleshooting
+
+### Community 270 - "RestoreBackup"
+Cohesion: 0.50
+Nodes (4): RestoreConfig, TestFindBackupDir(), findBackupDir(), RestoreBackup()
+
 ## Knowledge Gaps
 - **21 isolated node(s):** `github.com/krkn-chaos/krkn-operator`, `OLM_PACKAGE_NAME`, `OLM_CHANNEL_NAME`, `ICON_BASE64`, `ICON_MEDIATYPE` (+16 more)
-  These have ≤1 connection - possible missing edges or undocumented components. (Counts symbols only; 1902 node(s) total have ≤1 connection when file, concept and rationale nodes are included.)
-- **39 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+  These have ≤1 connection - possible missing edges or undocumented components. (Counts symbols only; 1904 node(s) total have ≤1 connection when file, concept and rationale nodes are included.)
+- **41 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `KrknScenarioRun` connect `KrknScenarioRun` to `main.go`, `testing.T`, `krkn-operator`, `.DeepCopyInto`, `KrknAIRun`, `🔧 TODO: Pod Recreation and Retry Logic`, `.GetScenarioRunStatus`, `makeScenarioRun`, `WSUnifiedJobItem`, `KrknGraphRun`, `KrknTargetRequest`, `context.Context`, `Handler`, `Broadcaster`, `.DeepCopy`, `github.com/go-logr/logr.Logger`, `GroupLabelKey`, `KrknUserGroup`, `buildScenarioRunResponse`, `KrknScenarioRunSpec`?**
-  _High betweenness centrality (0.026) - this node is a cross-community bridge._
+- **Why does `KrknAIRun` connect `KrknAIRun` to `main.go`, `testing.T`, `Handler`, `.DeepCopyInto`, `.DeepCopy`, `k8s.io/apimachinery/pkg/apis/meta/v1.Time`, `Optional Krkn-AI with OLM on OpenShift`, `KrknTargetRequest`, `KrknUser`, `context.Context`?**
+  _High betweenness centrality (0.023) - this node is a cross-community bridge._
 - **Are the 161 inferred relationships involving `NewTestHandler()` (e.g. with `setupAuthTestHandler()` and `TestLogin_InactiveUser()`) actually correct?**
   _`NewTestHandler()` has 161 INFERRED edges - model-reasoned connections that need verification._
 - **What connects `github.com/krkn-chaos/krkn-operator`, `OLM_PACKAGE_NAME`, `OLM_CHANNEL_NAME` to the rest of the system?**
   _21 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `main.go` be split into smaller, more focused modules?**
   _Cohesion score 0.08763153355183716 - nodes in this community are weakly interconnected._
-- **Why does `Handler` connect `Handler` to `main.go`, `.QueryTelemetryPage`, `Handler`, `.UpdateFile`, `k8s.io/api/core/v1.Secret`, `net/http.Request`, `.GetScenarioRunLogs`, `KrknUserGroup`, `Server`, `sigs.k8s.io/controller-runtime/pkg/client.Client`, `.GetScenarioRunStatus`, `.UpdateRegistry`, `JobTracker`, `GetClaimsFromContext`, `ai.go`, `context.Context`?**
-  _High betweenness centrality (0.018) - this node is a cross-community bridge._
+- **Why does `Optional Krkn-AI with OLM on OpenShift` connect `Optional Krkn-AI with OLM on OpenShift` to `KrknAIRun`?**
+  _High betweenness centrality (0.022) - this node is a cross-community bridge._
 - **Should `testing.T` be split into smaller, more focused modules?**
-  _Cohesion score 0.011759504862953138 - nodes in this community are weakly interconnected._
-- **Why does `krkn-operator` connect `krkn-operator` to `Running Locally`, `README.md`?**
-  _High betweenness centrality (0.017) - this node is a cross-community bridge._
+  _Cohesion score 0.011944620396344223 - nodes in this community are weakly interconnected._
+- **Why does `Handler` connect `Handler` to `main.go`, `.QueryTelemetryPage`, `Handler`, `.UpdateFile`, `.createKrknAIConfig`, `.GetScenarioRunLogs`, `KrknAIRun`, `KrknUserGroup`, `.UpdateCloudCredential`, `Server`, `.GetScenarioRunStatus`, `sigs.k8s.io/controller-runtime/pkg/client.Client`, `.UpdateRegistry`, `JobTracker`, `GetClaimsFromContext`, `ai.go`, `context.Context`?**
+  _High betweenness centrality (0.018) - this node is a cross-community bridge._

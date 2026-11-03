@@ -68,20 +68,22 @@ this implementation, then continue below.
 
 ## 3. Enable AI
 
-Find and edit the Subscription, **preserving existing environment entries**:
+Find the Subscription:
 
 ```bash
 SUB=$(oc get subscriptions -n "$NS" -o jsonpath='{.items[?(@.spec.name=="krkn-operator")].metadata.name}')
 oc edit subscription "$SUB" -n "$NS"
 ```
 
-Add under `spec`:
+Add or update `KRKNAI_ENABLED` at **`spec.config.env`**, preserving existing
+environment entries and other `spec` fields. The nesting must be:
 
 ```yaml
-config:
-  env:
-    - name: KRKNAI_ENABLED
-      value: "true"
+spec:
+  config:
+    env:
+      - name: KRKNAI_ENABLED
+        value: "true"
 ```
 
 Choose storage settings in the same `env` list **before first enabling**:
@@ -96,6 +98,26 @@ Claims must be writable by the service's SCC-admitted UID/groups. Changing a cla
 or StorageClass does not migrate artifacts; back up and migrate explicitly.
 For private AI images, set `KRKNAI_IMAGE_PULL_SECRETS` to a JSON list such as
 `[{"name":"registry-pull-secret"}]`.
+
+Alternatively, after choosing storage settings, enable AI without manually
+editing YAML. This preserves other environment entries and Subscription fields:
+
+```bash
+oc get subscription "$SUB" -n "$NS" -o json |
+  jq '.spec.config.env = (
+    [(.spec.config.env // [])[] | select(.name != "KRKNAI_ENABLED")] +
+    [{"name": "KRKNAI_ENABLED", "value": "true"}]
+  )' |
+  oc replace -f -
+```
+
+The fetched resource version protects against concurrent edits; on a conflict,
+rerun the whole pipeline. Confirm the saved Subscription returns `true`:
+
+```bash
+oc get subscription "$SUB" -n "$NS" \
+  -o jsonpath='{.spec.config.env[?(@.name=="KRKNAI_ENABLED")].value}{"\n"}'
+```
 
 Wait for OLM to apply the setting and roll out both Deployments:
 

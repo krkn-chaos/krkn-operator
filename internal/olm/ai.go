@@ -30,14 +30,14 @@ import (
 
 const (
 	AIServiceName                    = "krkn-operator-ai-service"
-	AIServiceTokenSecretName         = "krkn-operator-ai-service-token"
+	AIServiceTokenSecretName         = "krkn-operator-ai-service-token" // #nosec G101 -- Kubernetes Secret name, not a credential; newAITokenSecret generates the token with crypto/rand.
 	AIOrchestratorServiceAccountName = "krkn-operator-krkn-ai-orchestrator"
 	AIServiceURL                     = "http://krkn-operator-ai-service:8080"
 	aiServiceAccountName             = AIServiceName
 	aiOrchestratorRoleName           = AIOrchestratorServiceAccountName
 	aiOrchestratorRoleBindingName    = AIOrchestratorServiceAccountName
 	aiTokenKey                       = "token"
-	aiTokenEnv                       = "KRKNAI_SERVICE_TOKEN"
+	aiTokenEnv                       = "KRKNAI_SERVICE_TOKEN" // #nosec G101 -- Environment variable name, not a credential; its value comes from a SecretKeyRef.
 	aiServiceContainerName           = "ai-service"
 	aiStorageVolumeName              = "artifacts"
 	aiArtifactsMountPath             = "/var/lib/krkn-ai"

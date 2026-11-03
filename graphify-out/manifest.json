@@ -192,8 +192,8 @@
     "semantic_hash": "a9b893d7d549a6905bb0e7ea7a49276f"
   },
   "hack/olm/render-bundle.sh": {
-    "mtime": 1793703964.9731724,
-    "seen": 1793705521.5005932,
+    "mtime": 1793710871.3730187,
+    "seen": 1793713202.2736712,
     "ast_hash": "1ad15ff8ea7a867e6e76d4143d47d8a7",
     "semantic_hash": ""
   },
@@ -1674,8 +1674,8 @@
     "semantic_hash": "d14aa35b7b450101bb57efa1b97325c6"
   },
   "scripts/setup-ocm-and-operator.sh": {
-    "mtime": 1788172358.2720964,
-    "seen": 1793705521.5008764,
+    "mtime": 1793710871.3731058,
+    "seen": 1793713202.2871747,
     "ast_hash": "7addc8c00b69e82e2977fe7ee24f6a3c",
     "semantic_hash": "7addc8c00b69e82e2977fe7ee24f6a3c"
   },
@@ -1812,14 +1812,14 @@
     "semantic_hash": ""
   },
   ".github/workflows/release-chart.yml": {
-    "mtime": 1793706836.7438247,
-    "seen": 1793707176.4095576,
+    "mtime": 1793710871.3716192,
+    "seen": 1793713202.268872,
     "ast_hash": "71b10d4061e9d2c57f8c24d563a0c2e9",
     "semantic_hash": ""
   },
   ".github/workflows/release.yml": {
-    "mtime": 1793706661.857862,
-    "seen": 1793707176.4095592,
+    "mtime": 1793710871.3723888,
+    "seen": 1793713202.2688766,
     "ast_hash": "687a8762db59bd9a239555297d95362f",
     "semantic_hash": ""
   },
@@ -1890,9 +1890,9 @@
     "semantic_hash": ""
   },
   "README.md": {
-    "mtime": 1793704030.0442913,
-    "seen": 1793705521.5008912,
-    "ast_hash": "d625635e56c38e436f739aa2db54c27f",
+    "mtime": 1793713193.7622435,
+    "seen": 1793713202.2877421,
+    "ast_hash": "eb5d9d578a9e5181de8649c39e931631",
     "semantic_hash": ""
   },
   "ROADMAP.md": {
@@ -2106,8 +2106,8 @@
     "semantic_hash": ""
   },
   "charts/krkn-operator/values.yaml": {
-    "mtime": 1793264016.2455533,
-    "seen": 1793705521.5005288,
+    "mtime": 1793710871.3726847,
+    "seen": 1793713202.2709394,
     "ast_hash": "46e97343a069b02460f8542266c47540",
     "semantic_hash": ""
   },
@@ -2196,8 +2196,8 @@
     "semantic_hash": ""
   },
   "config/default/kustomization.yaml": {
-    "mtime": 1788172358.2602534,
-    "seen": 1793705521.5005524,
+    "mtime": 1793710871.3728127,
+    "seen": 1793713202.2719705,
     "ast_hash": "be4dd70ebe3c7b92b4dc3ed91d0b4664",
     "semantic_hash": ""
   },
@@ -2214,14 +2214,14 @@
     "semantic_hash": ""
   },
   "config/manager/kustomization.yaml": {
-    "mtime": 1788172358.2602534,
-    "seen": 1793705521.5005555,
+    "mtime": 1793710871.3728688,
+    "seen": 1793713202.2720764,
     "ast_hash": "a5bd9ecf2bad87a2f4d2fbba067e9ef0",
     "semantic_hash": ""
   },
   "config/manager/manager.yaml": {
-    "mtime": 1788172358.2603707,
-    "seen": 1793705521.5005567,
+    "mtime": 1793710871.372924,
+    "seen": 1793713202.2720795,
     "ast_hash": "0c117fafee01f2de0b20ce4891efaf9a",
     "semantic_hash": ""
   },
@@ -2592,9 +2592,9 @@
     "semantic_hash": ""
   },
   "internal/olm/ai.go": {
-    "mtime": 1793705094.0645394,
-    "seen": 1793705521.5007727,
-    "ast_hash": "f1acd8a38e59286debf3cb4db2176866",
+    "mtime": 1793713125.398989,
+    "seen": 1793713202.2823548,
+    "ast_hash": "524cc7dcd120aaef2e80569d402a977b",
     "semantic_hash": ""
   },
   "internal/olm/ai_test.go": {
@@ -2610,9 +2610,9 @@
     "semantic_hash": ""
   },
   "docs/olm-openshift-krkn-ai.md": {
-    "mtime": 1793706836.7446113,
-    "seen": 1793707176.4178247,
-    "ast_hash": "894a29d3f51d3c887719f94bdf2de59f",
+    "mtime": 1793712351.2805018,
+    "seen": 1793713202.2883308,
+    "ast_hash": "166b8e2b93019526117248582af71f2e",
     "semantic_hash": ""
   },
   "hack/olm/testdata/ai-releases.json": {
