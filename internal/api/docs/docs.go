@@ -2053,6 +2053,146 @@ const docTemplate = `{
                 }
             }
         },
+        "/scenarios/run/{runName}/rollback/{jobID}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "GET checks the pinned workspace for Krkn rollback files. POST starts a rollback run only when files are available.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "scenarios"
+                ],
+                "summary": "Inspect or execute rollback for a scenario attempt",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Scenario run name",
+                        "name": "runName",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Original attempt ID",
+                        "name": "jobID",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.RollbackAvailability"
+                        }
+                    },
+                    "202": {
+                        "description": "Accepted",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.RollbackAvailability"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "GET checks the pinned workspace for Krkn rollback files. POST starts a rollback run only when files are available.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "scenarios"
+                ],
+                "summary": "Inspect or execute rollback for a scenario attempt",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Scenario run name",
+                        "name": "runName",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Original attempt ID",
+                        "name": "jobID",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.RollbackAvailability"
+                        }
+                    },
+                    "202": {
+                        "description": "Accepted",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.RollbackAvailability"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/scenarios/run/{scenarioRunName}": {
             "get": {
                 "security": [
@@ -3306,6 +3446,236 @@ const docTemplate = `{
                     }
                 }
             }
+        },
+        "/workspaces": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "workspaces"
+                ],
+                "summary": "List platform workspaces visible to the caller",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/workspaces/available": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "workspaces"
+                ],
+                "summary": "List platform workspaces visible to the caller",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/workspaces/pvcs/available": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns Bound Filesystem ReadWriteMany PVCs in the operator namespace. Admin only.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "workspaces"
+                ],
+                "summary": "List PVCs eligible for workspace publication",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/workspaces/{name}": {
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "workspaces"
+                ],
+                "summary": "Publish an existing RWX PVC as a named workspace",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Workspace name",
+                        "name": "name",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Workspace definition",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.workspacePublishRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.workspaceInfo"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "workspaces"
+                ],
+                "summary": "Unpublish a workspace without deleting its PVC",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Workspace name",
+                        "name": "name",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    }
+                }
+            }
         }
     },
     "definitions": {
@@ -3355,9 +3725,11 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "component": {
+                    "description": "Component is the unique feature name within this manifest.",
                     "type": "string"
                 },
                 "description": {
+                    "description": "Description explains the feature exposed by the component.",
                     "type": "string"
                 }
             }
@@ -3366,12 +3738,14 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "components": {
+                    "description": "Components lists the named features exposed by this build.",
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/github_com_krkn-chaos_krkn-operator_api_v1alpha1.ComponentDescription"
                     }
                 },
                 "version": {
+                    "description": "Version is the exact Git tag embedded in the component build.",
                     "type": "string"
                 }
             }
@@ -3414,6 +3788,10 @@ const docTemplate = `{
                     "description": "ResiliencyWeight controls this node's contribution to the resiliency score.\n+optional\n+kubebuilder:validation:Minimum=0\n+kubebuilder:validation:ExclusiveMinimum=true",
                     "type": "number"
                 },
+                "rollbackEnabled": {
+                    "description": "RollbackEnabled persists this node's rollback files in its workspace.\n+optional",
+                    "type": "boolean"
+                },
                 "scenario": {
                     "description": "Scenario identifies the scenario and registry to resolve for this node.\nMetadata-only nodes (whose IDs start with _) may omit this field.\n+optional",
                     "allOf": [
@@ -3428,6 +3806,14 @@ const docTemplate = `{
                     "additionalProperties": {
                         "type": "string"
                     }
+                },
+                "workspace": {
+                    "description": "Workspace selects a published PVC for this node's scenario runs.\n+optional",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_krkn-chaos_krkn-operator_api_v1alpha1.WorkspaceReference"
+                        }
+                    ]
                 }
             }
         },
@@ -3444,6 +3830,27 @@ const docTemplate = `{
                 },
                 "registryName": {
                     "description": "RegistryName identifies the saved private registry when Private is true.",
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_krkn-chaos_krkn-operator_api_v1alpha1.WorkspaceReference": {
+            "type": "object",
+            "properties": {
+                "claimName": {
+                    "description": "ClaimName is the PVC name in the operator namespace.\n+kubebuilder:validation:Required",
+                    "type": "string"
+                },
+                "claimUid": {
+                    "description": "ClaimUID prevents a recreated PVC with the same name from replacing the data.",
+                    "type": "string"
+                },
+                "name": {
+                    "description": "Name is the platform workspace name.",
+                    "type": "string"
+                },
+                "workspaceUid": {
+                    "description": "WorkspaceUID pins the run to this workspace CR instance.",
                     "type": "string"
                 }
             }
@@ -5156,6 +5563,26 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_api.RollbackAvailability": {
+            "type": "object",
+            "properties": {
+                "canExecute": {
+                    "type": "boolean"
+                },
+                "jobId": {
+                    "type": "string"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "rollbackRunName": {
+                    "type": "string"
+                },
+                "state": {
+                    "type": "string"
+                }
+            }
+        },
         "internal_api.ScenarioDetailResponse": {
             "type": "object",
             "properties": {
@@ -5233,6 +5660,9 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/internal_api.ClusterResiliencyScoreResponse"
                     }
+                },
+                "rollbackEnabled": {
+                    "type": "boolean"
                 },
                 "runningJobs": {
                     "description": "RunningJobs is the number of currently running jobs",
@@ -5339,6 +5769,10 @@ const docTemplate = `{
                     "description": "ResiliencyScoreEnabled enables resiliency score calculation for this scenario run.\nWhen true, RESILIENCY_SCORE=true is set in scenario pods and the controller\ncalculates scores from pod logs upon completion.",
                     "type": "boolean"
                 },
+                "rollbackEnabled": {
+                    "description": "RollbackEnabled persists rollback files in the selected workspace.",
+                    "type": "boolean"
+                },
                 "scenario": {
                     "description": "Scenario identifies the scenario and registry to resolve. The operator\nresolves the executable image through krknctl; callers cannot provide one.",
                     "allOf": [
@@ -5368,6 +5802,14 @@ const docTemplate = `{
                 "targetRequestId": {
                     "description": "TargetRequestID is the UUID of the KrknTargetRequest (required)",
                     "type": "string"
+                },
+                "workspace": {
+                    "description": "Workspace names a published PVC. The server resolves and pins its UID.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_krkn-chaos_krkn-operator_api_v1alpha1.WorkspaceReference"
+                        }
+                    ]
                 }
             }
         },
@@ -5506,6 +5948,55 @@ const docTemplate = `{
                 },
                 "groups": {
                     "description": "Groups and AvailableToAll must be sent together to change visibility. When omitted, the current visibility is preserved.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "internal_api.workspaceInfo": {
+            "type": "object",
+            "properties": {
+                "available": {
+                    "type": "boolean"
+                },
+                "availableToAll": {
+                    "type": "boolean"
+                },
+                "claimName": {
+                    "type": "string"
+                },
+                "displayName": {
+                    "type": "string"
+                },
+                "groups": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "name": {
+                    "type": "string"
+                },
+                "reason": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_api.workspacePublishRequest": {
+            "type": "object",
+            "properties": {
+                "availableToAll": {
+                    "type": "boolean"
+                },
+                "claimName": {
+                    "type": "string"
+                },
+                "displayName": {
+                    "type": "string"
+                },
+                "groups": {
                     "type": "array",
                     "items": {
                         "type": "string"

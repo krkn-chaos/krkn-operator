@@ -345,6 +345,12 @@ func main() {
 		setupLog.Error(err, "unable to create controller", "controller", "KrknScenarioRun")
 		os.Exit(1)
 	}
+	if err = (&controller.KrknWorkspaceReconciler{
+		Client: mgr.GetClient(), Namespace: krknNamespace,
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "KrknWorkspace")
+		os.Exit(1)
+	}
 
 	if err = (&controller.KrknGraphRunReconciler{
 		Client:    mgr.GetClient(),

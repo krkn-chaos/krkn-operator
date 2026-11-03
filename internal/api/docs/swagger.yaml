@@ -42,17 +42,21 @@ definitions:
   github_com_krkn-chaos_krkn-operator_api_v1alpha1.ComponentDescription:
     properties:
       component:
+        description: Component is the unique feature name within this manifest.
         type: string
       description:
+        description: Description explains the feature exposed by the component.
         type: string
     type: object
   github_com_krkn-chaos_krkn-operator_api_v1alpha1.ComponentManifest:
     properties:
       components:
+        description: Components lists the named features exposed by this build.
         items:
           $ref: '#/definitions/github_com_krkn-chaos_krkn-operator_api_v1alpha1.ComponentDescription'
         type: array
       version:
+        description: Version is the exact Git tag embedded in the component build.
         type: string
     type: object
   github_com_krkn-chaos_krkn-operator_api_v1alpha1.GraphScenarioNode:
@@ -104,6 +108,11 @@ definitions:
           +kubebuilder:validation:Minimum=0
           +kubebuilder:validation:ExclusiveMinimum=true
         type: number
+      rollbackEnabled:
+        description: |-
+          RollbackEnabled persists this node's rollback files in its workspace.
+          +optional
+        type: boolean
       scenario:
         allOf:
         - $ref: '#/definitions/github_com_krkn-chaos_krkn-operator_api_v1alpha1.ScenarioReference'
@@ -118,6 +127,12 @@ definitions:
           Volumes is a map of volume mounts for the scenario
           +optional
         type: object
+      workspace:
+        allOf:
+        - $ref: '#/definitions/github_com_krkn-chaos_krkn-operator_api_v1alpha1.WorkspaceReference'
+        description: |-
+          Workspace selects a published PVC for this node's scenario runs.
+          +optional
     type: object
   github_com_krkn-chaos_krkn-operator_api_v1alpha1.ScenarioReference:
     properties:
@@ -132,6 +147,24 @@ definitions:
       registryName:
         description: RegistryName identifies the saved private registry when Private
           is true.
+        type: string
+    type: object
+  github_com_krkn-chaos_krkn-operator_api_v1alpha1.WorkspaceReference:
+    properties:
+      claimName:
+        description: |-
+          ClaimName is the PVC name in the operator namespace.
+          +kubebuilder:validation:Required
+        type: string
+      claimUid:
+        description: ClaimUID prevents a recreated PVC with the same name from replacing
+          the data.
+        type: string
+      name:
+        description: Name is the platform workspace name.
+        type: string
+      workspaceUid:
+        description: WorkspaceUID pins the run to this workspace CR instance.
         type: string
     type: object
   github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.AffectedPods:
@@ -1447,6 +1480,19 @@ definitions:
       status:
         type: string
     type: object
+  internal_api.RollbackAvailability:
+    properties:
+      canExecute:
+        type: boolean
+      jobId:
+        type: string
+      message:
+        type: string
+      rollbackRunName:
+        type: string
+      state:
+        type: string
+    type: object
   internal_api.ScenarioDetailResponse:
     properties:
       description:
@@ -1507,6 +1553,8 @@ definitions:
         items:
           $ref: '#/definitions/internal_api.ClusterResiliencyScoreResponse'
         type: array
+      rollbackEnabled:
+        type: boolean
       runningJobs:
         description: RunningJobs is the number of currently running jobs
         type: integer
@@ -1601,6 +1649,9 @@ definitions:
           When true, RESILIENCY_SCORE=true is set in scenario pods and the controller
           calculates scores from pod logs upon completion.
         type: boolean
+      rollbackEnabled:
+        description: RollbackEnabled persists rollback files in the selected workspace.
+        type: boolean
       scenario:
         allOf:
         - $ref: '#/definitions/github_com_krkn-chaos_krkn-operator_api_v1alpha1.ScenarioReference'
@@ -1631,6 +1682,11 @@ definitions:
       targetRequestId:
         description: TargetRequestID is the UUID of the KrknTargetRequest (required)
         type: string
+      workspace:
+        allOf:
+        - $ref: '#/definitions/github_com_krkn-chaos_krkn-operator_api_v1alpha1.WorkspaceReference'
+        description: Workspace names a published PVC. The server resolves and pins
+          its UID.
     type: object
   internal_api.ScenarioTag:
     properties:
@@ -1722,6 +1778,38 @@ definitions:
       groups:
         description: Groups and AvailableToAll must be sent together to change visibility.
           When omitted, the current visibility is preserved.
+        items:
+          type: string
+        type: array
+    type: object
+  internal_api.workspaceInfo:
+    properties:
+      available:
+        type: boolean
+      availableToAll:
+        type: boolean
+      claimName:
+        type: string
+      displayName:
+        type: string
+      groups:
+        items:
+          type: string
+        type: array
+      name:
+        type: string
+      reason:
+        type: string
+    type: object
+  internal_api.workspacePublishRequest:
+    properties:
+      availableToAll:
+        type: boolean
+      claimName:
+        type: string
+      displayName:
+        type: string
+      groups:
         items:
           type: string
         type: array
@@ -3092,6 +3180,99 @@ paths:
       summary: Download a scenario run report
       tags:
       - scenario-runs
+  /scenarios/run/{runName}/rollback/{jobID}:
+    get:
+      description: GET checks the pinned workspace for Krkn rollback files. POST starts
+        a rollback run only when files are available.
+      parameters:
+      - description: Scenario run name
+        in: path
+        name: runName
+        required: true
+        type: string
+      - description: Original attempt ID
+        in: path
+        name: jobID
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_api.RollbackAvailability'
+        "202":
+          description: Accepted
+          schema:
+            $ref: '#/definitions/internal_api.RollbackAvailability'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Inspect or execute rollback for a scenario attempt
+      tags:
+      - scenarios
+    post:
+      description: GET checks the pinned workspace for Krkn rollback files. POST starts
+        a rollback run only when files are available.
+      parameters:
+      - description: Scenario run name
+        in: path
+        name: runName
+        required: true
+        type: string
+      - description: Original attempt ID
+        in: path
+        name: jobID
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_api.RollbackAvailability'
+        "202":
+          description: Accepted
+          schema:
+            $ref: '#/definitions/internal_api.RollbackAvailability'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Inspect or execute rollback for a scenario attempt
+      tags:
+      - scenarios
   /scenarios/run/{scenarioRunName}:
     get:
       description: Get current execution status and metrics for a running or completed
@@ -4084,6 +4265,152 @@ paths:
       summary: List available workflow templates
       tags:
       - workflows
+  /workspaces:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: List platform workspaces visible to the caller
+      tags:
+      - workspaces
+  /workspaces/{name}:
+    delete:
+      parameters:
+      - description: Workspace name
+        in: path
+        name: name
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Unpublish a workspace without deleting its PVC
+      tags:
+      - workspaces
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: Workspace name
+        in: path
+        name: name
+        required: true
+        type: string
+      - description: Workspace definition
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_api.workspacePublishRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_api.workspaceInfo'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Publish an existing RWX PVC as a named workspace
+      tags:
+      - workspaces
+  /workspaces/available:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: List platform workspaces visible to the caller
+      tags:
+      - workspaces
+  /workspaces/pvcs/available:
+    get:
+      description: Returns Bound Filesystem ReadWriteMany PVCs in the operator namespace.
+        Admin only.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: List PVCs eligible for workspace publication
+      tags:
+      - workspaces
 securityDefinitions:
   BearerAuth:
     description: 'JWT token obtained from /api/v1/auth/login or /api/v2/auth/login.

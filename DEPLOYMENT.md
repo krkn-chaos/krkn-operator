@@ -265,6 +265,11 @@ make deploy-openshift NAMESPACE=krkn-operator-system
 make install
 ```
 
+This installs the `KrknWorkspace` CRD along with the other Krkn CRDs. Helm and
+OLM bundles include the same CRD. An environment administrator must provision
+the backing RWX PVC separately; see [Scenario workspaces](docs/scenario-workspaces.md)
+for the publication API and storage requirements.
+
 ## Complete Workflow Examples
 
 ### Development (Local)

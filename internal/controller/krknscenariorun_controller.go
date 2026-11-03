@@ -48,6 +48,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/krkn-chaos/krkn-operator/pkg/cloudcreds"
+	"github.com/krkn-chaos/krkn-operator/pkg/workspace"
 	krknctlconfig "github.com/krkn-chaos/krknctl/pkg/config"
 	krknctlprovider "github.com/krkn-chaos/krknctl/pkg/provider"
 	krknctlmodels "github.com/krkn-chaos/krknctl/pkg/provider/models"
@@ -64,6 +65,18 @@ type KrknScenarioRunReconciler struct {
 	// reconciliation uses krknctl's verifier when it is nil.
 	signatureVerifier imageSignatureVerifier
 	imageResolver     imageResolver
+}
+
+// Check storage before starting a chaos scenario. Some RWX backends allow the
+// PVC root to be written but create kubelet subPath directories with ownership
+// that prevents UID 1001 from writing inside them.
+const rollbackWorkspaceWriteCheck = `if ! (umask 077; probe="$ROLLBACK_VERSIONS_DIRECTORY/.krkn-workspace-write-probe"; : > "$probe" && rm "$probe"); then echo "rollback workspace is not writable: $ROLLBACK_VERSIONS_DIRECTORY" >&2; exit 1; fi; `
+
+// Public Krkn Hub images render config.yaml from their image template. Refuse
+// rollback-enabled execution if that template does not consume the environment
+// variable, since Krkn otherwise falls back to container-local storage.
+func rollbackConfigTemplateCheck(templatePath string) string {
+	return fmt.Sprintf(`if ! grep -E '^[[:space:]]*rollback_versions_directory:' %q | grep -Eq '\$(\{ROLLBACK_VERSIONS_DIRECTORY\}|ROLLBACK_VERSIONS_DIRECTORY)'; then echo 'scenario image does not map ROLLBACK_VERSIONS_DIRECTORY into config.yaml' >&2; exit 1; fi; `, templatePath)
 }
 
 // +kubebuilder:rbac:groups=krkn.krkn-chaos.dev,resources=krknscenarioruns,verbs=get;list;watch;create;update;patch;delete
@@ -243,6 +256,9 @@ func (r *KrknScenarioRunReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 				}
 			}
 			clusterAPIURL := r.getClusterAPIURL(ctx, &scenarioRun, providerName, clusterName)
+			if scenarioRun.Spec.RollbackSource != nil {
+				clusterAPIURL = scenarioRun.Spec.RollbackSource.ClusterAPIURL
+			}
 			targets = append(targets, clusterTarget{
 				providerName:     providerName,
 				clusterName:      clusterName,
@@ -311,6 +327,10 @@ func (r *KrknScenarioRunReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 					"scenarioRun", scenarioRun.Name,
 					"image", invalidSignatureErr.Image)
 			}
+			if errors.Is(outcome.err, workspace.ErrUnavailable) || errors.Is(outcome.err, workspace.ErrReplaced) {
+				failureReason = "WorkspaceUnavailable"
+				message = outcome.err.Error()
+			}
 			logger.Error(outcome.err, "failed to create cluster job",
 				"provider", outcome.target.providerName,
 				"cluster", outcome.target.clusterName,
@@ -328,6 +348,7 @@ func (r *KrknScenarioRunReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 				CompletionTime: &now,
 			}
 			if outcome.target.existingJobIndex >= 0 {
+				failedJob.AttemptHistory = scenarioRun.Status.ClusterJobs[outcome.target.existingJobIndex].AttemptHistory
 				scenarioRun.Status.ClusterJobs[outcome.target.existingJobIndex] = failedJob
 			} else {
 				scenarioRun.Status.ClusterJobs = append(scenarioRun.Status.ClusterJobs, failedJob)
@@ -475,6 +496,39 @@ func (r *KrknScenarioRunReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	return ctrl.Result{}, nil
 }
 
+// validateWorkspacePVC checks the pinned claim at each transition that could
+// start a scenario pod. A missing or replaced claim must never fall back to an
+// unmounted scenario execution.
+func (r *KrknScenarioRunReconciler) validateWorkspacePVC(ctx context.Context, ref *krknv1alpha1.WorkspaceReference) error {
+	if ref == nil {
+		return nil
+	}
+	if ref.Name == "" || ref.WorkspaceUID == "" || ref.ClaimName == "" || ref.ClaimUID == "" {
+		return fmt.Errorf("%w: workspace or PVC identity was not recorded", workspace.ErrUnavailable)
+	}
+	entry := &krknv1alpha1.KrknWorkspace{}
+	if err := r.Get(ctx, types.NamespacedName{Namespace: r.Namespace, Name: ref.Name}, entry); err != nil {
+		if apierrors.IsNotFound(err) {
+			return fmt.Errorf("%w: workspace %q is missing", workspace.ErrUnavailable, ref.Name)
+		}
+		return fmt.Errorf("load workspace %q: %w", ref.Name, err)
+	}
+	if entry.UID != types.UID(ref.WorkspaceUID) || entry.Spec.ClaimName != ref.ClaimName || entry.Spec.ClaimUID != ref.ClaimUID {
+		return fmt.Errorf("%w: workspace %q binding changed", workspace.ErrReplaced, ref.Name)
+	}
+	pvc := &corev1.PersistentVolumeClaim{}
+	if err := r.Get(ctx, types.NamespacedName{Namespace: r.Namespace, Name: ref.ClaimName}, pvc); err != nil {
+		if apierrors.IsNotFound(err) {
+			return fmt.Errorf("%w: PVC %q is missing", workspace.ErrUnavailable, ref.ClaimName)
+		}
+		return fmt.Errorf("load workspace PVC %q: %w", ref.ClaimName, err)
+	}
+	if err := workspace.ValidatePVC(pvc, types.UID(ref.ClaimUID)); err != nil {
+		return fmt.Errorf("workspace PVC %q: %w", ref.ClaimName, err)
+	}
+	return nil
+}
+
 // prepareJobResources prepares all resources needed for creating a scenario pod.
 // This includes ConfigMaps, Secrets, Volumes, EnvVars, and determining the container image.
 // Returns preparedJobResources or an error if preparation fails.
@@ -489,6 +543,70 @@ func (r *KrknScenarioRunReconciler) prepareJobResources(
 
 	// Generate unique job ID
 	jobID := uuid.New().String()
+	if scenarioRun.Spec.RollbackEnabled && scenarioRun.Spec.Workspace == nil {
+		return nil, fmt.Errorf("rollback requires a workspace")
+	}
+	if scenarioRun.Spec.RollbackSource != nil && scenarioRun.Spec.Workspace == nil {
+		return nil, fmt.Errorf("rollback source requires a workspace")
+	}
+	var workspaceSubPath string
+	var originalKubeconfig string
+	if ref := scenarioRun.Spec.Workspace; ref != nil {
+		if err := r.validateWorkspacePVC(ctx, ref); err != nil {
+			return nil, err
+		}
+		var err error
+		if source := scenarioRun.Spec.RollbackSource; source != nil {
+			original := &krknv1alpha1.KrknScenarioRun{}
+			if err := r.Get(ctx, types.NamespacedName{Namespace: r.Namespace, Name: source.RunName}, original); err != nil {
+				return nil, fmt.Errorf("load rollback source run: %w", err)
+			}
+			if string(original.UID) != source.RunUID || !original.Spec.RollbackEnabled || original.Spec.Workspace == nil || *original.Spec.Workspace != *ref {
+				return nil, fmt.Errorf("rollback source workspace identity changed")
+			}
+			found := false
+			for _, targetJob := range original.Status.ClusterJobs {
+				if targetJob.ProviderName != providerName || targetJob.ClusterName != clusterName {
+					continue
+				}
+				if targetJob.ClusterAPIURL == "" || targetJob.ClusterAPIURL != source.ClusterAPIURL {
+					return nil, fmt.Errorf("rollback source target identity changed")
+				}
+				if targetJob.JobID == source.JobID {
+					found = true
+				}
+				for _, attempt := range targetJob.AttemptHistory {
+					if attempt.JobID == source.JobID {
+						found = true
+					}
+				}
+			}
+			if !found || scenarioRun.Spec.Scenario.Name != "rollback" {
+				return nil, fmt.Errorf("rollback source attempt is invalid")
+			}
+			originalConfigMap := &corev1.ConfigMap{}
+			configMapName := fmt.Sprintf("krkn-job-%s-kubeconfig", source.JobID)
+			if err := r.Get(ctx, types.NamespacedName{Namespace: r.Namespace, Name: configMapName}, originalConfigMap); err != nil {
+				return nil, fmt.Errorf("load original attempt kubeconfig: %w", err)
+			}
+			owned := false
+			for _, owner := range originalConfigMap.OwnerReferences {
+				if owner.UID == original.UID && owner.Name == original.Name && owner.Kind == "KrknScenarioRun" {
+					owned = true
+				}
+			}
+			if !owned || originalConfigMap.Labels["krkn-job-id"] != source.JobID || originalConfigMap.Labels["krkn-cluster-name"] != clusterName || originalConfigMap.Data["config"] == "" {
+				return nil, fmt.Errorf("original attempt kubeconfig identity is invalid")
+			}
+			originalKubeconfig = originalConfigMap.Data["config"]
+			workspaceSubPath, err = workspace.SubPath(original.UID, providerName, clusterName, source.JobID)
+		} else {
+			workspaceSubPath, err = workspace.SubPath(scenarioRun.UID, providerName, clusterName, jobID)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("prepare workspace path: %w", err)
+		}
+	}
 
 	// Load krknctl config for defaults
 	krknctlCfg, err := krknctlconfig.LoadConfig()
@@ -511,16 +629,20 @@ func (r *KrknScenarioRunReconciler) prepareJobResources(
 		"cluster", clusterName,
 		"targetRequestId", scenarioRun.Spec.TargetRequestID)
 
-	// Get kubeconfig from managed-clusters Secret (works for ALL providers)
-	kubeconfigBase64, err := r.getKubeconfigFromProvider(ctx, scenarioRun.Spec.TargetRequestID, providerName, clusterName)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get kubeconfig from provider %s: %w", providerName, err)
-	}
-
-	// Decode kubeconfig for ConfigMap
-	kubeconfigDecoded, err := base64.StdEncoding.DecodeString(kubeconfigBase64)
-	if err != nil {
-		return nil, fmt.Errorf("failed to decode kubeconfig: %w", err)
+	var kubeconfigDecoded []byte
+	if originalKubeconfig != "" {
+		kubeconfigDecoded = []byte(originalKubeconfig)
+	} else {
+		// Get kubeconfig from managed-clusters Secret (works for ALL providers)
+		kubeconfigBase64, err := r.getKubeconfigFromProvider(ctx, scenarioRun.Spec.TargetRequestID, providerName, clusterName)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get kubeconfig from provider %s: %w", providerName, err)
+		}
+		// Decode kubeconfig for ConfigMap
+		kubeconfigDecoded, err = base64.StdEncoding.DecodeString(kubeconfigBase64)
+		if err != nil {
+			return nil, fmt.Errorf("failed to decode kubeconfig: %w", err)
+		}
 	}
 
 	if clusterAPIURL == "" {
@@ -725,6 +847,10 @@ func (r *KrknScenarioRunReconciler) prepareJobResources(
 	// Skip first ConfigMap (kubeconfig), file ConfigMaps start from index 1
 	fileConfigMaps := createdConfigMaps[1:]
 	for i, file := range scenarioRun.Spec.Files {
+		if workspaceSubPath != "" && workspace.ConflictsWithMount(file.MountPath) {
+			cleanup()
+			return nil, fmt.Errorf("file mount %q overlaps workspace mount", file.MountPath)
+		}
 		volumeName := fmt.Sprintf("file-%d", i)
 
 		volumes = append(volumes, corev1.Volume{
@@ -744,6 +870,17 @@ func (r *KrknScenarioRunReconciler) prepareJobResources(
 			SubPath:   file.Name,
 		})
 	}
+	if workspaceSubPath != "" {
+		volumes = append(volumes, corev1.Volume{
+			Name: "workspace",
+			VolumeSource: corev1.VolumeSource{PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+				ClaimName: scenarioRun.Spec.Workspace.ClaimName,
+			}},
+		})
+		volumeMounts = append(volumeMounts, corev1.VolumeMount{
+			Name: "workspace", MountPath: workspace.MountPath, SubPath: workspaceSubPath,
+		})
+	}
 
 	// Add writable tmp volume
 	volumes = append(volumes, corev1.Volume{
@@ -761,10 +898,19 @@ func (r *KrknScenarioRunReconciler) prepareJobResources(
 	// Convert environment map to EnvVar slice
 	envVars := make([]corev1.EnvVar, 0, len(scenarioRun.Spec.Environment))
 	for key, value := range scenarioRun.Spec.Environment {
+		if scenarioRun.Spec.RollbackEnabled && (key == "ROLLBACK_VERSIONS_DIRECTORY" || key == "UUID") {
+			continue
+		}
 		envVars = append(envVars, corev1.EnvVar{
 			Name:  key,
 			Value: value,
 		})
+	}
+	if scenarioRun.Spec.RollbackEnabled {
+		envVars = append(envVars, corev1.EnvVar{
+			Name: "ROLLBACK_VERSIONS_DIRECTORY", Value: workspace.MountPath,
+		})
+		envVars = append(envVars, corev1.EnvVar{Name: "UUID", Value: jobID})
 	}
 
 	// Inject RESILIENCY_SCORE env var for standalone runs (not graph-run children).
@@ -896,6 +1042,17 @@ func (r *KrknScenarioRunReconciler) submitScenarioPod(
 	if ownerLabel := getOwnerLabel(scenarioRun); ownerLabel != "" {
 		podLabels["krkn.krkn-chaos.dev/owner-user"] = ownerLabel
 	}
+	scenarioCommand := "if [ -x /home/krkn/kraken/containers/setup-ssh.sh ]; then /home/krkn/kraken/containers/setup-ssh.sh || exit $?; fi; " +
+		"/home/krkn/run.sh; krkn_exit=$?; " +
+		"if [ -f /home/krkn/kraken/kraken.report.html ]; then echo '===KRKN_REPORT_HTML_START==='; base64 /home/krkn/kraken/kraken.report.html; echo '===KRKN_REPORT_HTML_END==='; fi; " +
+		"if [ -f /home/krkn/kraken/kraken.report.pdf ]; then echo '===KRKN_REPORT_PDF_START==='; base64 /home/krkn/kraken/kraken.report.pdf; echo '===KRKN_REPORT_PDF_END==='; fi; " +
+		"exit $krkn_exit"
+	if scenarioRun.Spec.RollbackEnabled {
+		scenarioCommand = rollbackWorkspaceWriteCheck + scenarioCommand
+		if scenarioRun.Spec.Scenario.Private != nil && !*scenarioRun.Spec.Scenario.Private {
+			scenarioCommand = rollbackConfigTemplateCheck("/home/krkn/kraken/config/config.yaml.template") + scenarioCommand
+		}
+	}
 
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
@@ -914,16 +1071,10 @@ func (r *KrknScenarioRunReconciler) submitScenarioPod(
 			},
 			Containers: []corev1.Container{
 				{
-					Name:    "scenario",
-					Image:   resources.containerImage,
-					Command: []string{"/bin/bash", "-c"},
-					Args: []string{
-						"if [ -x /home/krkn/kraken/containers/setup-ssh.sh ]; then /home/krkn/kraken/containers/setup-ssh.sh || exit $?; fi; " +
-							"/home/krkn/run.sh; krkn_exit=$?; " +
-							"if [ -f /home/krkn/kraken/kraken.report.html ]; then echo '===KRKN_REPORT_HTML_START==='; base64 /home/krkn/kraken/kraken.report.html; echo '===KRKN_REPORT_HTML_END==='; fi; " +
-							"if [ -f /home/krkn/kraken/kraken.report.pdf ]; then echo '===KRKN_REPORT_PDF_START==='; base64 /home/krkn/kraken/kraken.report.pdf; echo '===KRKN_REPORT_PDF_END==='; fi; " +
-							"exit $krkn_exit",
-					},
+					Name:            "scenario",
+					Image:           resources.containerImage,
+					Command:         []string{"/bin/bash", "-c"},
+					Args:            []string{scenarioCommand},
 					Env:             resources.envVars,
 					VolumeMounts:    resources.volumeMounts,
 					ImagePullPolicy: corev1.PullAlways,
@@ -932,10 +1083,15 @@ func (r *KrknScenarioRunReconciler) submitScenarioPod(
 			Volumes: resources.volumes,
 		},
 	}
-
 	if err := controllerutil.SetControllerReference(scenarioRun, pod, r.Scheme); err != nil {
 		r.cleanupPreparedResources(ctx, resources)
 		return "", fmt.Errorf("failed to set owner reference on pod: %w", err)
+	}
+	if ref := scenarioRun.Spec.Workspace; ref != nil {
+		if err := r.validateWorkspacePVC(ctx, ref); err != nil {
+			r.cleanupPreparedResources(ctx, resources)
+			return "", err
+		}
 	}
 
 	if err := r.Create(ctx, pod); err != nil {
@@ -1129,6 +1285,20 @@ func (r *KrknScenarioRunReconciler) updateClusterJobStatuses(
 		previousPhase := job.Phase
 		switch pod.Status.Phase {
 		case corev1.PodPending:
+			if err := r.validateWorkspacePVC(ctx, scenarioRun.Spec.Workspace); err != nil {
+				if !errors.Is(err, workspace.ErrUnavailable) && !errors.Is(err, workspace.ErrReplaced) {
+					return err
+				}
+				if deleteErr := r.Delete(ctx, &pod); deleteErr != nil && !apierrors.IsNotFound(deleteErr) {
+					return fmt.Errorf("delete pending pod after workspace loss: %w", deleteErr)
+				}
+				job.Phase = "Failed"
+				job.Message = err.Error()
+				job.FailureReason = "WorkspaceUnavailable"
+				job.RetryCount = job.MaxRetries
+				r.setCompletionTime(job)
+				continue
+			}
 			job.Phase = "Pending"
 			if previousPhase != "Pending" {
 				logger.Info("job phase transition",
@@ -1197,6 +1367,9 @@ func (r *KrknScenarioRunReconciler) updateClusterJobStatuses(
 				}
 
 				// Retry!
+				if job.JobID != "" {
+					job.AttemptHistory = append(job.AttemptHistory, krknv1alpha1.ScenarioAttemptStatus{JobID: job.JobID, ScenarioImage: job.ScenarioImage})
+				}
 				job.Phase = "Retrying"
 				job.RetryCount++
 				job.LastRetryTime = &now
@@ -1580,9 +1753,13 @@ func (r *KrknScenarioRunReconciler) statusEqual(old, new *krknv1alpha1.KrknScena
 // jobStatusEqual compares two ClusterJobStatus semantically
 func (r *KrknScenarioRunReconciler) jobStatusEqual(old, new *krknv1alpha1.ClusterJobStatus) bool {
 	// Compare scalar fields
-	if old.ClusterName != new.ClusterName ||
+	if old.ProviderName != new.ProviderName ||
+		old.ClusterName != new.ClusterName ||
+		old.ClusterAPIURL != new.ClusterAPIURL ||
 		old.JobID != new.JobID ||
 		old.PodName != new.PodName ||
+		old.ScenarioImage != new.ScenarioImage ||
+		!reflect.DeepEqual(old.AttemptHistory, new.AttemptHistory) ||
 		old.Phase != new.Phase ||
 		old.Message != new.Message ||
 		old.RetryCount != new.RetryCount ||

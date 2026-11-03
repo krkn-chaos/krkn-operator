@@ -86,6 +86,10 @@ const (
 	FilesAvailablePath = FilesPath + "/available"
 )
 
+// Published PVC workspace endpoints.
+const WorkspacesPath = APIBasePath + "/workspaces"
+const WorkspacePVCsPath = WorkspacesPath + "/pvcs/available"
+
 // Workflow management endpoints
 const (
 	WorkflowsPath          = APIBasePath + "/workflows"

@@ -181,6 +181,7 @@ func BuildUnifiedJobList(scenarioRuns []krknv1alpha1.KrknScenarioRun, graphRuns 
 		item := ScenarioRunListItem{
 			ScenarioRunName:        sr.Name,
 			ScenarioName:           sr.Spec.Scenario.Name,
+			RollbackEnabled:        sr.Spec.RollbackEnabled,
 			ScenarioImage:          scenarioRunImage(sr.Status.ClusterJobs),
 			Phase:                  sr.Status.Phase,
 			TotalTargets:           sr.Status.TotalTargets,
