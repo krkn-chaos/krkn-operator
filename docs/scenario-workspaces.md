@@ -126,18 +126,18 @@ a workspace; selecting a workspace without enabling rollback remains valid.
 The operator mounts the per-attempt workspace at `/var/lib/krkn/workspace` and
 sets `ROLLBACK_VERSIONS_DIRECTORY` to that exact path in the Krkn container,
 overriding any caller-provided value when rollback is enabled. Krkn Hub images
-must render this environment variable into `kraken.rollback_versions_directory`
-in their generated config. For public images, the operator checks the image's
-`config.yaml.template` before starting Krkn and fails the Pod if that mapping
-is absent. An image with the field missing would otherwise make Krkn fall back
-to container-local `/home/krkn/.krkn/rollback` even though the PVC is mounted.
-The published CPU Hog digest observed in the IBM test lacked this field and
-needs to be rebuilt and published from the updated Krkn Hub source. Private
-image authors remain responsible for honoring the environment variable.
-That image's base `config/config.yaml` contains an empty
-`rollback_versions_directory` field, but CPU Hog's `run.sh` executes Krkn with
-the generated `config/cpu_config.yaml`; the latter omitted the field in the
-published digest even when the Pod environment variable was populated.
+that implement rollback must render this environment variable into
+`kraken.rollback_versions_directory`
+in their generated config. For public images that contain
+`config.yaml.template`, the operator checks that mapping before starting Krkn
+and fails the Pod if it is absent. An image with no template can still run; it
+may not implement rollback and will not offer rollback unless it leaves files
+in the workspace. The IBM test found that the published CPU Hog image contains
+the template mapping, while `dummy-scenario` has only a static `config.yaml`
+with an empty rollback directory. Private image authors remain responsible for
+honoring the environment variable when they implement rollback. Without the
+mapping, Krkn can fall back to container-local
+`/home/krkn/.krkn/rollback` even though the PVC is mounted.
 The operator also sets `UUID` to the attempt JobID, overriding a caller value,
 so Krkn's rollback context can be identified later without guessing.
 When rollback is disabled, the operator does not override the image's default

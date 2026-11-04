@@ -230,16 +230,20 @@ func TestRollbackConfigTemplateCheck(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
 		template string
+		missing  bool
 		wantFail bool
 	}{
 		{name: "plain variable", template: "kraken:\n  rollback_versions_directory: $ROLLBACK_VERSIONS_DIRECTORY\n"},
 		{name: "braced variable", template: "kraken:\n  rollback_versions_directory: ${ROLLBACK_VERSIONS_DIRECTORY}\n"},
+		{name: "scenario without rollback template", missing: true},
 		{name: "missing mapping", template: "kraken:\n  chaos_scenarios: []\n", wantFail: true},
 		{name: "hardcoded path", template: "kraken:\n  rollback_versions_directory: /tmp/rollback\n", wantFail: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			templatePath := filepath.Join(t.TempDir(), "config.yaml.template")
-			require.NoError(t, os.WriteFile(templatePath, []byte(tc.template), 0o600))
+			if !tc.missing {
+				require.NoError(t, os.WriteFile(templatePath, []byte(tc.template), 0o600))
+			}
 			cmd := exec.CommandContext(t.Context(), "/bin/bash", "-c", rollbackConfigTemplateCheck(templatePath)+"echo SCENARIO_STARTED")
 			output, err := cmd.CombinedOutput()
 			if tc.wantFail {
