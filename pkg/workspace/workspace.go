@@ -71,8 +71,10 @@ func ValidatePVC(pvc *corev1.PersistentVolumeClaim, expectedUID types.UID) error
 	return fmt.Errorf("%w: claim %s does not request ReadWriteMany", ErrUnavailable, pvc.Name)
 }
 
-// SubPath assigns a unique directory to a run, target, and execution attempt.
-// Target names are hashed so user-provided names cannot escape the volume root.
+// SubPath assigns one directory directly under the PVC root to a run, target,
+// and execution attempt. A single level lets a setgid PVC root pass its group
+// to a directory created by kubelet. Target names are hashed so user-provided
+// names cannot escape the volume root.
 func SubPath(runUID types.UID, provider, cluster, attemptID string) (string, error) {
 	if runUID == "" || provider == "" || cluster == "" || attemptID == "" {
 		return "", errors.New("workspace identity is incomplete")
@@ -84,5 +86,5 @@ func SubPath(runUID types.UID, provider, cluster, attemptID string) (string, err
 		return "", fmt.Errorf("invalid attempt ID: %w", err)
 	}
 	checksum := sha256.Sum256([]byte(provider + "\x00" + cluster))
-	return path.Join("runs", string(runUID), hex.EncodeToString(checksum[:16]), attemptID), nil
+	return "run-" + string(runUID) + "-" + hex.EncodeToString(checksum[:16]) + "-" + attemptID, nil
 }

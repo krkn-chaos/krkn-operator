@@ -2,7 +2,8 @@
 
 The environment SRE supplies a PVC in the operator namespace. It must be
 `Bound`, use `Filesystem`, request `ReadWriteMany`, and allow scenario pods
-running as UID/GID `1001:1001` to read and write. The operator does not create,
+running as UID/GID `1001:1001` to read and write in newly created directories
+directly under the PVC root. The operator does not create,
 delete, or replace the claim. Storage provisioning and backend configuration
 belong to the environment; Krkn does not require a particular storage vendor,
 NFS implementation, or cluster. An administrator publishes the PVC as a
@@ -57,8 +58,9 @@ A standalone scenario request may include:
 Graph scenario nodes accept the same `workspace` field. The server checks
 visibility and saves the wrapper UID plus PVC name and UID on the run. Scenario
 pods mount their assigned
-subdirectory at `/var/lib/krkn/workspace`. The subdirectory is based on the
-ScenarioRun UID, target provider and cluster, and execution attempt ID. Each
+subdirectory at `/var/lib/krkn/workspace`. The subdirectory is one path
+component directly under the PVC root, based on the ScenarioRun UID, a hash of
+the target provider and cluster, and the execution attempt ID. Each
 retry therefore receives a different directory. The scenario container mounts
 only that directory through `subPath`; it does not mount the PVC root. The
 directory split prevents accidental path collisions; it is not a permission
@@ -72,12 +74,16 @@ by the scenario container.
 
 Writing to the PVC root is only a preliminary check. On each worker that may
 host scenario pods, verify that a container running as `1001:1001` can write
-inside a newly created per-run `subPath`. Kubernetes may create this directory
-before the container starts, and its owner or inherited ACL can differ from
-the PVC root. When rollback is enabled, the scenario Pod tests writing in its
+inside a newly created one-level `subPath`. Kubernetes may create this directory
+before the container starts, and its owner or inherited permissions can differ
+from the PVC root. On NFS storage where kubelet creates directories as a
+different UID, making the PVC root owned by group `1001` with mode `2775`
+can pass group `1001` to the new directory. Verify this on the actual backend;
+the PVC root's own write test does not prove inheritance. When rollback is
+enabled, the scenario Pod tests writing in its
 assigned workspace before starting Krkn and fails with
 `rollback workspace is not writable` if that test fails. The storage
-administrator must arrange permissions or default ACLs so new directories are
+administrator must arrange permissions so new directories are
 writable by `1001:1001` on every eligible worker.
 
 In the IBM OpenShift test environment, `krkn-operator-system/krkn-shared-file`
@@ -90,16 +96,13 @@ to `1001:1001` on the worker's NFS mount, a Pod running as `1001:1001` printed
 The later scenario test exposed a second storage requirement: kubelet-created
 `runs/...` directories on this share were owned by `99:99` with mode `0775`.
 The scenario container running as `1001:1001` could not write there. Changing
-the PVC root owner alone did not make new `subPath` directories writable. The
-IBM environment still needs suitable ownership inheritance or ACLs for those
-directories, and mount behavior must be checked on every eligible worker. A
-setgid parent (`1001:1001`, mode `2775`) made one newly created child writable
-(`99:1001`, mode `0775`), but that child did not retain setgid. The next nested
-child was `99:99` and unwritable by `1001:1001`. Setting setgid only on the PVC
-root or `runs/` is therefore insufficient for the nested run path. The SRE
-must provide permissions that propagate through every newly created level,
-such as a tested inheritable ACL. The operator does not create a preparatory
-container.
+the PVC root owner alone did not make nested `subPath` directories writable.
+An NFS test with a setgid parent (`1001:1001`, mode `2775`) produced one
+kubelet-created child with `99:1001` and mode `0775`; a Pod running as `1001`
+wrote successfully. A second nested level lost the inherited group, so the
+operator now uses one directory level under the root. The SRE set the IBM PVC
+root to mode `2775`; new scenario runs still need an end-to-end write test on
+every eligible worker. The operator does not create a preparatory container.
 
 ## Replay and unavailable storage
 

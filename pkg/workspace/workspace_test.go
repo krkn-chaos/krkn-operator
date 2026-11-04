@@ -70,7 +70,8 @@ func TestSubPathSeparatesRunsTargetsAndAttempts(t *testing.T) {
 	attemptB := "dc7f90ee-56d0-4521-b014-d588f2af9341"
 	base, err := SubPath(runA, "provider", "cluster", attemptA)
 	require.NoError(t, err)
-	require.True(t, strings.HasPrefix(base, "runs/"+string(runA)+"/"))
+	require.True(t, strings.HasPrefix(base, "run-"+string(runA)+"-"))
+	require.NotContains(t, base, "/")
 	for _, args := range []struct {
 		run                        types.UID
 		provider, cluster, attempt string

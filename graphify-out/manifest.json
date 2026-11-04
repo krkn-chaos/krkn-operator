@@ -2514,15 +2514,15 @@
     "semantic_hash": ""
   },
   "pkg/workspace/workspace.go": {
-    "mtime": 1793634674.4959197,
-    "seen": 1793634743.4382331,
-    "ast_hash": "835102b833e17512ccf77e327e09e2f5",
+    "mtime": 1793784417.2818823,
+    "seen": 1793784493.9892962,
+    "ast_hash": "52c27a27870652531492beb267b43177",
     "semantic_hash": ""
   },
   "pkg/workspace/workspace_test.go": {
-    "mtime": 1793634674.5553586,
-    "seen": 1793634743.438234,
-    "ast_hash": "fd2a7a6f68d2e7eb07ca84c740506c2a",
+    "mtime": 1793784417.347212,
+    "seen": 1793784493.989297,
+    "ast_hash": "c58f0460307b43ff888165e83ee609f1",
     "semantic_hash": ""
   },
   "config/rbac/workspace_role.yaml": {
@@ -2538,9 +2538,9 @@
     "semantic_hash": ""
   },
   "docs/scenario-workspaces.md": {
-    "mtime": 1793635888.0309587,
-    "seen": 1793783707.130831,
-    "ast_hash": "10e4b54a4c9ae8c781c7084d3fe7ec52",
+    "mtime": 1793784431.180044,
+    "seen": 1793784493.9893901,
+    "ast_hash": "871b642e4a87cdf50139821179b4321f",
     "semantic_hash": ""
   },
   "api/v1alpha1/krknworkspace_types.go": {
