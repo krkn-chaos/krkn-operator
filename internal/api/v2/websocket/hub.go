@@ -30,6 +30,8 @@ type PaginationClientState struct {
 	Page           int
 	Limit          int
 	Categories     []string
+	SortBy         string
+	SortOrder      string
 	SubscriptionID string
 	LastHash       uint64 // fingerprint of last sent page content
 }

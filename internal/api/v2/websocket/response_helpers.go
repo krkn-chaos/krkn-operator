@@ -185,6 +185,145 @@ func filterJobsByCategories(jobs []WSUnifiedJobItem, categories []string) []WSUn
 	return filtered
 }
 
+// sortUnifiedJobItems sorts the full filtered jobs slice before pagination. An
+// omitted or unsupported sort keeps buildUnifiedJobList's createdAt-descending
+// order, preserving behavior for older WebSocket clients.
+func sortUnifiedJobItems(jobs []WSUnifiedJobItem, sortBy, sortOrder string) {
+	if (sortOrder != "asc" && sortOrder != "desc") || !isJobsSortField(sortBy) {
+		return
+	}
+
+	sort.SliceStable(jobs, func(i, j int) bool {
+		comparison := compareJobsByField(jobs[i], jobs[j], sortBy)
+		if sortOrder == "desc" {
+			return comparison > 0
+		}
+		return comparison < 0
+	})
+}
+
+func isJobsSortField(sortBy string) bool {
+	switch sortBy {
+	case "createdAt", "status", "name", "owner":
+		return true
+	default:
+		return false
+	}
+}
+
+func compareJobsByField(left, right WSUnifiedJobItem, sortBy string) int {
+	switch sortBy {
+	case "createdAt":
+		leftTime, leftErr := time.Parse(time.RFC3339, left.CreatedAt)
+		rightTime, rightErr := time.Parse(time.RFC3339, right.CreatedAt)
+		if leftErr != nil {
+			leftTime = time.Time{}
+		}
+		if rightErr != nil {
+			rightTime = time.Time{}
+		}
+		if leftTime.Before(rightTime) {
+			return -1
+		}
+		if leftTime.After(rightTime) {
+			return 1
+		}
+	case "status":
+		return compareNaturalStrings(jobSortStatus(left), jobSortStatus(right))
+	case "name":
+		return compareNaturalStrings(jobSortName(left), jobSortName(right))
+	case "owner":
+		return compareNaturalStrings(jobSortOwner(left), jobSortOwner(right))
+	}
+	return 0
+}
+
+func jobSortStatus(job WSUnifiedJobItem) string {
+	if job.GraphRun != nil {
+		if job.GraphRun.Phase == "Completed" {
+			return "Succeeded"
+		}
+		return job.GraphRun.Phase
+	}
+	if job.ScenarioRun != nil {
+		return job.ScenarioRun.Phase
+	}
+	return "Pending"
+}
+
+func jobSortName(job WSUnifiedJobItem) string {
+	if job.GraphRun != nil || job.Type == "graphRun" {
+		return job.Name
+	}
+	if job.ScenarioRun == nil {
+		return job.Name
+	}
+	if customName := strings.TrimSpace(job.ScenarioRun.CustomRunName); customName != "" {
+		return customName
+	}
+	return job.ScenarioRun.ScenarioRunName
+}
+
+func jobSortOwner(job WSUnifiedJobItem) string {
+	if job.GraphRun != nil {
+		return job.GraphRun.OwnerUserID
+	}
+	if job.ScenarioRun != nil {
+		return job.ScenarioRun.OwnerUserID
+	}
+	return ""
+}
+
+// compareNaturalStrings mirrors the console's case-insensitive, numeric-aware
+// run-name sorting without adding a locale/collation dependency.
+func compareNaturalStrings(left, right string) int {
+	a := []rune(strings.ToLower(left))
+	b := []rune(strings.ToLower(right))
+	for i, j := 0, 0; i < len(a) && j < len(b); {
+		if isASCIIDigit(a[i]) && isASCIIDigit(b[j]) {
+			aEnd, bEnd := i, j
+			for aEnd < len(a) && isASCIIDigit(a[aEnd]) {
+				aEnd++
+			}
+			for bEnd < len(b) && isASCIIDigit(b[bEnd]) {
+				bEnd++
+			}
+			aNumber := strings.TrimLeft(string(a[i:aEnd]), "0")
+			bNumber := strings.TrimLeft(string(b[j:bEnd]), "0")
+			if len(aNumber) < len(bNumber) {
+				return -1
+			}
+			if len(aNumber) > len(bNumber) {
+				return 1
+			}
+			if cmp := strings.Compare(aNumber, bNumber); cmp != 0 {
+				return cmp
+			}
+			i, j = aEnd, bEnd
+			continue
+		}
+		if a[i] < b[j] {
+			return -1
+		}
+		if a[i] > b[j] {
+			return 1
+		}
+		i++
+		j++
+	}
+	if len(a) < len(b) {
+		return -1
+	}
+	if len(a) > len(b) {
+		return 1
+	}
+	return 0
+}
+
+func isASCIIDigit(value rune) bool {
+	return value >= '0' && value <= '9'
+}
+
 // paginateJobItems returns a page of items and pagination metadata.
 func paginateJobItems(items []WSUnifiedJobItem, page, limit int) ([]WSUnifiedJobItem, WSPaginationMeta) {
 	total := len(items)
