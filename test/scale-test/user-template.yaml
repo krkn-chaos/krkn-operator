@@ -1,0 +1,42 @@
+# KrknUser template for scale testing
+# Variables that will be substituted:
+#   {{USER_NUM}}         - User number (1-15)
+#   {{USER_ID}}          - Email address
+#   {{NAME}}             - First name
+#   {{SURNAME}}          - Last name
+#   {{ORGANIZATION}}     - Organization name
+#   {{ROLE}}             - User role (user or admin)
+#   {{SECRET_NAME}}      - Password secret reference
+#   {{PASSWORD_HASH}}    - Bcrypt password hash
+#   {{NAMESPACE}}        - Kubernetes namespace
+#   {{GROUP_LABELS}}     - Group membership labels (optional)
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{SECRET_NAME}}
+  namespace: {{NAMESPACE}}
+  labels:
+    krkn.krkn-chaos.dev/user-account: "true"
+    krkn.krkn-chaos.dev/user-id: "test-user-{{USER_NUM}}"
+type: Opaque
+stringData:
+  passwordHash: "{{PASSWORD_HASH}}"
+---
+apiVersion: krkn.krkn-chaos.dev/v1alpha1
+kind: KrknUser
+metadata:
+  name: krkn-user-{{USER_NUM}}
+  namespace: {{NAMESPACE}}
+  labels:
+    krkn.krkn-chaos.dev/user-account: "true"
+    krkn.krkn-chaos.dev/role: "{{ROLE}}"
+{{GROUP_LABELS}}
+spec:
+  userId: {{USER_ID}}
+  name: {{NAME}}
+  surname: {{SURNAME}}
+  organization: {{ORGANIZATION}}
+  role: {{ROLE}}
+  passwordSecretRef: {{SECRET_NAME}}
