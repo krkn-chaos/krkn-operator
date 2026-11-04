@@ -35,13 +35,13 @@ type KrknWorkspaceStatus struct {
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }
 
+// KrknWorkspace publishes an externally provisioned PVC for scenario runs.
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name="PVC",type=string,JSONPath=`.spec.claimName`
 // +kubebuilder:printcolumn:name="Available",type=string,JSONPath=`.status.conditions[?(@.type=="Available")].status`
 // +kubebuilder:resource:shortName=kws
 // +kubebuilder:metadata:labels=app.kubernetes.io/name=krkn-operator
-// KrknWorkspace publishes an externally provisioned PVC for scenario runs.
 type KrknWorkspace struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
@@ -49,8 +49,8 @@ type KrknWorkspace struct {
 	Status            KrknWorkspaceStatus `json:"status,omitempty"`
 }
 
-// +kubebuilder:object:root=true
 // KrknWorkspaceList contains KrknWorkspace objects.
+// +kubebuilder:object:root=true
 type KrknWorkspaceList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`

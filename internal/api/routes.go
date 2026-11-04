@@ -86,7 +86,7 @@ const (
 	FilesAvailablePath = FilesPath + "/available"
 )
 
-// Published PVC workspace endpoints.
+// WorkspacesPath is the base path for published PVC workspace endpoints.
 const WorkspacesPath = APIBasePath + "/workspaces"
 const WorkspacePVCsPath = WorkspacesPath + "/pvcs/available"
 
