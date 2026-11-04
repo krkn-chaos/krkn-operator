@@ -130,6 +130,8 @@ type Handler struct {
 	// scenarioProviderFactory is injectable for API tests; production handlers
 	// use the krknctl-backed factory assigned by NewHandler.
 	scenarioProviderFactory func(provider.Mode) (provider.ScenarioDataProvider, error)
+	rollbackDigestResolver  func(context.Context, bool, *models.RegistryV2) (string, error)
+	rollbackImages          rollbackImageCache
 	// esClient is a long-lived, connection-pooling client shared across all
 	// telemetry queries so transports are reused rather than allocated per
 	// request.

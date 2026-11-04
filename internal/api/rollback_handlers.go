@@ -222,7 +222,7 @@ func (h *Handler) rollbackProbe(ctx context.Context, run *krknv1alpha1.KrknScena
 		},
 		Spec: corev1.PodSpec{
 			ServiceAccountName: "krkn-operator-krkn-scenario-runner",
-			RestartPolicy: corev1.RestartPolicyNever, AutomountServiceAccountToken: &falseValue,
+			RestartPolicy:      corev1.RestartPolicyNever, AutomountServiceAccountToken: &falseValue,
 			ActiveDeadlineSeconds: &deadline,
 			SecurityContext:       &corev1.PodSecurityContext{RunAsUser: &uid, RunAsGroup: &uid, FSGroup: &uid},
 			Volumes:               []corev1.Volume{{Name: "workspace", VolumeSource: corev1.VolumeSource{PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: run.Spec.Workspace.ClaimName, ReadOnly: true}}}},
@@ -331,6 +331,13 @@ func (h *Handler) HandleScenarioRollback(w http.ResponseWriter, r *http.Request,
 				response.Message = "Previous rollback failed; files are still available"
 			}
 		}
+		if response.CanExecute && (response.State == "available" || response.State == "failed") {
+			imageCheck := h.checkRollbackImage(r.Context(), run, true)
+			if !imageCheck.available() {
+				response.CanExecute = false
+				response.Message = imageCheck.message
+			}
+		}
 		writeJSON(w, http.StatusOK, response)
 		return
 	}
@@ -346,8 +353,17 @@ func (h *Handler) HandleScenarioRollback(w http.ResponseWriter, r *http.Request,
 		writeJSONError(w, http.StatusConflict, ErrorResponse{Error: "target_unavailable", Message: "Original target identity is unavailable"})
 		return
 	}
-	// The rollback image is resolved by the normal scenario controller through krknctl.
-	public := false
+	imageCheck := h.checkRollbackImage(r.Context(), run, false)
+	if !imageCheck.available() {
+		writeJSONError(w, imageCheck.status, ErrorResponse{Error: imageCheck.code, Message: imageCheck.message})
+		return
+	}
+	// Resolve the rollback workload from the same registry as the source scenario.
+	private := run.Spec.Scenario.Private != nil && *run.Spec.Scenario.Private
+	registryName := ""
+	if private {
+		registryName = run.Spec.Scenario.RegistryName
+	}
 	claims := auth.GetClaimsFromContext(r.Context())
 	owner := ""
 	if claims != nil {
@@ -357,7 +373,7 @@ func (h *Handler) HandleScenarioRollback(w http.ResponseWriter, r *http.Request,
 	rollback := &krknv1alpha1.KrknScenarioRun{
 		ObjectMeta: metav1.ObjectMeta{Name: rollbackName, Namespace: h.namespace, Labels: map[string]string{"krkn-rollback-source": run.Name, "krkn-rollback-attempt": jobID, "krkn-rollback-iteration": strconv.Itoa(iteration + 1)}},
 		Spec: krknv1alpha1.KrknScenarioRunSpec{
-			Scenario:        krknv1alpha1.ScenarioReference{Name: "rollback", Private: &public},
+			Scenario:        krknv1alpha1.ScenarioReference{Name: rollbackImageName, Private: &private, RegistryName: registryName},
 			TargetRequestID: run.Spec.TargetRequestID,
 			TargetClusters:  map[string][]string{job.ProviderName: {job.ClusterName}},
 			OwnerUserID:     owner,

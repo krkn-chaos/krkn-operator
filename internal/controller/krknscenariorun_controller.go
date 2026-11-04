@@ -581,7 +581,7 @@ func (r *KrknScenarioRunReconciler) prepareJobResources(
 					}
 				}
 			}
-			if !found || scenarioRun.Spec.Scenario.Name != "rollback" {
+			if !found || scenarioRun.Spec.Scenario.Name != "workload-rollback" {
 				return nil, fmt.Errorf("rollback source attempt is invalid")
 			}
 			originalConfigMap := &corev1.ConfigMap{}

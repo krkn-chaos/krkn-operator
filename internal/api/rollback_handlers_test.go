@@ -1,15 +1,23 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
+	"github.com/krkn-chaos/krkn-operator/pkg/registry"
+	"github.com/krkn-chaos/krkn-operator/pkg/signatureverification"
 	"github.com/krkn-chaos/krkn-operator/pkg/workspace"
+	"github.com/krkn-chaos/krknctl/pkg/provider"
+	"github.com/krkn-chaos/krknctl/pkg/provider/models"
+	"github.com/krkn-chaos/krknctl/pkg/verify"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -22,6 +30,12 @@ const priorRollbackAttemptID = "5e34f888-ed3a-4b57-82b8-8c59ab5dc4ab"
 func rollbackTestHandler(t *testing.T) *Handler {
 	t.Helper()
 	h := setupScenarioRunTestHandler("target", map[string]string{})
+	digest := "sha256:rollback-test"
+	mock := &mockScenarioProvider{
+		signature: verify.SignatureSigned,
+	}
+	h.scenarioProviderFactory = func(provider.Mode) (provider.ScenarioDataProvider, error) { return mock, nil }
+	h.rollbackDigestResolver = func(context.Context, bool, *models.RegistryV2) (string, error) { return digest, nil }
 	require.NoError(t, h.client.Create(t.Context(), testWorkspacePVC()))
 	readyWorkspace(t, h, "", true)
 	public := false
@@ -48,6 +62,33 @@ func rollbackTestHandler(t *testing.T) *Handler {
 		Data: map[string]string{"config": "apiVersion: v1"},
 	}))
 	return h
+}
+
+func rollbackAvailableProbe(t *testing.T, h *Handler) {
+	t.Helper()
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
+		Name: rollbackProbeName(rollbackAttemptID), Namespace: "default",
+		Labels: map[string]string{"krkn-scenario-run-uid": rollbackSourceUID},
+	}}
+	require.NoError(t, h.client.Create(t.Context(), pod))
+	pod.Status.Phase = corev1.PodSucceeded
+	pod.Status.ContainerStatuses = []corev1.ContainerStatus{{State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{Message: "available"}}}}
+	require.NoError(t, h.client.Status().Update(t.Context(), pod))
+}
+
+func rollbackRegistrySecret(t *testing.T, name string, availableToAll bool) *corev1.Secret {
+	t.Helper()
+	dockerConfig, err := registry.BuildDockerConfigJSON("registry.example.test", "test-user", "test-password")
+	require.NoError(t, err)
+	return &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: name, Namespace: "default",
+			Labels:      registry.BuildRegistryLabels(registry.AuthTypePassword, nil, availableToAll),
+			Annotations: registry.BuildRegistryAnnotations("registry.example.test", "scenarios", "", false, false, "admin"),
+		},
+		Type: corev1.SecretTypeDockerConfigJson,
+		Data: map[string][]byte{corev1.DockerConfigJsonKey: dockerConfig},
+	}
 }
 
 func rollbackRequest(h *Handler, method, role, jobID string) *httptest.ResponseRecorder {
@@ -98,7 +139,9 @@ func TestScenarioRollbackRequiresRetainedFilesAndReusesOriginalAttempt(t *testin
 	require.Equal(t, "running", decodeRollbackResponse(t, started).State)
 	rollback := &krknv1alpha1.KrknScenarioRun{}
 	require.NoError(t, h.client.Get(t.Context(), client.ObjectKey{Namespace: "default", Name: rollbackRunName(rollbackAttemptID)}, rollback))
-	require.Equal(t, "rollback", rollback.Spec.Scenario.Name)
+	require.Equal(t, "workload-rollback", rollback.Spec.Scenario.Name)
+	require.NotNil(t, rollback.Spec.Scenario.Private)
+	require.False(t, *rollback.Spec.Scenario.Private)
 	require.Equal(t, rollbackAttemptID, rollback.Spec.Environment["UUID"])
 	require.Equal(t, workspace.MountPath, rollback.Spec.Environment["ROLLBACK_VERSIONS_DIRECTORY"])
 	require.Equal(t, rollbackSourceUID, rollback.Spec.RollbackSource.RunUID)
@@ -118,6 +161,202 @@ func TestScenarioRollbackRequiresRetainedFilesAndReusesOriginalAttempt(t *testin
 	retry := rollbackRequest(h, http.MethodPost, "admin", rollbackAttemptID)
 	require.Equal(t, http.StatusAccepted, retry.Code, retry.Body.String())
 	require.Equal(t, rollbackRunAttemptName(rollbackAttemptID, 2), decodeRollbackResponse(t, retry).RollbackRunName)
+}
+
+func TestScenarioRollbackUsesSourcePrivateRegistry(t *testing.T) {
+	h := rollbackTestHandler(t)
+	require.NoError(t, h.client.Create(t.Context(), rollbackRegistrySecret(t, "source-registry", true)))
+	resolvedPrivate := false
+	h.rollbackDigestResolver = func(_ context.Context, private bool, config *models.RegistryV2) (string, error) {
+		resolvedPrivate = true
+		require.True(t, private)
+		require.NotNil(t, config)
+		require.Equal(t, "registry.example.test", config.RegistryURL)
+		return "sha256:private-test", nil
+	}
+	run := &krknv1alpha1.KrknScenarioRun{}
+	require.NoError(t, h.client.Get(t.Context(), client.ObjectKey{Namespace: "default", Name: "source-run"}, run))
+	private := true
+	run.Spec.Scenario.Private = &private
+	run.Spec.Scenario.RegistryName = "source-registry"
+	require.NoError(t, h.client.Update(t.Context(), run))
+
+	require.Equal(t, http.StatusOK, rollbackRequest(h, http.MethodGet, "admin", rollbackAttemptID).Code)
+	probe := &corev1.Pod{}
+	require.NoError(t, h.client.Get(t.Context(), client.ObjectKey{Namespace: "default", Name: rollbackProbeName(rollbackAttemptID)}, probe))
+	require.Equal(t, []corev1.LocalObjectReference{{Name: "source-registry"}}, probe.Spec.ImagePullSecrets)
+	probe.Status.Phase = corev1.PodSucceeded
+	probe.Status.ContainerStatuses = []corev1.ContainerStatus{{State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{Message: "available"}}}}
+	require.NoError(t, h.client.Status().Update(t.Context(), probe))
+
+	response := rollbackRequest(h, http.MethodPost, "admin", rollbackAttemptID)
+	require.Equal(t, http.StatusAccepted, response.Code, response.Body.String())
+	require.True(t, resolvedPrivate)
+	rollback := &krknv1alpha1.KrknScenarioRun{}
+	require.NoError(t, h.client.Get(t.Context(), client.ObjectKey{Namespace: "default", Name: rollbackRunName(rollbackAttemptID)}, rollback))
+	require.Equal(t, "workload-rollback", rollback.Spec.Scenario.Name)
+	require.NotNil(t, rollback.Spec.Scenario.Private)
+	require.True(t, *rollback.Spec.Scenario.Private)
+	require.Equal(t, "source-registry", rollback.Spec.Scenario.RegistryName)
+}
+
+func TestScenarioRollbackRejectsMissingOrUntrustedImage(t *testing.T) {
+	tests := []struct {
+		name       string
+		provider   *mockScenarioProvider
+		digestErr  error
+		wantStatus int
+		wantCode   string
+	}{
+		{
+			name:       "missing tag",
+			provider:   &mockScenarioProvider{},
+			digestErr:  registry.ErrTagNotFound,
+			wantStatus: http.StatusConflict,
+			wantCode:   "rollback_image_unavailable",
+		},
+		{
+			name:       "unsigned image",
+			provider:   &mockScenarioProvider{signature: verify.SignatureUnsigned},
+			wantStatus: http.StatusConflict,
+			wantCode:   "rollback_image_untrusted",
+		},
+		{
+			name:       "untrusted image",
+			provider:   &mockScenarioProvider{signature: verify.SignatureUntrusted},
+			wantStatus: http.StatusConflict,
+			wantCode:   "rollback_image_untrusted",
+		},
+		{
+			name:       "registry error",
+			provider:   &mockScenarioProvider{},
+			digestErr:  errors.New("registry unavailable"),
+			wantStatus: http.StatusServiceUnavailable,
+			wantCode:   "rollback_image_check_failed",
+		},
+		{
+			name:       "signature check error",
+			provider:   &mockScenarioProvider{signatureErr: errors.New("signature registry unavailable")},
+			wantStatus: http.StatusServiceUnavailable,
+			wantCode:   "rollback_image_check_failed",
+		},
+		{
+			name:       "unknown signature status",
+			provider:   &mockScenarioProvider{signature: verify.SignatureUnknown},
+			wantStatus: http.StatusServiceUnavailable,
+			wantCode:   "rollback_image_check_failed",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := rollbackTestHandler(t)
+			h.scenarioProviderFactory = func(provider.Mode) (provider.ScenarioDataProvider, error) { return tt.provider, nil }
+			if tt.digestErr != nil {
+				h.rollbackDigestResolver = func(context.Context, bool, *models.RegistryV2) (string, error) { return "", tt.digestErr }
+			}
+			rollbackAvailableProbe(t, h)
+			available := rollbackRequest(h, http.MethodGet, "admin", rollbackAttemptID)
+			require.Equal(t, http.StatusOK, available.Code)
+			result := decodeRollbackResponse(t, available)
+			require.Equal(t, "available", result.State)
+			require.False(t, result.CanExecute)
+			require.NotEmpty(t, result.Message)
+
+			started := rollbackRequest(h, http.MethodPost, "admin", rollbackAttemptID)
+			require.Equal(t, tt.wantStatus, started.Code, started.Body.String())
+			var failure ErrorResponse
+			require.NoError(t, json.Unmarshal(started.Body.Bytes(), &failure))
+			require.Equal(t, tt.wantCode, failure.Error)
+			run := &krknv1alpha1.KrknScenarioRun{}
+			require.True(t, apierrors.IsNotFound(h.client.Get(t.Context(), client.ObjectKey{Namespace: "default", Name: rollbackRunName(rollbackAttemptID)}, run)))
+		})
+	}
+}
+
+func TestScenarioRollbackCachesGETImageCheckButRechecksPOST(t *testing.T) {
+	h := rollbackTestHandler(t)
+	checks := 0
+	h.rollbackDigestResolver = func(context.Context, bool, *models.RegistryV2) (string, error) {
+		checks++
+		return "sha256:rollback-test", nil
+	}
+	rollbackAvailableProbe(t, h)
+	for range 2 {
+		response := rollbackRequest(h, http.MethodGet, "admin", rollbackAttemptID)
+		require.Equal(t, http.StatusOK, response.Code)
+		require.True(t, decodeRollbackResponse(t, response).CanExecute)
+	}
+	require.Equal(t, 1, checks)
+	require.Equal(t, http.StatusAccepted, rollbackRequest(h, http.MethodPost, "admin", rollbackAttemptID).Code)
+	require.Equal(t, 2, checks)
+}
+
+func TestScenarioRollbackPrivateRegistryRequiresAccess(t *testing.T) {
+	h := rollbackTestHandler(t)
+	run := &krknv1alpha1.KrknScenarioRun{}
+	require.NoError(t, h.client.Get(t.Context(), client.ObjectKey{Namespace: "default", Name: "source-run"}, run))
+	private := true
+	run.Spec.Scenario.Private = &private
+	run.Spec.Scenario.RegistryName = "source-registry"
+	require.NoError(t, h.client.Update(t.Context(), run))
+	require.NoError(t, h.client.Create(t.Context(), rollbackRegistrySecret(t, "source-registry", false)))
+	group := newCategoryTestGroup("rollback-runners")
+	group.Spec.ClusterPermissions = map[string]krknv1alpha1.ClusterPermissionSet{
+		"https://cluster.example.com": {Actions: []string{"view", "run"}},
+	}
+	require.NoError(t, h.client.Create(t.Context(), group))
+	require.NoError(t, h.client.Create(t.Context(), newCategoryTestUser(t, "person@example.com", "rollback-runners")))
+	rollbackAvailableProbe(t, h)
+	response := rollbackRequest(h, http.MethodGet, "user", rollbackAttemptID)
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	result := decodeRollbackResponse(t, response)
+	require.Equal(t, "available", result.State)
+	require.False(t, result.CanExecute)
+	require.Contains(t, result.Message, "registry")
+	require.Equal(t, http.StatusForbidden, rollbackRequest(h, http.MethodPost, "user", rollbackAttemptID).Code)
+}
+
+func TestScenarioRollbackPrivateRegistryMissingWorkload(t *testing.T) {
+	h := rollbackTestHandler(t)
+	run := &krknv1alpha1.KrknScenarioRun{}
+	require.NoError(t, h.client.Get(t.Context(), client.ObjectKey{Namespace: "default", Name: "source-run"}, run))
+	private := true
+	run.Spec.Scenario.Private = &private
+	run.Spec.Scenario.RegistryName = "source-registry"
+	require.NoError(t, h.client.Update(t.Context(), run))
+	require.NoError(t, h.client.Create(t.Context(), rollbackRegistrySecret(t, "source-registry", true)))
+	h.rollbackDigestResolver = func(_ context.Context, isPrivate bool, config *models.RegistryV2) (string, error) {
+		require.True(t, isPrivate)
+		require.NotNil(t, config)
+		return "", registry.ErrTagNotFound
+	}
+	rollbackAvailableProbe(t, h)
+	response := rollbackRequest(h, http.MethodGet, "admin", rollbackAttemptID)
+	require.Equal(t, http.StatusOK, response.Code)
+	result := decodeRollbackResponse(t, response)
+	require.Equal(t, "available", result.State)
+	require.False(t, result.CanExecute)
+	require.Contains(t, result.Message, rollbackImageName)
+	started := rollbackRequest(h, http.MethodPost, "admin", rollbackAttemptID)
+	require.Equal(t, http.StatusConflict, started.Code)
+	var failure ErrorResponse
+	require.NoError(t, json.Unmarshal(started.Body.Bytes(), &failure))
+	require.Equal(t, "rollback_image_unavailable", failure.Error)
+}
+
+func TestScenarioRollbackRespectsDisabledSignatureVerification(t *testing.T) {
+	h := rollbackTestHandler(t)
+	require.NoError(t, h.client.Create(t.Context(), &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Name: signatureverification.ConfigMapName, Namespace: "default"},
+		Data:       map[string]string{signatureverification.EnabledKey: "false"},
+	}))
+	mock := &mockScenarioProvider{signature: verify.SignatureUnsigned}
+	h.scenarioProviderFactory = func(provider.Mode) (provider.ScenarioDataProvider, error) { return mock, nil }
+	rollbackAvailableProbe(t, h)
+	response := rollbackRequest(h, http.MethodGet, "admin", rollbackAttemptID)
+	require.Equal(t, http.StatusOK, response.Code)
+	require.True(t, decodeRollbackResponse(t, response).CanExecute)
+	require.Equal(t, http.StatusAccepted, rollbackRequest(h, http.MethodPost, "admin", rollbackAttemptID).Code)
 }
 
 func TestScenarioRollbackAuthorizationAndMissingPVC(t *testing.T) {

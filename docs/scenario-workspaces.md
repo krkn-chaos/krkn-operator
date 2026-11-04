@@ -164,14 +164,23 @@ seconds and are checked again. Viewing requires cluster view permission;
 kubeconfig still available.
 
 `POST` to the same path requires cluster run permission and a recent `available`
-result. It creates a separate `KrknScenarioRun` for the public Krkn `rollback`
-image, resolved and verified through the normal image path. That run uses the
+result. It creates a separate `KrknScenarioRun` for the Krkn `workload-rollback`
+image in the same registry as the original scenario. The controller resolves its
+digest and verifies its signature through the normal image path. That run uses the
 original attempt's kubeconfig ConfigMap and cluster API identity, mounts the
 original attempt's directory,
 and receives the attempt JobID as `UUID`. Repeated requests while a rollback is
 running or succeeded return the existing run. A failed rollback can be retried
 while files remain; each retry has its own run record. The UI offers the action
 only when the inspection finds files and asks for confirmation before starting.
+When files are present, GET also checks that `workload-rollback` exists in the
+original scenario's registry and has a trusted signature when operator-wide
+signature verification is enabled. A missing image, untrusted signature,
+unavailable registry, or insufficient registry access disables the action and
+returns an explanatory message. Successful and definitive negative image checks
+are cached for 30 seconds to limit registry traffic. POST always checks again
+before creating the rollback run; the controller independently resolves and
+verifies the image before creating its Pod.
 
 The original run status retains earlier attempt IDs and images when retrying,
 so each attempt's files can be inspected independently. If the workspace or PVC

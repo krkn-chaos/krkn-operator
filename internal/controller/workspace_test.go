@@ -171,7 +171,7 @@ func TestScenarioPodMountsOnlyAssignedWorkspaceDirectory(t *testing.T) {
 	rollback := run.DeepCopy()
 	rollback.Name = "rollback-run"
 	rollback.UID = "8a44fb1b-1c03-4f17-af55-674e096b356e"
-	rollback.Spec.Scenario.Name = "rollback"
+	rollback.Spec.Scenario.Name = "workload-rollback"
 	rollback.Spec.RollbackSource = &krknv1alpha1.RollbackSource{RunName: "run", RunUID: string(original.UID), JobID: resources.jobID, ClusterAPIURL: "https://cluster.example.com"}
 	changedTarget := &corev1.Secret{}
 	require.NoError(t, r.Get(t.Context(), client.ObjectKey{Namespace: "default", Name: "target"}, changedTarget))

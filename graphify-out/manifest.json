@@ -114,8 +114,8 @@
     "semantic_hash": "9354ec7e75cf2cd9fb5b2b650ca8f40e"
   },
   "api/v1alpha1/zz_generated.deepcopy.go": {
-    "mtime": 1793784599.069061,
-    "seen": 1793785568.828459,
+    "mtime": 1793789754.398968,
+    "seen": 1793789773.744489,
     "ast_hash": "7a88a9f36fce10c21682db67dfff0030",
     "semantic_hash": ""
   },
@@ -450,9 +450,9 @@
     "semantic_hash": "ab824d31922a92db7c0f8cc7b491a8ac"
   },
   "internal/api/handlers.go": {
-    "mtime": 1793628408.1015134,
-    "seen": 1793628855.68351,
-    "ast_hash": "0864ac34130b9f9d2142ec68dc6331a7",
+    "mtime": 1793789372.911705,
+    "seen": 1793789773.744525,
+    "ast_hash": "f71e327ad66abbe899b3b902183e3c1b",
     "semantic_hash": ""
   },
   "internal/api/handlers_test.go": {
@@ -1002,9 +1002,9 @@
     "semantic_hash": "84d17a95090e654b8621958076f94861"
   },
   "internal/controller/krknscenariorun_controller.go": {
-    "mtime": 1793785005.9518251,
-    "seen": 1793785568.828555,
-    "ast_hash": "da18925c582cb9c9135ae01e4a34be8d",
+    "mtime": 1793786262.7527664,
+    "seen": 1793786326.092563,
+    "ast_hash": "b25bd2fdbd9f712370b1a56938aced29",
     "semantic_hash": ""
   },
   "internal/controller/krknscenariorun_controller_failedstatus_test.go": {
@@ -1062,10 +1062,10 @@
     "semantic_hash": "6a0ab81fb10084bd4159f5395275cac8"
   },
   "internal/controller/signature_verification.go": {
-    "mtime": 1792655698.3454666,
-    "seen": 1793612567.857358,
-    "ast_hash": "cb0dba84961e0112bddf7ed82e06caab",
-    "semantic_hash": "cb0dba84961e0112bddf7ed82e06caab"
+    "mtime": 1793789362.9154491,
+    "seen": 1793789773.744591,
+    "ast_hash": "f9f592e58f71bb075a4164273c41c45d",
+    "semantic_hash": ""
   },
   "internal/controller/signature_verification_test.go": {
     "mtime": 1792655698.3455584,
@@ -2112,62 +2112,62 @@
     "semantic_hash": ""
   },
   "config/crd/bases/krkn.krkn-chaos.dev_krkncategories.yaml": {
-    "mtime": 1793784596.1951823,
-    "seen": 1793785568.8286679,
+    "mtime": 1793789751.4207413,
+    "seen": 1793789773.744693,
     "ast_hash": "cd21936e0cfc49f45954b0548fc0c9db",
     "semantic_hash": ""
   },
   "config/crd/bases/krkn.krkn-chaos.dev_krkncomponents.yaml": {
-    "mtime": 1793784596.1956394,
-    "seen": 1793785568.8286679,
+    "mtime": 1793789751.421107,
+    "seen": 1793789773.744694,
     "ast_hash": "169141cb442ec180b4f7bd88393f4990",
     "semantic_hash": ""
   },
   "config/crd/bases/krkn.krkn-chaos.dev_krkngraphruns.yaml": {
-    "mtime": 1793784596.1974308,
-    "seen": 1793785568.8286688,
+    "mtime": 1793789751.4244678,
+    "seen": 1793789773.744694,
     "ast_hash": "97d12e8b247b7f3175dc041428be7ffe",
     "semantic_hash": ""
   },
   "config/crd/bases/krkn.krkn-chaos.dev_krknoperatortargetproviderconfigs.yaml": {
-    "mtime": 1793784596.1986756,
-    "seen": 1793785568.8286688,
+    "mtime": 1793789751.426806,
+    "seen": 1793789773.744695,
     "ast_hash": "4a9640d7baa385f0f3a8c77a4abea6d7",
     "semantic_hash": ""
   },
   "config/crd/bases/krkn.krkn-chaos.dev_krknoperatortargetproviders.yaml": {
-    "mtime": 1793784596.1982455,
-    "seen": 1793785568.82867,
+    "mtime": 1793789751.4262044,
+    "seen": 1793789773.7446961,
     "ast_hash": "0cb9d7c85c230ed1275ed2da22ee1359",
     "semantic_hash": ""
   },
   "config/crd/bases/krkn.krkn-chaos.dev_krknoperatortargets.yaml": {
-    "mtime": 1793784596.1979012,
-    "seen": 1793785568.828671,
+    "mtime": 1793789751.425795,
+    "seen": 1793789773.7446961,
     "ast_hash": "274bd1c7de8ebb50812e0d051c3d121d",
     "semantic_hash": ""
   },
   "config/crd/bases/krkn.krkn-chaos.dev_krknscenarioruns.yaml": {
-    "mtime": 1793784596.1999567,
-    "seen": 1793785568.828671,
+    "mtime": 1793789751.4281318,
+    "seen": 1793789773.7446961,
     "ast_hash": "f7e525e6f3e5486db12a6531807141ea",
     "semantic_hash": ""
   },
   "config/crd/bases/krkn.krkn-chaos.dev_krkntargetrequests.yaml": {
-    "mtime": 1793784596.2003713,
-    "seen": 1793785568.828672,
+    "mtime": 1793789751.4285505,
+    "seen": 1793789773.744697,
     "ast_hash": "1af5344716e5b8aa5a3990afac3bce39",
     "semantic_hash": ""
   },
   "config/crd/bases/krkn.krkn-chaos.dev_krknusergroups.yaml": {
-    "mtime": 1793784596.201106,
-    "seen": 1793785568.828672,
+    "mtime": 1793789751.429574,
+    "seen": 1793789773.744697,
     "ast_hash": "3cec0d84849fcf92e6635bf8c20d8514",
     "semantic_hash": ""
   },
   "config/crd/bases/krkn.krkn-chaos.dev_krknusers.yaml": {
-    "mtime": 1793784596.2007551,
-    "seen": 1793785568.8286731,
+    "mtime": 1793789751.429088,
+    "seen": 1793789773.744698,
     "ast_hash": "c8f6cb518fa7d0468cae26b7b2fd0bb2",
     "semantic_hash": ""
   },
@@ -2328,8 +2328,8 @@
     "semantic_hash": ""
   },
   "config/rbac/role.yaml": {
-    "mtime": 1793784596.1687303,
-    "seen": 1793785568.8286898,
+    "mtime": 1793789751.3917,
+    "seen": 1793789773.744715,
     "ast_hash": "7ab25ada2af8ece265f553729c92ea41",
     "semantic_hash": ""
   },
@@ -2508,9 +2508,9 @@
     "semantic_hash": ""
   },
   "internal/controller/workspace_test.go": {
-    "mtime": 1793785005.952188,
-    "seen": 1793785568.828563,
-    "ast_hash": "8888259e6645ca5f37d22a46b1bf7223",
+    "mtime": 1793789517.8671687,
+    "seen": 1793789773.744592,
+    "ast_hash": "44cc173d851e5f5fde864486ad9a30be",
     "semantic_hash": ""
   },
   "pkg/workspace/workspace.go": {
@@ -2538,9 +2538,9 @@
     "semantic_hash": ""
   },
   "docs/scenario-workspaces.md": {
-    "mtime": 1793785561.5073862,
-    "seen": 1793785568.8286998,
-    "ast_hash": "7aecb6edcf8ccbe0761a96a4f0664b3a",
+    "mtime": 1793789422.1764264,
+    "seen": 1793789773.7447228,
+    "ast_hash": "8472574ef62339fbee398472349116d2",
     "semantic_hash": ""
   },
   "api/v1alpha1/krknworkspace_types.go": {
@@ -2568,27 +2568,45 @@
     "semantic_hash": ""
   },
   "config/crd/bases/krkn.krkn-chaos.dev_krknworkspaces.yaml": {
-    "mtime": 1793784596.2016194,
-    "seen": 1793785568.8286731,
+    "mtime": 1793789751.4300406,
+    "seen": 1793789773.744698,
     "ast_hash": "bb8685ffe8a97d483a82c227c77fd1af",
     "semantic_hash": ""
   },
   "internal/api/rollback_handlers.go": {
-    "mtime": 1793785488.609636,
-    "seen": 1793785568.82851,
-    "ast_hash": "c3f824700c8ece29101572cee922b721",
+    "mtime": 1793789253.9658082,
+    "seen": 1793789773.7445388,
+    "ast_hash": "a3ef1da8863678072cfe07797f3e436e",
     "semantic_hash": ""
   },
   "internal/api/rollback_handlers_test.go": {
-    "mtime": 1793785488.7085454,
-    "seen": 1793785568.82851,
-    "ast_hash": "f8ee1f09b693a4fdf12509e8613f09cf",
+    "mtime": 1793789738.150074,
+    "seen": 1793789773.74454,
+    "ast_hash": "c15a3900627cbd101fc5294d3d0627bc",
     "semantic_hash": ""
   },
   "hack/workspace-mount-check.yaml": {
     "mtime": 1793630054.14556,
     "seen": 1793630058.755899,
     "ast_hash": "240c718768a48ce8a2c87b785df4b7ee",
+    "semantic_hash": ""
+  },
+  "internal/api/rollback_image.go": {
+    "mtime": 1793789734.7201688,
+    "seen": 1793789773.744541,
+    "ast_hash": "3722a658fb8090d224bb21bba0261472",
+    "semantic_hash": ""
+  },
+  "pkg/registry/rollback_digest.go": {
+    "mtime": 1793789355.299177,
+    "seen": 1793789773.74464,
+    "ast_hash": "d2944347c3388597c3ba51353f9ee892",
+    "semantic_hash": ""
+  },
+  "pkg/registry/rollback_digest_test.go": {
+    "mtime": 1793789413.295384,
+    "seen": 1793789773.744641,
+    "ast_hash": "6a01aee7b7fb02575e398f4fd7c8ae10",
     "semantic_hash": ""
   }
 }
