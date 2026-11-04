@@ -264,3 +264,43 @@ func TestReconcile_FailedJobStatus_IncludesClusterAPIURL(t *testing.T) {
 		t.Error("job.CompletionTime should be set on creation failure")
 	}
 }
+
+func TestReconcile_HistoryOnlyRunIsNotReprocessed(t *testing.T) {
+	scheme := newTestScheme(t)
+	const (
+		ns      = "default"
+		runName = "restored-run"
+	)
+	run := &krknv1alpha1.KrknScenarioRun{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        runName,
+			Namespace:   ns,
+			Annotations: map[string]string{historyOnlyAnnotation: "true"},
+		},
+		Spec: krknv1alpha1.KrknScenarioRunSpec{
+			TargetClusters: map[string][]string{"provider": {"cluster"}},
+		},
+		Status: krknv1alpha1.KrknScenarioRunStatus{Phase: "Succeeded"},
+	}
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithStatusSubresource(&krknv1alpha1.KrknScenarioRun{}).
+		WithObjects(run).
+		Build()
+
+	reconciler := &KrknScenarioRunReconciler{Client: fakeClient, Scheme: scheme, Namespace: ns}
+	_, err := reconciler.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: runName, Namespace: ns},
+	})
+	if err != nil {
+		t.Fatalf("history-only reconcile returned error: %v", err)
+	}
+
+	var restored krknv1alpha1.KrknScenarioRun
+	if err := fakeClient.Get(context.Background(), types.NamespacedName{Name: runName, Namespace: ns}, &restored); err != nil {
+		t.Fatalf("failed to fetch history-only run: %v", err)
+	}
+	if restored.Status.Phase != "Succeeded" {
+		t.Fatalf("history-only run phase = %q, want Succeeded", restored.Status.Phase)
+	}
+}

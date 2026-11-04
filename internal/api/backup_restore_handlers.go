@@ -17,8 +17,12 @@ limitations under the License.
 package api
 
 import (
+	"context"
+	"encoding/base64"
+	"errors"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"os"
 	"sort"
@@ -31,7 +35,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/krkn-chaos/krkn-operator/pkg/auth"
-	"github.com/krkn-chaos/krkn-operator/pkg/backup"
+	operatorprovider "github.com/krkn-chaos/krkn-operator/pkg/provider"
+	"github.com/krkn-chaos/krknctl/pkg/backup"
+	"k8s.io/client-go/dynamic"
 )
 
 const (
@@ -39,6 +45,52 @@ const (
 	maxActiveRestores = 1
 	maxUploadSize     = 100 << 20 // 100MB (nginx default is 1MB, must configure larger if needed)
 )
+
+// backupHandler owns the dependencies and lifecycle state for backup and
+// restore endpoints. Keeping these fields here prevents backup-specific
+// Kubernetes access from expanding the shared API Handler.
+type backupHandler struct {
+	dynamicClient dynamic.Interface
+	namespace     string
+	jobTracker    *JobTracker
+	restoreSlots  chan struct{}
+	baseCtx       context.Context
+	baseCancel    context.CancelFunc
+}
+
+func newBackupHandler(namespace string, dynamicClient dynamic.Interface) *backupHandler {
+	baseCtx, baseCancel := context.WithCancel(context.Background())
+	return &backupHandler{
+		dynamicClient: dynamicClient,
+		namespace:     namespace,
+		jobTracker:    NewJobTracker(),
+		restoreSlots:  make(chan struct{}, maxActiveRestores),
+		baseCtx:       baseCtx,
+		baseCancel:    baseCancel,
+	}
+}
+
+func (h *backupHandler) Shutdown() {
+	h.baseCancel()
+}
+
+// PostBackup keeps the existing API Handler method while delegating backup
+// work to the backup-specific handler.
+func (h *Handler) PostBackup(w http.ResponseWriter, r *http.Request) {
+	h.backupHandler.PostBackup(w, r)
+}
+
+// PostRestore keeps the existing API Handler method while delegating restore
+// work to the backup-specific handler.
+func (h *Handler) PostRestore(w http.ResponseWriter, r *http.Request) {
+	h.backupHandler.PostRestore(w, r)
+}
+
+// GetRestoreStatus keeps the existing API Handler method while delegating
+// restore status queries to the backup-specific handler.
+func (h *Handler) GetRestoreStatus(w http.ResponseWriter, r *http.Request) {
+	h.backupHandler.GetRestoreStatus(w, r)
+}
 
 // JobStatus tracks the status of an async restore operation.
 type JobStatus struct {
@@ -147,16 +199,17 @@ type RestoreResponse struct {
 // Creates and streams a backup archive for download (admin-only).
 //
 // @Summary Download operator configuration backup
-// @Description Create and download a backup archive of all operator configuration (admin-only)
+// @Description Create and download a backup archive of all operator configuration (admin-only). Pass the X-Backup-Passphrase header to encrypt the archive with AES-256-GCM.
 // @Tags backup
 // @Produce application/gzip
-// @Success 200 {file} binary "Backup archive (tar.gz)"
+// @Param X-Backup-Passphrase header string false "Passphrase to encrypt the archive"
+// @Success 200 {file} binary "Backup archive (tar.gz or tar.gz.enc)"
 // @Failure 403 {object} ErrorResponse "Forbidden - admin access required"
 // @Failure 405 {object} ErrorResponse "Method not allowed"
 // @Failure 500 {object} ErrorResponse "Internal server error"
 // @Security BearerAuth
 // @Router /backup [post]
-func (h *Handler) PostBackup(w http.ResponseWriter, r *http.Request) {
+func (h *backupHandler) PostBackup(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	logger := log.FromContext(ctx)
 
@@ -175,6 +228,13 @@ func (h *Handler) PostBackup(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	if h.dynamicClient == nil {
+		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+			Error:   "internal_error",
+			Message: "Backup Kubernetes client is not configured",
+		})
+		return
+	}
 
 	tempDir, err := os.MkdirTemp("", "krkn-backup-download-*")
 	if err != nil {
@@ -184,19 +244,36 @@ func (h *Handler) PostBackup(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	defer os.RemoveAll(tempDir)
+	defer func() {
+		if cleanupErr := os.RemoveAll(tempDir); cleanupErr != nil {
+			logger.Error(cleanupErr, "Failed to remove temporary backup directory", "path", tempDir)
+		}
+	}()
 
+	passphrase := r.Header.Get("X-Backup-Passphrase")
+	if passphrase != "" {
+		decoded, err := base64.StdEncoding.DecodeString(passphrase)
+		if err != nil {
+			writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+				Error:   "invalid_passphrase",
+				Message: "X-Backup-Passphrase header must be Base64-encoded",
+			})
+			return
+		}
+		passphrase = string(decoded)
+	}
 	backupName := fmt.Sprintf("krkn-backup-%s", time.Now().Format("2006-01-02-150405"))
 
 	config := backup.BackupConfig{
 		Namespace:  h.namespace,
 		OutputDir:  tempDir,
 		BackupName: backupName,
+		Passphrase: passphrase,
 	}
 
 	logger.Info("Creating backup for download", "backupName", backupName)
 
-	archivePath, err := backup.CreateBackup(ctx, h.client, config)
+	archivePath, err := backup.CreateBackup(ctx, h.dynamicClient, config)
 	if err != nil {
 		logger.Error(err, "Backup failed")
 		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
@@ -225,8 +302,13 @@ func (h *Handler) PostBackup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/gzip")
-	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s.tar.gz"`, backupName))
+	if passphrase != "" {
+		w.Header().Set("Content-Type", "application/octet-stream")
+		w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s.tar.gz.enc"`, backupName))
+	} else {
+		w.Header().Set("Content-Type", "application/gzip")
+		w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s.tar.gz"`, backupName))
+	}
 	w.Header().Set("Content-Length", strconv.FormatInt(fi.Size(), 10))
 	w.WriteHeader(http.StatusOK)
 
@@ -248,11 +330,12 @@ func (h *Handler) PostBackup(w http.ResponseWriter, r *http.Request) {
 // Accepts a backup archive upload and starts async restore (admin-only).
 //
 // @Summary Restore operator configuration from uploaded backup
-// @Description Upload a backup archive and restore all operator configuration (admin-only). Restore runs asynchronously and rechecks restored target connectivity when complete.
+// @Description Upload a backup archive and restore all operator configuration (admin-only). Restore runs asynchronously and rechecks restored target connectivity when complete. For encrypted archives (.tar.gz.enc), include the passphrase in the X-Backup-Passphrase header.
 // @Tags backup
 // @Accept multipart/form-data
 // @Produce json
-// @Param backup formData file true "Backup archive (tar.gz)"
+// @Param backup formData file true "Backup archive (tar.gz or tar.gz.enc)"
+// @Param X-Backup-Passphrase header string false "Passphrase to decrypt an encrypted archive"
 // @Success 202 {object} RestoreResponse "Restore started"
 // @Failure 400 {object} ErrorResponse "Invalid request or missing file"
 // @Failure 403 {object} ErrorResponse "Forbidden - admin access required"
@@ -260,7 +343,7 @@ func (h *Handler) PostBackup(w http.ResponseWriter, r *http.Request) {
 // @Failure 500 {object} ErrorResponse "Internal server error"
 // @Security BearerAuth
 // @Router /restore [post]
-func (h *Handler) PostRestore(w http.ResponseWriter, r *http.Request) {
+func (h *backupHandler) PostRestore(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	logger := log.FromContext(ctx)
 
@@ -276,6 +359,13 @@ func (h *Handler) PostRestore(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusForbidden, ErrorResponse{
 			Error:   "forbidden",
 			Message: "Restore is admin-only. Please contact your administrator.",
+		})
+		return
+	}
+	if h.dynamicClient == nil {
+		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+			Error:   "internal_error",
+			Message: "Restore Kubernetes client is not configured",
 		})
 		return
 	}
@@ -301,16 +391,31 @@ func (h *Handler) PostRestore(w http.ResponseWriter, r *http.Request) {
 
 	r.Body = http.MaxBytesReader(w, r.Body, maxUploadSize)
 
+	cleanupMultipartForm := func() {
+		if r.MultipartForm != nil {
+			if cleanupErr := r.MultipartForm.RemoveAll(); cleanupErr != nil {
+				logger.Error(cleanupErr, "Failed to remove multipart upload files")
+			}
+		}
+	}
+	defer cleanupMultipartForm()
+
 	// The request body is capped by http.MaxBytesReader above.
 	if err := r.ParseMultipartForm(32 << 20); err != nil { // #nosec G120 -- request body is limited to maxUploadSize
-		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
-			Error:   "bad_request",
-			Message: "Failed to parse upload: " + err.Error(),
+		status := http.StatusBadRequest
+		errorCode := "bad_request"
+		message := "Failed to parse upload: " + err.Error()
+		if isRequestBodyTooLarge(err) {
+			status = http.StatusRequestEntityTooLarge
+			errorCode = "request_entity_too_large"
+			message = "Request body too large"
+		}
+		writeJSONError(w, status, ErrorResponse{
+			Error:   errorCode,
+			Message: message,
 		})
 		return
 	}
-	defer r.MultipartForm.RemoveAll()
-
 	file, header, err := r.FormFile("backup")
 	if err != nil {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
@@ -321,10 +426,11 @@ func (h *Handler) PostRestore(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
-	if !strings.HasSuffix(strings.ToLower(header.Filename), ".tar.gz") {
+	lowerName := strings.ToLower(header.Filename)
+	if !strings.HasSuffix(lowerName, ".tar.gz") && !strings.HasSuffix(lowerName, ".tar.gz.enc") {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
 			Error:   "bad_request",
-			Message: "Backup file must be a .tar.gz archive",
+			Message: "Backup file must be a .tar.gz or .tar.gz.enc archive",
 		})
 		return
 	}
@@ -337,24 +443,34 @@ func (h *Handler) PostRestore(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	tempPath := tempFile.Name()
+	removeTempFile := func() {
+		if removeErr := os.Remove(tempPath); removeErr != nil && !os.IsNotExist(removeErr) {
+			logger.Error(removeErr, "Failed to remove temporary restore file", "path", tempPath)
+		}
+	}
 
 	if _, err := io.Copy(tempFile, file); err != nil {
 		if closeErr := tempFile.Close(); closeErr != nil {
 			logger.Error(closeErr, "Failed to close temporary restore file", "path", tempFile.Name())
 		}
-		if removeErr := os.Remove(tempFile.Name()); removeErr != nil && !os.IsNotExist(removeErr) {
-			logger.Error(removeErr, "Failed to remove temporary restore file", "path", tempFile.Name())
+		removeTempFile()
+		status := http.StatusInternalServerError
+		errorCode := "internal_error"
+		message := "Failed to save uploaded file"
+		if isRequestBodyTooLarge(err) {
+			status = http.StatusRequestEntityTooLarge
+			errorCode = "request_entity_too_large"
+			message = "Request body too large"
 		}
-		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
-			Error:   "internal_error",
-			Message: "Failed to save uploaded file",
+		writeJSONError(w, status, ErrorResponse{
+			Error:   errorCode,
+			Message: message,
 		})
 		return
 	}
 	if err := tempFile.Close(); err != nil {
-		if removeErr := os.Remove(tempFile.Name()); removeErr != nil && !os.IsNotExist(removeErr) {
-			logger.Error(removeErr, "Failed to remove temporary restore file", "path", tempFile.Name())
-		}
+		removeTempFile()
 
 		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
 			Error:   "internal_error",
@@ -363,15 +479,26 @@ func (h *Handler) PostRestore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	jobID := uuid.New().String()
-	tempPath := tempFile.Name()
+	passphrase := r.Header.Get("X-Backup-Passphrase")
+	if passphrase != "" {
+		decoded, err := base64.StdEncoding.DecodeString(passphrase)
+		if err != nil {
+			removeTempFile()
+			writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+				Error:   "invalid_passphrase",
+				Message: "X-Backup-Passphrase header must be Base64-encoded",
+			})
+			return
+		}
+		passphrase = string(decoded)
+	}
 
-	logger.Info("Restore requested", "jobID", jobID, "filename", header.Filename)
+	jobID := uuid.New().String()
+
+	logger.Info("Restore requested", "jobID", jobID, "filename", header.Filename, "encrypted", passphrase != "")
 
 	if err := h.jobTracker.Start(jobID, "restore"); err != nil {
-		if removeErr := os.Remove(tempPath); removeErr != nil && !os.IsNotExist(removeErr) {
-			logger.Error(removeErr, "Failed to remove temporary restore file", "path", tempPath)
-		}
+		removeTempFile()
 		writeJSONError(w, http.StatusServiceUnavailable, ErrorResponse{
 			Error:   "service_unavailable",
 			Message: err.Error(),
@@ -381,25 +508,36 @@ func (h *Handler) PostRestore(w http.ResponseWriter, r *http.Request) {
 	slotTransferred = true
 
 	go func() {
+		jobCtx := h.baseCtx
+		jobLogger := log.FromContext(jobCtx)
 		defer func() {
 			<-h.restoreSlots
 		}()
-		defer os.Remove(tempPath)
-		jobCtx := h.baseCtx
-		jobLogger := log.FromContext(jobCtx)
+		defer func() {
+			if removeErr := os.Remove(tempPath); removeErr != nil && !os.IsNotExist(removeErr) {
+				jobLogger.Error(removeErr, "Failed to remove temporary restore file", "path", tempPath, "jobID", jobID)
+			}
+		}()
 		jobLogger.Info("Starting restore", "jobID", jobID)
 
 		restoreConfig := backup.RestoreConfig{
 			Namespace:  h.namespace,
 			BackupPath: tempPath,
+			Passphrase: passphrase,
+			LegacyProviderConfigHandler: func(ctx context.Context, configs []backup.LegacyProviderConfig) error {
+				return operatorprovider.RestoreLegacyProviderConfigs(ctx, h.dynamicClient, h.namespace, configs)
+			},
+			RefreshTargetReadiness: true,
+			WarningHandler: func(message string) {
+				jobLogger.Info("Restore warning", "jobID", jobID, "message", message)
+			},
 		}
 
-		if err := backup.RestoreBackup(jobCtx, h.client, restoreConfig); err != nil {
+		if err := backup.RestoreBackup(jobCtx, h.dynamicClient, restoreConfig); err != nil {
 			jobLogger.Error(err, "Restore failed", "jobID", jobID)
 			h.jobTracker.Fail(jobID, err.Error())
 			return
 		}
-
 		jobLogger.Info("Restore completed successfully", "jobID", jobID)
 		h.jobTracker.Complete(jobID)
 	}()
@@ -412,6 +550,11 @@ func (h *Handler) PostRestore(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusAccepted, response)
+}
+
+func isRequestBodyTooLarge(err error) bool {
+	var maxBytesErr *http.MaxBytesError
+	return errors.Is(err, multipart.ErrMessageTooLarge) || errors.As(err, &maxBytesErr)
 }
 
 // GetRestoreStatus handles GET /api/v1/restore/{jobID} endpoint.
@@ -428,7 +571,7 @@ func (h *Handler) PostRestore(w http.ResponseWriter, r *http.Request) {
 // @Failure 404 {object} ErrorResponse "Job not found"
 // @Security BearerAuth
 // @Router /restore/{jobID} [get]
-func (h *Handler) GetRestoreStatus(w http.ResponseWriter, r *http.Request) {
+func (h *backupHandler) GetRestoreStatus(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	if r.Method != http.MethodGet {
