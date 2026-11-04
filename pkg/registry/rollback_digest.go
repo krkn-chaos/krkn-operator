@@ -55,12 +55,12 @@ func ResolvePublicTagDigest(ctx context.Context, repositoryAPIURI, tag string) (
 	for _, entry := range result.Tags {
 		if entry.Name == tag && entry.EndTS == nil {
 			if entry.ManifestDigest == "" {
-				return "", fmt.Errorf("Quay tag %q has no digest", tag)
+				return "", fmt.Errorf("quay tag %q has no digest", tag)
 			}
 			return entry.ManifestDigest, nil
 		}
 	}
-	return "", fmt.Errorf("Quay tag %q: %w", tag, ErrTagNotFound)
+	return "", fmt.Errorf("quay tag %q: %w", tag, ErrTagNotFound)
 }
 
 // ResolvePrivateTagDigest reads a Docker Registry v2 manifest digest without

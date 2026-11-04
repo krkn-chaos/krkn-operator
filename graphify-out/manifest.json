@@ -2598,9 +2598,9 @@
     "semantic_hash": ""
   },
   "pkg/registry/rollback_digest.go": {
-    "mtime": 1793789355.299177,
-    "seen": 1793789773.74464,
-    "ast_hash": "d2944347c3388597c3ba51353f9ee892",
+    "mtime": 1793802573.1375654,
+    "seen": 1793802587.1168509,
+    "ast_hash": "51ae107253c7914d3595f1972502ef52",
     "semantic_hash": ""
   },
   "pkg/registry/rollback_digest_test.go": {
