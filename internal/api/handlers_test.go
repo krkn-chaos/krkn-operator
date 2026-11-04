@@ -1389,8 +1389,9 @@ func TestGetScenarioRunStatus_IncludesCustomRunName(t *testing.T) {
 			Namespace: "default",
 		},
 		Spec: krknv1alpha1.KrknScenarioRunSpec{
-			Scenario:      publicScenarioReference("pod-delete"),
-			CustomRunName: "my-chaos-run",
+			Scenario:       publicScenarioReference("pod-delete"),
+			RollbackSource: &krknv1alpha1.RollbackSource{RunName: "source-run", JobID: "source-attempt"},
+			CustomRunName:  "my-chaos-run",
 			TargetClusters: map[string][]string{
 				"krkn-operator": {"cluster-1"},
 			},
@@ -1431,6 +1432,9 @@ func TestGetScenarioRunStatus_IncludesCustomRunName(t *testing.T) {
 
 	if response.ScenarioName != "pod-delete" {
 		t.Errorf("Expected ScenarioName='pod-delete', got '%s'", response.ScenarioName)
+	}
+	if !response.IsRollback {
+		t.Error("expected rollback identity from spec.rollbackSource in status response")
 	}
 }
 

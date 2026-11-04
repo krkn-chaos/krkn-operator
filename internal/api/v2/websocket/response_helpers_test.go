@@ -8,10 +8,13 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-func TestScenarioRunWebSocketResponsesIncludeRollbackEnabled(t *testing.T) {
+func TestScenarioRunWebSocketResponsesIncludeRollbackIdentity(t *testing.T) {
 	run := krknv1alpha1.KrknScenarioRun{
 		ObjectMeta: metav1.ObjectMeta{Name: "node-cpu-hog-953e3861"},
-		Spec:       krknv1alpha1.KrknScenarioRunSpec{RollbackEnabled: true},
+		Spec: krknv1alpha1.KrknScenarioRunSpec{
+			RollbackEnabled: true,
+			RollbackSource:  &krknv1alpha1.RollbackSource{RunName: "source-run", JobID: "attempt"},
+		},
 	}
 	jobs := buildUnifiedJobList([]krknv1alpha1.KrknScenarioRun{run}, nil)
 	if len(jobs) != 1 || jobs[0].ScenarioRun == nil {
@@ -31,6 +34,9 @@ func TestScenarioRunWebSocketResponsesIncludeRollbackEnabled(t *testing.T) {
 		}
 		if payload["rollbackEnabled"] != true {
 			t.Errorf("%s response omitted rollbackEnabled: %s", name, encoded)
+		}
+		if payload["isRollback"] != true {
+			t.Errorf("%s response omitted isRollback: %s", name, encoded)
 		}
 	}
 }

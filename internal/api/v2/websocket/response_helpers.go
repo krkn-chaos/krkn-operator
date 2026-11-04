@@ -229,6 +229,7 @@ func buildScenarioRunResponse(run *krknv1alpha1.KrknScenarioRun) ScenarioRunStat
 	return ScenarioRunStatusResponse{
 		ScenarioRunName:        run.Name,
 		RollbackEnabled:        run.Spec.RollbackEnabled,
+		IsRollback:             run.Spec.RollbackSource != nil,
 		ScenarioName:           run.Spec.Scenario.Name,
 		Phase:                  run.Status.Phase,
 		TotalTargets:           run.Status.TotalTargets,
@@ -253,6 +254,7 @@ func buildScenarioRunDetailResponse(run *krknv1alpha1.KrknScenarioRun) ScenarioR
 	return ScenarioRunStatusResponse{
 		ScenarioRunName:        run.Name,
 		RollbackEnabled:        run.Spec.RollbackEnabled,
+		IsRollback:             run.Spec.RollbackSource != nil,
 		ScenarioName:           run.Spec.Scenario.Name,
 		Phase:                  run.Status.Phase,
 		TotalTargets:           run.Status.TotalTargets,

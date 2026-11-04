@@ -529,3 +529,29 @@ func TestBuildUnifiedJobList_IncludesResolvedScenarioImage(t *testing.T) {
 		t.Fatalf("expected resolved scenario image, got %q", got)
 	}
 }
+
+func TestBuildUnifiedJobList_IdentifiesRollbackFromSource(t *testing.T) {
+	runs := []krknv1alpha1.KrknScenarioRun{
+		{
+			ObjectMeta: metav1.ObjectMeta{Name: "rollback-run"},
+			Spec: krknv1alpha1.KrknScenarioRunSpec{
+				Scenario:       krknv1alpha1.ScenarioReference{Name: "workload-rollback"},
+				RollbackSource: &krknv1alpha1.RollbackSource{RunName: "source-run", JobID: "attempt"},
+			},
+		},
+		{
+			ObjectMeta: metav1.ObjectMeta{Name: "normal-run"},
+			Spec: krknv1alpha1.KrknScenarioRunSpec{
+				Scenario: krknv1alpha1.ScenarioReference{Name: "workload-rollback"},
+			},
+		},
+	}
+
+	jobs := BuildUnifiedJobList(runs, nil)
+	if len(jobs) != 2 || jobs[0].ScenarioRun == nil || jobs[1].ScenarioRun == nil {
+		t.Fatalf("expected two scenario runs, got %+v", jobs)
+	}
+	if !jobs[0].ScenarioRun.IsRollback || jobs[1].ScenarioRun.IsRollback {
+		t.Fatalf("rollback identity must come from rollbackSource: %+v", jobs)
+	}
+}

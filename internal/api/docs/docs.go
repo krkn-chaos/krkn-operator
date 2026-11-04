@@ -5638,6 +5638,10 @@ const docTemplate = `{
                     "description": "GraphRunName is the name of the parent KrknGraphRun (if this scenario run is part of a graph run)",
                     "type": "string"
                 },
+                "isRollback": {
+                    "description": "IsRollback identifies runs created from a pinned rollback source attempt.",
+                    "type": "boolean"
+                },
                 "ownerUserId": {
                     "description": "OwnerUserID is the email address of the user who created this scenario run",
                     "type": "string"

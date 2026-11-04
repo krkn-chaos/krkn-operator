@@ -10,6 +10,7 @@ import (
 type ScenarioRunStatusResponse struct {
 	ScenarioRunName        string                           `json:"scenarioRunName"`
 	RollbackEnabled        bool                             `json:"rollbackEnabled,omitempty"`
+	IsRollback             bool                             `json:"isRollback,omitempty"`
 	ScenarioName           string                           `json:"scenarioName,omitempty"`
 	Phase                  string                           `json:"phase"`
 	TotalTargets           int                              `json:"totalTargets"`

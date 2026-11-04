@@ -375,6 +375,8 @@ type ScenarioRunStatusResponse struct {
 	// ScenarioName is the scenario tag/name being executed
 	ScenarioName    string `json:"scenarioName,omitempty"`
 	RollbackEnabled bool   `json:"rollbackEnabled,omitempty"`
+	// IsRollback identifies runs created from a pinned rollback source attempt.
+	IsRollback bool `json:"isRollback,omitempty"`
 	// Phase is the overall phase of the scenario run
 	Phase string `json:"phase"`
 	// TotalTargets is the total number of target clusters
@@ -444,6 +446,8 @@ type ScenarioRunListItem struct {
 	// ScenarioName is the name of the scenario being executed
 	ScenarioName    string `json:"scenarioName"`
 	RollbackEnabled bool   `json:"rollbackEnabled,omitempty"`
+	// IsRollback identifies runs created from a pinned rollback source attempt.
+	IsRollback bool `json:"isRollback,omitempty"`
 	// ScenarioImage is the resolved container image used by the scenario jobs
 	ScenarioImage string `json:"scenarioImage,omitempty"`
 	// Phase is the overall phase of the scenario run
