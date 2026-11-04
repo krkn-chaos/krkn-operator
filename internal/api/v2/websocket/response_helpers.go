@@ -228,6 +228,7 @@ func computeWSJobStats(jobs []WSUnifiedJobItem) WSJobStatsSummary {
 func buildScenarioRunResponse(run *krknv1alpha1.KrknScenarioRun) ScenarioRunStatusResponse {
 	return ScenarioRunStatusResponse{
 		ScenarioRunName:        run.Name,
+		RollbackEnabled:        run.Spec.RollbackEnabled,
 		ScenarioName:           run.Spec.Scenario.Name,
 		Phase:                  run.Status.Phase,
 		TotalTargets:           run.Status.TotalTargets,
@@ -251,6 +252,7 @@ func buildScenarioRunResponse(run *krknv1alpha1.KrknScenarioRun) ScenarioRunStat
 func buildScenarioRunDetailResponse(run *krknv1alpha1.KrknScenarioRun) ScenarioRunStatusResponse {
 	return ScenarioRunStatusResponse{
 		ScenarioRunName:        run.Name,
+		RollbackEnabled:        run.Spec.RollbackEnabled,
 		ScenarioName:           run.Spec.Scenario.Name,
 		Phase:                  run.Status.Phase,
 		TotalTargets:           run.Status.TotalTargets,

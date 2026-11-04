@@ -173,6 +173,9 @@ and receives the attempt JobID as `UUID`. Repeated requests while a rollback is
 running or succeeded return the existing run. A failed rollback can be retried
 while files remain; each retry has its own run record. The UI offers the action
 only when the inspection finds files and asks for confirmation before starting.
+The Jobs WebSocket snapshot and run-detail response include `rollbackEnabled`
+from the `KrknScenarioRun` spec so the console can render the inspection result
+for each finished job.
 When files are present, GET also checks that `workload-rollback` exists in the
 original scenario's registry and has a trusted signature when operator-wide
 signature verification is enabled. A missing image, untrusted signature,

@@ -1,11 +1,39 @@
 package websocket
 
 import (
+	"encoding/json"
 	"testing"
 
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
+
+func TestScenarioRunWebSocketResponsesIncludeRollbackEnabled(t *testing.T) {
+	run := krknv1alpha1.KrknScenarioRun{
+		ObjectMeta: metav1.ObjectMeta{Name: "node-cpu-hog-953e3861"},
+		Spec:       krknv1alpha1.KrknScenarioRunSpec{RollbackEnabled: true},
+	}
+	jobs := buildUnifiedJobList([]krknv1alpha1.KrknScenarioRun{run}, nil)
+	if len(jobs) != 1 || jobs[0].ScenarioRun == nil {
+		t.Fatalf("expected one scenario run in jobs snapshot, got %+v", jobs)
+	}
+	for name, response := range map[string]ScenarioRunStatusResponse{
+		"jobs":       *jobs[0].ScenarioRun,
+		"run-detail": buildScenarioRunDetailResponse(&run),
+	} {
+		encoded, err := json.Marshal(response)
+		if err != nil {
+			t.Fatalf("marshal %s response: %v", name, err)
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(encoded, &payload); err != nil {
+			t.Fatalf("decode %s response: %v", name, err)
+		}
+		if payload["rollbackEnabled"] != true {
+			t.Errorf("%s response omitted rollbackEnabled: %s", name, encoded)
+		}
+	}
+}
 
 func TestConvertClusterJobs_OmitsClusterAPIURL(t *testing.T) {
 	now := metav1.Now()

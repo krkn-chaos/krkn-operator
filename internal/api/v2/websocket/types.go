@@ -9,6 +9,7 @@ import (
 // ScenarioRunStatusResponse - copy of internal/api type to avoid import cycle
 type ScenarioRunStatusResponse struct {
 	ScenarioRunName        string                           `json:"scenarioRunName"`
+	RollbackEnabled        bool                             `json:"rollbackEnabled,omitempty"`
 	ScenarioName           string                           `json:"scenarioName,omitempty"`
 	Phase                  string                           `json:"phase"`
 	TotalTargets           int                              `json:"totalTargets"`
