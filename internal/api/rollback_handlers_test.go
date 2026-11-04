@@ -72,6 +72,9 @@ func TestScenarioRollbackRequiresRetainedFilesAndReusesOriginalAttempt(t *testin
 
 	probe := &corev1.Pod{}
 	require.NoError(t, h.client.Get(t.Context(), client.ObjectKey{Namespace: "default", Name: rollbackProbeName(rollbackAttemptID)}, probe))
+	require.Equal(t, "krkn-operator-krkn-scenario-runner", probe.Spec.ServiceAccountName)
+	require.NotNil(t, probe.Spec.AutomountServiceAccountToken)
+	require.False(t, *probe.Spec.AutomountServiceAccountToken)
 	require.True(t, probe.Spec.Volumes[0].PersistentVolumeClaim.ReadOnly)
 	require.Equal(t, workspace.MountPath, probe.Spec.Containers[0].VolumeMounts[0].MountPath)
 	expectedSubPath, err := workspace.SubPath(types.UID(rollbackSourceUID), "provider", "cluster", rollbackAttemptID)

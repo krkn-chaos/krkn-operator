@@ -155,7 +155,9 @@ platform can offer rollback. Run status alone is insufficient.
 It validates the pinned workspace and PVC, then starts a short-lived inspection
 Pod using the original scenario image with a read-only mount of that attempt's
 `subPath`. The Pod checks for unexecuted Krkn rollback version files; it does
-not execute them. The API returns `checking`, `available`, `absent`, `unavailable`,
+not execute them. It uses the scenario runner ServiceAccount for the same
+UID/GID `1001:1001` storage access as scenario Pods, without mounting a service
+account token. The API returns `checking`, `available`, `absent`, `unavailable`,
 `error`, or a rollback execution state. Inspection results expire after 30
 seconds and are checked again. Viewing requires cluster view permission;
 `canExecute` is true only with cluster run permission and the original

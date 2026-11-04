@@ -221,6 +221,7 @@ func (h *Handler) rollbackProbe(ctx context.Context, run *krknv1alpha1.KrknScena
 			OwnerReferences: []metav1.OwnerReference{{APIVersion: krknv1alpha1.GroupVersion.String(), Kind: "KrknScenarioRun", Name: run.Name, UID: run.UID}},
 		},
 		Spec: corev1.PodSpec{
+			ServiceAccountName: "krkn-operator-krkn-scenario-runner",
 			RestartPolicy: corev1.RestartPolicyNever, AutomountServiceAccountToken: &falseValue,
 			ActiveDeadlineSeconds: &deadline,
 			SecurityContext:       &corev1.PodSecurityContext{RunAsUser: &uid, RunAsGroup: &uid, FSGroup: &uid},
