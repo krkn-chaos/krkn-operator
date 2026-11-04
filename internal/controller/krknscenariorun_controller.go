@@ -72,11 +72,11 @@ type KrknScenarioRunReconciler struct {
 // that prevents UID 1001 from writing inside them.
 const rollbackWorkspaceWriteCheck = `if ! (umask 077; probe="$ROLLBACK_VERSIONS_DIRECTORY/.krkn-workspace-write-probe"; : > "$probe" && rm "$probe"); then echo "rollback workspace is not writable: $ROLLBACK_VERSIONS_DIRECTORY" >&2; exit 1; fi; `
 
-// Krkn Hub images with a config template must consume the rollback directory
-// environment variable. Images without a template may not implement rollback;
-// retained files determine whether rollback is available for those scenarios.
+// Public Krkn Hub images render config.yaml from their image template. Refuse
+// rollback-enabled execution if that template does not consume the environment
+// variable, since Krkn otherwise falls back to container-local storage.
 func rollbackConfigTemplateCheck(templatePath string) string {
-	return fmt.Sprintf(`if [ -f %q ]; then if ! grep -E '^[[:space:]]*rollback_versions_directory:' %q | grep -Eq '\$(\{ROLLBACK_VERSIONS_DIRECTORY\}|ROLLBACK_VERSIONS_DIRECTORY)'; then echo 'scenario image does not map ROLLBACK_VERSIONS_DIRECTORY into config.yaml' >&2; exit 1; fi; fi; `, templatePath, templatePath)
+	return fmt.Sprintf(`if ! grep -E '^[[:space:]]*rollback_versions_directory:' %q | grep -Eq '\$(\{ROLLBACK_VERSIONS_DIRECTORY\}|ROLLBACK_VERSIONS_DIRECTORY)'; then echo 'scenario image does not map ROLLBACK_VERSIONS_DIRECTORY into config.yaml' >&2; exit 1; fi; `, templatePath)
 }
 
 // +kubebuilder:rbac:groups=krkn.krkn-chaos.dev,resources=krknscenarioruns,verbs=get;list;watch;create;update;patch;delete
