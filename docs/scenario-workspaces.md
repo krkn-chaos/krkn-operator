@@ -122,6 +122,95 @@ The workspace directory persists independently of the run resource. Storage
 permissions, retention, backup, and cleanup remain the administrator's
 responsibility. Publication controls API selection.
 
+## Reuse from another operator
+
+`github.com/krkn-chaos/krkn-operator/pkg/workspace` is the public Go API for
+operators that create Pods in the operator namespace, alongside published
+`KrknWorkspace` objects and their backing PVCs. A consumer such as krknAI can use the same
+workspace alias and reconciler status without implementing its own PVC lookup
+or mount construction. It must import a released version of the operator Go
+module; a neighboring source checkout is not used automatically. The CRD and
+workspace reconciler must be installed in the cluster. The library does not
+install them or create PVCs.
+
+The consumer passes **its Pod namespace** to `Resolve`. In the current deployment
+this is the operator namespace shared by the consumer. The function reads the
+`KrknWorkspace` and PVC in that namespace and returns a `Binding` containing
+both pinned UIDs. The caller is responsible for passing the same namespace
+when it creates the Pod. The `Binding.Reference` can be stored in the
+consumer's workload spec or another durable record and reconstructed on retry.
+`Validate` checks the stored reference against the live wrapper and PVC before
+each Pod creation. If the PVC disappears, becomes unsuitable, or is recreated
+under the same name with a different UID, the consumer should stop scheduling
+that workload and surface the error. It must not silently switch to another
+claim. A fresh selection may use `Resolve` again.
+
+```go
+binding, err := workspace.Resolve(ctx, kubeClient, podNamespace, workspaceName)
+if err != nil {
+    return err
+}
+// Persist binding.Reference with the workload before scheduling it.
+
+// On each attempt, reconstruct Binding from the persisted reference.
+if err := workspace.Validate(ctx, kubeClient, binding); err != nil {
+    return err
+}
+directory, err := workspace.SubPathFor(workspace.WorkloadKey{
+    Consumer: "krkn-ai", WorkloadUID: workloadUID,
+    Target: clusterIdentity, Attempt: attemptID,
+})
+if err != nil {
+    return err
+}
+volume, mount, err := workspace.Mount(binding, workspace.MountOptions{
+    VolumeName: "workspace", MountPath: "/var/lib/krkn-ai/workspace",
+    SubPath: directory,
+})
+if err != nil {
+    return err
+}
+pod.Spec.Volumes = append(pod.Spec.Volumes, volume)
+pod.Spec.Containers[0].VolumeMounts = append(pod.Spec.Containers[0].VolumeMounts, mount)
+```
+
+The example assumes `ctx`, `kubeClient`, `podNamespace`, `workspaceName`,
+`workloadUID`, `clusterIdentity`, `attemptID`, and `pod` are supplied by the
+consumer. `SubPathFor` makes one stable directory directly under the PVC root
+from the consumer name, workload UID, target, and attempt. Reusing the same key
+finds the same directory; changing any field selects a separate directory.
+The path contains a hash instead of raw caller values. Consumers must persist
+or reconstruct the **same key** when reading files later. They may deliberately
+share a directory by using the same key or mount a known directory read-only;
+directory separation itself provides no permission isolation. The existing
+Krkn scenario and rollback flows keep using `SubPath`, whose directory naming
+is unchanged so previous artifacts remain discoverable.
+
+`Mount` returns only the PVC volume and its matching container mount. The
+consumer adds them to its Pod, chooses the mount path and volume name, and
+sets its Pod security context. `ReadOnly: true` applies to both the volume and
+mount. The storage administrator must ensure that the consumer's UID/GID can
+access kubelet-created directories on every eligible worker; the library does
+not change ownership or prepare the filesystem.
+
+`Available` reads the wrapper's reconciled status for display or initial
+selection. It is an observation that can lag a PVC change and cannot establish
+filesystem write access. `Resolve` requires a current `Available` condition
+and rechecks the PVC. `Validate` checks the live identities and PVC even when
+the reconciler has not yet updated status. Both return errors comparable with
+`errors.Is(err, workspace.ErrUnavailable)` or
+`errors.Is(err, workspace.ErrReplaced)`; API read failures retain their original
+cause. `Mount` rejects incomplete bindings and invalid mount options, but does
+not query Kubernetes, so call `Validate` first.
+
+Public and group visibility govern **platform API selection**. The operator's
+REST API checks the requesting user's access before calling `Resolve`. The Go
+functions use the caller's Kubernetes credentials and do not authenticate an
+end user. A consumer exposing workspace selection to its own users must apply
+its own authorization policy before resolution. Its service account needs
+read access to the wrapper and PVC in the supplied namespace, plus the normal
+permissions to create its Pods there.
+
 ## Rollback artifact persistence
 
 Scenario requests and graph nodes may set `rollbackEnabled: true`. This requires

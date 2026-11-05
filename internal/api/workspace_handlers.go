@@ -17,7 +17,6 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -45,15 +44,9 @@ type availableWorkspacePVC struct {
 	Name string `json:"name"`
 }
 
-func workspaceAvailable(entry *krknv1alpha1.KrknWorkspace) bool {
-	condition := meta.FindStatusCondition(entry.Status.Conditions, "Available")
-	return entry.DeletionTimestamp == nil && entry.Status.ObservedGeneration == entry.Generation &&
-		condition != nil && condition.Status == metav1.ConditionTrue && condition.ObservedGeneration == entry.Generation
-}
-
 func workspaceInfoFromCR(entry *krknv1alpha1.KrknWorkspace, admin bool) workspaceInfo {
 	info := workspaceInfo{Name: entry.Name, DisplayName: entry.Spec.DisplayName,
-		AvailableToAll: entry.Spec.AvailableToAll, Available: workspaceAvailable(entry)}
+		AvailableToAll: entry.Spec.AvailableToAll, Available: workspace.Available(entry)}
 	if entry.Spec.Group != "" {
 		info.Groups = []string{entry.Spec.Group}
 	}
@@ -159,25 +152,22 @@ func (h *Handler) resolveWorkspaceSelection(w http.ResponseWriter, r *http.Reque
 		writeJSONError(w, http.StatusForbidden, ErrorResponse{Error: "forbidden", Message: "Workspace is not available to this user"})
 		return nil, false
 	}
-	if !workspaceAvailable(entry) {
-		writeJSONError(w, http.StatusConflict, ErrorResponse{Error: "workspace_unavailable", Message: "Workspace PVC is not available"})
-		return nil, false
-	}
-	pvc := &corev1.PersistentVolumeClaim{}
-	if err := h.client.Get(r.Context(), client.ObjectKey{Namespace: h.namespace, Name: entry.Spec.ClaimName}, pvc); err != nil {
-		if apierrors.IsNotFound(err) {
-			writeJSONError(w, http.StatusConflict, ErrorResponse{Error: "workspace_unavailable", Message: "Workspace PVC is missing"})
+	binding, err := workspace.Resolve(r.Context(), h.client, h.namespace, requested.Name)
+	if err != nil {
+		if errors.Is(err, workspace.ErrUnavailable) || errors.Is(err, workspace.ErrReplaced) {
+			writeJSONError(w, http.StatusConflict, ErrorResponse{Error: "workspace_unavailable", Message: err.Error()})
 		} else {
-			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{Error: "internal_error", Message: "Failed to load workspace PVC"})
+			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{Error: "internal_error", Message: "Failed to resolve workspace PVC"})
 		}
 		return nil, false
 	}
-	if err := workspace.ValidatePVC(pvc, types.UID(entry.Spec.ClaimUID)); err != nil {
-		writeJSONError(w, http.StatusConflict, ErrorResponse{Error: "workspace_unavailable", Message: err.Error()})
+	if requested.WorkspaceUID != "" && requested.WorkspaceUID != binding.Reference.WorkspaceUID ||
+		requested.ClaimName != "" && requested.ClaimName != binding.Reference.ClaimName ||
+		requested.ClaimUID != "" && requested.ClaimUID != binding.Reference.ClaimUID {
+		writeJSONError(w, http.StatusConflict, ErrorResponse{Error: "workspace_unavailable", Message: "Workspace binding changed"})
 		return nil, false
 	}
-	return &krknv1alpha1.WorkspaceReference{Name: entry.Name, WorkspaceUID: string(entry.UID),
-		ClaimName: pvc.Name, ClaimUID: string(pvc.UID)}, true
+	return binding.Reference.DeepCopy(), true
 }
 
 // WorkspaceRouter manages platform workspaces backed by existing PVCs.
@@ -275,7 +265,7 @@ func (h *Handler) listWorkspaces(w http.ResponseWriter, r *http.Request) {
 	items := make([]workspaceInfo, 0, len(entries.Items))
 	for i := range entries.Items {
 		entry := &entries.Items[i]
-		if (strings.HasSuffix(r.URL.Path, "/available") || !admin) && !workspaceAvailable(entry) {
+		if (strings.HasSuffix(r.URL.Path, "/available") || !admin) && !workspace.Available(entry) {
 			continue
 		}
 		allowed, err := h.canAccessWorkspace(r.Context(), entry)

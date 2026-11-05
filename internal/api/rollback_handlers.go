@@ -16,7 +16,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -156,18 +155,7 @@ func (h *Handler) validateRollbackWorkspace(ctx context.Context, run *krknv1alph
 	if !run.Spec.RollbackEnabled || ref == nil {
 		return workspace.ErrUnavailable
 	}
-	entry := &krknv1alpha1.KrknWorkspace{}
-	if err := h.client.Get(ctx, client.ObjectKey{Namespace: h.namespace, Name: ref.Name}, entry); err != nil {
-		return fmt.Errorf("load workspace: %w", err)
-	}
-	if string(entry.UID) != ref.WorkspaceUID || entry.Spec.ClaimName != ref.ClaimName || entry.Spec.ClaimUID != ref.ClaimUID {
-		return workspace.ErrReplaced
-	}
-	pvc := &corev1.PersistentVolumeClaim{}
-	if err := h.client.Get(ctx, client.ObjectKey{Namespace: h.namespace, Name: ref.ClaimName}, pvc); err != nil {
-		return fmt.Errorf("load PVC: %w", err)
-	}
-	return workspace.ValidatePVC(pvc, types.UID(ref.ClaimUID))
+	return workspace.Validate(ctx, h.client, workspace.Binding{Namespace: h.namespace, Reference: *ref})
 }
 
 func (h *Handler) rollbackProbe(ctx context.Context, run *krknv1alpha1.KrknScenarioRun, job *krknv1alpha1.ClusterJobStatus, jobID, image string) (string, error) {
@@ -211,6 +199,11 @@ func (h *Handler) rollbackProbe(ctx context.Context, run *krknv1alpha1.KrknScena
 	if err != nil {
 		return "error", err
 	}
+	volume, mount, err := workspace.Mount(workspace.Binding{Namespace: h.namespace, Reference: *run.Spec.Workspace},
+		workspace.MountOptions{VolumeName: "workspace", MountPath: workspace.MountPath, SubPath: subPath, ReadOnly: true})
+	if err != nil {
+		return "error", fmt.Errorf("prepare rollback inspection mount: %w", err)
+	}
 	falseValue := false
 	deadline := int64(60)
 	uid := int64(1001)
@@ -225,11 +218,11 @@ func (h *Handler) rollbackProbe(ctx context.Context, run *krknv1alpha1.KrknScena
 			RestartPolicy:      corev1.RestartPolicyNever, AutomountServiceAccountToken: &falseValue,
 			ActiveDeadlineSeconds: &deadline,
 			SecurityContext:       &corev1.PodSecurityContext{RunAsUser: &uid, RunAsGroup: &uid, FSGroup: &uid},
-			Volumes:               []corev1.Volume{{Name: "workspace", VolumeSource: corev1.VolumeSource{PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: run.Spec.Workspace.ClaimName, ReadOnly: true}}}},
+			Volumes:               []corev1.Volume{volume},
 			Containers: []corev1.Container{{
 				Name: "inspect", Image: image, Command: []string{"python3", "-c"}, Args: []string{rollbackProbeScript},
 				Env:          []corev1.EnvVar{{Name: "UUID", Value: jobID}, {Name: "ROLLBACK_VERSIONS_DIRECTORY", Value: workspace.MountPath}},
-				VolumeMounts: []corev1.VolumeMount{{Name: "workspace", MountPath: workspace.MountPath, SubPath: subPath, ReadOnly: true}},
+				VolumeMounts: []corev1.VolumeMount{mount},
 			}},
 		},
 	}

@@ -1002,9 +1002,9 @@
     "semantic_hash": "84d17a95090e654b8621958076f94861"
   },
   "internal/controller/krknscenariorun_controller.go": {
-    "mtime": 1793786262.7527664,
-    "seen": 1793786326.092563,
-    "ast_hash": "b25bd2fdbd9f712370b1a56938aced29",
+    "mtime": 1793868509.9512177,
+    "seen": 1793868603.483357,
+    "ast_hash": "ded107335f99f70ba7fe20022806b660",
     "semantic_hash": ""
   },
   "internal/controller/krknscenariorun_controller_failedstatus_test.go": {
@@ -2496,9 +2496,9 @@
     "semantic_hash": ""
   },
   "internal/api/workspace_handlers.go": {
-    "mtime": 1793867125.4763796,
-    "seen": 1793867193.596456,
-    "ast_hash": "72c013ab8085469cf24daa3876ff4646",
+    "mtime": 1793868573.063893,
+    "seen": 1793868603.483346,
+    "ast_hash": "8dae1e38c58ef8ad8b4db72edb5d94c2",
     "semantic_hash": ""
   },
   "internal/api/workspace_handlers_test.go": {
@@ -2514,9 +2514,9 @@
     "semantic_hash": ""
   },
   "pkg/workspace/workspace.go": {
-    "mtime": 1793867125.4750726,
-    "seen": 1793867193.596537,
-    "ast_hash": "9f5cdd209ae81c80ca2cfe812cd7385c",
+    "mtime": 1793868579.7353325,
+    "seen": 1793868603.483427,
+    "ast_hash": "4c5cc389666b04f4507aaf4ad62a7e7a",
     "semantic_hash": ""
   },
   "pkg/workspace/workspace_test.go": {
@@ -2538,9 +2538,9 @@
     "semantic_hash": ""
   },
   "docs/scenario-workspaces.md": {
-    "mtime": 1793867178.2086515,
-    "seen": 1793867193.596614,
-    "ast_hash": "02812923c8acbbf2a16d5f2e3abd5e55",
+    "mtime": 1793868620.54929,
+    "seen": 1793868628.9969459,
+    "ast_hash": "ac3ed8a9a4ccb1828d31cbf776e293f3",
     "semantic_hash": ""
   },
   "api/v1alpha1/krknworkspace_types.go": {
@@ -2574,9 +2574,9 @@
     "semantic_hash": ""
   },
   "internal/api/rollback_handlers.go": {
-    "mtime": 1793867231.424714,
-    "seen": 1793867256.305961,
-    "ast_hash": "5eb575bd7174be6226b239a0402200af",
+    "mtime": 1793868573.1443503,
+    "seen": 1793868603.483309,
+    "ast_hash": "6627e6adc4ea9f38276428656aa4679e",
     "semantic_hash": ""
   },
   "internal/api/rollback_handlers_test.go": {
@@ -2607,6 +2607,18 @@
     "mtime": 1793789413.295384,
     "seen": 1793789773.744641,
     "ast_hash": "6a01aee7b7fb02575e398f4fd7c8ae10",
+    "semantic_hash": ""
+  },
+  "pkg/workspace/binding.go": {
+    "mtime": 1793868638.917068,
+    "seen": 1793868645.6760478,
+    "ast_hash": "6e0f4f5df7077494d9cefb08f8f7bd1d",
+    "semantic_hash": ""
+  },
+  "pkg/workspace/binding_test.go": {
+    "mtime": 1793868638.9976764,
+    "seen": 1793868645.6760478,
+    "ast_hash": "7974b3be28b913b03686fca0a4dc609a",
     "semantic_hash": ""
   }
 }

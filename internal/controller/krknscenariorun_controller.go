@@ -503,30 +503,7 @@ func (r *KrknScenarioRunReconciler) validateWorkspacePVC(ctx context.Context, re
 	if ref == nil {
 		return nil
 	}
-	if ref.Name == "" || ref.WorkspaceUID == "" || ref.ClaimName == "" || ref.ClaimUID == "" {
-		return fmt.Errorf("%w: workspace or PVC identity was not recorded", workspace.ErrUnavailable)
-	}
-	entry := &krknv1alpha1.KrknWorkspace{}
-	if err := r.Get(ctx, types.NamespacedName{Namespace: r.Namespace, Name: ref.Name}, entry); err != nil {
-		if apierrors.IsNotFound(err) {
-			return fmt.Errorf("%w: workspace %q is missing", workspace.ErrUnavailable, ref.Name)
-		}
-		return fmt.Errorf("load workspace %q: %w", ref.Name, err)
-	}
-	if entry.UID != types.UID(ref.WorkspaceUID) || entry.Spec.ClaimName != ref.ClaimName || entry.Spec.ClaimUID != ref.ClaimUID {
-		return fmt.Errorf("%w: workspace %q binding changed", workspace.ErrReplaced, ref.Name)
-	}
-	pvc := &corev1.PersistentVolumeClaim{}
-	if err := r.Get(ctx, types.NamespacedName{Namespace: r.Namespace, Name: ref.ClaimName}, pvc); err != nil {
-		if apierrors.IsNotFound(err) {
-			return fmt.Errorf("%w: PVC %q is missing", workspace.ErrUnavailable, ref.ClaimName)
-		}
-		return fmt.Errorf("load workspace PVC %q: %w", ref.ClaimName, err)
-	}
-	if err := workspace.ValidatePVC(pvc, types.UID(ref.ClaimUID)); err != nil {
-		return fmt.Errorf("workspace PVC %q: %w", ref.ClaimName, err)
-	}
-	return nil
+	return workspace.Validate(ctx, r.Client, workspace.Binding{Namespace: r.Namespace, Reference: *ref})
 }
 
 // prepareJobResources prepares all resources needed for creating a scenario pod.
@@ -871,15 +848,14 @@ func (r *KrknScenarioRunReconciler) prepareJobResources(
 		})
 	}
 	if workspaceSubPath != "" {
-		volumes = append(volumes, corev1.Volume{
-			Name: "workspace",
-			VolumeSource: corev1.VolumeSource{PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
-				ClaimName: scenarioRun.Spec.Workspace.ClaimName,
-			}},
-		})
-		volumeMounts = append(volumeMounts, corev1.VolumeMount{
-			Name: "workspace", MountPath: workspace.MountPath, SubPath: workspaceSubPath,
-		})
+		volume, mount, err := workspace.Mount(workspace.Binding{Namespace: r.Namespace, Reference: *scenarioRun.Spec.Workspace},
+			workspace.MountOptions{VolumeName: "workspace", MountPath: workspace.MountPath, SubPath: workspaceSubPath})
+		if err != nil {
+			cleanup()
+			return nil, fmt.Errorf("prepare workspace mount: %w", err)
+		}
+		volumes = append(volumes, volume)
+		volumeMounts = append(volumeMounts, mount)
 	}
 
 	// Add writable tmp volume

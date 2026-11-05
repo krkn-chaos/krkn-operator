@@ -1,4 +1,4 @@
-// Package workspace defines the published PVC contract used by scenario pods.
+// Package workspace provides the published PVC contract for colocated workloads.
 package workspace
 
 import (
