@@ -63,6 +63,14 @@
   spec:
     uuid: example-target-request
 - apiVersion: krkn.krkn-chaos.dev/v1alpha1
+  kind: KrknWorkspace
+  metadata:
+    name: shared-rollback-files
+  spec:
+    claimName: krkn-shared-file
+    claimUid: 9e70715d-9154-4b9e-aa76-1ae6c6b2594e
+    availableToAll: true
+- apiVersion: krkn.krkn-chaos.dev/v1alpha1
   kind: KrknUserGroup
   metadata:
     name: platform-engineers

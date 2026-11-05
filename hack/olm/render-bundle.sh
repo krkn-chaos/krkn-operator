@@ -236,6 +236,7 @@ for crd_file in "$output_dir"/manifests/*.yaml; do
     KrknOperatorTargetProvider) crd_display_name="Krkn Operator Target Provider" ;;
     KrknOperatorTarget) crd_display_name="Krkn Operator Target" ;;
     KrknScenarioRun) crd_display_name="Krkn Scenario Run" ;;
+    KrknWorkspace) crd_display_name="Krkn Workspace" ;;
     KrknTargetRequest) crd_display_name="Krkn Target Request" ;;
     KrknUserGroup) crd_display_name="Krkn User Group" ;;
     KrknUser) crd_display_name="Krkn User" ;;

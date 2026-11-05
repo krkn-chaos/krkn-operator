@@ -64,6 +64,20 @@ type FileMount struct {
 	FileID string `json:"fileId,omitempty"`
 }
 
+// WorkspaceReference pins a scenario run to a published PVC. The controller
+// assigns a separate subdirectory for each target and execution attempt.
+type WorkspaceReference struct {
+	// Name is the platform workspace name.
+	Name string `json:"name"`
+	// WorkspaceUID pins the run to this workspace CR instance.
+	WorkspaceUID string `json:"workspaceUid"`
+	// ClaimName is the PVC name in the operator namespace.
+	// +kubebuilder:validation:Required
+	ClaimName string `json:"claimName,omitempty"`
+	// ClaimUID prevents a recreated PVC with the same name from replacing the data.
+	ClaimUID string `json:"claimUid"`
+}
+
 // ClusterJobStatus represents the status of a scenario job for a specific cluster
 type ClusterJobStatus struct {
 	// ProviderName is the name of the provider that owns this cluster
@@ -75,6 +89,9 @@ type ClusterJobStatus struct {
 	ClusterAPIURL string `json:"clusterApiUrl,omitempty"`
 	// JobID is the unique identifier for this job
 	JobID string `json:"jobId"`
+	// AttemptHistory retains earlier attempt IDs so their rollback files remain discoverable after retries.
+	// +optional
+	AttemptHistory []ScenarioAttemptStatus `json:"attemptHistory,omitempty"`
 	// PodName is the name of the pod running the scenario
 	PodName string `json:"podName,omitempty"`
 	// ScenarioImage is the resolved container image path (registry/repository:tag) being run
@@ -108,6 +125,20 @@ type ClusterJobStatus struct {
 	// FailureReason contains a categorized failure reason (OOMKilled, ContainerError, etc.)
 	// +optional
 	FailureReason string `json:"failureReason,omitempty"`
+}
+
+// ScenarioAttemptStatus identifies an earlier execution attempt for a target.
+type ScenarioAttemptStatus struct {
+	JobID         string `json:"jobId"`
+	ScenarioImage string `json:"scenarioImage,omitempty"`
+}
+
+// RollbackSource pins a rollback run to one original execution attempt.
+type RollbackSource struct {
+	RunName       string `json:"runName"`
+	RunUID        string `json:"runUid"`
+	JobID         string `json:"jobId"`
+	ClusterAPIURL string `json:"clusterApiUrl"`
 }
 
 // ScenarioReference identifies a scenario without allowing the caller to
@@ -194,6 +225,19 @@ type KrknScenarioRunSpec struct {
 	// Files is a list of files to mount in the scenario pod
 	// +optional
 	Files []FileMount `json:"files,omitempty"`
+
+	// Workspace is the published PVC selected for this run.
+	// +optional
+	Workspace *WorkspaceReference `json:"workspace,omitempty"`
+
+	// RollbackEnabled persists rollback version files in the selected workspace.
+	// It does not trigger automatic rollback execution.
+	// +optional
+	RollbackEnabled bool `json:"rollbackEnabled,omitempty"`
+
+	// RollbackSource identifies the attempt whose workspace is mounted by a rollback run.
+	// +optional
+	RollbackSource *RollbackSource `json:"rollbackSource,omitempty"`
 
 	// Environment is a map of environment variables to set in the scenario pod
 	// +optional

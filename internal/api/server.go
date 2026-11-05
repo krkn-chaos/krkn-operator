@@ -263,6 +263,8 @@ func NewServerWithComponentNamespace(port int, client client.Client, clientset k
 	// File management endpoints - CRUD: admin only, available: all users
 	mux.Handle(FilesPath, authMw.RequireAuth(http.HandlerFunc(handler.FilesRouter)))
 	mux.Handle(FilesPath+"/", authMw.RequireAuth(http.HandlerFunc(handler.FilesRouter)))
+	mux.Handle(WorkspacesPath, authMw.RequireAuth(http.HandlerFunc(handler.WorkspaceRouter)))
+	mux.Handle(WorkspacesPath+"/", authMw.RequireAuth(http.HandlerFunc(handler.WorkspaceRouter)))
 	mux.Handle(FilesAvailablePath, authMw.RequireAuth(http.HandlerFunc(handler.ListAvailableFiles)))
 
 	// Workflow management endpoints - CRUD: authenticated users, list all: admin only, available: all users

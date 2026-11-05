@@ -37,6 +37,7 @@ import (
 	"github.com/krkn-chaos/krkn-operator/pkg/auth"
 	"github.com/krkn-chaos/krkn-operator/pkg/cloudcreds"
 	"github.com/krkn-chaos/krkn-operator/pkg/groupauth"
+	"github.com/krkn-chaos/krkn-operator/pkg/workspace"
 )
 
 // ListGraphRuns handles GET /api/v1/graphruns
@@ -193,7 +194,7 @@ func (h *Handler) GetGraphRun(w http.ResponseWriter, r *http.Request) {
 		Namespace:         graphRun.Namespace,
 		CreationTimestamp: graphRun.CreationTimestamp.Time,
 		Spec: GraphRunSpecResponse{
-			Graph:                   graphRun.Spec.Graph,
+			Graph:                   h.publicGraphWorkspaces(r.Context(), graphRun.Spec.Graph),
 			TargetRequestID:         graphRun.Spec.TargetRequestID,
 			TargetClusters:          graphRun.Spec.TargetClusters,
 			OwnerUserID:             graphRun.Spec.OwnerUserID,
@@ -451,6 +452,27 @@ func (h *Handler) CreateGraphRun(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Validate file access for Volumes references in graph nodes
+	for nodeID, node := range req.Graph {
+		resolved, ok := h.resolveWorkspaceSelection(w, r, node.Workspace)
+		if !ok {
+			return
+		}
+		if node.RollbackEnabled && resolved == nil {
+			writeJSONError(w, http.StatusBadRequest, ErrorResponse{Error: "bad_request", Message: "Rollback requires a workspace for node " + nodeID})
+			return
+		}
+		if resolved != nil {
+			for _, mountPath := range node.Volumes {
+				if workspace.ConflictsWithMount(mountPath) {
+					writeJSONError(w, http.StatusBadRequest, ErrorResponse{Error: "bad_request", Message: "File mount overlaps the workspace path"})
+					return
+				}
+			}
+		}
+		node.Workspace = resolved
+		req.Graph[nodeID] = node
+	}
+
 	// Volumes format: {"<file-uuid>": "/mount/path"}
 	for nodeID, node := range req.Graph {
 		for fileID := range node.Volumes {
@@ -615,7 +637,7 @@ func (h *Handler) CreateGraphRun(w http.ResponseWriter, r *http.Request) {
 		Namespace:         graphRun.Namespace,
 		CreationTimestamp: graphRun.CreationTimestamp.Time,
 		Spec: GraphRunSpecResponse{
-			Graph:                   graphRun.Spec.Graph,
+			Graph:                   h.publicGraphWorkspaces(r.Context(), graphRun.Spec.Graph),
 			TargetRequestID:         graphRun.Spec.TargetRequestID,
 			TargetClusters:          graphRun.Spec.TargetClusters,
 			MaxRetries:              graphRun.Spec.MaxRetries,

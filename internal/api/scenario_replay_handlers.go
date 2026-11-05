@@ -197,6 +197,7 @@ func (h *Handler) GetScenarioReplay(w http.ResponseWriter, r *http.Request) {
 		"userID", claims.UserID)
 
 	// Step 6: Return payload (identical to wizard output)
+	payload.Workspace = h.visibleWorkspaceReference(ctx, payload.Workspace)
 	writeJSON(w, http.StatusOK, payload)
 }
 
@@ -263,9 +264,11 @@ func (h *Handler) reconstructScenarioRunPayload(ctx context.Context, scenarioRun
 		ScenarioImage: scenarioRunImage(scenarioRun.Status.ClusterJobs),
 
 		// Optional fields
-		Environment:    scenarioRun.Spec.Environment,
-		KubeconfigPath: scenarioRun.Spec.KubeconfigPath,
-		MaxRetries:     intPtr(scenarioRun.Spec.MaxRetries),
+		Environment:     scenarioRun.Spec.Environment,
+		KubeconfigPath:  scenarioRun.Spec.KubeconfigPath,
+		MaxRetries:      intPtr(scenarioRun.Spec.MaxRetries),
+		Workspace:       scenarioRun.Spec.Workspace,
+		RollbackEnabled: scenarioRun.Spec.RollbackEnabled,
 	}
 	if ref := h.replayableCloudCredentialRef(ctx, scenarioRun.Spec.CloudCredentialRef); ref != "" {
 		payload.CloudCredentialRef = ref

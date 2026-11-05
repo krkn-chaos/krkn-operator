@@ -228,6 +228,8 @@ func computeWSJobStats(jobs []WSUnifiedJobItem) WSJobStatsSummary {
 func buildScenarioRunResponse(run *krknv1alpha1.KrknScenarioRun) ScenarioRunStatusResponse {
 	return ScenarioRunStatusResponse{
 		ScenarioRunName:        run.Name,
+		RollbackEnabled:        run.Spec.RollbackEnabled,
+		IsRollback:             run.Spec.RollbackSource != nil,
 		ScenarioName:           run.Spec.Scenario.Name,
 		Phase:                  run.Status.Phase,
 		TotalTargets:           run.Status.TotalTargets,
@@ -251,6 +253,8 @@ func buildScenarioRunResponse(run *krknv1alpha1.KrknScenarioRun) ScenarioRunStat
 func buildScenarioRunDetailResponse(run *krknv1alpha1.KrknScenarioRun) ScenarioRunStatusResponse {
 	return ScenarioRunStatusResponse{
 		ScenarioRunName:        run.Name,
+		RollbackEnabled:        run.Spec.RollbackEnabled,
+		IsRollback:             run.Spec.RollbackSource != nil,
 		ScenarioName:           run.Spec.Scenario.Name,
 		Phase:                  run.Status.Phase,
 		TotalTargets:           run.Status.TotalTargets,
@@ -294,6 +298,7 @@ func convertClusterJobs(jobs []krknv1alpha1.ClusterJobStatus) []ClusterJobRespon
 			JobID:           job.JobID,
 			PodName:         job.PodName,
 			ScenarioImage:   job.ScenarioImage,
+			AttemptHistory:  job.AttemptHistory,
 			Phase:           job.Phase,
 			StartTime:       convertMetaTime(job.StartTime),
 			CompletionTime:  convertMetaTime(job.CompletionTime),

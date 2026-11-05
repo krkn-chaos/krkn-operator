@@ -2,12 +2,8 @@ package controller
 
 import (
 	"context"
-	"crypto/tls"
 	"fmt"
-	"io"
-	"net/http"
 	"strings"
-	"time"
 
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
 	registryutil "github.com/krkn-chaos/krkn-operator/pkg/registry"
@@ -80,6 +76,17 @@ func resolveImmutableImage(ctx context.Context, config *krknctlconfig.Config, re
 		if err != nil {
 			return "", fmt.Errorf("failed to build public scenario image URI: %w", err)
 		}
+		if reference.Name == "workload-rollback" {
+			repositoryAPIURI, err := config.GetQuayScenarioRepositoryAPIURI()
+			if err != nil {
+				return "", fmt.Errorf("failed to build public rollback repository URI: %w", err)
+			}
+			digest, err := registryutil.ResolvePublicTagDigest(ctx, repositoryAPIURI, reference.Name)
+			if err != nil {
+				return "", fmt.Errorf("failed to resolve rollback image digest: %w", err)
+			}
+			return krknctlprovider.ImageReference(base, krknctlmodels.ScenarioTag{Name: reference.Name, Digest: &digest}), nil
+		}
 	}
 	provider := krknctlfactory.NewProviderFactory(config).NewInstance(mode)
 	if provider == nil {
@@ -96,47 +103,7 @@ func resolveImmutableImage(ctx context.Context, config *krknctlconfig.Config, re
 }
 
 func resolvePrivateImageDigest(ctx context.Context, scenario string, registry *krknctlmodels.RegistryV2) (string, error) {
-	manifestURI, err := registry.GetV2ScenarioDetailAPIURI(scenario)
-	if err != nil {
-		return "", fmt.Errorf("failed to build private image manifest URI: %w", err)
-	}
-	transport := &http.Transport{TLSClientConfig: &tls.Config{
-		InsecureSkipVerify: registry.SkipTLS, // #nosec G402 -- skipTLS is an explicit administrator-controlled registry setting.
-	}}
-	client := &http.Client{Transport: transport, Timeout: 30 * time.Second}
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, manifestURI, nil)
-	if err != nil {
-		return "", fmt.Errorf("failed to create private image manifest request: %w", err)
-	}
-	request.Header.Set("Accept", strings.Join([]string{
-		"application/vnd.docker.distribution.manifest.v2+json",
-		"application/vnd.docker.distribution.manifest.list.v2+json",
-		"application/vnd.oci.image.manifest.v1+json",
-		"application/vnd.oci.image.index.v1+json",
-	}, ", "))
-	if registry.Token != nil && *registry.Token != "" {
-		request.Header.Set("Authorization", "Bearer "+*registry.Token)
-	} else if registry.Username != nil {
-		password := ""
-		if registry.Password != nil {
-			password = *registry.Password
-		}
-		request.SetBasicAuth(*registry.Username, password)
-	}
-	response, err := client.Do(request)
-	if err != nil {
-		return "", fmt.Errorf("failed to resolve private image digest: %w", err)
-	}
-	defer response.Body.Close()
-	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
-		body, _ := io.ReadAll(response.Body)
-		return "", fmt.Errorf("private image manifest request returned %s: %s", response.Status, strings.TrimSpace(string(body)))
-	}
-	digest := response.Header.Get("Docker-Content-Digest")
-	if digest == "" {
-		return "", fmt.Errorf("private image manifest response did not include Docker-Content-Digest")
-	}
-	return digest, nil
+	return registryutil.ResolvePrivateTagDigest(ctx, scenario, registry)
 }
 
 func scenarioTagForImage(reference krknv1alpha1.ScenarioReference, image string) krknctlmodels.ScenarioTag {

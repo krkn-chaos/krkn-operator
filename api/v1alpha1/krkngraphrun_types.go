@@ -91,6 +91,14 @@ type GraphScenarioNode struct {
 	// +optional
 	Volumes map[string]string `json:"volumes,omitempty"`
 
+	// Workspace selects a published PVC for this node's scenario runs.
+	// +optional
+	Workspace *WorkspaceReference `json:"workspace,omitempty"`
+
+	// RollbackEnabled persists this node's rollback files in its workspace.
+	// +optional
+	RollbackEnabled bool `json:"rollbackEnabled,omitempty"`
+
 	// ResiliencyWeight controls this node's contribution to the resiliency score.
 	// +optional
 	// +kubebuilder:validation:Minimum=0

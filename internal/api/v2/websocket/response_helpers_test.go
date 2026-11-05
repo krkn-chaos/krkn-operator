@@ -1,11 +1,45 @@
 package websocket
 
 import (
+	"encoding/json"
 	"testing"
 
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
+
+func TestScenarioRunWebSocketResponsesIncludeRollbackIdentity(t *testing.T) {
+	run := krknv1alpha1.KrknScenarioRun{
+		ObjectMeta: metav1.ObjectMeta{Name: "node-cpu-hog-953e3861"},
+		Spec: krknv1alpha1.KrknScenarioRunSpec{
+			RollbackEnabled: true,
+			RollbackSource:  &krknv1alpha1.RollbackSource{RunName: "source-run", JobID: "attempt"},
+		},
+	}
+	jobs := buildUnifiedJobList([]krknv1alpha1.KrknScenarioRun{run}, nil)
+	if len(jobs) != 1 || jobs[0].ScenarioRun == nil {
+		t.Fatalf("expected one scenario run in jobs snapshot, got %+v", jobs)
+	}
+	for name, response := range map[string]ScenarioRunStatusResponse{
+		"jobs":       *jobs[0].ScenarioRun,
+		"run-detail": buildScenarioRunDetailResponse(&run),
+	} {
+		encoded, err := json.Marshal(response)
+		if err != nil {
+			t.Fatalf("marshal %s response: %v", name, err)
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(encoded, &payload); err != nil {
+			t.Fatalf("decode %s response: %v", name, err)
+		}
+		if payload["rollbackEnabled"] != true {
+			t.Errorf("%s response omitted rollbackEnabled: %s", name, encoded)
+		}
+		if payload["isRollback"] != true {
+			t.Errorf("%s response omitted isRollback: %s", name, encoded)
+		}
+	}
+}
 
 func TestConvertClusterJobs_OmitsClusterAPIURL(t *testing.T) {
 	now := metav1.Now()
@@ -17,6 +51,7 @@ func TestConvertClusterJobs_OmitsClusterAPIURL(t *testing.T) {
 			JobID:           "job-1",
 			PodName:         "pod-1",
 			ScenarioImage:   "quay.io/krkn/scenario:latest",
+			AttemptHistory:  []krknv1alpha1.ScenarioAttemptStatus{{JobID: "previous-job", ScenarioImage: "quay.io/krkn/scenario:previous"}},
 			Phase:           "Succeeded",
 			StartTime:       &now,
 			CompletionTime:  &now,
@@ -43,6 +78,9 @@ func TestConvertClusterJobs_OmitsClusterAPIURL(t *testing.T) {
 	}
 	if r.JobID != "job-1" {
 		t.Errorf("Expected JobID 'job-1', got '%s'", r.JobID)
+	}
+	if len(r.AttemptHistory) != 1 || r.AttemptHistory[0].JobID != "previous-job" {
+		t.Errorf("Expected previous attempt in WebSocket response, got %+v", r.AttemptHistory)
 	}
 	if r.Phase != "Succeeded" {
 		t.Errorf("Expected Phase 'Succeeded', got '%s'", r.Phase)

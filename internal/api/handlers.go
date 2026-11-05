@@ -58,6 +58,7 @@ import (
 	"github.com/krkn-chaos/krkn-operator/pkg/elasticsearch"
 	"github.com/krkn-chaos/krkn-operator/pkg/groupauth"
 	"github.com/krkn-chaos/krkn-operator/pkg/registry"
+	"github.com/krkn-chaos/krkn-operator/pkg/workspace"
 	pb "github.com/krkn-chaos/krkn-operator/proto/dataprovider"
 )
 
@@ -129,6 +130,8 @@ type Handler struct {
 	// scenarioProviderFactory is injectable for API tests; production handlers
 	// use the krknctl-backed factory assigned by NewHandler.
 	scenarioProviderFactory func(provider.Mode) (provider.ScenarioDataProvider, error)
+	rollbackDigestResolver  func(context.Context, bool, *models.RegistryV2) (string, error)
+	rollbackImages          rollbackImageCache
 	// esClient is a long-lived, connection-pooling client shared across all
 	// telemetry queries so transports are reused rather than allocated per
 	// request.
@@ -1355,6 +1358,29 @@ func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Process file references: validate access and translate to FileMount
+	workspaceRef, ok := h.resolveWorkspaceSelection(w, r, req.Workspace)
+	if !ok {
+		return
+	}
+	if req.RollbackEnabled && workspaceRef == nil {
+		writeJSONError(w, http.StatusBadRequest, ErrorResponse{Error: "bad_request", Message: "Rollback requires a workspace"})
+		return
+	}
+	if workspaceRef != nil {
+		for _, file := range req.Files {
+			if workspace.ConflictsWithMount(file.MountPath) {
+				writeJSONError(w, http.StatusBadRequest, ErrorResponse{Error: "bad_request", Message: "File mount overlaps the workspace path"})
+				return
+			}
+		}
+		for _, file := range req.FileReferences {
+			if workspace.ConflictsWithMount(file.MountPath) {
+				writeJSONError(w, http.StatusBadRequest, ErrorResponse{Error: "bad_request", Message: "File mount overlaps the workspace path"})
+				return
+			}
+		}
+	}
+
 	translatedFiles := make([]krknv1alpha1.FileMount, 0, len(req.FileReferences))
 
 	for _, fileRef := range req.FileReferences {
@@ -1619,6 +1645,8 @@ func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
 			CustomRunName:          req.CustomRunName,
 			ResiliencyScoreEnabled: req.ResiliencyScoreEnabled,
 			MaxRetries:             maxRetries,
+			Workspace:              workspaceRef,
+			RollbackEnabled:        req.RollbackEnabled,
 		},
 	}
 
@@ -1802,6 +1830,8 @@ func (h *Handler) GetScenarioRunStatus(w http.ResponseWriter, r *http.Request) {
 				response := ScenarioRunStatusResponse{
 					ScenarioRunName:        scenarioRunName,
 					ScenarioName:           scenarioRun.Spec.Scenario.Name,
+					RollbackEnabled:        scenarioRun.Spec.RollbackEnabled,
+					IsRollback:             scenarioRun.Spec.RollbackSource != nil,
 					Phase:                  scenarioRun.Status.Phase,
 					TotalTargets:           scenarioRun.Status.TotalTargets,
 					SuccessfulJobs:         scenarioRun.Status.SuccessfulJobs,
@@ -1836,6 +1866,7 @@ func (h *Handler) GetScenarioRunStatus(w http.ResponseWriter, r *http.Request) {
 			ProviderName:    job.ProviderName,
 			ClusterName:     job.ClusterName,
 			JobID:           job.JobID,
+			AttemptHistory:  job.AttemptHistory,
 			PodName:         job.PodName,
 			ScenarioImage:   job.ScenarioImage,
 			Phase:           job.Phase,
@@ -1852,6 +1883,8 @@ func (h *Handler) GetScenarioRunStatus(w http.ResponseWriter, r *http.Request) {
 	response := ScenarioRunStatusResponse{
 		ScenarioRunName:        scenarioRunName,
 		ScenarioName:           scenarioRun.Spec.Scenario.Name,
+		RollbackEnabled:        scenarioRun.Spec.RollbackEnabled,
+		IsRollback:             scenarioRun.Spec.RollbackSource != nil,
 		Phase:                  scenarioRun.Status.Phase,
 		TotalTargets:           scenarioRun.Status.TotalTargets,
 		SuccessfulJobs:         scenarioRun.Status.SuccessfulJobs,
@@ -2498,6 +2531,8 @@ func (h *Handler) ListScenarioRuns(w http.ResponseWriter, r *http.Request) {
 		run := ScenarioRunListItem{
 			ScenarioRunName:        sr.Name,
 			ScenarioName:           sr.Spec.Scenario.Name,
+			RollbackEnabled:        sr.Spec.RollbackEnabled,
+			IsRollback:             sr.Spec.RollbackSource != nil,
 			ScenarioImage:          scenarioRunImage(sr.Status.ClusterJobs),
 			Phase:                  sr.Status.Phase,
 			TotalTargets:           sr.Status.TotalTargets,
@@ -2972,6 +3007,7 @@ func (h *Handler) GetSingleJob(w http.ResponseWriter, r *http.Request) {
 		ProviderName:    foundJob.ProviderName,
 		ClusterName:     foundJob.ClusterName,
 		JobID:           foundJob.JobID,
+		AttemptHistory:  foundJob.AttemptHistory,
 		PodName:         foundJob.PodName,
 		Phase:           foundJob.Phase,
 		Message:         foundJob.Message,
@@ -3273,6 +3309,11 @@ func (h *Handler) ScenariosRunRouter(w http.ResponseWriter, r *http.Request) {
 	if strings.HasPrefix(path, ScenariosRunPath+"/") {
 		// Note: WebSocket logs endpoint (/jobs/{jobID}/logs) is handled in server.go
 		// before reaching this router, so no need to check for it here
+		rollbackParts := strings.Split(strings.TrimPrefix(path, ScenariosRunPath+"/"), "/")
+		if len(rollbackParts) == 3 && rollbackParts[1] == "rollback" {
+			h.HandleScenarioRollback(w, r, rollbackParts[0], rollbackParts[2])
+			return
+		}
 
 		// Check for /replay/{jobID} pattern (GET only - scenario replay)
 		if strings.HasPrefix(path, ScenariosRunPath+"/replay/") {

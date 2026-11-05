@@ -61,6 +61,14 @@ rules:
   verbs:
   - get
 - apiGroups:
+  - ""
+  resources:
+  - persistentvolumeclaims
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
   - krkn.krkn-chaos.dev
   resources:
   - krkncategories
@@ -70,6 +78,7 @@ rules:
   - krknoperatortargets
   - krkntargetrequests
   - krknscenarioruns
+  - krknworkspaces
   - krknusergroups
   - krknusers
   verbs:
@@ -99,6 +108,7 @@ rules:
   - krknoperatortargets/status
   - krkntargetrequests/status
   - krknscenarioruns/status
+  - krknworkspaces/status
   - krknusergroups/status
   - krknusers/status
   verbs:
@@ -150,6 +160,7 @@ rules:
   - krknoperatortargets
   - krkntargetrequests
   - krknscenarioruns
+  - krknworkspaces
   - krknusergroups
   - krknusers
   verbs:
@@ -169,6 +180,7 @@ rules:
   - krknoperatortargets/status
   - krkntargetrequests/status
   - krknscenarioruns/status
+  - krknworkspaces/status
   - krknusergroups/status
   - krknusers/status
   verbs:

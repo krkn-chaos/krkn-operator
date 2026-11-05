@@ -8,6 +8,8 @@ resources:
 - scenario_serviceaccount.yaml
 - role.yaml
 - role_binding.yaml
+- workspace_role.yaml
+- workspace_role_binding.yaml
 - leader_election_role.yaml
 - leader_election_role_binding.yaml
 # The following RBAC configurations are used to protect
