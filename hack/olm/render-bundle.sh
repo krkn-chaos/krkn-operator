@@ -59,6 +59,36 @@ data_provider_image=${DATA_PROVIDER_IMAGE:-krkn-chaos.docker.scarf.sh/krkn-chaos
 console_image=${CONSOLE_IMAGE:-krkn-chaos.docker.scarf.sh/krkn-chaos/krkn-operator-console:latest}
 min_kube_version=${MIN_KUBE_VERSION:-1.19.0}
 openshift_versions=${OPENSHIFT_VERSIONS:-v4.19-v4.22}
+ai_orchestrator_image=${AI_ORCHESTRATOR_IMAGE:-quay.io/krkn-chaos/krkn-ai-operator:latest}
+ai_service_image=${AI_SERVICE_IMAGE:-quay.io/krkn-chaos/krkn-ai-service:latest}
+if [[ "${USE_IMAGE_DIGESTS:-false}" == "true" ]]; then
+  resolve_runtime_digest() {
+    local image=$1
+    local digest
+    if [[ "$image" == *@sha256:* ]]; then
+      [[ "$image" =~ @sha256:[[:xdigit:]]{64}$ ]] || {
+        echo "invalid sha256 runtime image digest: $image" >&2
+        exit 1
+      }
+      printf '%s\n' "$image"
+      return
+    fi
+    command -v docker >/dev/null || {
+      echo "docker is required to resolve runtime image digest: $image" >&2
+      exit 1
+    }
+    digest=$(docker buildx imagetools inspect "$image" | awk '$1 == "Digest:" { print $2; exit }')
+    [[ "$digest" =~ ^sha256:[[:xdigit:]]{64}$ ]] || {
+      echo "could not resolve a sha256 digest for runtime image: $image" >&2
+      exit 1
+    }
+    printf '%s@%s\n' "$image" "$digest"
+  }
+  ai_orchestrator_image=$(resolve_runtime_digest "$ai_orchestrator_image")
+  ai_service_image=$(resolve_runtime_digest "$ai_service_image")
+fi
+export AI_ORCHESTRATOR_IMAGE="$ai_orchestrator_image"
+export AI_SERVICE_IMAGE="$ai_service_image"
 export OPERATOR_IMAGE="$operator_image"
 export DATA_PROVIDER_IMAGE="$data_provider_image"
 export CONSOLE_IMAGE="$console_image"
@@ -93,12 +123,16 @@ helm template krkn-operator "$repo_root/charts/krkn-operator" \
   --set-string "images.operator.image=${operator_image}" \
   --set-string "images.dataProvider.image=${data_provider_image}" \
   --set-string "images.console.image=${console_image}" \
+  --set-string "images.aiOrchestrator.image=${ai_orchestrator_image}" \
+  --set-string "images.aiService.image=${ai_service_image}" \
   --output-dir "$render_dir" >/dev/null
 
-# Helm does not render the chart's CRD directory through templates. Bundle
-# generation still needs those CRDs alongside the rendered workload resources.
+# Bundles always own the optional Krkn-AI API, while runtime resources remain
+# managed by the operator after installation.
 mkdir -p "$render_dir/krkn-operator/crds"
 cp "$repo_root"/charts/krkn-operator/crds/*.yaml "$render_dir/krkn-operator/crds/"
+cp "$repo_root/config/crd/bases/krkn.krkn-chaos.dev_krknairuns.yaml" \
+  "$render_dir/krkn-operator/crds/"
 
 # Feed examples to Operator SDK before bundle generation as well as applying
 # them to the final CRDs below. This keeps generation quiet and ensures the
@@ -171,17 +205,23 @@ csv_file="$output_dir/manifests/krkn-operator.clusterserviceversion.yaml"
 resolved_operator_image="$OPERATOR_IMAGE"
 resolved_data_provider_image="$DATA_PROVIDER_IMAGE"
 resolved_console_image="$CONSOLE_IMAGE"
+resolved_ai_orchestrator_image="$AI_ORCHESTRATOR_IMAGE"
+resolved_ai_service_image="$AI_SERVICE_IMAGE"
 if [[ "${USE_IMAGE_DIGESTS:-false}" == "true" ]]; then
   resolved_operator_image=$(yq -r '.spec.install.spec.deployments[] | select(.name == "krkn-operator-operator") | .spec.template.spec.containers[] | select(.name == "manager") | .image' "$csv_file")
   resolved_data_provider_image=$(yq -r '.spec.install.spec.deployments[] | select(.name == "krkn-operator-operator") | .spec.template.spec.containers[] | select(.name == "data-provider") | .image' "$csv_file")
   resolved_console_image=$(yq -r '.spec.install.spec.deployments[] | select(.name == "krkn-operator-console") | .spec.template.spec.containers[] | select(.name == "console") | .image' "$csv_file")
-  for image in "$resolved_operator_image" "$resolved_data_provider_image" "$resolved_console_image"; do
-    [[ "$image" == *@sha256:* ]] || { echo "digest mode produced a mutable image: $image" >&2; exit 1; }
+  resolved_ai_orchestrator_image=$(yq -r '.spec.install.spec.deployments[] | select(.name == "krkn-operator-operator") | .spec.template.spec.containers[] | select(.name == "manager") | .env[] | select(.name == "KRKNAI_ORCHESTRATOR_IMAGE") | .value' "$csv_file")
+  resolved_ai_service_image=$(yq -r '.spec.install.spec.deployments[] | select(.name == "krkn-operator-operator") | .spec.template.spec.containers[] | select(.name == "manager") | .env[] | select(.name == "KRKNAI_SERVICE_IMAGE") | .value' "$csv_file")
+  for image in "$resolved_operator_image" "$resolved_data_provider_image" "$resolved_console_image" "$resolved_ai_orchestrator_image" "$resolved_ai_service_image"; do
+    [[ "$image" =~ @sha256:[[:xdigit:]]{64}$ ]] || { echo "digest mode produced a mutable image: $image" >&2; exit 1; }
   done
 fi
 export RESOLVED_OPERATOR_IMAGE="$resolved_operator_image"
 export RESOLVED_DATA_PROVIDER_IMAGE="$resolved_data_provider_image"
 export RESOLVED_CONSOLE_IMAGE="$resolved_console_image"
+export RESOLVED_AI_ORCHESTRATOR_IMAGE="$resolved_ai_orchestrator_image"
+export RESOLVED_AI_SERVICE_IMAGE="$resolved_ai_service_image"
 yq -i \
   '.metadata.annotations.containerImage = strenv(RESOLVED_OPERATOR_IMAGE) |
    .metadata.annotations."alm-examples" = (load(strenv(EXAMPLES_FILE)) | to_json) |
@@ -189,7 +229,9 @@ yq -i \
    .spec.relatedImages = [
      {"name": "krkn-operator", "image": strenv(RESOLVED_OPERATOR_IMAGE)},
      {"name": "krkn-operator-data-provider", "image": strenv(RESOLVED_DATA_PROVIDER_IMAGE)},
-     {"name": "krkn-operator-console", "image": strenv(RESOLVED_CONSOLE_IMAGE)}
+     {"name": "krkn-operator-console", "image": strenv(RESOLVED_CONSOLE_IMAGE)},
+     {"name": "krkn-ai-orchestrator", "image": strenv(RESOLVED_AI_ORCHESTRATOR_IMAGE)},
+     {"name": "krkn-ai-service", "image": strenv(RESOLVED_AI_SERVICE_IMAGE)}
    ] |
    .spec.install.spec.permissions += [{
      "serviceAccountName": "krkn-operator",
@@ -239,6 +281,7 @@ for crd_file in "$output_dir"/manifests/*.yaml; do
     KrknTargetRequest) crd_display_name="Krkn Target Request" ;;
     KrknUserGroup) crd_display_name="Krkn User Group" ;;
     KrknUser) crd_display_name="Krkn User" ;;
+    KrknAIRun) crd_display_name="Krkn AI Run" ;;
     *) crd_display_name="$crd_kind" ;;
   esac
 
@@ -265,6 +308,9 @@ if [[ "$profile" == "ocp" ]]; then
   yq -i '.spec.install.spec.clusterPermissions += [{
     "serviceAccountName": "krkn-operator",
     "rules": [{"apiGroups": ["rbac.authorization.k8s.io"], "resources": ["clusterroles"], "resourceNames": ["system:openshift:scc:anyuid"], "verbs": ["bind"]}]
+  }, {
+    "serviceAccountName": "krkn-operator",
+    "rules": [{"apiGroups": ["rbac.authorization.k8s.io"], "resources": ["clusterrolebindings"], "verbs": ["update"]}]
   }]' "$csv_file"
 fi
 

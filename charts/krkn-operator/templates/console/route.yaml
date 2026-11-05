@@ -7,10 +7,9 @@ metadata:
   labels:
     {{- include "krkn-operator.labels" . | nindent 4 }}
     app.kubernetes.io/component: console
-  {{- with .Values.console.route.annotations }}
+  {{- $routeAnnotations := mergeOverwrite (dict "haproxy.router.openshift.io/timeout" "6m") .Values.console.route.annotations }}
   annotations:
-    {{- toYaml . | nindent 4 }}
-  {{- end }}
+    {{- toYaml $routeAnnotations | nindent 4 }}
 spec:
   {{- $routeHost := .Values.console.route.host | default .Values.console.route.hostname }}
   {{- if $routeHost }}

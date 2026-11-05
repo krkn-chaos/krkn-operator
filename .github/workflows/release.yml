@@ -235,6 +235,7 @@ jobs:
       RELEASE_TAG: ${{ github.ref_name }}
       REGISTRY: quay.io
       IMAGE_NAMESPACE: krkn-chaos
+      USE_IMAGE_DIGESTS: 'true'
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -272,18 +273,35 @@ jobs:
           console_version=$(hack/olm/select-compatible-release.sh \
             krkn-chaos/krkn-operator-console "$RELEASE_TAG")
           echo "Selected compatible console release: $console_version"
+          ai_release=$(hack/olm/select-compatible-release.sh krkn-chaos/krkn-ai latest-stable)
+          ai_image_tag="${ai_release#v}"
+          echo "Selected stable Krkn-AI release: $ai_release"
 
           resolve_digest() {
             local image=$1
             local digest
+            if [[ "$image" == *@sha256:* ]]; then
+              [[ "$image" =~ @sha256:[[:xdigit:]]{64}$ ]] || {
+                echo "invalid sha256 image digest: $image" >&2
+                return 1
+              }
+              printf '%s\n' "$image"
+              return
+            fi
             digest=$(docker buildx imagetools inspect "$image" | awk '$1 == "Digest:" { print $2; exit }')
-            test -n "$digest"
+            [[ "$digest" =~ ^sha256:[[:xdigit:]]{64}$ ]] || {
+              echo "could not resolve a sha256 digest for image: $image" >&2
+              return 1
+            }
             printf '%s@%s\n' "$image" "$digest"
           }
 
           export OPERATOR_IMAGE=$(resolve_digest "$REGISTRY/$IMAGE_NAMESPACE/krkn-operator:$RELEASE_TAG")
           export DATA_PROVIDER_IMAGE=$(resolve_digest "$REGISTRY/$IMAGE_NAMESPACE/krkn-operator-data-provider:$RELEASE_TAG")
           export CONSOLE_IMAGE=$(resolve_digest "krkn-chaos.docker.scarf.sh/krkn-chaos/krkn-operator-console:$console_version")
+          AI_ORCHESTRATOR_IMAGE=$(resolve_digest "$REGISTRY/$IMAGE_NAMESPACE/krkn-ai-operator:$ai_image_tag")
+          AI_SERVICE_IMAGE=$(resolve_digest "$REGISTRY/$IMAGE_NAMESPACE/krkn-ai-service:$ai_image_tag")
+          export AI_ORCHESTRATOR_IMAGE AI_SERVICE_IMAGE
 
           for profile in kubernetes ocp; do
             output_dir="dist/bundle-$profile"

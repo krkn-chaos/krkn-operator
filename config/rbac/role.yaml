@@ -22,11 +22,13 @@ rules:
   - ""
   resources:
   - pods/log
+  - serviceaccounts
   verbs:
   - get
 - apiGroups:
   - krkn.krkn-chaos.dev
   resources:
+  - krknairuns
   - krkncategories
   - krkngraphruns
   - krknoperatortargets
@@ -45,15 +47,15 @@ rules:
 - apiGroups:
   - krkn.krkn-chaos.dev
   resources:
-  - krkncomponents
+  - krknairuns/finalizers
+  - krkngraphruns/finalizers
+  - krknscenarioruns/finalizers
   verbs:
-  - create
-  - get
-  - list
-  - watch
+  - update
 - apiGroups:
   - krkn.krkn-chaos.dev
   resources:
+  - krknairuns/status
   - krkncomponents/status
   - krkngraphruns/status
   - krknoperatortargetproviderconfigs/status
@@ -70,10 +72,12 @@ rules:
 - apiGroups:
   - krkn.krkn-chaos.dev
   resources:
-  - krkngraphruns/finalizers
-  - krknscenarioruns/finalizers
+  - krkncomponents
   verbs:
-  - update
+  - create
+  - get
+  - list
+  - watch
 - apiGroups:
   - krkn.krkn-chaos.dev
   resources:

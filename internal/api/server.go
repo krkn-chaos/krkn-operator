@@ -72,6 +72,7 @@ import (
 	_ "github.com/krkn-chaos/krkn-operator/internal/api/docs" // Import generated docs
 	v2 "github.com/krkn-chaos/krkn-operator/internal/api/v2"
 	"github.com/krkn-chaos/krkn-operator/pkg/auth"
+	"github.com/krkn-chaos/krkn-operator/pkg/krknaiserver"
 	"github.com/krkn-chaos/krkn-operator/pkg/wsorigin"
 )
 
@@ -111,21 +112,22 @@ const WebSocketAllowedOriginsEnv = "WEBSOCKET_ALLOWED_ORIGINS"
 //
 // Parameters:
 //   - port: HTTP port to listen on
-//   - client: Kubernetes client
+//   - k8sClient: Kubernetes client
 //   - clientset: Kubernetes clientset
 //   - namespace: Namespace for Krkn resources and target providers
 //   - grpcServerAddr: gRPC server address
 //   - secretManager: JWT secret manager (must be started before API server receives traffic)
+//   - krknAI: Krkn-AI creation state and installation-level artifact service credentials
 //
 // Returns a new Server instance
-func NewServer(port int, client client.Client, clientset kubernetes.Interface, namespace, grpcServerAddr string, secretManager *auth.SecretManager) *Server {
-	return NewServerWithComponentNamespace(port, client, clientset, namespace, namespace, grpcServerAddr, secretManager)
+func NewServer(port int, k8sClient client.Client, clientset kubernetes.Interface, namespace, grpcServerAddr string, secretManager *auth.SecretManager, krknAI KrknAIServiceConfig) *Server {
+	return NewServerWithComponentNamespace(port, k8sClient, clientset, namespace, namespace, grpcServerAddr, secretManager, krknAI)
 }
 
 // NewServerWithComponentNamespace creates a server whose component versions
 // are read from componentNamespace, independently of the Krkn resource namespace.
-func NewServerWithComponentNamespace(port int, client client.Client, clientset kubernetes.Interface, namespace, componentNamespace, grpcServerAddr string, secretManager *auth.SecretManager) *Server {
-	handler := NewHandler(client, clientset, namespace, grpcServerAddr, secretManager)
+func NewServerWithComponentNamespace(port int, k8sClient client.Client, clientset kubernetes.Interface, namespace, componentNamespace, grpcServerAddr string, secretManager *auth.SecretManager, krknAI KrknAIServiceConfig) *Server {
+	handler := NewHandler(k8sClient, clientset, namespace, grpcServerAddr, secretManager, krknAI)
 	handler.componentNamespace = componentNamespace
 
 	// Create auth middleware using SecretManager
@@ -146,7 +148,7 @@ func NewServerWithComponentNamespace(port int, client client.Client, clientset k
 	// Set up user active status check: after JWT validation, verify the user account
 	// is still active by looking up the KrknUser CR. Uses a 1-minute TTL cache to
 	// avoid hitting the API server on every request.
-	userChecker := newK8sUserStatusChecker(client, namespace)
+	userChecker := newK8sUserStatusChecker(k8sClient, namespace)
 	cachedChecker := auth.NewCachedUserStatusChecker(userChecker, 1*time.Minute)
 	authMw.SetUserStatusChecker(cachedChecker)
 
@@ -154,7 +156,7 @@ func NewServerWithComponentNamespace(port int, client client.Client, clientset k
 	getTokenGenCtx := func(ctx context.Context) (*auth.TokenGenerator, error) {
 		return secretManager.GetTokenGenerator()
 	}
-	v2Handler := v2.NewHandler(client, namespace, handler, getTokenGenCtx) // handler implements AuthorizationChecker
+	v2Handler := v2.NewHandler(k8sClient, namespace, handler, getTokenGenCtx) // handler implements AuthorizationChecker
 
 	// Strict per-IP rate limiter for the login endpoint only: 5 requests per
 	// minute, burst of 10. Login is the password brute-force surface, so it is
@@ -300,6 +302,12 @@ func NewServerWithComponentNamespace(port int, client client.Client, clientset k
 	mux.Handle(GraphRunsPath, authMw.RequireAuth(http.HandlerFunc(handler.GraphRunsRouter)))
 	mux.Handle(GraphRunsPath+"/", authMw.RequireAuth(http.HandlerFunc(handler.GraphRunsRouter)))
 
+	// Krkn-AI artifacts are accessed only through the authenticated operator API.
+	mux.Handle(KrknAIPath, authMw.RequireAuth(http.HandlerFunc(handler.KrknAIRouter)))
+	mux.Handle(KrknAIPath+"/", authMw.RequireAuth(http.HandlerFunc(handler.KrknAIRouter)))
+	// Krkn-AI orchestrator logs authenticate with the JWT access_token subprotocol.
+	mux.HandleFunc("/api/v2/ws/krkn-ai/runs/", handler.GetKrknAIRunLogs)
+
 	// Swagger UI - public endpoint for API documentation
 	mux.Handle("/api/swagger/", httpSwagger.WrapHandler)
 	// Elasticsearch config endpoints - admin only
@@ -366,12 +374,16 @@ func NewServerWithComponentNamespace(port int, client client.Client, clientset k
 	// Wrap mux with middleware chain: logging -> body size limit -> routes
 	// maxBodySize is 10MB, applied only to POST/PUT/PATCH requests
 	const maxBodySize int64 = 10 << 20 // 10 MB
+	const discoveryResponseTimeout = krknaiserver.DefaultDiscoveryTimeout + 30*time.Second
 	server := &http.Server{
-		Addr:              fmt.Sprintf(":%d", port),
-		Handler:           loggingMiddleware(maxBodySizeMiddleware(maxBodySize)(mux)),
+		Addr: fmt.Sprintf(":%d", port),
+		Handler: discoveryResponseDeadlineMiddleware(
+			discoveryResponseTimeout,
+			loggingMiddleware(maxBodySizeMiddleware(maxBodySize)(mux)),
+		),
 		ReadHeaderTimeout: 30 * time.Second,  // Prevent Slowloris attacks
 		ReadTimeout:       60 * time.Second,  // Total request read timeout
-		WriteTimeout:      60 * time.Second,  // Response write timeout
+		WriteTimeout:      60 * time.Second,  // Default response write timeout
 		IdleTimeout:       120 * time.Second, // Keep-alive timeout
 	}
 
@@ -436,6 +448,18 @@ startServer:
 	case <-ctx.Done():
 		return s.Shutdown()
 	}
+}
+
+// discoveryResponseDeadlineMiddleware extends only the discovery endpoint's
+// response write deadline. Request header and body read timeouts remain owned by
+// the server's existing protections.
+func discoveryResponseDeadlineMiddleware(timeout time.Duration, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && r.URL.Path == KrknAIPath+"/discoveries" {
+			_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(timeout))
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // Shutdown gracefully shuts down the API server and cancels in-flight background jobs.

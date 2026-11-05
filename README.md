@@ -453,6 +453,21 @@ For example, the `resiliency-file` global parameter is described as:
 }
 ```
 
+## Krkn-AI Operator API
+
+Krkn-AI supports discovery, configuration validation, optimization runs,
+results, and live logs. It is optional and disabled by default:
+
+- **Helm:** set `krknAI.enabled=true`.
+- **OLM:** set `KRKNAI_ENABLED=true` in the Subscription's `spec.config.env`.
+
+REST endpoints are under `/api/v1/krkn-ai` and require authentication and
+appropriate target permissions. The status endpoint reports enablement, not
+readiness. Disabling OLM AI preserves active runs, cleanup, and artifact access.
+
+See [OpenShift OLM quickstart](docs/olm-openshift-krkn-ai.md) for installation
+and `/api/swagger/index.html` on the operator for REST endpoint schemas.
+
 ## Ecosystem
 
 See [DEPLOYMENT.md](DEPLOYMENT.md) for full installation options and configuration.
