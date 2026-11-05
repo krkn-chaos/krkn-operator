@@ -64,9 +64,6 @@ spec:
                 description: ClaimUID pins the publication to this exact PVC instance.
                 minLength: 1
                 type: string
-              displayName:
-                description: DisplayName is an optional human-readable name.
-                type: string
               group:
                 description: Group permits members of one platform group to select
                   it.

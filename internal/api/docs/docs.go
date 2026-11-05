@@ -5971,9 +5971,6 @@ const docTemplate = `{
                 "claimName": {
                     "type": "string"
                 },
-                "displayName": {
-                    "type": "string"
-                },
                 "groups": {
                     "type": "array",
                     "items": {
@@ -5995,9 +5992,6 @@ const docTemplate = `{
                     "type": "boolean"
                 },
                 "claimName": {
-                    "type": "string"
-                },
-                "displayName": {
                     "type": "string"
                 },
                 "groups": {

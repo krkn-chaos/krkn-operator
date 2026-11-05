@@ -21,7 +21,7 @@ CR. The API revalidates the selected claim when the admin calls
 `PUT /api/v1/workspaces/{name}`. For example:
 
 ```json
-{"claimName": "krkn-shared-file", "displayName": "Shared rollback files", "availableToAll": true}
+{"claimName": "krkn-shared-file", "availableToAll": true}
 ```
 
 For group access, use:
@@ -38,9 +38,13 @@ CR without deleting the PVC or its data. Administrators see all wrappers and
 their backing PVC names with `GET /api/v1/workspaces`; other authenticated users
 see only available workspaces they may select with
 `GET /api/v1/workspaces/available`. The user-facing list omits PVC names.
-An existing alias can change its display name and visibility; binding it to a
+The workspace name is the Kubernetes resource name and is unique within the
+operator namespace. An existing workspace can change its visibility; binding it to a
 different PVC requires deleting and recreating the wrapper, which changes its
 UID and invalidates old run bindings.
+After upgrading from a version with `spec.displayName`, clients should use the
+resource name shown in the catalog. The old display value is ignored, and the
+publication API rejects a `displayName` request field.
 
 The workspace reconciler watches the wrapper and its referenced PVC, and
 rechecks the claim at least every five minutes. Its

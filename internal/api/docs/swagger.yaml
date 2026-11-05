@@ -1794,8 +1794,6 @@ definitions:
         type: boolean
       claimName:
         type: string
-      displayName:
-        type: string
       groups:
         items:
           type: string
@@ -1810,8 +1808,6 @@ definitions:
       availableToAll:
         type: boolean
       claimName:
-        type: string
-      displayName:
         type: string
       groups:
         items:

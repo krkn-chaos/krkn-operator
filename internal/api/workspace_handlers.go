@@ -25,14 +25,12 @@ import (
 
 type workspacePublishRequest struct {
 	ClaimName      string   `json:"claimName"`
-	DisplayName    string   `json:"displayName,omitempty"`
 	Groups         []string `json:"groups,omitempty"`
 	AvailableToAll bool     `json:"availableToAll,omitempty"`
 }
 
 type workspaceInfo struct {
 	Name           string   `json:"name"`
-	DisplayName    string   `json:"displayName,omitempty"`
 	ClaimName      string   `json:"claimName,omitempty"`
 	Groups         []string `json:"groups,omitempty"`
 	AvailableToAll bool     `json:"availableToAll"`
@@ -45,7 +43,7 @@ type availableWorkspacePVC struct {
 }
 
 func workspaceInfoFromCR(entry *krknv1alpha1.KrknWorkspace, admin bool) workspaceInfo {
-	info := workspaceInfo{Name: entry.Name, DisplayName: entry.Spec.DisplayName,
+	info := workspaceInfo{Name: entry.Name,
 		AvailableToAll: entry.Spec.AvailableToAll, Available: workspace.Available(entry)}
 	if entry.Spec.Group != "" {
 		info.Groups = []string{entry.Spec.Group}
@@ -338,7 +336,7 @@ func (h *Handler) publishWorkspace(w http.ResponseWriter, r *http.Request, name 
 		if apierrors.IsNotFound(err) {
 			entry = &krknv1alpha1.KrknWorkspace{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: h.namespace},
 				Spec: krknv1alpha1.KrknWorkspaceSpec{ClaimName: pvc.Name, ClaimUID: string(pvc.UID),
-					DisplayName: request.DisplayName, AvailableToAll: request.AvailableToAll, Group: groupName}}
+					AvailableToAll: request.AvailableToAll, Group: groupName}}
 			return h.client.Create(r.Context(), entry)
 		}
 		if err != nil {
@@ -347,7 +345,7 @@ func (h *Handler) publishWorkspace(w http.ResponseWriter, r *http.Request, name 
 		if entry.Spec.ClaimName != pvc.Name || entry.Spec.ClaimUID != string(pvc.UID) {
 			return errBindingChanged
 		}
-		entry.Spec.DisplayName, entry.Spec.AvailableToAll, entry.Spec.Group = request.DisplayName, request.AvailableToAll, groupName
+		entry.Spec.AvailableToAll, entry.Spec.Group = request.AvailableToAll, groupName
 		return h.client.Update(r.Context(), entry)
 	})
 	if errors.Is(err, errBindingChanged) || apierrors.IsAlreadyExists(err) {

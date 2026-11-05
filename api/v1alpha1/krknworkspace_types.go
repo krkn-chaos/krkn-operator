@@ -13,9 +13,6 @@ type KrknWorkspaceSpec struct {
 	// ClaimUID pins the publication to this exact PVC instance.
 	// +kubebuilder:validation:MinLength=1
 	ClaimUID string `json:"claimUid"`
-	// DisplayName is an optional human-readable name.
-	// +optional
-	DisplayName string `json:"displayName,omitempty"`
 	// AvailableToAll permits every authenticated platform user to select it.
 	// +optional
 	AvailableToAll bool `json:"availableToAll,omitempty"`

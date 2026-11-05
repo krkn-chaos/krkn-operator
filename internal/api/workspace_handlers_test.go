@@ -115,6 +115,10 @@ func TestWorkspacePublicationAndAccess(t *testing.T) {
 	published := httptest.NewRecorder()
 	h.WorkspaceRouter(published, newCategoryRequestAs(http.MethodPut, WorkspacesPath+"/friendly", `{"claimName":"shared","groups":["team-a"]}`, "admin", "admin@example.com"))
 	require.Equal(t, http.StatusOK, published.Code, published.Body.String())
+	require.NotContains(t, published.Body.String(), "displayName")
+	legacyName := httptest.NewRecorder()
+	h.WorkspaceRouter(legacyName, newCategoryRequestAs(http.MethodPut, WorkspacesPath+"/another", `{"claimName":"shared","displayName":"Duplicate"}`, "admin", "admin@example.com"))
+	require.Equal(t, http.StatusBadRequest, legacyName.Code, legacyName.Body.String())
 	entry := &krknv1alpha1.KrknWorkspace{}
 	require.NoError(t, h.client.Get(t.Context(), client.ObjectKey{Namespace: "default", Name: "friendly"}, entry))
 	require.Equal(t, "shared", entry.Spec.ClaimName)

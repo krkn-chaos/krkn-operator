@@ -5965,9 +5965,6 @@
                 "claimName": {
                     "type": "string"
                 },
-                "displayName": {
-                    "type": "string"
-                },
                 "groups": {
                     "type": "array",
                     "items": {
@@ -5989,9 +5986,6 @@
                     "type": "boolean"
                 },
                 "claimName": {
-                    "type": "string"
-                },
-                "displayName": {
                     "type": "string"
                 },
                 "groups": {
