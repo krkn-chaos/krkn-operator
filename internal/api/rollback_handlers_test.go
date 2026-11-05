@@ -388,7 +388,77 @@ func TestScenarioRollbackViewerCannotExecute(t *testing.T) {
 	response := rollbackRequest(h, http.MethodGet, "user", rollbackAttemptID)
 	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
 	require.False(t, decodeRollbackResponse(t, response).CanExecute)
+	require.Equal(t, "unavailable", decodeRollbackResponse(t, response).State)
+	probe := &corev1.Pod{}
+	require.True(t, apierrors.IsNotFound(h.client.Get(t.Context(), client.ObjectKey{Namespace: "default", Name: rollbackProbeName(rollbackAttemptID)}, probe)))
 	require.Equal(t, http.StatusForbidden, rollbackRequest(h, http.MethodPost, "user", rollbackAttemptID).Code)
+}
+
+func TestScenarioRollbackSucceededIsIdempotent(t *testing.T) {
+	h := rollbackTestHandler(t)
+	rollback := &krknv1alpha1.KrknScenarioRun{
+		ObjectMeta: metav1.ObjectMeta{Name: rollbackRunName(rollbackAttemptID), Namespace: "default",
+			Labels: map[string]string{"krkn-rollback-attempt": rollbackAttemptID, "krkn-rollback-iteration": "1"}},
+		Spec: krknv1alpha1.KrknScenarioRunSpec{RollbackSource: &krknv1alpha1.RollbackSource{
+			RunName: "source-run", RunUID: rollbackSourceUID, JobID: rollbackAttemptID}},
+		Status: krknv1alpha1.KrknScenarioRunStatus{Phase: "Succeeded"},
+	}
+	require.NoError(t, h.client.Create(t.Context(), rollback))
+	for _, method := range []string{http.MethodGet, http.MethodPost} {
+		response := rollbackRequest(h, method, "admin", rollbackAttemptID)
+		require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+		result := decodeRollbackResponse(t, response)
+		require.Equal(t, "succeeded", result.State)
+		require.False(t, result.CanExecute)
+		require.Equal(t, rollback.Name, result.RollbackRunName)
+	}
+	probe := &corev1.Pod{}
+	require.True(t, apierrors.IsNotFound(h.client.Get(t.Context(), client.ObjectKey{Namespace: "default", Name: rollbackProbeName(rollbackAttemptID)}, probe)))
+	var runs krknv1alpha1.KrknScenarioRunList
+	require.NoError(t, h.client.List(t.Context(), &runs, client.InNamespace("default")))
+	require.Len(t, runs.Items, 2)
+}
+
+func TestScenarioRollbackFailedWithoutFilesIsUnavailable(t *testing.T) {
+	h := rollbackTestHandler(t)
+	rollback := &krknv1alpha1.KrknScenarioRun{
+		ObjectMeta: metav1.ObjectMeta{Name: rollbackRunName(rollbackAttemptID), Namespace: "default",
+			Labels: map[string]string{"krkn-rollback-attempt": rollbackAttemptID, "krkn-rollback-iteration": "1"}},
+		Spec: krknv1alpha1.KrknScenarioRunSpec{RollbackSource: &krknv1alpha1.RollbackSource{
+			RunName: "source-run", RunUID: rollbackSourceUID, JobID: rollbackAttemptID}},
+		Status: krknv1alpha1.KrknScenarioRunStatus{Phase: "Failed"},
+	}
+	require.NoError(t, h.client.Create(t.Context(), rollback))
+	probe := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
+		Name: rollbackProbeName(rollbackAttemptID), Namespace: "default",
+		Labels: map[string]string{"krkn-scenario-run-uid": rollbackSourceUID},
+	}}
+	require.NoError(t, h.client.Create(t.Context(), probe))
+	probe.Status.Phase = corev1.PodSucceeded
+	probe.Status.ContainerStatuses = []corev1.ContainerStatus{{State: corev1.ContainerState{
+		Terminated: &corev1.ContainerStateTerminated{Message: "absent"}}}}
+	require.NoError(t, h.client.Status().Update(t.Context(), probe))
+	response := rollbackRequest(h, http.MethodGet, "admin", rollbackAttemptID)
+	require.Equal(t, http.StatusOK, response.Code)
+	result := decodeRollbackResponse(t, response)
+	require.Equal(t, "unavailable", result.State)
+	require.False(t, result.CanExecute)
+	require.Contains(t, result.Message, "failed")
+}
+
+func TestScenarioRollbackRetryingDoesNotInspect(t *testing.T) {
+	h := rollbackTestHandler(t)
+	run := &krknv1alpha1.KrknScenarioRun{}
+	require.NoError(t, h.client.Get(t.Context(), client.ObjectKey{Namespace: "default", Name: "source-run"}, run))
+	run.Status.ClusterJobs[0].Phase = "Retrying"
+	require.NoError(t, h.client.Update(t.Context(), run))
+	response := rollbackRequest(h, http.MethodGet, "admin", rollbackAttemptID)
+	require.Equal(t, http.StatusOK, response.Code)
+	require.Equal(t, "unavailable", decodeRollbackResponse(t, response).State)
+	require.False(t, decodeRollbackResponse(t, response).CanExecute)
+	probe := &corev1.Pod{}
+	require.True(t, apierrors.IsNotFound(h.client.Get(t.Context(), client.ObjectKey{Namespace: "default", Name: rollbackProbeName(rollbackAttemptID)}, probe)))
+	require.Equal(t, http.StatusConflict, rollbackRequest(h, http.MethodPost, "admin", rollbackAttemptID).Code)
 }
 
 func TestScenarioRollbackInspectsEarlierRetryAttempt(t *testing.T) {

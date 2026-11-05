@@ -197,11 +197,7 @@ func (h *Handler) GetScenarioReplay(w http.ResponseWriter, r *http.Request) {
 		"userID", claims.UserID)
 
 	// Step 6: Return payload (identical to wizard output)
-	if payload.Workspace != nil {
-		redacted := *payload.Workspace
-		redacted.ClaimName = ""
-		payload.Workspace = &redacted
-	}
+	payload.Workspace = h.visibleWorkspaceReference(ctx, payload.Workspace)
 	writeJSON(w, http.StatusOK, payload)
 }
 

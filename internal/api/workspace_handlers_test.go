@@ -79,6 +79,28 @@ func readyWorkspace(t *testing.T, h *Handler, group string, public bool) *krknv1
 	return entry
 }
 
+func TestWorkspaceReferenceVisibilityPreservesPinnedIdentity(t *testing.T) {
+	h := setupScenarioRunTestHandler("target", map[string]string{})
+	require.NoError(t, h.client.Create(t.Context(), testWorkspacePVC()))
+	readyWorkspace(t, h, "team-a", false)
+	require.NoError(t, h.client.Create(t.Context(), newCategoryTestGroup("team-a")))
+	require.NoError(t, h.client.Create(t.Context(), newCategoryTestUser(t, "member@example.com", "team-a")))
+	require.NoError(t, h.client.Create(t.Context(), newCategoryTestUser(t, "outsider@example.com")))
+	ref := &krknv1alpha1.WorkspaceReference{Name: "friendly", WorkspaceUID: testEntryUID, ClaimName: "shared", ClaimUID: testWorkspaceUID}
+	member := newCategoryRequestAs(http.MethodGet, WorkspacesPath, "", "user", "member@example.com")
+	visible := h.visibleWorkspaceReference(member.Context(), ref)
+	require.NotNil(t, visible)
+	require.Equal(t, ref.Name, visible.Name)
+	require.Equal(t, ref.WorkspaceUID, visible.WorkspaceUID)
+	require.Equal(t, ref.ClaimUID, visible.ClaimUID)
+	require.Empty(t, visible.ClaimName)
+	require.Equal(t, "shared", ref.ClaimName, "response redaction must not mutate the run")
+	outsider := newCategoryRequestAs(http.MethodGet, WorkspacesPath, "", "user", "outsider@example.com")
+	require.Nil(t, h.visibleWorkspaceReference(outsider.Context(), ref))
+	nodes := map[string]krknv1alpha1.GraphScenarioNode{"node": {Workspace: ref}}
+	require.Nil(t, h.publicGraphWorkspaces(outsider.Context(), nodes)["node"].Workspace)
+}
+
 func TestWorkspacePublicationAndAccess(t *testing.T) {
 	h := setupScenarioRunTestHandler("target", map[string]string{})
 	require.NoError(t, h.client.Create(t.Context(), testWorkspacePVC()))

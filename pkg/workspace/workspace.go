@@ -15,6 +15,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 )
 
+// MountPath is the shared path used by scenario and rollback containers.
 const MountPath = "/var/lib/krkn/workspace"
 
 // ConflictsWithMount reports whether a requested file mount would hide the
@@ -25,8 +26,10 @@ func ConflictsWithMount(candidate string) bool {
 }
 
 var (
+	// ErrUnavailable means the selected PVC cannot currently be mounted.
 	ErrUnavailable = errors.New("workspace PVC is unavailable")
-	ErrReplaced    = errors.New("workspace PVC was replaced")
+	// ErrReplaced means the PVC no longer has the UID pinned by the run.
+	ErrReplaced = errors.New("workspace PVC was replaced")
 )
 
 // CanAccess reports whether a user may select the workspace.

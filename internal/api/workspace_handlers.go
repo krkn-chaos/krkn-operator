@@ -21,6 +21,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 type workspacePublishRequest struct {
@@ -69,14 +70,38 @@ func workspaceInfoFromCR(entry *krknv1alpha1.KrknWorkspace, admin bool) workspac
 	return info
 }
 
-func publicGraphWorkspaces(nodes map[string]krknv1alpha1.GraphScenarioNode) map[string]krknv1alpha1.GraphScenarioNode {
+// visibleWorkspaceReference keeps the pinned UIDs needed for safe replay only
+// when the caller can still select the workspace. PVC names remain private.
+func (h *Handler) visibleWorkspaceReference(ctx context.Context, ref *krknv1alpha1.WorkspaceReference) *krknv1alpha1.WorkspaceReference {
+	if ref == nil {
+		return nil
+	}
+	if !auth.IsAdmin(ctx) {
+		entry := &krknv1alpha1.KrknWorkspace{}
+		if err := h.client.Get(ctx, client.ObjectKey{Namespace: h.namespace, Name: ref.Name}, entry); err != nil {
+			if !apierrors.IsNotFound(err) {
+				log.FromContext(ctx).Error(err, "Failed to load workspace for response", "workspaceName", ref.Name)
+			}
+			return nil
+		}
+		allowed, err := h.canAccessWorkspace(ctx, entry)
+		if err != nil {
+			log.FromContext(ctx).Error(err, "Failed to check workspace visibility", "workspaceName", ref.Name)
+			return nil
+		}
+		if !allowed || string(entry.UID) != ref.WorkspaceUID || entry.Spec.ClaimUID != ref.ClaimUID || entry.Spec.ClaimName != ref.ClaimName {
+			return nil
+		}
+	}
+	visible := *ref
+	visible.ClaimName = ""
+	return &visible
+}
+
+func (h *Handler) publicGraphWorkspaces(ctx context.Context, nodes map[string]krknv1alpha1.GraphScenarioNode) map[string]krknv1alpha1.GraphScenarioNode {
 	redacted := make(map[string]krknv1alpha1.GraphScenarioNode, len(nodes))
 	for id, node := range nodes {
-		if node.Workspace != nil {
-			ref := *node.Workspace
-			ref.ClaimName = ""
-			node.Workspace = &ref
-		}
+		node.Workspace = h.visibleWorkspaceReference(ctx, node.Workspace)
 		redacted[id] = node
 	}
 	return redacted

@@ -51,6 +51,7 @@ func TestConvertClusterJobs_OmitsClusterAPIURL(t *testing.T) {
 			JobID:           "job-1",
 			PodName:         "pod-1",
 			ScenarioImage:   "quay.io/krkn/scenario:latest",
+			AttemptHistory:  []krknv1alpha1.ScenarioAttemptStatus{{JobID: "previous-job", ScenarioImage: "quay.io/krkn/scenario:previous"}},
 			Phase:           "Succeeded",
 			StartTime:       &now,
 			CompletionTime:  &now,
@@ -77,6 +78,9 @@ func TestConvertClusterJobs_OmitsClusterAPIURL(t *testing.T) {
 	}
 	if r.JobID != "job-1" {
 		t.Errorf("Expected JobID 'job-1', got '%s'", r.JobID)
+	}
+	if len(r.AttemptHistory) != 1 || r.AttemptHistory[0].JobID != "previous-job" {
+		t.Errorf("Expected previous attempt in WebSocket response, got %+v", r.AttemptHistory)
 	}
 	if r.Phase != "Succeeded" {
 		t.Errorf("Expected Phase 'Succeeded', got '%s'", r.Phase)

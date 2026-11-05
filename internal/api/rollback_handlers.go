@@ -279,6 +279,33 @@ func (h *Handler) HandleScenarioRollback(w http.ResponseWriter, r *http.Request,
 			return
 		}
 	}
+	existing, iteration, err := h.latestRollbackRun(r.Context(), string(run.UID), jobID)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{Error: "internal_error", Message: "Failed to load rollback run"})
+		return
+	}
+	if existing != nil {
+		switch existing.Status.Phase {
+		case "Succeeded":
+			writeJSON(w, http.StatusOK, RollbackAvailability{JobID: jobID, State: "succeeded", RollbackRunName: existing.Name})
+			return
+		case "", "Pending", "Running":
+			writeJSON(w, http.StatusOK, RollbackAvailability{JobID: jobID, State: "running", RollbackRunName: existing.Name})
+			return
+		}
+	}
+	if job.Phase == "Running" || job.Phase == "Pending" || job.Phase == "Retrying" {
+		if r.Method == http.MethodGet {
+			writeJSON(w, http.StatusOK, RollbackAvailability{JobID: jobID, State: "unavailable", Message: "Scenario attempt is still active"})
+		} else {
+			writeJSONError(w, http.StatusConflict, ErrorResponse{Error: "scenario_active", Message: "Scenario attempt is still active"})
+		}
+		return
+	}
+	if r.Method == http.MethodGet && !canExecute {
+		writeJSON(w, http.StatusOK, RollbackAvailability{JobID: jobID, State: "unavailable", Message: "Cluster run permission is required"})
+		return
+	}
 	if err := h.validateRollbackWorkspace(r.Context(), run); err != nil {
 		if r.Method == http.MethodGet {
 			writeJSON(w, http.StatusOK, RollbackAvailability{JobID: jobID, State: "unavailable", CanExecute: canExecute, Message: "Workspace PVC is unavailable"})
@@ -294,19 +321,6 @@ func (h *Handler) HandleScenarioRollback(w http.ResponseWriter, r *http.Request,
 	}
 	if kubeconfigErr != nil {
 		canExecute = false
-	}
-	existing, iteration, err := h.latestRollbackRun(r.Context(), string(run.UID), jobID)
-	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{Error: "internal_error", Message: "Failed to load rollback run"})
-		return
-	}
-	if r.Method == http.MethodGet && existing != nil && (existing.Status.Phase == "Pending" || existing.Status.Phase == "Running" || existing.Status.Phase == "") {
-		writeJSON(w, http.StatusOK, RollbackAvailability{JobID: jobID, State: "running", CanExecute: canExecute, RollbackRunName: existing.Name})
-		return
-	}
-	if r.Method == http.MethodPost && existing != nil && (existing.Status.Phase == "Pending" || existing.Status.Phase == "Running" || existing.Status.Phase == "") {
-		writeJSON(w, http.StatusOK, RollbackAvailability{JobID: jobID, State: "running", RollbackRunName: existing.Name})
-		return
 	}
 	state, err := h.rollbackProbe(r.Context(), run, job, jobID, image)
 	if err != nil {
@@ -326,10 +340,19 @@ func (h *Handler) HandleScenarioRollback(w http.ResponseWriter, r *http.Request,
 		}
 		if existing != nil {
 			response.RollbackRunName = existing.Name
-			if (existing.Status.Phase == "Failed" || existing.Status.Phase == "PartiallyFailed" || existing.Status.Phase == "MaxRetriesExceeded") && state == "available" {
-				response.State = "failed"
-				response.Message = "Previous rollback failed; files are still available"
+			if existing.Status.Phase == "Failed" || existing.Status.Phase == "PartiallyFailed" || existing.Status.Phase == "MaxRetriesExceeded" {
+				switch state {
+				case "available":
+					response.State = "failed"
+					response.Message = "Previous rollback failed; files are still available"
+				case "absent":
+					response.State = "unavailable"
+					response.Message = "Previous rollback failed and files are no longer available"
+				}
 			}
+		}
+		if response.State != "available" && response.State != "failed" {
+			response.CanExecute = false
 		}
 		if response.CanExecute && (response.State == "available" || response.State == "failed") {
 			imageCheck := h.checkRollbackImage(r.Context(), run, true)
@@ -343,10 +366,6 @@ func (h *Handler) HandleScenarioRollback(w http.ResponseWriter, r *http.Request,
 	}
 	if state != "available" {
 		writeJSONError(w, http.StatusConflict, ErrorResponse{Error: "rollback_unavailable", Message: "Rollback files are not available"})
-		return
-	}
-	if job.Phase == "Running" || job.Phase == "Pending" || job.Phase == "Retrying" {
-		writeJSONError(w, http.StatusConflict, ErrorResponse{Error: "scenario_active", Message: "Scenario attempt is still active"})
 		return
 	}
 	if job.ClusterAPIURL == "" {

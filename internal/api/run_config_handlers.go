@@ -141,6 +141,7 @@ func (h *Handler) GetScenarioRunConfig(w http.ResponseWriter, r *http.Request) {
 		"scenarioRunName", scenarioRunName,
 		"userID", claims.UserID)
 
+	payload.Workspace = h.visibleWorkspaceReference(ctx, payload.Workspace)
 	writeJSON(w, http.StatusOK, payload)
 }
 
@@ -242,7 +243,7 @@ func (h *Handler) GetGraphRunConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	payload := GraphRunCreateRequest{
-		Graph:           graphRun.Spec.Graph,
+		Graph:           h.publicGraphWorkspaces(ctx, graphRun.Spec.Graph),
 		TargetRequestID: graphRun.Spec.TargetRequestID,
 		TargetClusters:  graphRun.Spec.TargetClusters,
 		MaxRetries:      intPtr(graphRun.Spec.MaxRetries),

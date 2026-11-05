@@ -194,7 +194,7 @@ func (h *Handler) GetGraphRun(w http.ResponseWriter, r *http.Request) {
 		Namespace:         graphRun.Namespace,
 		CreationTimestamp: graphRun.CreationTimestamp.Time,
 		Spec: GraphRunSpecResponse{
-			Graph:                   publicGraphWorkspaces(graphRun.Spec.Graph),
+			Graph:                   h.publicGraphWorkspaces(r.Context(), graphRun.Spec.Graph),
 			TargetRequestID:         graphRun.Spec.TargetRequestID,
 			TargetClusters:          graphRun.Spec.TargetClusters,
 			OwnerUserID:             graphRun.Spec.OwnerUserID,
@@ -637,7 +637,7 @@ func (h *Handler) CreateGraphRun(w http.ResponseWriter, r *http.Request) {
 		Namespace:         graphRun.Namespace,
 		CreationTimestamp: graphRun.CreationTimestamp.Time,
 		Spec: GraphRunSpecResponse{
-			Graph:                   publicGraphWorkspaces(graphRun.Spec.Graph),
+			Graph:                   h.publicGraphWorkspaces(r.Context(), graphRun.Spec.Graph),
 			TargetRequestID:         graphRun.Spec.TargetRequestID,
 			TargetClusters:          graphRun.Spec.TargetClusters,
 			MaxRetries:              graphRun.Spec.MaxRetries,

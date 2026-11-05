@@ -112,8 +112,11 @@ unavailable, or has been recreated with the same name and a different UID, the
 request is rejected before a new run is created. The controller repeats the
 identity and PVC checks before creating each scenario pod. An administrator
 must explicitly select a new workspace to change the replay's storage dependency.
-The replay API omits the cluster PVC name from its response; the server resolves
-it again from the pinned workspace identity.
+Replay and configuration APIs omit the cluster PVC name from their responses.
+For nonadmins, they include the pinned UIDs only when the caller may still
+select that workspace; otherwise they omit the workspace reference. Admins
+retain the pinned UIDs even if the claim is missing. The server resolves the
+PVC name again from the pinned workspace identity.
 
 The workspace directory persists independently of the run resource. Storage
 permissions, retention, backup, and cleanup remain the administrator's
@@ -160,8 +163,11 @@ UID/GID `1001:1001` storage access as scenario Pods, without mounting a service
 account token. The API returns `checking`, `available`, `absent`, `unavailable`,
 `error`, or a rollback execution state. Inspection results expire after 30
 seconds and are checked again. Viewing requires cluster view permission;
+the inspection Pod is created only for callers with cluster run permission.
 `canExecute` is true only with cluster run permission and the original
-kubeconfig still available.
+kubeconfig still available. An active scenario retry returns `unavailable`
+without starting an inspection Pod. A succeeded rollback returns `succeeded`
+with the existing rollback run name, even when its files have been removed.
 
 `POST` to the same path requires cluster run permission and a recent `available`
 result. It creates a separate `KrknScenarioRun` for the Krkn `workload-rollback`
@@ -174,8 +180,8 @@ running or succeeded return the existing run. A failed rollback can be retried
 while files remain; each retry has its own run record. The UI offers the action
 only when the inspection finds files and asks for confirmation before starting.
 The Jobs WebSocket snapshot and run-detail response include `rollbackEnabled`
-from the `KrknScenarioRun` spec so the console can render the inspection result
-for each finished job.
+from the `KrknScenarioRun` spec and the earlier attempt IDs, so the console can
+inspect rollback availability for every finished attempt.
 When files are present, GET also checks that `workload-rollback` exists in the
 original scenario's registry and has a trusted signature when operator-wide
 signature verification is enabled. A missing image, untrusted signature,

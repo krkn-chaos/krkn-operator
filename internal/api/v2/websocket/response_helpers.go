@@ -298,6 +298,7 @@ func convertClusterJobs(jobs []krknv1alpha1.ClusterJobStatus) []ClusterJobRespon
 			JobID:           job.JobID,
 			PodName:         job.PodName,
 			ScenarioImage:   job.ScenarioImage,
+			AttemptHistory:  job.AttemptHistory,
 			Phase:           job.Phase,
 			StartTime:       convertMetaTime(job.StartTime),
 			CompletionTime:  convertMetaTime(job.CompletionTime),

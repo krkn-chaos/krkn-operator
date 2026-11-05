@@ -31,6 +31,7 @@ type KrknWorkspaceReconciler struct {
 // +kubebuilder:rbac:groups=krkn.krkn-chaos.dev,resources=krknworkspaces,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=krkn.krkn-chaos.dev,resources=krknworkspaces/status,verbs=get;update;patch
 
+// Reconcile refreshes the workspace availability condition from its pinned PVC.
 func (r *KrknWorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	if req.Namespace != r.Namespace {
 		return ctrl.Result{}, nil
@@ -93,6 +94,7 @@ func (r *KrknWorkspaceReconciler) mapPVC(ctx context.Context, object client.Obje
 	return requests
 }
 
+// SetupWithManager watches workspaces and PVC changes in the operator namespace.
 func (r *KrknWorkspaceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&krknv1alpha1.KrknWorkspace{}).

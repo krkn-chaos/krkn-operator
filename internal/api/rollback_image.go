@@ -90,6 +90,7 @@ func (h *Handler) checkRollbackImage(ctx context.Context, run *krknv1alpha1.Krkn
 		mode = provider.Private
 		secret, err := h.loadRegistrySecret(ctx, run.Spec.Scenario.RegistryName)
 		if err != nil {
+			log.FromContext(ctx).Error(err, "Failed to load original scenario registry for rollback", "registryName", run.Spec.Scenario.RegistryName)
 			return rollbackImageCheck{status: http.StatusConflict, code: "rollback_registry_unavailable", message: "The original scenario registry is unavailable"}
 		}
 		if !h.canAccessRegistry(ctx, secret) {
