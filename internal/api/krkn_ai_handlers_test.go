@@ -4,12 +4,14 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
 	"github.com/krkn-chaos/krkn-operator/pkg/auth"
@@ -445,6 +447,30 @@ func TestKrknAIDiscoveryAndArtifactProxyRequireTargetAccess(t *testing.T) {
 	handler.KrknAIRouter(unauthorized, httptest.NewRequest(http.MethodPost, KrknAIPath+"/discoveries", strings.NewReader(discoveryBody)))
 	if unauthorized.Code != http.StatusForbidden {
 		t.Fatalf("discovery without target authorization returned %d", unauthorized.Code)
+	}
+}
+
+func TestKrknAIDiscoveryDeadlineReturnsGatewayTimeout(t *testing.T) {
+	service := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		<-r.Context().Done()
+	}))
+	defer service.Close()
+
+	handler := newKrknAITestHandler(t, service.URL)
+
+	response := httptest.NewRecorder()
+	body := `{"targetRequestId":"target","targetClusters":{"provider":["cluster"]}}`
+	request := adminKrknAIRequest(http.MethodPost, KrknAIPath+"/discoveries", body)
+	ctx, cancel := context.WithTimeout(request.Context(), 25*time.Millisecond)
+	defer cancel()
+	handler.KrknAIRouter(response, request.WithContext(ctx))
+	var failure ErrorResponse
+	if response.Code != http.StatusGatewayTimeout || json.Unmarshal(response.Body.Bytes(), &failure) != nil {
+		t.Fatalf("discovery timeout response = %d %s, want a JSON 504", response.Code, response.Body.String())
+	}
+	if failure.Error != "gateway_timeout" {
+		t.Fatalf("discovery timeout error = %q, want gateway_timeout", failure.Error)
 	}
 }
 func TestKrknAIRunTypedResultsAuthorizeAndProxyByUID(t *testing.T) {

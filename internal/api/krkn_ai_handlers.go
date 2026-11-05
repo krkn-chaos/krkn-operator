@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -374,6 +375,7 @@ func writeKrknAIServiceUnavailable(w http.ResponseWriter) {
 // @Failure 403 {object} ErrorResponse "Target access denied"
 // @Failure 404 {object} ErrorResponse "Target request not found"
 // @Failure 503 {object} ErrorResponse "Krkn-AI service unavailable"
+// @Failure 504 {object} ErrorResponse "Discovery deadline exceeded"
 // @Security BearerAuth
 // @Router /krkn-ai/discoveries [post]
 func (h *Handler) createKrknAIDiscovery(w http.ResponseWriter, r *http.Request) {
@@ -399,7 +401,7 @@ func (h *Handler) createKrknAIDiscovery(w http.ResponseWriter, r *http.Request) 
 		"kubeconfig": kubeconfig, "namespacePattern": request.NamespacePattern,
 		"podLabelPattern": request.PodLabelPattern, "nodeLabelPattern": request.NodeLabelPattern, "skipPodName": request.SkipPodName,
 	})
-	h.proxyKrknAIRequest(w, r, http.MethodPost, "/v1/discoveries", payload)
+	h.proxyKrknAIDiscovery(w, r, http.MethodPost, "/v1/discoveries", payload)
 }
 
 // @Summary Create a Krkn-AI configuration
@@ -1214,10 +1216,17 @@ func (h *Handler) proxyKrknAIArtifact(w http.ResponseWriter, r *http.Request, na
 	_, _ = io.Copy(w, response.Body)
 }
 
-func (h *Handler) proxyKrknAIRequest(w http.ResponseWriter, r *http.Request, method, path string, payload []byte) {
-	response, err := h.artifactClient.Do(r.Context(), method, path, payload)
+func (h *Handler) proxyKrknAIDiscovery(w http.ResponseWriter, r *http.Request, method, path string, payload []byte) {
+	ctx, cancel := context.WithTimeout(r.Context(), krknaiserver.DefaultDiscoveryTimeout)
+	defer cancel()
+
+	response, err := h.artifactClient.DoDiscovery(ctx, method, path, payload)
 	if err != nil {
-		writeJSONError(w, http.StatusServiceUnavailable, ErrorResponse{Error: "service_unavailable", Message: "Krkn-AI artifact service is unavailable"})
+		if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			writeJSONError(w, http.StatusGatewayTimeout, ErrorResponse{Error: "gateway_timeout", Message: "Krkn-AI discovery exceeded its deadline"})
+			return
+		}
+		writeKrknAIServiceUnavailable(w)
 		return
 	}
 	if response.StatusCode == http.StatusGone {
@@ -1226,11 +1235,15 @@ func (h *Handler) proxyKrknAIRequest(w http.ResponseWriter, r *http.Request, met
 	}
 	defer response.Body.Close()
 	if response.StatusCode >= http.StatusInternalServerError {
-		writeJSONError(w, http.StatusServiceUnavailable, ErrorResponse{Error: "service_unavailable", Message: "Krkn-AI artifact service is unavailable"})
+		writeKrknAIServiceUnavailable(w)
 		return
 	}
 	var responsePayload any
 	if err := json.NewDecoder(response.Body).Decode(&responsePayload); err != nil {
+		if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			writeJSONError(w, http.StatusGatewayTimeout, ErrorResponse{Error: "gateway_timeout", Message: "Krkn-AI discovery exceeded its deadline"})
+			return
+		}
 		writeJSONError(w, http.StatusServiceUnavailable, ErrorResponse{Error: "service_unavailable", Message: "Krkn-AI artifact service returned an invalid response"})
 		return
 	}

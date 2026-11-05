@@ -14,23 +14,42 @@ import (
 
 // Client sends authenticated requests to the Krkn-AI artifact service.
 type Client struct {
-	baseURL    string
-	token      string
-	httpClient *http.Client
+	baseURL         string
+	token           string
+	httpClient      *http.Client
+	discoveryClient *http.Client
 }
 
-// New returns an artifact-service client with a bounded request timeout.
+// DefaultRequestTimeout bounds ordinary artifact-service requests.
+const DefaultRequestTimeout = 30 * time.Second
+
+// DefaultDiscoveryTimeout bounds synchronous discovery at its usage sites.
+const DefaultDiscoveryTimeout = 5 * time.Minute
+
+// New returns an artifact-service client with bounded artifact and discovery
+// request timeouts.
 func New(baseURL, token string) *Client {
 	return &Client{
-		baseURL:    strings.TrimRight(baseURL, "/"),
-		token:      token,
-		httpClient: &http.Client{Timeout: 30 * time.Second},
+		baseURL:         strings.TrimRight(baseURL, "/"),
+		token:           token,
+		httpClient:      &http.Client{Timeout: DefaultRequestTimeout},
+		discoveryClient: &http.Client{Timeout: DefaultDiscoveryTimeout},
 	}
 }
 
-// Do sends one authenticated request to path. Callers own and must close the
-// response body.
+// Do sends one authenticated artifact-service request to path. Callers own and
+// must close the response body.
 func (c *Client) Do(ctx context.Context, method, path string, body []byte) (*http.Response, error) {
+	return c.do(c.httpClient, ctx, method, path, body)
+}
+
+// DoDiscovery sends one authenticated discovery request with the fixed
+// discovery timeout.
+func (c *Client) DoDiscovery(ctx context.Context, method, path string, body []byte) (*http.Response, error) {
+	return c.do(c.discoveryClient, ctx, method, path, body)
+}
+
+func (c *Client) do(httpClient *http.Client, ctx context.Context, method, path string, body []byte) (*http.Response, error) {
 	if c.baseURL == "" || c.token == "" {
 		return nil, fmt.Errorf("Krkn-AI artifact service is not configured")
 	}
@@ -42,7 +61,7 @@ func (c *Client) Do(ctx context.Context, method, path string, body []byte) (*htt
 	if len(body) > 0 {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	return c.httpClient.Do(req)
+	return httpClient.Do(req)
 }
 
 // EscapePath URL-escapes each segment while preserving path separators.

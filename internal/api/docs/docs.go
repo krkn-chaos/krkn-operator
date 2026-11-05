@@ -1410,6 +1410,12 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
+                    },
+                    "504": {
+                        "description": "Discovery deadline exceeded",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
                     }
                 }
             }

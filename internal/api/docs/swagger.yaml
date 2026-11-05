@@ -3447,6 +3447,10 @@ paths:
           description: Krkn-AI service unavailable
           schema:
             $ref: '#/definitions/internal_api.ErrorResponse'
+        "504":
+          description: Discovery deadline exceeded
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
       security:
       - BearerAuth: []
       summary: Discover a target cluster for Krkn-AI

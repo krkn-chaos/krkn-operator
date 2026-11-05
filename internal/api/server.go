@@ -72,6 +72,7 @@ import (
 	_ "github.com/krkn-chaos/krkn-operator/internal/api/docs" // Import generated docs
 	v2 "github.com/krkn-chaos/krkn-operator/internal/api/v2"
 	"github.com/krkn-chaos/krkn-operator/pkg/auth"
+	"github.com/krkn-chaos/krkn-operator/pkg/krknaiserver"
 	"github.com/krkn-chaos/krkn-operator/pkg/wsorigin"
 )
 
@@ -373,12 +374,16 @@ func NewServerWithComponentNamespace(port int, k8sClient client.Client, clientse
 	// Wrap mux with middleware chain: logging -> body size limit -> routes
 	// maxBodySize is 10MB, applied only to POST/PUT/PATCH requests
 	const maxBodySize int64 = 10 << 20 // 10 MB
+	const discoveryResponseTimeout = krknaiserver.DefaultDiscoveryTimeout + 30*time.Second
 	server := &http.Server{
-		Addr:              fmt.Sprintf(":%d", port),
-		Handler:           loggingMiddleware(maxBodySizeMiddleware(maxBodySize)(mux)),
+		Addr: fmt.Sprintf(":%d", port),
+		Handler: discoveryResponseDeadlineMiddleware(
+			discoveryResponseTimeout,
+			loggingMiddleware(maxBodySizeMiddleware(maxBodySize)(mux)),
+		),
 		ReadHeaderTimeout: 30 * time.Second,  // Prevent Slowloris attacks
 		ReadTimeout:       60 * time.Second,  // Total request read timeout
-		WriteTimeout:      60 * time.Second,  // Response write timeout
+		WriteTimeout:      60 * time.Second,  // Default response write timeout
 		IdleTimeout:       120 * time.Second, // Keep-alive timeout
 	}
 
@@ -443,6 +448,18 @@ startServer:
 	case <-ctx.Done():
 		return s.Shutdown()
 	}
+}
+
+// discoveryResponseDeadlineMiddleware extends only the discovery endpoint's
+// response write deadline. Request header and body read timeouts remain owned by
+// the server's existing protections.
+func discoveryResponseDeadlineMiddleware(timeout time.Duration, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && r.URL.Path == KrknAIPath+"/discoveries" {
+			_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(timeout))
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // Shutdown gracefully shuts down the API server and cancels in-flight background jobs.

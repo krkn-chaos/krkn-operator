@@ -159,15 +159,20 @@ if grep -Eq 'KRKNAI_SERVICE_(TOKEN|URL)' "$work_dir/olm-ocp.yaml"; then
   exit 1
 fi
 
-
 helm template krkn-operator "$chart_dir" \
   --set console.ingress.enabled=true \
   --set console.ingress.hostname=console.example.test \
   --set console.ingress.tls.enabled=true \
   --set console.ingress.tls.secretName=console-tls > "$work_dir/ingress-map.yaml"
-
-yq -e 'select(.kind == "Ingress") | .spec.tls[0].secretName == "console-tls" and .spec.rules[0].host == "console.example.test"' \
+yq -e 'select(.kind == "Ingress") | .spec.tls[0].secretName == "console-tls" and .spec.rules[0].host == "console.example.test" and .metadata.annotations."nginx.ingress.kubernetes.io/proxy-read-timeout" == "360"' \
   "$work_dir/ingress-map.yaml" >/dev/null
+
+helm template krkn-operator "$chart_dir" \
+  --set console.ingress.enabled=true \
+  --set-json 'console.ingress.annotations={"nginx.ingress.kubernetes.io/proxy-read-timeout":"420"}' > "$work_dir/ingress-override.yaml"
+
+yq -e 'select(.kind == "Ingress") | .metadata.annotations."nginx.ingress.kubernetes.io/proxy-read-timeout" == "420"' \
+  "$work_dir/ingress-override.yaml" >/dev/null
 
 helm template krkn-operator "$chart_dir" \
   --set console.ingress.enabled=true \
@@ -189,8 +194,16 @@ helm template krkn-operator "$chart_dir" \
   --set console.route.enabled=true \
   --set console.route.hostname=console.apps.example.test > "$work_dir/route.yaml"
 
-yq -e 'select(.kind == "Route") | .spec.host == "console.apps.example.test" and .spec.to.name == "krkn-operator-console"' \
+yq -e 'select(.kind == "Route") | .spec.host == "console.apps.example.test" and .spec.to.name == "krkn-operator-console" and .metadata.annotations."haproxy.router.openshift.io/timeout" == "6m"' \
   "$work_dir/route.yaml" >/dev/null
+
+helm template krkn-operator "$chart_dir" \
+  --api-versions route.openshift.io/v1/Route \
+  --set console.route.enabled=true \
+  --set-json 'console.route.annotations={"haproxy.router.openshift.io/timeout":"10m"}' > "$work_dir/route-override.yaml"
+
+yq -e 'select(.kind == "Route") | .metadata.annotations."haproxy.router.openshift.io/timeout" == "10m"' \
+  "$work_dir/route-override.yaml" >/dev/null
 
 helm template krkn-operator "$chart_dir" \
   --api-versions route.openshift.io/v1/Route \
@@ -211,4 +224,11 @@ helm template krkn-operator "$chart_dir" \
 yq -e 'select(.kind == "Route") | .spec.host == "legacy.apps.example.test"' \
   "$work_dir/route-legacy.yaml" >/dev/null
 
-echo "Ingress and Route rendering checks passed"
+helm template krkn-operator "$chart_dir" \
+  --api-versions gateway.networking.k8s.io/v1/HTTPRoute \
+  --set console.gateway.enabled=true > "$work_dir/gateway.yaml"
+
+yq -e 'select(.kind == "HTTPRoute") | .spec.rules[0].timeouts.request == "6m" and .spec.rules[0].timeouts.backendRequest == "6m"' \
+  "$work_dir/gateway.yaml" >/dev/null
+
+echo "Ingress, Route, and Gateway timeout rendering checks passed"
