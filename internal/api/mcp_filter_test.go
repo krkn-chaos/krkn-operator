@@ -32,6 +32,8 @@ import (
 const (
 	urlA = "https://api.a:6443"
 	urlB = "https://api.b:6443"
+	// jobAFixture is the job on cluster-a in the seeded run r1.
+	jobAFixture = "job-a"
 )
 
 // permsFor builds clusterPerms for the given URL→actions.

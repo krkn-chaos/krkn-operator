@@ -35,6 +35,60 @@ const (
 	robotCIBotPrincipal = "robot:ci-bot"
 )
 
+// countGraphRuns counts graph runs in the test namespace.
+func countGraphRuns(t *testing.T, c client.Client) int {
+	t.Helper()
+	list := &krknv1alpha1.KrknGraphRunList{}
+	if err := c.List(context.Background(), list, client.InNamespace("default")); err != nil {
+		t.Fatalf("list graph runs: %v", err)
+	}
+	return len(list.Items)
+}
+
+// TestMCPRunWorkflow_IdempotencyKeyDeduplicates is the graph-run variant of
+// the scenario-run idempotency test: the same key returns the existing graph
+// run, a different key creates a new one.
+func TestMCPRunWorkflow_IdempotencyKeyDeduplicates(t *testing.T) {
+	wf := workflowConfigMap("wf-sre", []string{"sre"}, false)
+	h, c, _ := newMCPRunsTestHandler(t, targetRequestTR1(), wf)
+	backend := &mcpBackend{h: h}
+	baseline := countGraphRuns(t, c)
+
+	in := mcpserver.RunWorkflowInput{
+		WorkflowID:      "wf-sre",
+		TargetRequestID: graphTR1ID,
+		TargetClusters:  map[string][]string{"krkn-operator": {"cluster-a"}},
+		IdempotencyKey:  "wf-deploy-1",
+	}
+	first, err := backend.RunWorkflow(context.Background(), robotPrincipalFixture(), in)
+	if err != nil {
+		t.Fatalf("first RunWorkflow failed: %v", err)
+	}
+
+	second, err := backend.RunWorkflow(context.Background(), robotPrincipalFixture(), in)
+	if err != nil {
+		t.Fatalf("retry RunWorkflow failed: %v", err)
+	}
+	if second.Name != first.Name {
+		t.Errorf("retry returned graph run %q, want the existing run %q", second.Name, first.Name)
+	}
+	if after := countGraphRuns(t, c); after != baseline+1 {
+		t.Errorf("graph run count = %d, want %d (no duplicate)", after, baseline+1)
+	}
+
+	in.IdempotencyKey = "wf-deploy-2"
+	third, err := backend.RunWorkflow(context.Background(), robotPrincipalFixture(), in)
+	if err != nil {
+		t.Fatalf("RunWorkflow with a new key failed: %v", err)
+	}
+	if third.Name == first.Name {
+		t.Errorf("new key returned the existing graph run %q, want a new run", third.Name)
+	}
+	if after := countGraphRuns(t, c); after != baseline+2 {
+		t.Errorf("graph run count = %d, want %d", after, baseline+2)
+	}
+}
+
 func TestMCPRunWorkflow_CreatesGraphRunOwnedByRobot(t *testing.T) {
 	wf := workflowConfigMap("wf-sre", []string{"sre"}, false)
 	h, c, _ := newMCPRunsTestHandler(t, targetRequestTR1(), wf)

@@ -211,6 +211,83 @@ func TestMCPRunScenario_IdempotencyKeyDeduplicates(t *testing.T) {
 	}
 }
 
+// TestMCPRunScenario_IdempotencyKeyScopedToRobot proves a key is scoped to
+// the submitting principal: another robot with equivalent permissions using
+// the same key gets its own run, not the first robot's.
+func TestMCPRunScenario_IdempotencyKeyScopedToRobot(t *testing.T) {
+	h, c, _ := newMCPRunsTestHandler(t, targetRequestTR1())
+	backend := &mcpBackend{h: h}
+
+	// A second robot with run permission on cluster-a via a different group.
+	otherGroup := &krknv1alpha1.KrknUserGroup{
+		ObjectMeta: metav1.ObjectMeta{Name: "qa", Namespace: "default"},
+		Spec: krknv1alpha1.KrknUserGroupSpec{
+			Name: "qa",
+			ClusterPermissions: map[string]krknv1alpha1.ClusterPermissionSet{
+				urlA: {Actions: []string{"view", "run", "cancel"}},
+			},
+		},
+	}
+	if err := c.Create(context.Background(), otherGroup); err != nil {
+		t.Fatal(err)
+	}
+	otherRobot := robotFixture("qa-bot", false)
+	otherRobot.Labels = map[string]string{"group.krkn.krkn-chaos.dev/qa": "true"}
+	if err := c.Create(context.Background(), otherRobot); err != nil {
+		t.Fatal(err)
+	}
+
+	in := mcpWriteInput()
+	in.IdempotencyKey = "shared-key"
+	first, err := backend.RunScenario(context.Background(), robotPrincipalFixture(), in)
+	if err != nil {
+		t.Fatalf("ci-bot RunScenario failed: %v", err)
+	}
+	second, err := backend.RunScenario(context.Background(), mcpserver.Principal{RobotName: "qa-bot"}, in)
+	if err != nil {
+		t.Fatalf("qa-bot RunScenario failed: %v", err)
+	}
+	if second.Name == first.Name {
+		t.Errorf("qa-bot's run %q reused ci-bot's run; idempotency keys must be scoped per robot", second.Name)
+	}
+}
+
+// TestMCPPermissions_ReflectGroupLabelChangeImmediately proves permission
+// changes take effect on the next request with no caching: removing the
+// robot's group label hides runs that were visible a moment before.
+func TestMCPPermissions_ReflectGroupLabelChangeImmediately(t *testing.T) {
+	h, c, _ := newMCPRunsTestHandler(t)
+	backend := &mcpBackend{h: h}
+
+	out, err := backend.ListScenarioRuns(context.Background(), robotPrincipalFixture(), mcpserver.ListScenarioRunsInput{})
+	if err != nil {
+		t.Fatalf("ListScenarioRuns failed: %v", err)
+	}
+	if out.Total != 1 || out.Runs[0].Name != "r1" {
+		t.Fatalf("before label change: runs = %+v, want only r1", out.Runs)
+	}
+
+	// Strip the sre group label from the robot, as an admin removing
+	// membership would.
+	robot := &krknv1alpha1.KrknRobot{}
+	if err := c.Get(context.Background(), client.ObjectKey{Name: "ci-bot", Namespace: "default"}, robot); err != nil {
+		t.Fatal(err)
+	}
+	updated := robot.DeepCopy()
+	delete(updated.Labels, "group.krkn.krkn-chaos.dev/sre")
+	if err := c.Patch(context.Background(), updated, client.MergeFrom(robot)); err != nil {
+		t.Fatal(err)
+	}
+
+	after, err := backend.ListScenarioRuns(context.Background(), robotPrincipalFixture(), mcpserver.ListScenarioRunsInput{})
+	if err != nil {
+		t.Fatalf("ListScenarioRuns after label change failed: %v", err)
+	}
+	if after.Total != 0 {
+		t.Errorf("after removing the group label: Total = %d, want 0 (permissions must not be cached)", after.Total)
+	}
+}
+
 func TestMCPRunScenario_DeniedWithoutRun(t *testing.T) {
 	h, c, _ := newMCPRunsTestHandler(t, targetRequestTR1())
 	backend := &mcpBackend{h: h}
@@ -337,7 +414,7 @@ func TestMCPCancelJob_RequiresCancelOnJobCluster(t *testing.T) {
 	h, _, _ := newMCPRunsTestHandler(t, targetRequestTR1())
 	backend := &mcpBackend{h: h}
 
-	out, err := backend.CancelJob(context.Background(), robotPrincipalFixture(), mcpserver.CancelJobInput{ScenarioRunName: "r1", JobID: "job-a"})
+	out, err := backend.CancelJob(context.Background(), robotPrincipalFixture(), mcpserver.CancelJobInput{ScenarioRunName: "r1", JobID: jobAFixture})
 	if err != nil {
 		t.Fatalf("CancelJob on cluster-a failed: %v", err)
 	}
@@ -350,7 +427,7 @@ func TestMCPCancelJob_RequiresCancelOnJobCluster(t *testing.T) {
 	}
 	cancelled := false
 	for _, job := range run.Status.ClusterJobs {
-		if job.JobID == "job-a" && job.CancelRequested {
+		if job.JobID == jobAFixture && job.CancelRequested {
 			cancelled = true
 		}
 	}
@@ -377,7 +454,7 @@ func TestMCPCancelJob_RequiresCancelOnJobCluster(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err = backend.CancelJob(context.Background(), mcpserver.Principal{RobotName: "viewer-bot"}, mcpserver.CancelJobInput{ScenarioRunName: "r1", JobID: "job-a"})
+	_, err = backend.CancelJob(context.Background(), mcpserver.Principal{RobotName: "viewer-bot"}, mcpserver.CancelJobInput{ScenarioRunName: "r1", JobID: jobAFixture})
 	_ = isBackendCode(t, err, mcpserver.CodeForbidden)
 }
 

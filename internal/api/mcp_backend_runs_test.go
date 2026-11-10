@@ -78,7 +78,7 @@ func newMCPRunsTestHandler(t *testing.T, objs ...runtime.Object) (*Handler, clie
 		Status: krknv1alpha1.KrknScenarioRunStatus{
 			Phase: "PartiallyFailed",
 			ClusterJobs: []krknv1alpha1.ClusterJobStatus{
-				{ProviderName: "krkn-operator", ClusterName: "cluster-a", ClusterAPIURL: urlA, JobID: "job-a", Phase: "Succeeded", PodName: "pod-a"},
+				{ProviderName: "krkn-operator", ClusterName: "cluster-a", ClusterAPIURL: urlA, JobID: jobAFixture, Phase: "Succeeded", PodName: "pod-a"},
 				{ProviderName: "krkn-operator", ClusterName: "cluster-b", ClusterAPIURL: urlB, JobID: "job-b", Phase: "Failed", PodName: "pod-b"},
 			},
 			ResiliencyScores: []krknv1alpha1.ClusterResiliencyScore{
@@ -237,13 +237,13 @@ func TestMCPGetJobLogs_Bounds(t *testing.T) {
 	backend := &mcpBackend{h: h}
 	out, err := backend.GetJobLogs(context.Background(), robotPrincipalFixture(), mcpserver.JobLogsInput{
 		ScenarioRunName: "r1",
-		JobID:           "job-a",
+		JobID:           jobAFixture,
 		TailLines:       5000,
 	})
 	if err != nil {
 		t.Fatalf("GetJobLogs failed: %v", err)
 	}
-	if out.JobID != "job-a" || out.PodName != "pod-a" {
+	if out.JobID != jobAFixture || out.PodName != "pod-a" {
 		t.Errorf("out = %+v", out)
 	}
 	if captured == nil {
@@ -266,7 +266,7 @@ func TestMCPGetJobLogs_NegativeTail(t *testing.T) {
 
 	_, err := backend.GetJobLogs(context.Background(), robotPrincipalFixture(), mcpserver.JobLogsInput{
 		ScenarioRunName: "r1",
-		JobID:           "job-a",
+		JobID:           jobAFixture,
 		TailLines:       -1,
 	})
 	_ = isBackendCode(t, err, mcpserver.CodeInvalidArg)
