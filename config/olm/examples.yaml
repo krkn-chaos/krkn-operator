@@ -87,3 +87,11 @@
     surname: Administrator
     role: admin
     passwordSecretRef: example-password
+- apiVersion: krkn.krkn-chaos.dev/v1alpha1
+  kind: KrknRobot
+  metadata:
+    name: example-robot
+    labels:
+      krkn.krkn-chaos.dev/robot-account: 'true'
+  spec:
+    description: Example automation robot

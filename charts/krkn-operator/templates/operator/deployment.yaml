@@ -86,6 +86,10 @@ spec:
         - name: TRUSTED_PROXY_CIDRS
           value: {{ . | quote }}
         {{- end }}
+        {{- if .Values.mcp.enabled }}
+        - name: KRKN_MCP_ENABLED
+          value: "true"
+        {{- end }}
         {{- with .Values.auth.websocketAllowedOrigins }}
         - name: WEBSOCKET_ALLOWED_ORIGINS
           value: {{ . | quote }}

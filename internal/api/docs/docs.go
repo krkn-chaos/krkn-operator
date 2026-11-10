@@ -1502,6 +1502,227 @@ const docTemplate = `{
                 }
             }
         },
+        "/robots": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "List all robot accounts (admin only)",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "robots"
+                ],
+                "summary": "List robot accounts",
+                "responses": {
+                    "200": {
+                        "description": "List of robots",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.RobotListResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Create a robot account with optional group memberships (admin only)",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "robots"
+                ],
+                "summary": "Create a robot account",
+                "responses": {
+                    "201": {
+                        "description": "Created robot",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.RobotResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Robot already exists",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/robots/{name}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Get a robot account by name (admin only)",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "robots"
+                ],
+                "summary": "Get a robot account",
+                "responses": {
+                    "200": {
+                        "description": "Robot details",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.RobotResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Robot not found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Delete a robot account and its token secret (admin only)",
+                "tags": [
+                    "robots"
+                ],
+                "summary": "Delete a robot account",
+                "responses": {
+                    "204": {
+                        "description": "No content"
+                    },
+                    "404": {
+                        "description": "Robot not found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "patch": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Update description, disabled flag or group memberships (admin only). Groups replaces all group labels.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "robots"
+                ],
+                "summary": "Update a robot account",
+                "responses": {
+                    "200": {
+                        "description": "Updated robot",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.RobotResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Robot not found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/robots/{name}/token": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Issue a new bearer token for a robot, replacing any previous one (admin only). The token is shown exactly once.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "robots"
+                ],
+                "summary": "Issue a robot token",
+                "responses": {
+                    "201": {
+                        "description": "Issued token",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.IssueRobotTokenResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Robot not found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Robot is disabled",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Revoke the active token of a robot (admin only)",
+                "tags": [
+                    "robots"
+                ],
+                "summary": "Revoke a robot token",
+                "responses": {
+                    "204": {
+                        "description": "No content"
+                    },
+                    "404": {
+                        "description": "Robot not found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/scenarios": {
             "post": {
                 "security": [
@@ -3355,9 +3576,11 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "component": {
+                    "description": "Component is the unique feature name within this manifest.",
                     "type": "string"
                 },
                 "description": {
+                    "description": "Description explains the feature exposed by the component.",
                     "type": "string"
                 }
             }
@@ -3366,12 +3589,14 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "components": {
+                    "description": "Components lists the named features exposed by this build.",
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/github_com_krkn-chaos_krkn-operator_api_v1alpha1.ComponentDescription"
                     }
                 },
                 "version": {
+                    "description": "Version is the exact Git tag embedded in the component build.",
                     "type": "string"
                 }
             }
@@ -4907,6 +5132,23 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_api.IssueRobotTokenResponse": {
+            "type": "object",
+            "properties": {
+                "expiresAt": {
+                    "type": "string"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "token": {
+                    "type": "string"
+                },
+                "tokenId": {
+                    "type": "string"
+                }
+            }
+        },
         "internal_api.JobStatsSummary": {
             "type": "object",
             "properties": {
@@ -5152,6 +5394,55 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "status": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_api.RobotListResponse": {
+            "type": "object",
+            "properties": {
+                "robots": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_api.RobotResponse"
+                    }
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
+        "internal_api.RobotResponse": {
+            "type": "object",
+            "properties": {
+                "createdAt": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "disabled": {
+                    "type": "boolean"
+                },
+                "groups": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "lastUsedAt": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "tokenExpiresAt": {
+                    "type": "string"
+                },
+                "tokenId": {
+                    "type": "string"
+                },
+                "tokenIssuedAt": {
                     "type": "string"
                 }
             }
