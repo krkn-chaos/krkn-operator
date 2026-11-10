@@ -241,6 +241,12 @@ server errors return `500`. See the
 [official API documentation](https://krkn-chaos.dev/docs/krkn-operator) for
 the full operator API reference.
 
+## MCP Server
+
+The operator ships an opt-in MCP endpoint for AI agents operating as robot accounts. See
+[docs/mcp-server.md](docs/mcp-server.md) for the security model, admin workflow and tool
+reference.
+
 ## Telemetry Query API
 
 Query chaos-run telemetry stored in Elasticsearch/OpenSearch through the operator's REST API. The request supplies the connection in one of two mutually exclusive ways:
