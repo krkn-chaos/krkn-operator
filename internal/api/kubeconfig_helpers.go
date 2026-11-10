@@ -67,7 +67,6 @@ func (h *Handler) getKubeconfigFromOperatorTarget(ctx context.Context, targetUUI
 }
 
 // getKubeconfigFromTargetRequest retrieves kubeconfig from KrknTargetRequest (legacy)
-// This is for backward compatibility with the old krkn-operator-acm flow
 // Returns base64-encoded kubeconfig string
 func (h *Handler) getKubeconfigFromTargetRequest(ctx context.Context, targetID string, clusterName string) (string, error) {
 	// Fetch the secret with the same name as the KrknTargetRequest ID
@@ -88,7 +87,7 @@ func (h *Handler) getKubeconfigFromTargetRequest(ctx context.Context, targetID s
 	}
 
 	// Parse the JSON to extract cluster configurations
-	// Structure: { "krkn-operator-acm": { "cluster-name": { "kubeconfig": "base64..." } } }
+	// Structure: { "operator-name": { "cluster-name": { "kubeconfig": "base64..." } } }
 	var managedClusters map[string]map[string]struct {
 		Kubeconfig string `json:"kubeconfig"`
 	}
@@ -96,20 +95,21 @@ func (h *Handler) getKubeconfigFromTargetRequest(ctx context.Context, targetID s
 		return "", fmt.Errorf("failed to parse managed-clusters JSON: %w", err)
 	}
 
-	// Get the krkn-operator-acm object
-	acmClusters, exists := managedClusters["krkn-operator-acm"]
-	if !exists {
-		return "", fmt.Errorf("krkn-operator-acm not found in managed-clusters")
+	var kubeconfig string
+	found := false
+	for _, clusters := range managedClusters {
+		if cluster, exists := clusters[clusterName]; exists {
+			if found {
+				return "", fmt.Errorf("cluster '%s' found under multiple operators in managed-clusters", clusterName)
+			}
+			kubeconfig = cluster.Kubeconfig
+			found = true
+		}
 	}
-
-	// Check if the requested cluster exists
-	clusterConfig, exists := acmClusters[clusterName]
-	if !exists {
-		return "", fmt.Errorf("cluster '%s' not found in krkn-operator-acm", clusterName)
+	if !found {
+		return "", fmt.Errorf("cluster '%s' not found in managed-clusters", clusterName)
 	}
-
-	// Return the base64-encoded kubeconfig
-	return clusterConfig.Kubeconfig, nil
+	return kubeconfig, nil
 }
 
 // getClusterAPIURL retrieves the cluster API URL from either:
