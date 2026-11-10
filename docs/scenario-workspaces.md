@@ -219,6 +219,12 @@ permissions to create its Pods there.
 
 Scenario requests and graph nodes may set `rollbackEnabled: true`. This requires
 a workspace; selecting a workspace without enabling rollback remains valid.
+Rollback-enabled runs use zero orchestrator retries. The REST API persists
+`maxRetries: 0` even when the request supplies a positive value, and the
+controller enforces the same limit for runs created directly as CRs. For a
+graph, only nodes with rollback enabled use zero retries; other nodes retain
+the graph's configured retry count. Previously created rollback-enabled runs
+also stop retrying when the updated controller reconciles them.
 The operator mounts the per-attempt workspace at `/var/lib/krkn/workspace` and
 sets `ROLLBACK_VERSIONS_DIRECTORY` to that exact path in the Krkn container,
 overriding any caller-provided value when rollback is enabled. Krkn Hub images

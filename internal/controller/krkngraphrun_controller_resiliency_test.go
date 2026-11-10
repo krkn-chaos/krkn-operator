@@ -65,11 +65,14 @@ func TestCreateScenarioRun_ResiliencyScore(t *testing.T) {
 				Spec: krknv1alpha1.KrknGraphRunSpec{
 					Graph: map[string]krknv1alpha1.GraphScenarioNode{
 						"node-1": {
-							Scenario: publicScenarioReference("test-scenario"),
+							Scenario:        publicScenarioReference("test-scenario"),
+							RollbackEnabled: true,
+							Workspace:       &krknv1alpha1.WorkspaceReference{Name: "friendly"},
 						},
 					},
 					TargetRequestID:         "test-target",
 					TargetClusters:          map[string][]string{"local": {"cluster1"}},
+					MaxRetries:              3,
 					ResiliencyScoreEnabled:  true,
 					ResiliencyScoreBaseline: &baselineValue,
 				},
@@ -379,6 +382,9 @@ func TestCreateScenarioRun_ResiliencyScore(t *testing.T) {
 			}
 
 			scenarioRun := &scenarioRunList.Items[0]
+			if graphRun.Spec.Graph[tt.nodeID].RollbackEnabled && scenarioRun.Spec.MaxRetries != 0 {
+				t.Errorf("rollback node maxRetries = %d, want 0", scenarioRun.Spec.MaxRetries)
+			}
 
 			// Validate expected env vars are present
 			for key, expectedValue := range tt.expectEnvVars {

@@ -379,7 +379,7 @@ func (r *KrknScenarioRunReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 					Phase:                "Pending",
 					StartTime:            &now,
 					RetryCount:           0,
-					MaxRetries:           scenarioRun.Spec.MaxRetries,
+					MaxRetries:           effectiveScenarioMaxRetries(&scenarioRun),
 					MaxRetriesConfigured: true,
 				})
 				logger.Info("created new cluster job",
@@ -1134,7 +1134,7 @@ func (r *KrknScenarioRunReconciler) createClusterJob(
 			Phase:                "Pending",
 			StartTime:            &now,
 			RetryCount:           0,
-			MaxRetries:           scenarioRun.Spec.MaxRetries,
+			MaxRetries:           effectiveScenarioMaxRetries(scenarioRun),
 			MaxRetriesConfigured: true,
 		})
 		logger.Info("created new cluster job",
@@ -1155,7 +1155,12 @@ func (r *KrknScenarioRunReconciler) updateClusterJobStatuses(
 
 	for i := range scenarioRun.Status.ClusterJobs {
 		job := &scenarioRun.Status.ClusterJobs[i]
-		backfillLegacyMaxRetries(job, scenarioRun.Spec.MaxRetries)
+		if scenarioRun.Spec.RollbackEnabled {
+			job.MaxRetries = 0
+			job.MaxRetriesConfigured = true
+		} else {
+			backfillLegacyMaxRetries(job, scenarioRun.Spec.MaxRetries)
+		}
 
 		logger.V(1).Info("checking job status",
 			"cluster", job.ClusterName,
@@ -1481,6 +1486,15 @@ func (r *KrknScenarioRunReconciler) extractFailureReason(pod *corev1.Pod) string
 	}
 
 	return "Unknown"
+}
+
+// effectiveScenarioMaxRetries prevents rollback attempts from being retried,
+// including when a run was created directly as a custom resource.
+func effectiveScenarioMaxRetries(run *krknv1alpha1.KrknScenarioRun) int {
+	if run.Spec.RollbackEnabled {
+		return 0
+	}
+	return run.Spec.MaxRetries
 }
 
 // backfillLegacyMaxRetries restores the retry limit for jobs written by older

@@ -210,16 +210,19 @@ func TestScenarioRollbackRequiresWorkspaceAndPersistsSelection(t *testing.T) {
 
 	selected := httptest.NewRecorder()
 	h.PostScenarioRun(selected, newCategoryRequestAs(http.MethodPost, ScenariosRunPath,
-		`{"targetRequestId":"target","targetClusters":{"krkn-operator":["cluster"]},"scenario":{"name":"pod-delete","private":false},"rollbackEnabled":true,"workspace":{"name":"friendly"}}`, "admin", "admin@example.com"))
+		`{"targetRequestId":"target","targetClusters":{"krkn-operator":["cluster"]},"scenario":{"name":"pod-delete","private":false},"rollbackEnabled":true,"maxRetries":5,"workspace":{"name":"friendly"}}`, "admin", "admin@example.com"))
 	require.Equal(t, http.StatusCreated, selected.Code, selected.Body.String())
 	var created ScenarioRunCreateResponse
 	require.NoError(t, json.Unmarshal(selected.Body.Bytes(), &created))
 	run := &krknv1alpha1.KrknScenarioRun{}
 	require.NoError(t, h.client.Get(t.Context(), client.ObjectKey{Namespace: "default", Name: created.ScenarioRunName}, run))
 	require.True(t, run.Spec.RollbackEnabled)
+	require.Zero(t, run.Spec.MaxRetries)
 	replay, err := h.reconstructScenarioRunPayload(t.Context(), run)
 	require.NoError(t, err)
 	require.True(t, replay.RollbackEnabled)
+	require.NotNil(t, replay.MaxRetries)
+	require.Zero(t, *replay.MaxRetries)
 	require.Equal(t, run.Spec.Workspace, replay.Workspace)
 }
 
