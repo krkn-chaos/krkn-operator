@@ -66,6 +66,43 @@ func makeGraphRun(name string, createdAt time.Time) *krknv1alpha1.KrknGraphRun {
 	}
 }
 
+func TestGroupRollbackJobs_UsesSourceUIDAndKeepsOrphans(t *testing.T) {
+	now := time.Now()
+	parent := makeScenarioRun("source", now.Add(-time.Hour))
+	parent.UID = "source-uid"
+	child := makeScenarioRun("rollback", now)
+	child.Spec.RollbackSource = &krknv1alpha1.RollbackSource{RunName: parent.Name, RunUID: string(parent.UID), JobID: "attempt-one"}
+	child.Status.Phase = "Running"
+	child.Status.ClusterJobs = []krknv1alpha1.ClusterJobStatus{{JobID: "rollback-job", PodName: "rollback-pod", Phase: "Running"}}
+	orphan := makeScenarioRun("orphan", now.Add(-time.Minute))
+	orphan.Spec.RollbackSource = &krknv1alpha1.RollbackSource{RunName: parent.Name, RunUID: "old-uid", JobID: "attempt-two"}
+	runs := []krknv1alpha1.KrknScenarioRun{*parent, *child, *orphan}
+
+	flat := BuildUnifiedJobList(runs, nil)
+	grouped := GroupRollbackJobs(flat, runs)
+	if len(grouped) != 2 {
+		t.Fatalf("expected source and orphan at top level, got %d", len(grouped))
+	}
+	for _, job := range grouped {
+		if job.Name == child.Name {
+			t.Fatal("linked rollback remained at top level")
+		}
+		if job.Name == parent.Name {
+			if len(job.RollbackRuns) != 1 || job.RollbackRuns[0].SourceJobID != "attempt-one" || job.RollbackRuns[0].JobID != "rollback-job" {
+				t.Fatalf("source has wrong rollback children: %+v", job.RollbackRuns)
+			}
+		}
+	}
+	if len(flat) != 3 {
+		t.Fatalf("expected three flat jobs, got %d", len(flat))
+	}
+	for _, job := range flat {
+		if len(job.RollbackRuns) != 0 {
+			t.Fatal("grouping mutated the flat Jobs view")
+		}
+	}
+}
+
 func TestListJobs_NoPagination(t *testing.T) {
 	scheme := runtime.NewScheme()
 	_ = krknv1alpha1.AddToScheme(scheme)
@@ -114,6 +151,32 @@ func TestListJobs_NoPagination(t *testing.T) {
 	}
 	if response.Jobs[2].Name != "sr-1" {
 		t.Errorf("expected last item to be sr-1 (oldest), got %s", response.Jobs[2].Name)
+	}
+}
+
+func TestListJobs_GroupedRollbacksBeforePagination(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = krknv1alpha1.AddToScheme(scheme)
+	now := time.Now()
+	parent := makeScenarioRun("source", now.Add(-time.Hour))
+	parent.UID = "source-uid"
+	child := makeScenarioRun("rollback", now)
+	child.Spec.RollbackSource = &krknv1alpha1.RollbackSource{RunName: parent.Name, RunUID: string(parent.UID), JobID: "attempt"}
+	client := fakeclient.NewClientBuilder().WithScheme(scheme).WithObjects(parent, child).Build()
+	handler := NewTestHandler(client, fake.NewSimpleClientset(), "default", "localhost:50051")
+	req := httptest.NewRequest(http.MethodGet, "/api/v2/jobs?groupRollbacks=true&page=1&limit=1", nil)
+	req = req.WithContext(context.WithValue(req.Context(), auth.UserClaimsKey, &auth.Claims{UserID: "admin@example.com", Role: "admin"}))
+	w := httptest.NewRecorder()
+	handler.ListJobs(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var response UnifiedJobsResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode grouped Jobs response: %v", err)
+	}
+	if response.Pagination.Total != 1 || len(response.Jobs) != 1 || response.Jobs[0].Name != parent.Name || len(response.Jobs[0].RollbackRuns) != 1 {
+		t.Fatalf("unexpected grouped Jobs response: %+v", response)
 	}
 }
 

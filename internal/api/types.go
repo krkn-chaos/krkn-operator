@@ -513,6 +513,22 @@ type UnifiedJobItem struct {
 	ScenarioRun *ScenarioRunListItem `json:"scenarioRun,omitempty"`
 	// GraphRun contains the graph run data (when Type == "graphRun")
 	GraphRun *GraphRunListItem `json:"graphRun,omitempty"`
+	// RollbackRuns are executions linked to this scenario run in the grouped Jobs view.
+	RollbackRuns []RollbackRunSummary `json:"rollbackRuns,omitempty"`
+}
+
+// RollbackRunSummary identifies one rollback execution and its original attempt.
+// It is derived from the rollback ScenarioRun; the source run status is unchanged.
+type RollbackRunSummary struct {
+	ScenarioRunName string    `json:"scenarioRunName"`
+	SourceJobID     string    `json:"sourceJobId"`
+	Iteration       int       `json:"iteration,omitempty"`
+	Phase           string    `json:"phase"`
+	OwnerUserID     string    `json:"ownerUserId,omitempty"`
+	CreatedAt       time.Time `json:"createdAt"`
+	JobID           string    `json:"jobId,omitempty"`
+	PodName         string    `json:"podName,omitempty"`
+	JobPhase        string    `json:"jobPhase,omitempty"`
 }
 
 func (u UnifiedJobItem) JobType() string { return u.Type }

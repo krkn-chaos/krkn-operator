@@ -297,3 +297,25 @@ rejected. If the original attempt's kubeconfig ConfigMap is missing or has a
 different owner, the files may still be detected but `canExecute` is false and
 POST is rejected. Storage retention and cleanup remain administrator
 responsibilities.
+
+### Rollback history in Jobs
+
+`GET /api/v2/jobs?groupRollbacks=true` and a Jobs WebSocket subscription with
+`groupRollbacks: true` return rollback executions in the source scenario item's
+`rollbackRuns` array. The default Jobs view remains flat for existing clients.
+Grouping happens before pagination and statistics, so a child does not consume
+a top-level page slot or count as a separate job in the grouped view. Each child
+contains its source attempt JobID, rollback run name, iteration, phase, actor,
+creation time, and current rollback job/pod IDs. The source name and immutable
+UID must both match; deleted sources, graph-node sources, and children whose
+parent is not visible to the caller remain top-level history.
+
+The source scenario phase remains unchanged. The console derives `Rolling back`,
+`Rolled back`, `Partially rolled back`, or `Rollback failed` from the latest
+rollback execution for each source attempt. This is execution history, separate
+from the retained-file inspection that controls whether another rollback can be
+started. The indicator covers attempts with a rollback run; it does not assert
+that every failed target was restored. Group members see pending rollback runs
+using the pinned source cluster
+identity before a rollback job appears; `view` permits inspection and `run` on
+that cluster is required to launch another rollback.

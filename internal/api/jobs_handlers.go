@@ -51,6 +51,7 @@ func getDefaultPageSize() int {
 // @Produce json
 // @Param page query int false "Page number (1-based). Omit for all results."
 // @Param limit query int false "Items per page. Defaults to jobs.defaultPageSize from ConfigMap."
+// @Param groupRollbacks query bool false "Nest rollback runs under their source run before pagination. Defaults to false."
 // @Success 200 {object} UnifiedJobsResponse "Paginated list of jobs"
 // @Failure 500 {object} ErrorResponse "Internal server error"
 // @Security BearerAuth
@@ -87,6 +88,9 @@ func (h *Handler) ListJobs(w http.ResponseWriter, r *http.Request) {
 
 	// Build unified list
 	jobs := BuildUnifiedJobList(filteredScenarioRuns, filteredGraphRuns)
+	if r.URL.Query().Get("groupRollbacks") == "true" {
+		jobs = GroupRollbackJobs(jobs, filteredScenarioRuns)
+	}
 	if err := h.filterJobCategoriesByVisibility(ctx, jobs); err != nil {
 		logger.Error(err, "Failed to determine category visibility for jobs")
 		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
@@ -244,6 +248,56 @@ func BuildUnifiedJobList(scenarioRuns []krknv1alpha1.KrknScenarioRun, graphRuns 
 	})
 
 	return jobs
+}
+
+// GroupRollbackJobs attaches visible rollback runs to their visible source run.
+// Unmatched, orphaned, and graph-node rollback runs remain top-level history.
+// The caller must apply authorization before invoking this function.
+func GroupRollbackJobs(jobs []UnifiedJobItem, scenarioRuns []krknv1alpha1.KrknScenarioRun) []UnifiedJobItem {
+	jobs = append([]UnifiedJobItem(nil), jobs...)
+	byName := make(map[string]*krknv1alpha1.KrknScenarioRun, len(scenarioRuns))
+	for i := range scenarioRuns {
+		byName[scenarioRuns[i].Name] = &scenarioRuns[i]
+	}
+	parents := make(map[string]int)
+	for i := range jobs {
+		if run := byName[jobs[i].Name]; run != nil && run.UID != "" && run.Spec.RollbackSource == nil && run.Labels["krkn.dev/graph-run"] == "" {
+			parents[run.Name+"/"+string(run.UID)] = i
+		}
+	}
+	grouped := make([]bool, len(jobs))
+	for i := range jobs {
+		run := byName[jobs[i].Name]
+		if run == nil || run.Spec.RollbackSource == nil || run.Spec.RollbackSource.RunUID == "" {
+			continue
+		}
+		source := run.Spec.RollbackSource
+		parentIndex, ok := parents[source.RunName+"/"+source.RunUID]
+		if !ok {
+			continue
+		}
+		summary := RollbackRunSummary{
+			ScenarioRunName: run.Name,
+			SourceJobID:     source.JobID,
+			Phase:           run.Status.Phase,
+			OwnerUserID:     run.Spec.OwnerUserID,
+			CreatedAt:       run.CreationTimestamp.Time,
+		}
+		summary.Iteration, _ = strconv.Atoi(run.Labels["krkn-rollback-iteration"])
+		if len(run.Status.ClusterJobs) > 0 {
+			job := run.Status.ClusterJobs[0]
+			summary.JobID, summary.PodName, summary.JobPhase = job.JobID, job.PodName, job.Phase
+		}
+		jobs[parentIndex].RollbackRuns = append(jobs[parentIndex].RollbackRuns, summary)
+		grouped[i] = true
+	}
+	result := make([]UnifiedJobItem, 0, len(jobs))
+	for i := range jobs {
+		if !grouped[i] {
+			result = append(result, jobs[i])
+		}
+	}
+	return result
 }
 
 // scenarioRunImage returns the resolved image from the first cluster job that

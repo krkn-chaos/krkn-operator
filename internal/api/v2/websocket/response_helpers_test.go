@@ -41,6 +41,37 @@ func TestScenarioRunWebSocketResponsesIncludeRollbackIdentity(t *testing.T) {
 	}
 }
 
+func TestGroupRollbackJobsWebSocketKeepsFlatViewAndChecksUID(t *testing.T) {
+	parent := krknv1alpha1.KrknScenarioRun{ObjectMeta: metav1.ObjectMeta{Name: "source", UID: "source-uid"}}
+	child := krknv1alpha1.KrknScenarioRun{
+		ObjectMeta: metav1.ObjectMeta{Name: "rollback"},
+		Spec:       krknv1alpha1.KrknScenarioRunSpec{RollbackSource: &krknv1alpha1.RollbackSource{RunName: parent.Name, RunUID: string(parent.UID), JobID: "attempt"}},
+		Status:     krknv1alpha1.KrknScenarioRunStatus{Phase: "Succeeded"},
+	}
+	wrongUID := child.DeepCopy()
+	wrongUID.Name = "old-rollback"
+	wrongUID.Spec.RollbackSource.RunUID = "old-uid"
+	runs := []krknv1alpha1.KrknScenarioRun{parent, child, *wrongUID}
+	flat := buildUnifiedJobList(runs, nil)
+	grouped := groupRollbackJobs(flat, runs)
+	if len(grouped) != 2 || len(flat) != 3 {
+		t.Fatalf("expected two grouped and three flat jobs, got %d and %d", len(grouped), len(flat))
+	}
+	for _, job := range grouped {
+		if job.Name == "rollback" {
+			t.Fatal("linked rollback remained at top level")
+		}
+		if job.Name == "source" && (len(job.RollbackRuns) != 1 || job.RollbackRuns[0].SourceJobID != "attempt") {
+			t.Fatalf("source has wrong rollback children: %+v", job.RollbackRuns)
+		}
+	}
+	for _, job := range flat {
+		if len(job.RollbackRuns) != 0 {
+			t.Fatal("grouping mutated the flat Jobs view")
+		}
+	}
+}
+
 func TestConvertClusterJobs_OmitsClusterAPIURL(t *testing.T) {
 	now := metav1.Now()
 	jobs := []krknv1alpha1.ClusterJobStatus{

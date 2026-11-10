@@ -158,7 +158,7 @@ func (h *Handler) checkScenarioRunAccessWithAction(
 	}
 
 	// Reject runs without jobs (defensive - should not happen for new runs)
-	if len(scenarioRun.Status.ClusterJobs) == 0 {
+	if len(scenarioRun.Status.ClusterJobs) == 0 && (scenarioRun.Spec.RollbackSource == nil || scenarioRun.Spec.RollbackSource.ClusterAPIURL == "") {
 		writeJSONError(w, http.StatusForbidden, ErrorResponse{
 			Error:   "forbidden",
 			Message: "Access denied. This scenario run has no jobs",
@@ -225,6 +225,11 @@ func (h *Handler) checkScenarioRunGroupAccess(
 		if groupauth.CanPerformAction(userGroups, job.ClusterAPIURL, requiredAction) {
 			return true, nil // User has access to at least one job
 		}
+	}
+	// A rollback run may be Pending before its first job is recorded. Its source
+	// pins the cluster that the API authorized when creating the rollback.
+	if source := scenarioRun.Spec.RollbackSource; len(scenarioRun.Status.ClusterJobs) == 0 && source != nil && source.ClusterAPIURL != "" {
+		return groupauth.CanPerformAction(userGroups, source.ClusterAPIURL, requiredAction), nil
 	}
 
 	return false, nil // No permission on any job

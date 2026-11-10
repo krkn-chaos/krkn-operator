@@ -201,6 +201,27 @@ func TestCheckScenarioRunAccess(t *testing.T) {
 			expectedStatus: http.StatusForbidden,
 		},
 		{
+			name:   "groupmate can view pending rollback before its job exists",
+			claims: userClaims,
+			scenarioRun: &krknv1alpha1.KrknScenarioRun{
+				Spec: krknv1alpha1.KrknScenarioRunSpec{
+					RollbackSource: &krknv1alpha1.RollbackSource{ClusterAPIURL: "https://cluster1.example.com:6443"},
+				},
+			},
+			expectAllow: true,
+		},
+		{
+			name:   "groupmate cannot view pending rollback on another cluster",
+			claims: userClaims,
+			scenarioRun: &krknv1alpha1.KrknScenarioRun{
+				Spec: krknv1alpha1.KrknScenarioRunSpec{
+					RollbackSource: &krknv1alpha1.RollbackSource{ClusterAPIURL: "https://cluster2.example.com:6443"},
+				},
+			},
+			expectAllow:    false,
+			expectedStatus: http.StatusForbidden,
+		},
+		{
 			name:   "run without jobs is rejected (user)",
 			claims: userClaims,
 			scenarioRun: &krknv1alpha1.KrknScenarioRun{
