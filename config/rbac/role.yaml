@@ -30,6 +30,7 @@ rules:
   - krkncategories
   - krkngraphruns
   - krknoperatortargets
+  - krknrobots
   - krknscenarioruns
   - krkntargetrequests
   - krknusergroups
@@ -59,6 +60,7 @@ rules:
   - krknoperatortargetproviderconfigs/status
   - krknoperatortargetproviders/status
   - krknoperatortargets/status
+  - krknrobots/status
   - krknscenarioruns/status
   - krkntargetrequests/status
   - krknusergroups/status

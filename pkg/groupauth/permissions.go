@@ -28,6 +28,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
+	"github.com/krkn-chaos/krkn-operator/pkg/auth"
+
+	"github.com/go-logr/logr"
 )
 
 const (
@@ -69,6 +72,12 @@ var (
 func GetUserGroups(ctx context.Context, k8sClient client.Client, userID, namespace string) ([]krknv1alpha1.KrknUserGroup, error) {
 	logger := log.FromContext(ctx).WithName("groupauth.GetUserGroups")
 
+	// Robot principals resolve through their KrknRobot CR instead of a
+	// KrknUser, so every permission check applies to robots unchanged.
+	if robotName, ok := auth.ParseRobotPrincipalID(userID); ok {
+		return getRobotGroups(ctx, k8sClient, robotName, namespace, logger)
+	}
+
 	// Fetch KrknUser by email
 	userName, err := SanitizeUserIDForResourceName(userID)
 	if err != nil {
@@ -86,9 +95,53 @@ func GetUserGroups(ctx context.Context, k8sClient client.Client, userID, namespa
 		return []krknv1alpha1.KrknUserGroup{}, nil
 	}
 
-	// Fetch KrknUserGroup CRs by name
-	groups := make([]krknv1alpha1.KrknUserGroup, 0, len(groupNames))
-	for _, groupName := range groupNames {
+	groups := fetchGroupsByName(ctx, k8sClient, groupNames, namespace, logger)
+
+	logger.V(1).Info("Fetched user groups", "userID", userID, "groupCount", len(groups))
+	return groups, nil
+}
+
+// getRobotGroups resolves a robot principal's groups from its KrknRobot CR.
+// A missing robot CR is an error; a disabled robot has no groups.
+func getRobotGroups(
+	ctx context.Context,
+	k8sClient client.Client,
+	robotName, namespace string,
+	logger logr.Logger,
+) ([]krknv1alpha1.KrknUserGroup, error) {
+	robot := &krknv1alpha1.KrknRobot{}
+	if err := k8sClient.Get(ctx, client.ObjectKey{Name: robotName, Namespace: namespace}, robot); err != nil {
+		return nil, fmt.Errorf("failed to get robot %s: %w", robotName, err)
+	}
+
+	if robot.Spec.Disabled {
+		logger.V(1).Info("Robot is disabled", "robot", robotName)
+		return []krknv1alpha1.KrknUserGroup{}, nil
+	}
+
+	groupNames := ExtractGroupNamesFromLabels(robot.Labels)
+	if len(groupNames) == 0 {
+		logger.V(1).Info("Robot has no group memberships", "robot", robotName)
+		return []krknv1alpha1.KrknUserGroup{}, nil
+	}
+
+	groups := fetchGroupsByName(ctx, k8sClient, groupNames, namespace, logger)
+
+	logger.V(1).Info("Fetched robot groups", "robot", robotName, "groupCount", len(groups))
+	return groups, nil
+}
+
+// fetchGroupsByName fetches KrknUserGroup CRs by name, skipping groups that
+// no longer exist (logged at V(1), matching the pre-existing behavior).
+func fetchGroupsByName(
+	ctx context.Context,
+	k8sClient client.Client,
+	names []string,
+	namespace string,
+	logger logr.Logger,
+) []krknv1alpha1.KrknUserGroup {
+	groups := make([]krknv1alpha1.KrknUserGroup, 0, len(names))
+	for _, groupName := range names {
 		group := &krknv1alpha1.KrknUserGroup{}
 		if err := k8sClient.Get(ctx, client.ObjectKey{Name: groupName, Namespace: namespace}, group); err != nil {
 			// Log warning but continue - group may have been deleted
@@ -97,9 +150,7 @@ func GetUserGroups(ctx context.Context, k8sClient client.Client, userID, namespa
 		}
 		groups = append(groups, *group)
 	}
-
-	logger.V(1).Info("Fetched user groups", "userID", userID, "groupCount", len(groups))
-	return groups, nil
+	return groups
 }
 
 // AggregateClusterPermissions aggregates permissions from all user groups.
@@ -236,6 +287,9 @@ func CountGroupMembers(ctx context.Context, k8sClient client.Client, groupName, 
 //
 // Example: "user@example.com" -> "krknuser-user-example-com"
 func SanitizeUserIDForResourceName(email string) (string, error) {
+	if _, ok := auth.ParseRobotPrincipalID(email); ok {
+		return "", fmt.Errorf("robot principals have no KrknUser resource")
+	}
 	label, err := SanitizeUserIDForLabel(email)
 	if err != nil {
 		return "", err
@@ -259,6 +313,15 @@ func SanitizeUserIDForResourceName(email string) (string, error) {
 //
 // Example: "user@example.com" -> "user-example-com"
 func SanitizeUserIDForLabel(email string) (string, error) {
+	// Robot principals map to "robot.<name>". Sanitized emails never
+	// contain ".", so this form never collides with a human user's label.
+	if robotName, ok := auth.ParseRobotPrincipalID(email); ok {
+		label := "robot." + robotName
+		if len(label) > maxLabelValueLength || !labelValueRegexp.MatchString(label) {
+			return "", fmt.Errorf("user ID %q does not produce a valid Kubernetes label value", email)
+		}
+		return label, nil
+	}
 	if strings.TrimSpace(email) == "" {
 		return "", fmt.Errorf("cannot sanitize an empty user ID")
 	}

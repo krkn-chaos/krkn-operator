@@ -125,6 +125,16 @@ func (tg *TokenGenerator) ValidateToken(tokenString string) (*Claims, error) {
 		return nil, fmt.Errorf("invalid token")
 	}
 
+	// Robot accounts authenticate only via the MCP endpoint with opaque
+	// bearer tokens. Any JWT carrying robot credentials is rejected here,
+	// covering the REST middleware and both WebSocket validators.
+	if claims.Role == string(RoleRobot) {
+		return nil, fmt.Errorf("robot credentials are not accepted on this endpoint")
+	}
+	if _, ok := ParseRobotPrincipalID(claims.UserID); ok {
+		return nil, fmt.Errorf("robot credentials are not accepted on this endpoint")
+	}
+
 	return claims, nil
 }
 

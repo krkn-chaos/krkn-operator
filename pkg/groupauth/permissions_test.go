@@ -658,3 +658,153 @@ func TestSanitizeUserIDConsistency(t *testing.T) {
 		}
 	}
 }
+
+func TestGetUserGroups_Robot(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = krknv1alpha1.AddToScheme(scheme)
+
+	robot := &krknv1alpha1.KrknRobot{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "ci-bot",
+			Namespace: "default",
+			Labels: map[string]string{
+				"group.krkn.krkn-chaos.dev/sre": "true",
+			},
+		},
+	}
+	group := &krknv1alpha1.KrknUserGroup{
+		ObjectMeta: metav1.ObjectMeta{Name: "sre", Namespace: "default"},
+		Spec:       krknv1alpha1.KrknUserGroupSpec{Name: "sre"},
+	}
+
+	c := fakeclient.NewClientBuilder().WithScheme(scheme).WithRuntimeObjects(robot, group).Build()
+	groups, err := GetUserGroups(context.Background(), c, "robot:ci-bot", "default")
+	if err != nil {
+		t.Fatalf("GetUserGroups(robot) failed: %v", err)
+	}
+	if len(groups) != 1 || groups[0].Name != "sre" {
+		t.Errorf("got groups %v, want [sre]", groups)
+	}
+}
+
+func TestGetUserGroups_RobotDisabled(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = krknv1alpha1.AddToScheme(scheme)
+
+	robot := &krknv1alpha1.KrknRobot{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "ci-bot",
+			Namespace: "default",
+			Labels:    map[string]string{"group.krkn.krkn-chaos.dev/sre": "true"},
+		},
+		Spec: krknv1alpha1.KrknRobotSpec{Disabled: true},
+	}
+
+	c := fakeclient.NewClientBuilder().WithScheme(scheme).WithRuntimeObjects(robot).Build()
+	groups, err := GetUserGroups(context.Background(), c, "robot:ci-bot", "default")
+	if err != nil {
+		t.Fatalf("GetUserGroups(disabled robot) failed: %v", err)
+	}
+	if len(groups) != 0 {
+		t.Errorf("got %d groups for disabled robot, want 0", len(groups))
+	}
+}
+
+func TestGetUserGroups_RobotMissing(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = krknv1alpha1.AddToScheme(scheme)
+
+	c := fakeclient.NewClientBuilder().WithScheme(scheme).Build()
+	_, err := GetUserGroups(context.Background(), c, "robot:ci-bot", "default")
+	if err == nil {
+		t.Fatal("GetUserGroups(missing robot) returned nil error, want error")
+	}
+}
+
+func TestGetUserGroups_RobotDoesNotMatchUserCR(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = krknv1alpha1.AddToScheme(scheme)
+
+	// A human user whose sanitized name would be krknuser-ci-bot exists,
+	// but no KrknRobot named ci-bot does. The robot principal must NOT
+	// resolve to the human user's groups.
+	user := &krknv1alpha1.KrknUser{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "krknuser-ci-bot",
+			Namespace: "default",
+			Labels:    map[string]string{"group.krkn.krkn-chaos.dev/sre": "true"},
+		},
+	}
+	group := &krknv1alpha1.KrknUserGroup{
+		ObjectMeta: metav1.ObjectMeta{Name: "sre", Namespace: "default"},
+		Spec:       krknv1alpha1.KrknUserGroupSpec{Name: "sre"},
+	}
+
+	c := fakeclient.NewClientBuilder().WithScheme(scheme).WithRuntimeObjects(user, group).Build()
+	_, err := GetUserGroups(context.Background(), c, "robot:ci-bot", "default")
+	if err == nil {
+		t.Fatal("GetUserGroups(robot with no robot CR) returned nil error, want error")
+	}
+}
+
+func TestSanitizeUserIDForLabel_Robot(t *testing.T) {
+	got, err := SanitizeUserIDForLabel("robot:ci-bot")
+	if err != nil {
+		t.Fatalf("SanitizeUserIDForLabel(robot:ci-bot) failed: %v", err)
+	}
+	if got != "robot.ci-bot" {
+		t.Errorf("got %q, want robot.ci-bot", got)
+	}
+
+	got, err = SanitizeUserIDForLabel("ci@bot")
+	if err != nil {
+		t.Fatalf("SanitizeUserIDForLabel(ci@bot) failed: %v", err)
+	}
+	if got != "ci-bot" {
+		t.Errorf("got %q, want ci-bot (email behavior unchanged)", got)
+	}
+
+	if _, err := SanitizeUserIDForLabel("robot:BAD"); err == nil {
+		t.Error("SanitizeUserIDForLabel(robot:BAD) returned nil error, want error")
+	}
+}
+
+func TestHasClusterPermission_Robot(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = krknv1alpha1.AddToScheme(scheme)
+
+	robot := &krknv1alpha1.KrknRobot{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "ci-bot",
+			Namespace: "default",
+			Labels:    map[string]string{"group.krkn.krkn-chaos.dev/sre": "true"},
+		},
+	}
+	group := &krknv1alpha1.KrknUserGroup{
+		ObjectMeta: metav1.ObjectMeta{Name: "sre", Namespace: "default"},
+		Spec: krknv1alpha1.KrknUserGroupSpec{
+			Name: "sre",
+			ClusterPermissions: map[string]krknv1alpha1.ClusterPermissionSet{
+				"https://api.a:6443": {Actions: []string{"view", "run"}},
+			},
+		},
+	}
+
+	c := fakeclient.NewClientBuilder().WithScheme(scheme).WithRuntimeObjects(robot, group).Build()
+
+	view, err := HasClusterPermission(context.Background(), c, "robot:ci-bot", "default", "https://api.a:6443", ActionView)
+	if err != nil {
+		t.Fatalf("HasClusterPermission(view) failed: %v", err)
+	}
+	if !view {
+		t.Error("view = false, want true")
+	}
+	cancel, err := HasClusterPermission(
+		context.Background(), c, "robot:ci-bot", "default", "https://api.a:6443", ActionCancel)
+	if err != nil {
+		t.Fatalf("HasClusterPermission(cancel) failed: %v", err)
+	}
+	if cancel {
+		t.Error("cancel = true, want false")
+	}
+}

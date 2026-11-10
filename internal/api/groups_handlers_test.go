@@ -979,3 +979,44 @@ func TestCleanupDiscoveryTargetRequest_Success(t *testing.T) {
 func strPtr(s string) *string {
 	return &s
 }
+
+func TestDeleteUserGroup_StripsRobotLabels(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = krknv1alpha1.AddToScheme(scheme)
+
+	group := &krknv1alpha1.KrknUserGroup{
+		ObjectMeta: metav1.ObjectMeta{Name: "sre", Namespace: "default"},
+		Spec:       krknv1alpha1.KrknUserGroupSpec{Name: "sre"},
+	}
+	robot := &krknv1alpha1.KrknRobot{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "ci-bot",
+			Namespace: "default",
+			Labels:    map[string]string{"group.krkn.krkn-chaos.dev/sre": "true"},
+		},
+	}
+
+	fakeClient := fakeclient.NewClientBuilder().
+		WithScheme(scheme).
+		WithRuntimeObjects(group, robot).
+		Build()
+
+	handler := NewTestHandler(fakeClient, fake.NewSimpleClientset(), "default", "localhost:50051")
+
+	req := httptest.NewRequest("DELETE", GroupsPath+"/sre", nil)
+	req = req.WithContext(createAdminContext())
+	w := httptest.NewRecorder()
+	handler.DeleteUserGroup(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("Expected status %d, got %d. Body: %s", http.StatusOK, w.Code, w.Body.String())
+	}
+
+	var updated krknv1alpha1.KrknRobot
+	if err := fakeClient.Get(context.Background(), client.ObjectKey{Name: "ci-bot", Namespace: "default"}, &updated); err != nil {
+		t.Fatalf("Failed to get robot: %v", err)
+	}
+	if _, ok := updated.Labels["group.krkn.krkn-chaos.dev/sre"]; ok {
+		t.Error("robot still carries group label after group deletion")
+	}
+}

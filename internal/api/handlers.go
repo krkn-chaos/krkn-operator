@@ -137,6 +137,8 @@ type Handler struct {
 	restoreSlots chan struct{}
 	baseCtx      context.Context
 	baseCancel   context.CancelFunc
+	// robotTokens issues and verifies robot account bearer tokens.
+	robotTokens *robotTokenService
 }
 
 // NewHandler creates a new Handler.
@@ -155,6 +157,7 @@ func NewHandler(client client.Client, clientset kubernetes.Interface, namespace 
 		restoreSlots:            make(chan struct{}, maxActiveRestores),
 		baseCtx:                 bgCtx,
 		baseCancel:              bgCancel,
+		robotTokens:             newRobotTokenService(client, namespace),
 	}
 }
 
