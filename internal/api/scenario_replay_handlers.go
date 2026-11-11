@@ -70,6 +70,7 @@ func (h *Handler) replayableCloudCredentialRef(ctx context.Context, ref string) 
 // @Failure 400 {object} ErrorResponse "Invalid job ID or job not found"
 // @Failure 403 {object} ErrorResponse "Insufficient permissions"
 // @Failure 404 {object} ErrorResponse "Job or ScenarioRun not found"
+// @Failure 409 {object} ErrorResponse "Original workspace is no longer available"
 // @Failure 500 {object} ErrorResponse "Internal server error"
 // @Security BearerAuth
 // @Router /scenarios/run/replay/{jobId} [get]
@@ -191,13 +192,22 @@ func (h *Handler) GetScenarioReplay(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Step 6: Return payload (identical to wizard output)
+	originalWorkspace := payload.Workspace
+	payload.Workspace, err = h.visibleWorkspaceReference(ctx, payload.Workspace)
+	if err != nil {
+		logger.Error(err, "Failed to check workspace for scenario replay", "scenarioRunName", scenarioRunName)
+		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{Error: "internal_error", Message: "Failed to reconstruct scenario payload"})
+		return
+	}
+	if originalWorkspace != nil && payload.Workspace == nil {
+		writeJSONError(w, http.StatusConflict, ErrorResponse{Error: "workspace_unavailable", Message: "Original workspace is no longer available for replay"})
+		return
+	}
 	logger.Info("Scenario replay payload reconstructed successfully",
 		"jobId", jobID,
 		"scenarioRunName", scenarioRunName,
 		"userID", claims.UserID)
-
-	// Step 6: Return payload (identical to wizard output)
-	payload.Workspace = h.visibleWorkspaceReference(ctx, payload.Workspace)
 	writeJSON(w, http.StatusOK, payload)
 }
 

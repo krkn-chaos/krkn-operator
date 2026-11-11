@@ -983,6 +983,12 @@
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     },
+                    "409": {
+                        "description": "Workspace is no longer available",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
                     "500": {
                         "description": "Internal server error",
                         "schema": {
@@ -1049,6 +1055,12 @@
                     },
                     "404": {
                         "description": "GraphRun not found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Original workspace is no longer available",
                         "schema": {
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
@@ -1845,6 +1857,12 @@
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
                     },
+                    "409": {
+                        "description": "Original workspace is no longer available",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
                     "500": {
                         "description": "Internal server error",
                         "schema": {
@@ -2114,6 +2132,18 @@
                         "schema": {
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
                     }
                 }
             },
@@ -2180,6 +2210,18 @@
                     },
                     "409": {
                         "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
                         "schema": {
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }
@@ -2296,6 +2338,12 @@
                     },
                     "404": {
                         "description": "ScenarioRun not found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Original workspace is no longer available",
                         "schema": {
                             "$ref": "#/definitions/internal_api.ErrorResponse"
                         }

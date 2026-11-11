@@ -1,7 +1,9 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -12,6 +14,15 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
+
+type failingWorkspaceGetClient struct{ client.Client }
+
+func (c failingWorkspaceGetClient) Get(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+	if _, ok := obj.(*krknv1alpha1.KrknWorkspace); ok {
+		return errors.New("temporary workspace lookup failure")
+	}
+	return c.Client.Get(ctx, key, obj, opts...)
+}
 
 const testWorkspaceUID = "9e70715d-9154-4b9e-aa76-1ae6c6b2594e"
 const testEntryUID = "e7b95e74-ffec-4574-8c7a-e102444decae"
@@ -88,7 +99,8 @@ func TestWorkspaceReferenceVisibilityPreservesPinnedIdentity(t *testing.T) {
 	require.NoError(t, h.client.Create(t.Context(), newCategoryTestUser(t, "outsider@example.com")))
 	ref := &krknv1alpha1.WorkspaceReference{Name: "friendly", WorkspaceUID: testEntryUID, ClaimName: "shared", ClaimUID: testWorkspaceUID}
 	member := newCategoryRequestAs(http.MethodGet, WorkspacesPath, "", "user", "member@example.com")
-	visible := h.visibleWorkspaceReference(member.Context(), ref)
+	visible, err := h.visibleWorkspaceReference(member.Context(), ref)
+	require.NoError(t, err)
 	require.NotNil(t, visible)
 	require.Equal(t, ref.Name, visible.Name)
 	require.Equal(t, ref.WorkspaceUID, visible.WorkspaceUID)
@@ -96,9 +108,55 @@ func TestWorkspaceReferenceVisibilityPreservesPinnedIdentity(t *testing.T) {
 	require.Empty(t, visible.ClaimName)
 	require.Equal(t, "shared", ref.ClaimName, "response redaction must not mutate the run")
 	outsider := newCategoryRequestAs(http.MethodGet, WorkspacesPath, "", "user", "outsider@example.com")
-	require.Nil(t, h.visibleWorkspaceReference(outsider.Context(), ref))
+	visible, err = h.visibleWorkspaceReference(outsider.Context(), ref)
+	require.NoError(t, err)
+	require.Nil(t, visible)
 	nodes := map[string]krknv1alpha1.GraphScenarioNode{"node": {Workspace: ref}}
-	require.Nil(t, h.publicGraphWorkspaces(outsider.Context(), nodes)["node"].Workspace)
+	redacted, err := h.publicGraphWorkspaces(outsider.Context(), nodes)
+	require.NoError(t, err)
+	require.Nil(t, redacted["node"].Workspace)
+	h.client = failingWorkspaceGetClient{h.client}
+	_, err = h.visibleWorkspaceReference(member.Context(), ref)
+	require.ErrorContains(t, err, "temporary workspace lookup failure")
+	_, err = h.publicGraphWorkspaces(member.Context(), nodes)
+	require.ErrorContains(t, err, "temporary workspace lookup failure")
+}
+
+func TestAvailableWorkspacesTrailingSlashStillFiltersUnavailable(t *testing.T) {
+	h := setupScenarioRunTestHandler("target", map[string]string{})
+	require.NoError(t, h.client.Create(t.Context(), testWorkspacePVC()))
+	readyWorkspace(t, h, "", true)
+	require.NoError(t, h.client.Create(t.Context(), &krknv1alpha1.KrknWorkspace{
+		ObjectMeta: metav1.ObjectMeta{Name: "unavailable", Namespace: "default"},
+		Spec:       krknv1alpha1.KrknWorkspaceSpec{ClaimName: "shared", ClaimUID: testWorkspaceUID, AvailableToAll: true},
+	}))
+	for _, path := range []string{WorkspacesPath + "/available", WorkspacesPath + "/available/"} {
+		response := httptest.NewRecorder()
+		h.WorkspaceRouter(response, newCategoryRequestAs(http.MethodGet, path, "", "admin", "admin@example.com"))
+		require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+		var body struct {
+			Workspaces []workspaceInfo `json:"workspaces"`
+		}
+		require.NoError(t, json.Unmarshal(response.Body.Bytes(), &body))
+		require.Len(t, body.Workspaces, 1)
+		require.Equal(t, "friendly", body.Workspaces[0].Name)
+	}
+}
+
+func TestWorkspaceResolutionHidesPVCIdentityFromNonAdmin(t *testing.T) {
+	h := setupScenarioRunTestHandler("target", map[string]string{})
+	pvc := testWorkspacePVC()
+	require.NoError(t, h.client.Create(t.Context(), pvc))
+	readyWorkspace(t, h, "", true)
+	pvc.Status.Phase = corev1.ClaimPending
+	require.NoError(t, h.client.Status().Update(t.Context(), pvc))
+	response := httptest.NewRecorder()
+	request := newCategoryRequestAs(http.MethodPost, ScenariosRunPath, "", "user", "person@example.com")
+	_, ok := h.resolveWorkspaceSelection(response, request, &krknv1alpha1.WorkspaceReference{Name: "friendly"})
+	require.False(t, ok)
+	require.Equal(t, http.StatusConflict, response.Code)
+	require.NotContains(t, response.Body.String(), "shared")
+	require.NotContains(t, response.Body.String(), testWorkspaceUID)
 }
 
 func TestWorkspacePublicationAndAccess(t *testing.T) {

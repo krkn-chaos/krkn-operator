@@ -2525,6 +2525,10 @@ paths:
           description: Referenced resource not found
           schema:
             $ref: '#/definitions/internal_api.ErrorResponse'
+        "409":
+          description: Workspace is no longer available
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
         "500":
           description: Internal server error
           schema:
@@ -2568,6 +2572,10 @@ paths:
             $ref: '#/definitions/internal_api.ErrorResponse'
         "404":
           description: GraphRun not found
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "409":
+          description: Original workspace is no longer available
           schema:
             $ref: '#/definitions/internal_api.ErrorResponse'
         "500":
@@ -3222,6 +3230,14 @@ paths:
           description: Conflict
           schema:
             $ref: '#/definitions/internal_api.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
       security:
       - BearerAuth: []
       summary: Inspect or execute rollback for a scenario attempt
@@ -3266,6 +3282,14 @@ paths:
             $ref: '#/definitions/internal_api.ErrorResponse'
         "409":
           description: Conflict
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "503":
+          description: Service Unavailable
           schema:
             $ref: '#/definitions/internal_api.ErrorResponse'
       security:
@@ -3344,6 +3368,10 @@ paths:
           description: ScenarioRun not found
           schema:
             $ref: '#/definitions/internal_api.ErrorResponse'
+        "409":
+          description: Original workspace is no longer available
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
         "500":
           description: Internal server error
           schema:
@@ -3380,6 +3408,10 @@ paths:
             $ref: '#/definitions/internal_api.ErrorResponse'
         "404":
           description: Job or ScenarioRun not found
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "409":
+          description: Original workspace is no longer available
           schema:
             $ref: '#/definitions/internal_api.ErrorResponse'
         "500":

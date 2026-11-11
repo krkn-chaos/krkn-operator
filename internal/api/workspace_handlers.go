@@ -63,39 +63,42 @@ func workspaceInfoFromCR(entry *krknv1alpha1.KrknWorkspace, admin bool) workspac
 
 // visibleWorkspaceReference keeps the pinned UIDs needed for safe replay only
 // when the caller can still select the workspace. PVC names remain private.
-func (h *Handler) visibleWorkspaceReference(ctx context.Context, ref *krknv1alpha1.WorkspaceReference) *krknv1alpha1.WorkspaceReference {
+func (h *Handler) visibleWorkspaceReference(ctx context.Context, ref *krknv1alpha1.WorkspaceReference) (*krknv1alpha1.WorkspaceReference, error) {
 	if ref == nil {
-		return nil
+		return nil, nil
 	}
 	if !auth.IsAdmin(ctx) {
 		entry := &krknv1alpha1.KrknWorkspace{}
 		if err := h.client.Get(ctx, client.ObjectKey{Namespace: h.namespace, Name: ref.Name}, entry); err != nil {
-			if !apierrors.IsNotFound(err) {
-				log.FromContext(ctx).Error(err, "Failed to load workspace for response", "workspaceName", ref.Name)
+			if apierrors.IsNotFound(err) {
+				return nil, nil
 			}
-			return nil
+			return nil, fmt.Errorf("load workspace %q for response: %w", ref.Name, err)
 		}
 		allowed, err := h.canAccessWorkspace(ctx, entry)
 		if err != nil {
-			log.FromContext(ctx).Error(err, "Failed to check workspace visibility", "workspaceName", ref.Name)
-			return nil
+			return nil, fmt.Errorf("check workspace %q visibility: %w", ref.Name, err)
 		}
 		if !allowed || string(entry.UID) != ref.WorkspaceUID || entry.Spec.ClaimUID != ref.ClaimUID || entry.Spec.ClaimName != ref.ClaimName {
-			return nil
+			return nil, nil
 		}
 	}
 	visible := *ref
 	visible.ClaimName = ""
-	return &visible
+	return &visible, nil
 }
 
-func (h *Handler) publicGraphWorkspaces(ctx context.Context, nodes map[string]krknv1alpha1.GraphScenarioNode) map[string]krknv1alpha1.GraphScenarioNode {
+func (h *Handler) publicGraphWorkspaces(ctx context.Context, nodes map[string]krknv1alpha1.GraphScenarioNode) (map[string]krknv1alpha1.GraphScenarioNode, error) {
 	redacted := make(map[string]krknv1alpha1.GraphScenarioNode, len(nodes))
 	for id, node := range nodes {
-		node.Workspace = h.visibleWorkspaceReference(ctx, node.Workspace)
+		var err error
+		node.Workspace, err = h.visibleWorkspaceReference(ctx, node.Workspace)
+		if err != nil {
+			return nil, fmt.Errorf("check workspace for graph node %q: %w", id, err)
+		}
 		redacted[id] = node
 	}
-	return redacted
+	return redacted, nil
 }
 
 func (h *Handler) canAccessWorkspace(ctx context.Context, entry *krknv1alpha1.KrknWorkspace) (bool, error) {
@@ -152,8 +155,13 @@ func (h *Handler) resolveWorkspaceSelection(w http.ResponseWriter, r *http.Reque
 	}
 	binding, err := workspace.Resolve(r.Context(), h.client, h.namespace, requested.Name)
 	if err != nil {
+		log.FromContext(r.Context()).Error(err, "Failed to resolve workspace PVC", "workspaceName", requested.Name)
 		if errors.Is(err, workspace.ErrUnavailable) || errors.Is(err, workspace.ErrReplaced) {
-			writeJSONError(w, http.StatusConflict, ErrorResponse{Error: "workspace_unavailable", Message: err.Error()})
+			message := "Workspace PVC is unavailable"
+			if errors.Is(err, workspace.ErrReplaced) {
+				message = "Workspace binding changed"
+			}
+			writeJSONError(w, http.StatusConflict, ErrorResponse{Error: "workspace_unavailable", Message: message})
 		} else {
 			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{Error: "internal_error", Message: "Failed to resolve workspace PVC"})
 		}
@@ -192,7 +200,7 @@ func (h *Handler) WorkspaceRouter(w http.ResponseWriter, r *http.Request) {
 			writeJSONError(w, http.StatusForbidden, ErrorResponse{Error: "forbidden", Message: "Admin privileges required"})
 			return
 		}
-		h.listWorkspaces(w, r)
+		h.listWorkspaces(w, r, path == WorkspacesPath+"/available")
 		return
 	}
 	if !strings.HasPrefix(path, WorkspacesPath+"/") || !auth.IsAdmin(r.Context()) {
@@ -253,7 +261,7 @@ func (h *Handler) listAvailableWorkspacePVCs(w http.ResponseWriter, r *http.Requ
 // @Router /workspaces [get]
 // @Router /workspaces/available [get]
 // @Security BearerAuth
-func (h *Handler) listWorkspaces(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) listWorkspaces(w http.ResponseWriter, r *http.Request, availableOnly bool) {
 	var entries krknv1alpha1.KrknWorkspaceList
 	if err := h.client.List(r.Context(), &entries, client.InNamespace(h.namespace)); err != nil {
 		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{Error: "internal_error", Message: "Failed to list workspaces"})
@@ -263,7 +271,7 @@ func (h *Handler) listWorkspaces(w http.ResponseWriter, r *http.Request) {
 	items := make([]workspaceInfo, 0, len(entries.Items))
 	for i := range entries.Items {
 		entry := &entries.Items[i]
-		if (strings.HasSuffix(r.URL.Path, "/available") || !admin) && !workspace.Available(entry) {
+		if (availableOnly || !admin) && !workspace.Available(entry) {
 			continue
 		}
 		allowed, err := h.canAccessWorkspace(r.Context(), entry)

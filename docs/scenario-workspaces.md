@@ -260,13 +260,19 @@ Pod using the original scenario image with a read-only mount of that attempt's
 not execute them. It uses the scenario runner ServiceAccount for the same
 UID/GID `1001:1001` storage access as scenario Pods, without mounting a service
 account token. The API returns `checking`, `available`, `absent`, `unavailable`,
-`error`, or a rollback execution state. Inspection results expire after 30
-seconds and are checked again. Viewing requires cluster view permission;
+`error`, or a rollback execution state. Successful inspection results expire
+after 30 seconds and are checked again. If the inspection Pod cannot start,
+fails, or remains pending for more than two minutes, the API returns
+`unavailable` with `canExecute: false` instead of recreating it on every poll.
+This reports that rollback cannot currently be offered; it does not claim the
+files are absent. Viewing requires cluster view permission;
 the inspection Pod is created only for callers with cluster run permission.
 `canExecute` is true only with cluster run permission and the original
 kubeconfig still available. An active scenario retry returns `unavailable`
 without starting an inspection Pod. A succeeded rollback returns `succeeded`
 with the existing rollback run name, even when its files have been removed.
+For private scenarios, the caller must also have access to the original
+registry before inspection can create a Pod or read retained files.
 
 `POST` to the same path requires cluster run permission and a recent `available`
 result. It creates a separate `KrknScenarioRun` for the Krkn `workload-rollback`
@@ -289,6 +295,14 @@ returns an explanatory message. Successful and definitive negative image checks
 are cached for 30 seconds to limit registry traffic. POST always checks again
 before creating the rollback run; the controller independently resolves and
 verifies the image before creating its Pod.
+Replay and run-configuration endpoints return an error if a stored workspace
+reference cannot be checked, or a conflict if the caller can no longer select
+it. They do not silently omit the volume from a replay payload.
+If the API cannot load rollback run state, it returns HTTP 500 with
+`internal_error`. If POST cannot inspect files or check the rollback image, it
+returns HTTP 503 with `rollback_inspection_failed` or
+`rollback_image_check_failed`. These failures do not establish that rollback
+files are absent; callers can retry after the dependency recovers.
 
 The original run status retains earlier attempt IDs and images when retrying,
 so each attempt's files can be inspected independently. If the workspace or PVC

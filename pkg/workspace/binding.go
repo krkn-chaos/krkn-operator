@@ -103,6 +103,8 @@ func Validate(ctx context.Context, reader client.Reader, binding Binding) error 
 }
 
 // WorkloadKey identifies one consumer workload, target, and execution attempt.
+// External consumers such as krkn-ai can use it to derive stable, isolated
+// directories from the same published workspace without changing Krkn paths.
 // Reusing the same key retrieves the same directory; a different component
 // produces a different directory. Every field must be nonempty and stable.
 type WorkloadKey struct {
@@ -115,6 +117,8 @@ type WorkloadKey struct {
 // SubPathFor returns a deterministic single directory under the PVC root.
 // Its hash keeps caller-provided values out of the filesystem path. The legacy
 // SubPath format remains unchanged for existing Krkn rollback artifacts.
+// Other operators sharing this namespace, including krkn-ai, may use this
+// function with a distinct Consumer value to avoid path collisions.
 func SubPathFor(key WorkloadKey) (string, error) {
 	if key.Consumer == "" || key.WorkloadUID == "" || key.Target == "" || key.Attempt == "" {
 		return "", fmt.Errorf("workspace workload identity is incomplete")

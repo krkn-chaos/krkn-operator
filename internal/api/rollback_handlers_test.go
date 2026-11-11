@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
 	"github.com/krkn-chaos/krkn-operator/pkg/registry"
@@ -163,6 +164,50 @@ func TestScenarioRollbackRequiresRetainedFilesAndReusesOriginalAttempt(t *testin
 	require.Equal(t, rollbackRunAttemptName(rollbackAttemptID, 2), decodeRollbackResponse(t, retry).RollbackRunName)
 }
 
+func TestScenarioRollbackProbeCannotInspectWorkspace(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		phase   corev1.PodPhase
+		waiting string
+		age     time.Duration
+		message string
+	}{
+		{name: "mount configuration error", phase: corev1.PodPending, waiting: "CreateContainerConfigError", message: "could not start"},
+		{name: "pending timeout", phase: corev1.PodPending, age: 3 * time.Minute, message: "timed out"},
+		{name: "failed deadline", phase: corev1.PodFailed, age: 3 * time.Minute, message: "failed"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := rollbackTestHandler(t)
+			pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
+				Name: rollbackProbeName(rollbackAttemptID), Namespace: "default",
+				Labels: map[string]string{"krkn-scenario-run-uid": rollbackSourceUID},
+			}}
+			if tc.age > 0 {
+				pod.CreationTimestamp = metav1.NewTime(time.Now().Add(-tc.age))
+			}
+			require.NoError(t, h.client.Create(t.Context(), pod))
+			pod.Status.Phase = tc.phase
+			if tc.waiting != "" {
+				pod.Status.ContainerStatuses = []corev1.ContainerStatus{{Name: "inspect", State: corev1.ContainerState{
+					Waiting: &corev1.ContainerStateWaiting{Reason: tc.waiting},
+				}}}
+			}
+			require.NoError(t, h.client.Status().Update(t.Context(), pod))
+
+			for range 2 {
+				response := rollbackRequest(h, http.MethodGet, "admin", rollbackAttemptID)
+				require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+				result := decodeRollbackResponse(t, response)
+				require.Equal(t, "unavailable", result.State)
+				require.False(t, result.CanExecute)
+				require.Contains(t, result.Message, tc.message)
+			}
+			require.Equal(t, http.StatusConflict, rollbackRequest(h, http.MethodPost, "admin", rollbackAttemptID).Code)
+			require.NoError(t, h.client.Get(t.Context(), client.ObjectKeyFromObject(pod), &corev1.Pod{}))
+		})
+	}
+}
+
 func TestScenarioRollbackUsesSourcePrivateRegistry(t *testing.T) {
 	h := rollbackTestHandler(t)
 	require.NoError(t, h.client.Create(t.Context(), rollbackRegistrySecret(t, "source-registry", true)))
@@ -306,13 +351,15 @@ func TestScenarioRollbackPrivateRegistryRequiresAccess(t *testing.T) {
 	}
 	require.NoError(t, h.client.Create(t.Context(), group))
 	require.NoError(t, h.client.Create(t.Context(), newCategoryTestUser(t, "person@example.com", "rollback-runners")))
-	rollbackAvailableProbe(t, h)
 	response := rollbackRequest(h, http.MethodGet, "user", rollbackAttemptID)
 	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
 	result := decodeRollbackResponse(t, response)
-	require.Equal(t, "available", result.State)
+	require.Equal(t, "unavailable", result.State)
 	require.False(t, result.CanExecute)
 	require.Contains(t, result.Message, "registry")
+	probe := &corev1.Pod{}
+	err := h.client.Get(t.Context(), client.ObjectKey{Namespace: "default", Name: rollbackProbeName(rollbackAttemptID)}, probe)
+	require.True(t, apierrors.IsNotFound(err), "registry access must be checked before creating a probe: %v", err)
 	require.Equal(t, http.StatusForbidden, rollbackRequest(h, http.MethodPost, "user", rollbackAttemptID).Code)
 }
 

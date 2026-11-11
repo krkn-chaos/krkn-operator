@@ -600,6 +600,9 @@ func (r *KrknScenarioRunReconciler) prepareJobResources(
 	if kubeconfigPath == "" {
 		kubeconfigPath = krknctlCfg.KubeconfigPath
 	}
+	if workspaceSubPath != "" && workspace.ConflictsWithMount(kubeconfigPath) {
+		return nil, fmt.Errorf("kubeconfig mount %q overlaps workspace mount", kubeconfigPath)
+	}
 
 	logger.Info("getting kubeconfig for cluster",
 		"provider", providerName,

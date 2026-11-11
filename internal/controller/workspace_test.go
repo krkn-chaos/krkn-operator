@@ -108,6 +108,12 @@ func TestScenarioPodMountsOnlyAssignedWorkspaceDirectory(t *testing.T) {
 			return verify.SignatureSigned, nil
 		},
 	}
+	for _, mountPath := range []string{workspace.MountPath, workspace.MountPath + "/config", "/var/lib/krkn"} {
+		run.Spec.KubeconfigPath = mountPath
+		_, err := r.prepareJobResources(t.Context(), run, "provider", "cluster", "https://cluster.example.com")
+		require.ErrorContains(t, err, "overlaps workspace mount")
+	}
+	run.Spec.KubeconfigPath = ""
 	resources, err := r.prepareJobResources(t.Context(), run, "provider", "cluster", "https://cluster.example.com")
 	require.NoError(t, err)
 	expected, err := workspace.SubPath(run.UID, "provider", "cluster", resources.jobID)

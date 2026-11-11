@@ -43,6 +43,7 @@ import (
 // @Failure 401 {object} ErrorResponse "User authentication required"
 // @Failure 403 {object} ErrorResponse "Insufficient permissions"
 // @Failure 404 {object} ErrorResponse "ScenarioRun not found"
+// @Failure 409 {object} ErrorResponse "Original workspace is no longer available"
 // @Failure 500 {object} ErrorResponse "Internal server error"
 // @Security BearerAuth
 // @Router /scenarios/run/{scenarioRunName}/config [get]
@@ -137,11 +138,20 @@ func (h *Handler) GetScenarioRunConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	originalWorkspace := payload.Workspace
+	payload.Workspace, err = h.visibleWorkspaceReference(ctx, payload.Workspace)
+	if err != nil {
+		logger.Error(err, "Failed to check workspace for scenario configuration", "scenarioRunName", scenarioRunName)
+		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{Error: "internal_error", Message: "Failed to retrieve scenario run configuration"})
+		return
+	}
+	if originalWorkspace != nil && payload.Workspace == nil {
+		writeJSONError(w, http.StatusConflict, ErrorResponse{Error: "workspace_unavailable", Message: "Original workspace is no longer available for replay"})
+		return
+	}
 	logger.Info("Scenario run config retrieved successfully",
 		"scenarioRunName", scenarioRunName,
 		"userID", claims.UserID)
-
-	payload.Workspace = h.visibleWorkspaceReference(ctx, payload.Workspace)
 	writeJSON(w, http.StatusOK, payload)
 }
 
@@ -158,6 +168,7 @@ func (h *Handler) GetScenarioRunConfig(w http.ResponseWriter, r *http.Request) {
 // @Failure 401 {object} ErrorResponse "User authentication required"
 // @Failure 403 {object} ErrorResponse "Insufficient permissions"
 // @Failure 404 {object} ErrorResponse "GraphRun not found"
+// @Failure 409 {object} ErrorResponse "Original workspace is no longer available"
 // @Failure 500 {object} ErrorResponse "Internal server error"
 // @Security BearerAuth
 // @Router /graphruns/{graphRunName}/config [get]
@@ -242,8 +253,20 @@ func (h *Handler) GetGraphRunConfig(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	visibleGraph, err := h.publicGraphWorkspaces(ctx, graphRun.Spec.Graph)
+	if err != nil {
+		logger.Error(err, "Failed to check workspaces for graph configuration", "graphRunName", graphRunName)
+		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{Error: "internal_error", Message: "Failed to retrieve graph run configuration"})
+		return
+	}
+	for id, node := range graphRun.Spec.Graph {
+		if node.Workspace != nil && visibleGraph[id].Workspace == nil {
+			writeJSONError(w, http.StatusConflict, ErrorResponse{Error: "workspace_unavailable", Message: "Original workspace is no longer available for replay"})
+			return
+		}
+	}
 	payload := GraphRunCreateRequest{
-		Graph:           h.publicGraphWorkspaces(ctx, graphRun.Spec.Graph),
+		Graph:           visibleGraph,
 		TargetRequestID: graphRun.Spec.TargetRequestID,
 		TargetClusters:  graphRun.Spec.TargetClusters,
 		MaxRetries:      intPtr(graphRun.Spec.MaxRetries),
