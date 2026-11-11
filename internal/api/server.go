@@ -255,6 +255,18 @@ func NewServerWithComponentNamespace(port int, client client.Client, clientset k
 	mux.Handle(GroupsPath, authMw.RequireAuth(http.HandlerFunc(handler.GroupsRouter)))
 	mux.Handle(GroupsPath+"/", authMw.RequireAuth(http.HandlerFunc(handler.GroupsRouter)))
 
+	// Robot account management endpoints - admin only
+	mux.Handle(RobotsPath, authMw.RequireAuth(http.HandlerFunc(handler.RobotsRouter)))
+	mux.Handle(RobotsPath+"/", authMw.RequireAuth(http.HandlerFunc(handler.RobotsRouter)))
+
+	// MCP endpoint - opt-in, robot bearer tokens only
+	if os.Getenv(MCPEnabledEnv) == "true" {
+		mux.Handle(MCPPath, handler.newMCPHTTPHandler())
+		log.Log.WithName("mcp").Info("MCP endpoint enabled", "path", MCPPath)
+	} else {
+		log.Log.WithName("mcp").Info("MCP endpoint disabled", "path", MCPPath)
+	}
+
 	// Registry management endpoints - CRUD: admin only, available: all users
 	mux.Handle(RegistriesPath, authMw.RequireAuth(http.HandlerFunc(handler.RegistriesRouter)))
 	mux.Handle(RegistriesPath+"/", authMw.RequireAuth(http.HandlerFunc(handler.RegistriesRouter)))

@@ -7,5 +7,6 @@ resources:
 - bases/krkn.krkn-chaos.dev_krknscenarioruns.yaml
 - bases/krkn.krkn-chaos.dev_krkngraphruns.yaml
 - bases/krkn.krkn-chaos.dev_krknusers.yaml
+- bases/krkn.krkn-chaos.dev_krknrobots.yaml
 - bases/krkn.krkn-chaos.dev_krknusergroups.yaml
 - bases/krkn.krkn-chaos.dev_krkncategories.yaml

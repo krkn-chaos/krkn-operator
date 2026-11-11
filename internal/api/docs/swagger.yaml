@@ -42,17 +42,21 @@ definitions:
   github_com_krkn-chaos_krkn-operator_api_v1alpha1.ComponentDescription:
     properties:
       component:
+        description: Component is the unique feature name within this manifest.
         type: string
       description:
+        description: Description explains the feature exposed by the component.
         type: string
     type: object
   github_com_krkn-chaos_krkn-operator_api_v1alpha1.ComponentManifest:
     properties:
       components:
+        description: Components lists the named features exposed by this build.
         items:
           $ref: '#/definitions/github_com_krkn-chaos_krkn-operator_api_v1alpha1.ComponentDescription'
         type: array
       version:
+        description: Version is the exact Git tag embedded in the component build.
         type: string
     type: object
   github_com_krkn-chaos_krkn-operator_api_v1alpha1.GraphScenarioNode:
@@ -1272,6 +1276,17 @@ definitions:
         description: Registered indicates if at least one admin user exists
         type: boolean
     type: object
+  internal_api.IssueRobotTokenResponse:
+    properties:
+      expiresAt:
+        type: string
+      message:
+        type: string
+      token:
+        type: string
+      tokenId:
+        type: string
+    type: object
   internal_api.JobStatsSummary:
     properties:
       failedJobs:
@@ -1445,6 +1460,38 @@ definitions:
       startedAt:
         type: string
       status:
+        type: string
+    type: object
+  internal_api.RobotListResponse:
+    properties:
+      robots:
+        items:
+          $ref: '#/definitions/internal_api.RobotResponse'
+        type: array
+      total:
+        type: integer
+    type: object
+  internal_api.RobotResponse:
+    properties:
+      createdAt:
+        type: string
+      description:
+        type: string
+      disabled:
+        type: boolean
+      groups:
+        items:
+          type: string
+        type: array
+      lastUsedAt:
+        type: string
+      name:
+        type: string
+      tokenExpiresAt:
+        type: string
+      tokenId:
+        type: string
+      tokenIssuedAt:
         type: string
     type: object
   internal_api.ScenarioDetailResponse:
@@ -2773,6 +2820,145 @@ paths:
       summary: Get restore job status
       tags:
       - backup
+  /robots:
+    get:
+      description: List all robot accounts (admin only)
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: List of robots
+          schema:
+            $ref: '#/definitions/internal_api.RobotListResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: List robot accounts
+      tags:
+      - robots
+    post:
+      consumes:
+      - application/json
+      description: Create a robot account with optional group memberships (admin only)
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created robot
+          schema:
+            $ref: '#/definitions/internal_api.RobotResponse'
+        "400":
+          description: Invalid request
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "409":
+          description: Robot already exists
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Create a robot account
+      tags:
+      - robots
+  /robots/{name}:
+    delete:
+      description: Delete a robot account and its token secret (admin only)
+      responses:
+        "204":
+          description: No content
+        "404":
+          description: Robot not found
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Delete a robot account
+      tags:
+      - robots
+    get:
+      description: Get a robot account by name (admin only)
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Robot details
+          schema:
+            $ref: '#/definitions/internal_api.RobotResponse'
+        "404":
+          description: Robot not found
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get a robot account
+      tags:
+      - robots
+    patch:
+      consumes:
+      - application/json
+      description: Update description, disabled flag or group memberships (admin only).
+        Groups replaces all group labels.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Updated robot
+          schema:
+            $ref: '#/definitions/internal_api.RobotResponse'
+        "400":
+          description: Invalid request
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "404":
+          description: Robot not found
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Update a robot account
+      tags:
+      - robots
+  /robots/{name}/token:
+    delete:
+      description: Revoke the active token of a robot (admin only)
+      responses:
+        "204":
+          description: No content
+        "404":
+          description: Robot not found
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Revoke a robot token
+      tags:
+      - robots
+    post:
+      description: Issue a new bearer token for a robot, replacing any previous one
+        (admin only). The token is shown exactly once.
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Issued token
+          schema:
+            $ref: '#/definitions/internal_api.IssueRobotTokenResponse'
+        "404":
+          description: Robot not found
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "409":
+          description: Robot is disabled
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Issue a robot token
+      tags:
+      - robots
   /scenarios:
     post:
       consumes:

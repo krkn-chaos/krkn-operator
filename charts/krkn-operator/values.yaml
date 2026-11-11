@@ -308,3 +308,13 @@ commonAnnotations: {}
 ## Name overrides
 nameOverride: ""
 fullnameOverride: ""
+
+## MCP server (Model Context Protocol)
+mcp:
+  # Opt-in Streamable HTTP MCP endpoint at /api/mcp for AI agents operating
+  # as robot accounts (admin-issued 90-day bearer tokens, group-based cluster
+  # permissions). OFF by default: the endpoint is only mounted when enabled.
+  #
+  # Robot accounts and tokens are managed by admins via /api/v1/robots.
+  # See docs/mcp-server.md in the krkn-operator repository.
+  enabled: false

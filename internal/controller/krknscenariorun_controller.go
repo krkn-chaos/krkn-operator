@@ -47,6 +47,7 @@ import (
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
 
 	"github.com/google/uuid"
+	"github.com/krkn-chaos/krkn-operator/pkg/auth"
 	"github.com/krkn-chaos/krkn-operator/pkg/cloudcreds"
 	krknctlconfig "github.com/krkn-chaos/krknctl/pkg/config"
 	krknctlprovider "github.com/krkn-chaos/krknctl/pkg/provider"
@@ -114,6 +115,11 @@ type jobOutcome struct {
 func getOwnerLabel(scenarioRun *krknv1alpha1.KrknScenarioRun) string {
 	if scenarioRun.Spec.OwnerUserID == "" {
 		return ""
+	}
+	// Robot principals use "robot.<name>", which is a valid label value and
+	// cannot collide with sanitized emails (which never contain ".").
+	if robotName, ok := auth.ParseRobotPrincipalID(scenarioRun.Spec.OwnerUserID); ok {
+		return "robot." + robotName
 	}
 	sanitized := strings.ReplaceAll(scenarioRun.Spec.OwnerUserID, "@", "-")
 	sanitized = strings.ReplaceAll(sanitized, ".", "-")

@@ -72,6 +72,14 @@ const (
 const (
 	UsersPath  = APIBasePath + "/users"
 	GroupsPath = APIBasePath + "/groups"
+	RobotsPath = APIBasePath + "/robots"
+
+	// MCPPath is the Streamable HTTP MCP endpoint. It lives outside /api/v1
+	// because it is not a versioned REST resource, but under /api/ so the
+	// console nginx proxy reaches it without configuration changes.
+	MCPPath = "/api/mcp"
+	// MCPEnabledEnv enables the MCP endpoint when set to "true".
+	MCPEnabledEnv = "KRKN_MCP_ENABLED"
 )
 
 // Registry management endpoints

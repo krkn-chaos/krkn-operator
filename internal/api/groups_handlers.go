@@ -999,5 +999,32 @@ func removeGroupFromAllMembers(ctx context.Context, k8sClient client.Client, gro
 		}
 	}
 
+	// Also strip the group label from robot accounts, so recreating a group
+	// with the same name does not silently restore robot access.
+	robotList := &krknv1alpha1.KrknRobotList{}
+	if err := k8sClient.List(ctx, robotList,
+		client.InNamespace(namespace),
+		client.MatchingLabels{labelKey: "true"},
+	); err != nil {
+		return fmt.Errorf("failed to list robots with group label: %w", err)
+	}
+
+	for i := range robotList.Items {
+		base := robotList.Items[i].DeepCopy()
+		updated := robotList.Items[i].DeepCopy()
+		delete(updated.Labels, labelKey)
+
+		// A merge patch carries no resourceVersion, so a concurrent status
+		// update (e.g. LastUsedAt) cannot turn this into a conflict that
+		// would leave the stale label behind.
+		if err := k8sClient.Patch(ctx, updated, client.MergeFrom(base)); err != nil {
+			// Log but continue
+			log.FromContext(ctx).Error(err, "Failed to remove group label from robot",
+				"robot", updated.Name,
+				"groupName", groupName,
+			)
+		}
+	}
+
 	return nil
 }
