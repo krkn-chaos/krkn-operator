@@ -66,6 +66,27 @@ The endpoint is then reachable:
 - via a port-forward: `kubectl port-forward svc/<operator-service> 8080:8080` →
   `http://localhost:8080/api/mcp`.
 
+## Quickstart (development cluster)
+
+`scripts/mcp-live-demo.sh` deploys everything a dev needs against the cluster
+in your current `oc` context and prints a ready-to-use robot token:
+
+```bash
+oc login <api-url> -u kubeadmin -p <password>
+./scripts/mcp-live-demo.sh setup
+./scripts/mcp-live-demo.sh call '{"name":"krkn_whoami","arguments":{}}'
+```
+
+It installs CRDs, bootstraps the scenario-runner RBAC, starts the operator
+locally with `KRKN_MCP_ENABLED=true`, provisions a robot with view/run/cancel
+on the target cluster, registers the target, and mints a token. The script
+handles the non-obvious parts: the kubeconfig Secret must be JSON-wrapped as
+`{"kubeconfig": "<base64>"}`, `KrknOperatorTarget.status.ready` must be set
+via `--subresource=status` (plain apply drops status), and a second
+`KrknOperatorTargetProvider` must NOT be created (the operator heartbeats its
+own; duplicates block target-request completion). `cleanup` removes
+everything. For production use the Helm chart above instead.
+
 ## Admin workflow
 
 All robot administration is admin-only REST under `/api/v1/robots` (JWT, like the rest of the
