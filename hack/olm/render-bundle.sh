@@ -183,6 +183,11 @@ export RESOLVED_OPERATOR_IMAGE="$resolved_operator_image"
 export RESOLVED_DATA_PROVIDER_IMAGE="$resolved_data_provider_image"
 export RESOLVED_CONSOLE_IMAGE="$resolved_console_image"
 yq -i \
+  '(.spec.install.spec.deployments[] | select(.name == "krkn-operator-operator") |
+    .spec.template.spec.containers[] | select(.name == "manager") |
+    .env[] | select(.name == "KRKN_ROLLBACK_INSPECTOR_IMAGE") | .value) = strenv(RESOLVED_OPERATOR_IMAGE)' \
+  "$csv_file"
+yq -i \
   '.metadata.annotations.containerImage = strenv(RESOLVED_OPERATOR_IMAGE) |
    .metadata.annotations."alm-examples" = (load(strenv(EXAMPLES_FILE)) | to_json) |
    .spec.minKubeVersion = strenv(MIN_KUBE_VERSION) |

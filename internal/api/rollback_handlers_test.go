@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -28,9 +29,13 @@ const rollbackSourceUID = "7fa25dbb-7278-4104-90c7-e7744b68e5af"
 const rollbackAttemptID = "4f322276-81e4-4d70-9f94-9951ded10e75"
 const priorRollbackAttemptID = "5e34f888-ed3a-4b57-82b8-8c59ab5dc4ab"
 
+var testRollbackInspectorImage = "quay.io/krkn-chaos/krkn-operator@sha256:" + strings.Repeat("a", 64)
+
 func rollbackTestHandler(t *testing.T) *Handler {
 	t.Helper()
 	h := setupScenarioRunTestHandler("target", map[string]string{})
+	h.rollbackInspectorImage = testRollbackInspectorImage
+	h.rollbackInspectorPullSecrets = `[{"name":"operator-pull-secret"}]`
 	digest := "sha256:rollback-test"
 	mock := &mockScenarioProvider{
 		signature: verify.SignatureSigned,
@@ -67,14 +72,24 @@ func rollbackTestHandler(t *testing.T) *Handler {
 
 func rollbackAvailableProbe(t *testing.T, h *Handler) {
 	t.Helper()
-	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
-		Name: rollbackProbeName(rollbackAttemptID), Namespace: "default",
-		Labels: map[string]string{"krkn-scenario-run-uid": rollbackSourceUID},
-	}}
+	pod := testRollbackProbePod(rollbackAttemptID)
 	require.NoError(t, h.client.Create(t.Context(), pod))
 	pod.Status.Phase = corev1.PodSucceeded
 	pod.Status.ContainerStatuses = []corev1.ContainerStatus{{State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{Message: "available"}}}}
 	require.NoError(t, h.client.Status().Update(t.Context(), pod))
+}
+
+func testRollbackProbePod(jobID string) *corev1.Pod {
+	return &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: rollbackProbeName(jobID), Namespace: "default",
+			Labels: map[string]string{"krkn-scenario-run-uid": rollbackSourceUID},
+		},
+		Spec: corev1.PodSpec{Containers: []corev1.Container{{
+			Name: "inspect", Image: testRollbackInspectorImage,
+			Command: []string{"/manager", "inspect-rollback"},
+		}}},
+	}
 }
 
 func rollbackRegistrySecret(t *testing.T, name string, availableToAll bool) *corev1.Secret {
@@ -117,6 +132,11 @@ func TestScenarioRollbackRequiresRetainedFilesAndReusesOriginalAttempt(t *testin
 	require.Equal(t, "krkn-operator-krkn-scenario-runner", probe.Spec.ServiceAccountName)
 	require.NotNil(t, probe.Spec.AutomountServiceAccountToken)
 	require.False(t, *probe.Spec.AutomountServiceAccountToken)
+	require.Equal(t, testRollbackInspectorImage, probe.Spec.Containers[0].Image)
+	require.Equal(t, []string{"/manager", "inspect-rollback"}, probe.Spec.Containers[0].Command)
+	require.Equal(t, []corev1.LocalObjectReference{{Name: "operator-pull-secret"}}, probe.Spec.ImagePullSecrets)
+	require.True(t, *probe.Spec.SecurityContext.RunAsNonRoot)
+	require.True(t, *probe.Spec.Containers[0].SecurityContext.ReadOnlyRootFilesystem)
 	require.True(t, probe.Spec.Volumes[0].PersistentVolumeClaim.ReadOnly)
 	require.Equal(t, workspace.MountPath, probe.Spec.Containers[0].VolumeMounts[0].MountPath)
 	expectedSubPath, err := workspace.SubPath(types.UID(rollbackSourceUID), "provider", "cluster", rollbackAttemptID)
@@ -152,7 +172,7 @@ func TestScenarioRollbackRequiresRetainedFilesAndReusesOriginalAttempt(t *testin
 
 	rollback.Status.Phase = "Failed"
 	require.NoError(t, h.client.Update(t.Context(), rollback))
-	probe = &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: rollbackProbeName(rollbackAttemptID), Namespace: "default", Labels: map[string]string{"krkn-scenario-run-uid": rollbackSourceUID}}}
+	probe = testRollbackProbePod(rollbackAttemptID)
 	require.NoError(t, h.client.Create(t.Context(), probe))
 	probe.Status.Phase = corev1.PodSucceeded
 	probe.Status.ContainerStatuses = []corev1.ContainerStatus{{State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{Message: "available"}}}}
@@ -178,10 +198,7 @@ func TestScenarioRollbackProbeCannotInspectWorkspace(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h := rollbackTestHandler(t)
-			pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
-				Name: rollbackProbeName(rollbackAttemptID), Namespace: "default",
-				Labels: map[string]string{"krkn-scenario-run-uid": rollbackSourceUID},
-			}}
+			pod := testRollbackProbePod(rollbackAttemptID)
 			if tc.age > 0 {
 				pod.CreationTimestamp = metav1.NewTime(time.Now().Add(-tc.age))
 			}
@@ -208,6 +225,53 @@ func TestScenarioRollbackProbeCannotInspectWorkspace(t *testing.T) {
 	}
 }
 
+func TestScenarioRollbackProbeRequiresPinnedOperatorImage(t *testing.T) {
+	for _, image := range []string{"", "quay.io/krkn-chaos/krkn-operator:latest", "quay.io/krkn-chaos/krkn-operator@sha256:bad"} {
+		t.Run(image, func(t *testing.T) {
+			h := rollbackTestHandler(t)
+			h.rollbackInspectorImage = image
+			response := rollbackRequest(h, http.MethodGet, "admin", rollbackAttemptID)
+			require.Equal(t, http.StatusOK, response.Code)
+			result := decodeRollbackResponse(t, response)
+			require.Equal(t, "unavailable", result.State)
+			require.False(t, result.CanExecute)
+			probe := &corev1.Pod{}
+			require.True(t, apierrors.IsNotFound(h.client.Get(t.Context(), client.ObjectKey{Namespace: "default", Name: rollbackProbeName(rollbackAttemptID)}, probe)))
+			require.Equal(t, http.StatusConflict, rollbackRequest(h, http.MethodPost, "admin", rollbackAttemptID).Code)
+		})
+	}
+}
+
+func TestRollbackInspectorConfigAcceptsReleaseImageAndRejectsInvalidSecrets(t *testing.T) {
+	h := rollbackTestHandler(t)
+	h.rollbackInspectorImage = "quay.io/krkn-chaos/krkn-operator:v1.2.0@sha256:" + strings.Repeat("a", 64)
+	image, secrets, err := h.rollbackInspectorConfig()
+	require.NoError(t, err)
+	require.Equal(t, h.rollbackInspectorImage, image)
+	require.Equal(t, []corev1.LocalObjectReference{{Name: "operator-pull-secret"}}, secrets)
+	h.rollbackInspectorPullSecrets = `[{"name":""}]`
+	_, _, err = h.rollbackInspectorConfig()
+	require.Error(t, err)
+}
+
+func TestScenarioRollbackReplacesLegacyProbeBeforeReadingResult(t *testing.T) {
+	h := rollbackTestHandler(t)
+	legacy := testRollbackProbePod(rollbackAttemptID)
+	legacy.Spec.Containers[0].Image = "quay.io/krkn-chaos/krkn-hub:pod-delete"
+	require.NoError(t, h.client.Create(t.Context(), legacy))
+	legacy.Status.Phase = corev1.PodSucceeded
+	legacy.Status.ContainerStatuses = []corev1.ContainerStatus{{State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{Message: "available"}}}}
+	require.NoError(t, h.client.Status().Update(t.Context(), legacy))
+	response := rollbackRequest(h, http.MethodGet, "admin", rollbackAttemptID)
+	require.Equal(t, "checking", decodeRollbackResponse(t, response).State)
+	require.True(t, apierrors.IsNotFound(h.client.Get(t.Context(), client.ObjectKeyFromObject(legacy), &corev1.Pod{})))
+	response = rollbackRequest(h, http.MethodGet, "admin", rollbackAttemptID)
+	require.Equal(t, "checking", decodeRollbackResponse(t, response).State)
+	probe := &corev1.Pod{}
+	require.NoError(t, h.client.Get(t.Context(), client.ObjectKeyFromObject(legacy), probe))
+	require.Equal(t, testRollbackInspectorImage, probe.Spec.Containers[0].Image)
+}
+
 func TestScenarioRollbackUsesSourcePrivateRegistry(t *testing.T) {
 	h := rollbackTestHandler(t)
 	require.NoError(t, h.client.Create(t.Context(), rollbackRegistrySecret(t, "source-registry", true)))
@@ -229,7 +293,7 @@ func TestScenarioRollbackUsesSourcePrivateRegistry(t *testing.T) {
 	require.Equal(t, http.StatusOK, rollbackRequest(h, http.MethodGet, "admin", rollbackAttemptID).Code)
 	probe := &corev1.Pod{}
 	require.NoError(t, h.client.Get(t.Context(), client.ObjectKey{Namespace: "default", Name: rollbackProbeName(rollbackAttemptID)}, probe))
-	require.Equal(t, []corev1.LocalObjectReference{{Name: "source-registry"}}, probe.Spec.ImagePullSecrets)
+	require.Equal(t, []corev1.LocalObjectReference{{Name: "operator-pull-secret"}}, probe.Spec.ImagePullSecrets)
 	probe.Status.Phase = corev1.PodSucceeded
 	probe.Status.ContainerStatuses = []corev1.ContainerStatus{{State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{Message: "available"}}}}
 	require.NoError(t, h.client.Status().Update(t.Context(), probe))
@@ -416,12 +480,16 @@ func TestScenarioRollbackAuthorizationAndMissingPVC(t *testing.T) {
 	require.NoError(t, h.client.Delete(t.Context(), pvc))
 	response := rollbackRequest(h, http.MethodGet, "admin", rollbackAttemptID)
 	require.Equal(t, http.StatusOK, response.Code)
-	require.Equal(t, "unavailable", decodeRollbackResponse(t, response).State)
+	result := decodeRollbackResponse(t, response)
+	require.Equal(t, "unavailable", result.State)
+	require.False(t, result.CanExecute)
 	require.Equal(t, http.StatusConflict, rollbackRequest(h, http.MethodPost, "admin", rollbackAttemptID).Code)
 	replacement := testWorkspacePVC()
 	replacement.UID = "8f53d5ab-fca8-464f-877c-9bb72dcdb319"
 	require.NoError(t, h.client.Create(t.Context(), replacement))
-	require.Equal(t, "unavailable", decodeRollbackResponse(t, rollbackRequest(h, http.MethodGet, "admin", rollbackAttemptID)).State)
+	result = decodeRollbackResponse(t, rollbackRequest(h, http.MethodGet, "admin", rollbackAttemptID))
+	require.Equal(t, "unavailable", result.State)
+	require.False(t, result.CanExecute)
 }
 
 func TestScenarioRollbackViewerCannotExecute(t *testing.T) {
@@ -476,10 +544,7 @@ func TestScenarioRollbackFailedWithoutFilesIsUnavailable(t *testing.T) {
 		Status: krknv1alpha1.KrknScenarioRunStatus{Phase: "Failed"},
 	}
 	require.NoError(t, h.client.Create(t.Context(), rollback))
-	probe := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
-		Name: rollbackProbeName(rollbackAttemptID), Namespace: "default",
-		Labels: map[string]string{"krkn-scenario-run-uid": rollbackSourceUID},
-	}}
+	probe := testRollbackProbePod(rollbackAttemptID)
 	require.NoError(t, h.client.Create(t.Context(), probe))
 	probe.Status.Phase = corev1.PodSucceeded
 	probe.Status.ContainerStatuses = []corev1.ContainerStatus{{State: corev1.ContainerState{
@@ -528,6 +593,7 @@ func TestScenarioRollbackInspectsEarlierRetryAttempt(t *testing.T) {
 	expected, err := workspace.SubPath(run.UID, "provider", "cluster", priorRollbackAttemptID)
 	require.NoError(t, err)
 	require.Equal(t, expected, probe.Spec.Containers[0].VolumeMounts[0].SubPath)
+	require.Equal(t, testRollbackInspectorImage, probe.Spec.Containers[0].Image)
 }
 
 func TestScenarioRollbackCannotUseMissingOriginalKubeconfig(t *testing.T) {

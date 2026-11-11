@@ -7,8 +7,9 @@ global:
   namespaceOverride: ""
 
 ## Images configuration
-# NOTE: Tags are automatically updated during release by CI/CD workflow
-# - Operator & Data Provider: match the release tag (e.g., v0.4.3-beta)
+# NOTE: Images are automatically updated during release by CI/CD workflow
+# - Operator: pinned to the release digest for rollback inspection
+# - Data Provider: matches the release tag (e.g., v0.4.3-beta)
 # - ACM: frozen to latest stable ACM tag at release time
 # - Console: frozen to latest stable Console tag at release time
 # Local development: uses :latest tags for all components

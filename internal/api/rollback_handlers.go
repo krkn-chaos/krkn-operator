@@ -2,14 +2,17 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
+	"regexp"
 	"strconv"
 	"time"
 
 	"github.com/google/uuid"
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
+	"github.com/krkn-chaos/krkn-operator/internal/kubeconfig"
 	"github.com/krkn-chaos/krkn-operator/pkg/auth"
 	"github.com/krkn-chaos/krkn-operator/pkg/groupauth"
 	"github.com/krkn-chaos/krkn-operator/pkg/workspace"
@@ -44,40 +47,29 @@ func (h *Handler) canExecuteRollback(ctx context.Context, job *krknv1alpha1.Clus
 }
 
 func (h *Handler) validateOriginalKubeconfig(ctx context.Context, run *krknv1alpha1.KrknScenarioRun, job *krknv1alpha1.ClusterJobStatus, jobID string) error {
-	configMap := &corev1.ConfigMap{}
-	name := fmt.Sprintf("krkn-job-%s-kubeconfig", jobID)
-	if err := h.client.Get(ctx, client.ObjectKey{Namespace: h.namespace, Name: name}, configMap); err != nil {
-		return fmt.Errorf("load original kubeconfig: %w", err)
-	}
-	owned := false
-	for _, owner := range configMap.OwnerReferences {
-		if owner.UID == run.UID && owner.Name == run.Name && owner.Kind == "KrknScenarioRun" {
-			owned = true
-		}
-	}
-	if !owned || configMap.Labels["krkn-job-id"] != jobID || configMap.Labels["krkn-cluster-name"] != job.ClusterName || configMap.Data["config"] == "" {
-		return errors.New("original kubeconfig identity is invalid")
-	}
-	return nil
+	_, err := kubeconfig.LoadOriginalAttempt(ctx, h.client, h.namespace, run, jobID, job.ClusterName)
+	return err
 }
 
-const rollbackProbeScript = `import os,re
-root=os.environ["ROLLBACK_VERSIONS_DIRECTORY"]
-run_id=os.environ["UUID"]
-found=False
-for directory in os.scandir(root):
-    if not directory.is_dir(follow_symlinks=False) or not re.fullmatch(r"[0-9]+-"+re.escape(run_id),directory.name):
-        continue
-    for entry in os.scandir(directory.path):
-        if not entry.is_file(follow_symlinks=False) or not entry.name.endswith(".py"):
-            continue
-        parts=entry.name[:-3].rsplit("_",2)
-        if len(parts)==3 and parts[0] and parts[1].isdigit() and len(parts[2])==8 and parts[2].isalnum():
-            found=True
-            break
-with open("/dev/termination-log","w") as result:
-    result.write("available" if found else "absent")
-`
+var rollbackInspectorImagePattern = regexp.MustCompile(`^[^@[:space:]]+@sha256:[a-f0-9]{64}$`)
+
+func (h *Handler) rollbackInspectorConfig() (string, []corev1.LocalObjectReference, error) {
+	if !rollbackInspectorImagePattern.MatchString(h.rollbackInspectorImage) {
+		return "", nil, errors.New("rollback inspector image must be pinned to a SHA-256 digest")
+	}
+	var pullSecrets []corev1.LocalObjectReference
+	if h.rollbackInspectorPullSecrets != "" {
+		if err := json.Unmarshal([]byte(h.rollbackInspectorPullSecrets), &pullSecrets); err != nil {
+			return "", nil, fmt.Errorf("decode rollback inspector pull secrets: %w", err)
+		}
+		for _, secret := range pullSecrets {
+			if secret.Name == "" {
+				return "", nil, errors.New("rollback inspector pull secret name is empty")
+			}
+		}
+	}
+	return h.rollbackInspectorImage, pullSecrets, nil
+}
 
 func rollbackProbeName(jobID string) string { return "krkn-rb-probe-" + jobID }
 func rollbackRunName(jobID string) string   { return "krkn-rollback-" + jobID }
@@ -112,10 +104,10 @@ func (h *Handler) latestRollbackRun(ctx context.Context, runUID, jobID string) (
 	return latest, maxIteration, nil
 }
 
-func (h *Handler) loadRollbackAttempt(w http.ResponseWriter, r *http.Request, runName, jobID string, action groupauth.Action) (*krknv1alpha1.KrknScenarioRun, *krknv1alpha1.ClusterJobStatus, string, bool) {
+func (h *Handler) loadRollbackAttempt(w http.ResponseWriter, r *http.Request, runName, jobID string, action groupauth.Action) (*krknv1alpha1.KrknScenarioRun, *krknv1alpha1.ClusterJobStatus, bool) {
 	if _, err := uuid.Parse(jobID); err != nil || runName == "" {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{Error: "bad_request", Message: "Invalid rollback run or attempt ID"})
-		return nil, nil, "", false
+		return nil, nil, false
 	}
 	run := &krknv1alpha1.KrknScenarioRun{}
 	if err := h.client.Get(r.Context(), client.ObjectKey{Namespace: h.namespace, Name: runName}, run); err != nil {
@@ -124,7 +116,7 @@ func (h *Handler) loadRollbackAttempt(w http.ResponseWriter, r *http.Request, ru
 		} else {
 			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{Error: "internal_error", Message: "Failed to load scenario run"})
 		}
-		return nil, nil, "", false
+		return nil, nil, false
 	}
 	for i := range run.Status.ClusterJobs {
 		job := &run.Status.ClusterJobs[i]
@@ -139,16 +131,17 @@ func (h *Handler) loadRollbackAttempt(w http.ResponseWriter, r *http.Request, ru
 				}
 			}
 		}
+		// An attempt without an image never reached a scenario Pod.
 		if image == "" {
 			continue
 		}
 		if !h.checkJobAccess(w, r, job, action, "rollback") {
-			return nil, nil, "", false
+			return nil, nil, false
 		}
-		return run, job, image, true
+		return run, job, true
 	}
 	writeJSONError(w, http.StatusNotFound, ErrorResponse{Error: "not_found", Message: "Scenario attempt not found"})
-	return nil, nil, "", false
+	return nil, nil, false
 }
 
 func (h *Handler) validateRollbackWorkspace(ctx context.Context, run *krknv1alpha1.KrknScenarioRun) error {
@@ -159,13 +152,25 @@ func (h *Handler) validateRollbackWorkspace(ctx context.Context, run *krknv1alph
 	return workspace.Validate(ctx, h.client, workspace.Binding{Namespace: h.namespace, Reference: *ref})
 }
 
-func (h *Handler) rollbackProbe(ctx context.Context, run *krknv1alpha1.KrknScenarioRun, job *krknv1alpha1.ClusterJobStatus, jobID, image string) (string, string, error) {
+func (h *Handler) rollbackProbe(ctx context.Context, run *krknv1alpha1.KrknScenarioRun, job *krknv1alpha1.ClusterJobStatus, jobID string) (string, string, error) {
+	image, pullSecrets, err := h.rollbackInspectorConfig()
+	if err != nil {
+		return "unavailable", "Rollback inspector image is unavailable", nil
+	}
 	pod := &corev1.Pod{}
 	key := client.ObjectKey{Namespace: h.namespace, Name: rollbackProbeName(jobID)}
-	err := h.client.Get(ctx, key, pod)
+	err = h.client.Get(ctx, key, pod)
 	if err == nil {
 		if pod.Labels["krkn-scenario-run-uid"] != string(run.UID) {
 			return "error", "", errors.New("rollback probe belongs to another run")
+		}
+		if len(pod.Spec.Containers) != 1 || pod.Spec.Containers[0].Image != image || len(pod.Spec.Containers[0].Command) != 2 || pod.Spec.Containers[0].Command[0] != "/manager" || pod.Spec.Containers[0].Command[1] != "inspect-rollback" {
+			if pod.DeletionTimestamp == nil {
+				if err := h.client.Delete(ctx, pod); err != nil && !apierrors.IsNotFound(err) {
+					return "error", "", fmt.Errorf("replace stale rollback probe: %w", err)
+				}
+			}
+			return "checking", "", nil
 		}
 		// A missing read-only subPath leaves the container in CreateContainerConfigError.
 		// Keep the failed probe so polling cannot delete and recreate it forever.
@@ -213,6 +218,7 @@ func (h *Handler) rollbackProbe(ctx context.Context, run *krknv1alpha1.KrknScena
 		return "error", "", fmt.Errorf("prepare rollback inspection mount: %w", err)
 	}
 	falseValue := false
+	trueValue := true
 	deadline := int64(60)
 	uid := int64(1001)
 	pod = &corev1.Pod{
@@ -224,18 +230,17 @@ func (h *Handler) rollbackProbe(ctx context.Context, run *krknv1alpha1.KrknScena
 		Spec: corev1.PodSpec{
 			ServiceAccountName: "krkn-operator-krkn-scenario-runner",
 			RestartPolicy:      corev1.RestartPolicyNever, AutomountServiceAccountToken: &falseValue,
+			ImagePullSecrets:      pullSecrets,
 			ActiveDeadlineSeconds: &deadline,
-			SecurityContext:       &corev1.PodSecurityContext{RunAsUser: &uid, RunAsGroup: &uid, FSGroup: &uid},
+			SecurityContext:       &corev1.PodSecurityContext{RunAsUser: &uid, RunAsGroup: &uid, FSGroup: &uid, RunAsNonRoot: &trueValue, SeccompProfile: &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault}},
 			Volumes:               []corev1.Volume{volume},
 			Containers: []corev1.Container{{
-				Name: "inspect", Image: image, Command: []string{"python3", "-c"}, Args: []string{rollbackProbeScript},
-				Env:          []corev1.EnvVar{{Name: "UUID", Value: jobID}, {Name: "ROLLBACK_VERSIONS_DIRECTORY", Value: workspace.MountPath}},
-				VolumeMounts: []corev1.VolumeMount{mount},
+				Name: "inspect", Image: image, Command: []string{"/manager", "inspect-rollback"},
+				Env:             []corev1.EnvVar{{Name: "UUID", Value: jobID}, {Name: "ROLLBACK_VERSIONS_DIRECTORY", Value: workspace.MountPath}},
+				VolumeMounts:    []corev1.VolumeMount{mount},
+				SecurityContext: &corev1.SecurityContext{AllowPrivilegeEscalation: &falseValue, ReadOnlyRootFilesystem: &trueValue, Capabilities: &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}}},
 			}},
 		},
-	}
-	if run.Spec.Scenario.Private != nil && *run.Spec.Scenario.Private {
-		pod.Spec.ImagePullSecrets = []corev1.LocalObjectReference{{Name: run.Spec.Scenario.RegistryName}}
 	}
 	if err := h.client.Create(ctx, pod); err != nil && !apierrors.IsAlreadyExists(err) {
 		return "error", "", fmt.Errorf("create rollback probe: %w", err)
@@ -269,7 +274,7 @@ func (h *Handler) HandleScenarioRollback(w http.ResponseWriter, r *http.Request,
 		writeJSONError(w, http.StatusMethodNotAllowed, ErrorResponse{Error: "method_not_allowed", Message: "Method not allowed"})
 		return
 	}
-	run, job, image, ok := h.loadRollbackAttempt(w, r, runName, jobID, action)
+	run, job, ok := h.loadRollbackAttempt(w, r, runName, jobID, action)
 	if !ok {
 		return
 	}
@@ -312,7 +317,7 @@ func (h *Handler) HandleScenarioRollback(w http.ResponseWriter, r *http.Request,
 	}
 	if err := h.validateRollbackWorkspace(r.Context(), run); err != nil {
 		if r.Method == http.MethodGet {
-			writeJSON(w, http.StatusOK, RollbackAvailability{JobID: jobID, State: "unavailable", CanExecute: canExecute, Message: "Workspace PVC is unavailable"})
+			writeJSON(w, http.StatusOK, RollbackAvailability{JobID: jobID, State: "unavailable", Message: "Workspace PVC is unavailable"})
 		} else {
 			writeJSONError(w, http.StatusConflict, ErrorResponse{Error: "workspace_unavailable", Message: "Workspace PVC is unavailable"})
 		}
@@ -346,7 +351,7 @@ func (h *Handler) HandleScenarioRollback(w http.ResponseWriter, r *http.Request,
 	if kubeconfigErr != nil {
 		canExecute = false
 	}
-	state, probeMessage, err := h.rollbackProbe(r.Context(), run, job, jobID, image)
+	state, probeMessage, err := h.rollbackProbe(r.Context(), run, job, jobID)
 	if err != nil {
 		log.FromContext(r.Context()).Error(err, "Failed to inspect rollback files", "runName", runName, "jobID", jobID)
 		if r.Method == http.MethodPost {

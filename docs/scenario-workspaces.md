@@ -273,6 +273,17 @@ without starting an inspection Pod. A succeeded rollback returns `succeeded`
 with the existing rollback run name, even when its files have been removed.
 For private scenarios, the caller must also have access to the original
 registry before inspection can create a Pod or read retained files.
+The inspection Pod runs the installed operator image with the
+`/manager inspect-rollback` command, not the original scenario image. It only
+checks regular file names in the read-only attempt directory. This also covers
+older attempts whose saved `scenarioImage` contains a mutable tag. The operator
+image must be supplied as `KRKN_ROLLBACK_INSPECTOR_IMAGE` with a SHA-256 digest;
+Helm and OLM release manifests pass the installed operator image to this
+variable. Helm also passes `images.pullSecrets` as
+`KRKN_ROLLBACK_INSPECTOR_PULL_SECRETS` for private operator registries. Local
+installations using a tag must configure a digest-pinned operator image to
+enable rollback inspection. Without a valid digest, GET reports `unavailable`
+and POST returns a conflict without creating a probe.
 
 `POST` to the same path requires cluster run permission and a recent `available`
 result. It creates a separate `KrknScenarioRun` for the Krkn `workload-rollback`

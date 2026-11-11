@@ -45,6 +45,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
+	"github.com/krkn-chaos/krkn-operator/internal/kubeconfig"
 
 	"github.com/google/uuid"
 	"github.com/krkn-chaos/krkn-operator/pkg/cloudcreds"
@@ -561,21 +562,10 @@ func (r *KrknScenarioRunReconciler) prepareJobResources(
 			if !found || scenarioRun.Spec.Scenario.Name != "workload-rollback" {
 				return nil, fmt.Errorf("rollback source attempt is invalid")
 			}
-			originalConfigMap := &corev1.ConfigMap{}
-			configMapName := fmt.Sprintf("krkn-job-%s-kubeconfig", source.JobID)
-			if err := r.Get(ctx, types.NamespacedName{Namespace: r.Namespace, Name: configMapName}, originalConfigMap); err != nil {
-				return nil, fmt.Errorf("load original attempt kubeconfig: %w", err)
+			originalKubeconfig, err = kubeconfig.LoadOriginalAttempt(ctx, r.Client, r.Namespace, original, source.JobID, clusterName)
+			if err != nil {
+				return nil, err
 			}
-			owned := false
-			for _, owner := range originalConfigMap.OwnerReferences {
-				if owner.UID == original.UID && owner.Name == original.Name && owner.Kind == "KrknScenarioRun" {
-					owned = true
-				}
-			}
-			if !owned || originalConfigMap.Labels["krkn-job-id"] != source.JobID || originalConfigMap.Labels["krkn-cluster-name"] != clusterName || originalConfigMap.Data["config"] == "" {
-				return nil, fmt.Errorf("original attempt kubeconfig identity is invalid")
-			}
-			originalKubeconfig = originalConfigMap.Data["config"]
 			workspaceSubPath, err = workspace.SubPath(original.UID, providerName, clusterName, source.JobID)
 		} else {
 			workspaceSubPath, err = workspace.SubPath(scenarioRun.UID, providerName, clusterName, jobID)
@@ -637,7 +627,7 @@ func (r *KrknScenarioRunReconciler) prepareJobResources(
 	}
 
 	// Create ConfigMap for kubeconfig
-	kubeconfigConfigMapName := fmt.Sprintf("krkn-job-%s-kubeconfig", jobID)
+	kubeconfigConfigMapName := kubeconfig.AttemptConfigMapName(jobID)
 	kubeconfigLabels := map[string]string{
 		"krkn-job-id":         jobID,
 		"krkn-scenario-run":   scenarioRun.Name,

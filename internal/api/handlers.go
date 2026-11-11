@@ -24,6 +24,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -129,9 +130,11 @@ type Handler struct {
 	secretManager      *auth.SecretManager
 	// scenarioProviderFactory is injectable for API tests; production handlers
 	// use the krknctl-backed factory assigned by NewHandler.
-	scenarioProviderFactory func(provider.Mode) (provider.ScenarioDataProvider, error)
-	rollbackDigestResolver  func(context.Context, bool, *models.RegistryV2) (string, error)
-	rollbackImages          rollbackImageCache
+	scenarioProviderFactory      func(provider.Mode) (provider.ScenarioDataProvider, error)
+	rollbackDigestResolver       func(context.Context, bool, *models.RegistryV2) (string, error)
+	rollbackImages               rollbackImageCache
+	rollbackInspectorImage       string
+	rollbackInspectorPullSecrets string
 	// esClient is a long-lived, connection-pooling client shared across all
 	// telemetry queries so transports are reused rather than allocated per
 	// request.
@@ -147,17 +150,19 @@ type Handler struct {
 func NewHandler(client client.Client, clientset kubernetes.Interface, namespace string, grpcServerAddr string, secretManager *auth.SecretManager) *Handler {
 	bgCtx, bgCancel := context.WithCancel(context.Background())
 	return &Handler{
-		client:                  client,
-		clientset:               clientset,
-		namespace:               namespace,
-		grpcServerAddr:          grpcServerAddr,
-		secretManager:           secretManager,
-		scenarioProviderFactory: createScenarioProvider,
-		esClient:                elasticsearch.NewClient(),
-		jobTracker:              NewJobTracker(),
-		restoreSlots:            make(chan struct{}, maxActiveRestores),
-		baseCtx:                 bgCtx,
-		baseCancel:              bgCancel,
+		client:                       client,
+		clientset:                    clientset,
+		namespace:                    namespace,
+		grpcServerAddr:               grpcServerAddr,
+		secretManager:                secretManager,
+		scenarioProviderFactory:      createScenarioProvider,
+		rollbackInspectorImage:       os.Getenv("KRKN_ROLLBACK_INSPECTOR_IMAGE"),
+		rollbackInspectorPullSecrets: os.Getenv("KRKN_ROLLBACK_INSPECTOR_PULL_SECRETS"),
+		esClient:                     elasticsearch.NewClient(),
+		jobTracker:                   NewJobTracker(),
+		restoreSlots:                 make(chan struct{}, maxActiveRestores),
+		baseCtx:                      bgCtx,
+		baseCancel:                   bgCancel,
 	}
 }
 
