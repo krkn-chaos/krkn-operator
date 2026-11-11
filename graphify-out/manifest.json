@@ -2502,9 +2502,9 @@
     "semantic_hash": ""
   },
   "internal/api/workspace_handlers_test.go": {
-    "mtime": 1794387290.076488,
-    "seen": 1794387425.494417,
-    "ast_hash": "70521da5b84dd5d69e8976f50d9f2aa5",
+    "mtime": 1794390916.5936747,
+    "seen": 1794391065.194423,
+    "ast_hash": "07269ce742f59a7b3453e17041e0b8e6",
     "semantic_hash": ""
   },
   "internal/controller/workspace_test.go": {

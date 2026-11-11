@@ -78,6 +78,32 @@ func TestListAvailableWorkspacePVCs(t *testing.T) {
 	}
 }
 
+func TestScenarioRunWithoutPVCOrWorkspace(t *testing.T) {
+	h := setupScenarioRunTestHandler("target", map[string]string{"cluster": "YXBpVmVyc2lvbjogdjEK"})
+
+	for _, path := range []string{WorkspacePVCsPath, WorkspacesPath + "/available"} {
+		response := httptest.NewRecorder()
+		h.WorkspaceRouter(response, newCategoryRequestAs(http.MethodGet, path, "", "admin", "admin@example.com"))
+		require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+		if path == WorkspacePVCsPath {
+			require.JSONEq(t, `{"pvcs":[]}`, response.Body.String())
+		} else {
+			require.JSONEq(t, `{"workspaces":[]}`, response.Body.String())
+		}
+	}
+
+	request := `{"targetRequestId":"target","targetClusters":{"krkn-operator":["cluster"]},"scenario":{"name":"pod-delete","private":false},"rollbackEnabled":false}`
+	response := httptest.NewRecorder()
+	h.PostScenarioRun(response, newCategoryRequestAs(http.MethodPost, ScenariosRunPath, request, "admin", "admin@example.com"))
+	require.Equal(t, http.StatusCreated, response.Code, response.Body.String())
+	var created ScenarioRunCreateResponse
+	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &created))
+	run := &krknv1alpha1.KrknScenarioRun{}
+	require.NoError(t, h.client.Get(t.Context(), client.ObjectKey{Namespace: "default", Name: created.ScenarioRunName}, run))
+	require.Nil(t, run.Spec.Workspace)
+	require.False(t, run.Spec.RollbackEnabled)
+}
+
 func readyWorkspace(t *testing.T, h *Handler, group string, public bool) *krknv1alpha1.KrknWorkspace {
 	t.Helper()
 	entry := &krknv1alpha1.KrknWorkspace{ObjectMeta: metav1.ObjectMeta{Name: "friendly", Namespace: "default", UID: testEntryUID},
@@ -145,6 +171,7 @@ func TestAvailableWorkspacesTrailingSlashStillFiltersUnavailable(t *testing.T) {
 
 func TestWorkspaceResolutionHidesPVCIdentityFromNonAdmin(t *testing.T) {
 	h := setupScenarioRunTestHandler("target", map[string]string{})
+	require.NoError(t, h.client.Create(t.Context(), newCategoryTestUser(t, "person@example.com")))
 	pvc := testWorkspacePVC()
 	require.NoError(t, h.client.Create(t.Context(), pvc))
 	readyWorkspace(t, h, "", true)
