@@ -1,3 +1,4 @@
+// Package rollbackinspector checks retained rollback files without executing them.
 package rollbackinspector
 
 import (

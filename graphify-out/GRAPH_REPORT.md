@@ -1,7 +1,7 @@
 # Graph Report - krkn-operator  (2026-11-11)
 
 ## Corpus Check
-- 341 files · ~435,293 words
+- 341 files · ~435,303 words
 - Verdict: corpus is large enough that graph structure adds value.
 - Unclassified: 18 file(s) not represented in the graph (top: (none) 12, .jsonl 2, .toml 1)
 
@@ -11,7 +11,7 @@
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `14dd846a`
+- Built from commit: `5d50d354`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
