@@ -23,13 +23,27 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
+// RollbackState is the observable state of an attempt's rollback action.
+type RollbackState string
+
+const (
+	RollbackStateChecking    RollbackState = "checking"
+	RollbackStateAvailable   RollbackState = "available"
+	RollbackStateAbsent      RollbackState = "absent"
+	RollbackStateUnavailable RollbackState = "unavailable"
+	RollbackStateRunning     RollbackState = "running"
+	RollbackStateSucceeded   RollbackState = "succeeded"
+	RollbackStateFailed      RollbackState = "failed"
+	RollbackStateError       RollbackState = "error"
+)
+
 // RollbackAvailability describes files in one pinned scenario attempt.
 type RollbackAvailability struct {
-	JobID           string `json:"jobId"`
-	State           string `json:"state"`
-	CanExecute      bool   `json:"canExecute"`
-	RollbackRunName string `json:"rollbackRunName,omitempty"`
-	Message         string `json:"message,omitempty"`
+	JobID           string        `json:"jobId"`
+	State           RollbackState `json:"state"`
+	CanExecute      bool          `json:"canExecute"`
+	RollbackRunName string        `json:"rollbackRunName,omitempty"`
+	Message         string        `json:"message,omitempty"`
 }
 
 func (h *Handler) canExecuteRollback(ctx context.Context, job *krknv1alpha1.ClusterJobStatus) (bool, error) {
@@ -152,70 +166,70 @@ func (h *Handler) validateRollbackWorkspace(ctx context.Context, run *krknv1alph
 	return workspace.Validate(ctx, h.client, workspace.Binding{Namespace: h.namespace, Reference: *ref})
 }
 
-func (h *Handler) rollbackProbe(ctx context.Context, run *krknv1alpha1.KrknScenarioRun, job *krknv1alpha1.ClusterJobStatus, jobID string) (string, string, error) {
+func (h *Handler) rollbackProbe(ctx context.Context, run *krknv1alpha1.KrknScenarioRun, job *krknv1alpha1.ClusterJobStatus, jobID string) (RollbackState, string, error) {
 	image, pullSecrets, err := h.rollbackInspectorConfig()
 	if err != nil {
-		return "unavailable", "Rollback inspector image is unavailable", nil
+		return RollbackStateUnavailable, "Rollback inspector image is unavailable", nil
 	}
 	pod := &corev1.Pod{}
 	key := client.ObjectKey{Namespace: h.namespace, Name: rollbackProbeName(jobID)}
 	err = h.client.Get(ctx, key, pod)
 	if err == nil {
 		if pod.Labels["krkn-scenario-run-uid"] != string(run.UID) {
-			return "error", "", errors.New("rollback probe belongs to another run")
+			return RollbackStateError, "", errors.New("rollback probe belongs to another run")
 		}
 		if len(pod.Spec.Containers) != 1 || pod.Spec.Containers[0].Image != image || len(pod.Spec.Containers[0].Command) != 2 || pod.Spec.Containers[0].Command[0] != "/manager" || pod.Spec.Containers[0].Command[1] != "inspect-rollback" {
 			if pod.DeletionTimestamp == nil {
 				if err := h.client.Delete(ctx, pod); err != nil && !apierrors.IsNotFound(err) {
-					return "error", "", fmt.Errorf("replace stale rollback probe: %w", err)
+					return RollbackStateError, "", fmt.Errorf("replace stale rollback probe: %w", err)
 				}
 			}
-			return "checking", "", nil
+			return RollbackStateChecking, "", nil
 		}
 		// A missing read-only subPath leaves the container in CreateContainerConfigError.
 		// Keep the failed probe so polling cannot delete and recreate it forever.
 		for _, container := range pod.Status.ContainerStatuses {
 			if container.State.Waiting != nil && container.State.Waiting.Reason == "CreateContainerConfigError" {
-				return "unavailable", "Rollback unavailable: inspection pod could not start", nil
+				return RollbackStateUnavailable, "Rollback unavailable: inspection pod could not start", nil
 			}
 		}
 		if pod.Status.Phase == corev1.PodFailed {
-			return "unavailable", "Rollback unavailable: inspection pod failed", nil
+			return RollbackStateUnavailable, "Rollback unavailable: inspection pod failed", nil
 		}
 		if !pod.CreationTimestamp.IsZero() && pod.Status.Phase != corev1.PodSucceeded && time.Since(pod.CreationTimestamp.Time) > 2*time.Minute {
-			return "unavailable", "Rollback unavailable: inspection timed out", nil
+			return RollbackStateUnavailable, "Rollback unavailable: inspection timed out", nil
 		}
 		if !pod.CreationTimestamp.IsZero() && pod.Status.Phase == corev1.PodSucceeded && time.Since(pod.CreationTimestamp.Time) > 30*time.Second {
 			if err := h.client.Delete(ctx, pod); err != nil && !apierrors.IsNotFound(err) {
-				return "error", "", fmt.Errorf("refresh rollback probe: %w", err)
+				return RollbackStateError, "", fmt.Errorf("refresh rollback probe: %w", err)
 			}
-			return "checking", "", nil
+			return RollbackStateChecking, "", nil
 		}
 		switch pod.Status.Phase {
 		case corev1.PodSucceeded:
 			if len(pod.Status.ContainerStatuses) == 0 || pod.Status.ContainerStatuses[0].State.Terminated == nil {
-				return "error", "", errors.New("rollback probe has no result")
+				return RollbackStateError, "", errors.New("rollback probe has no result")
 			}
 			result := pod.Status.ContainerStatuses[0].State.Terminated.Message
 			if result == "available" || result == "absent" {
-				return result, "", nil
+				return RollbackState(result), "", nil
 			}
-			return "error", "", errors.New("rollback probe returned an invalid result")
+			return RollbackStateError, "", errors.New("rollback probe returned an invalid result")
 		default:
-			return "checking", "", nil
+			return RollbackStateChecking, "", nil
 		}
 	}
 	if !apierrors.IsNotFound(err) {
-		return "error", "", fmt.Errorf("load rollback probe: %w", err)
+		return RollbackStateError, "", fmt.Errorf("load rollback probe: %w", err)
 	}
 	subPath, err := workspace.SubPath(run.UID, job.ProviderName, job.ClusterName, jobID)
 	if err != nil {
-		return "error", "", err
+		return RollbackStateError, "", err
 	}
 	volume, mount, err := workspace.Mount(workspace.Binding{Namespace: h.namespace, Reference: *run.Spec.Workspace},
 		workspace.MountOptions{VolumeName: "workspace", MountPath: workspace.MountPath, SubPath: subPath, ReadOnly: true})
 	if err != nil {
-		return "error", "", fmt.Errorf("prepare rollback inspection mount: %w", err)
+		return RollbackStateError, "", fmt.Errorf("prepare rollback inspection mount: %w", err)
 	}
 	falseValue := false
 	trueValue := true
@@ -243,9 +257,9 @@ func (h *Handler) rollbackProbe(ctx context.Context, run *krknv1alpha1.KrknScena
 		},
 	}
 	if err := h.client.Create(ctx, pod); err != nil && !apierrors.IsAlreadyExists(err) {
-		return "error", "", fmt.Errorf("create rollback probe: %w", err)
+		return RollbackStateError, "", fmt.Errorf("create rollback probe: %w", err)
 	}
-	return "checking", "", nil
+	return RollbackStateChecking, "", nil
 }
 
 // HandleScenarioRollback inspects retained files or launches a rollback run for one attempt.
@@ -296,28 +310,28 @@ func (h *Handler) HandleScenarioRollback(w http.ResponseWriter, r *http.Request,
 	if existing != nil {
 		switch existing.Status.Phase {
 		case "Succeeded":
-			writeJSON(w, http.StatusOK, RollbackAvailability{JobID: jobID, State: "succeeded", RollbackRunName: existing.Name})
+			writeJSON(w, http.StatusOK, RollbackAvailability{JobID: jobID, State: RollbackStateSucceeded, RollbackRunName: existing.Name})
 			return
 		case "", "Pending", "Running":
-			writeJSON(w, http.StatusOK, RollbackAvailability{JobID: jobID, State: "running", RollbackRunName: existing.Name})
+			writeJSON(w, http.StatusOK, RollbackAvailability{JobID: jobID, State: RollbackStateRunning, RollbackRunName: existing.Name})
 			return
 		}
 	}
 	if job.Phase == "Running" || job.Phase == "Pending" || job.Phase == "Retrying" {
 		if r.Method == http.MethodGet {
-			writeJSON(w, http.StatusOK, RollbackAvailability{JobID: jobID, State: "unavailable", Message: "Scenario attempt is still active"})
+			writeJSON(w, http.StatusOK, RollbackAvailability{JobID: jobID, State: RollbackStateUnavailable, Message: "Scenario attempt is still active"})
 		} else {
 			writeJSONError(w, http.StatusConflict, ErrorResponse{Error: "scenario_active", Message: "Scenario attempt is still active"})
 		}
 		return
 	}
 	if r.Method == http.MethodGet && !canExecute {
-		writeJSON(w, http.StatusOK, RollbackAvailability{JobID: jobID, State: "unavailable", Message: "Cluster run permission is required"})
+		writeJSON(w, http.StatusOK, RollbackAvailability{JobID: jobID, State: RollbackStateUnavailable, Message: "Cluster run permission is required"})
 		return
 	}
 	if err := h.validateRollbackWorkspace(r.Context(), run); err != nil {
 		if r.Method == http.MethodGet {
-			writeJSON(w, http.StatusOK, RollbackAvailability{JobID: jobID, State: "unavailable", Message: "Workspace PVC is unavailable"})
+			writeJSON(w, http.StatusOK, RollbackAvailability{JobID: jobID, State: RollbackStateUnavailable, Message: "Workspace PVC is unavailable"})
 		} else {
 			writeJSONError(w, http.StatusConflict, ErrorResponse{Error: "workspace_unavailable", Message: "Workspace PVC is unavailable"})
 		}
@@ -328,7 +342,7 @@ func (h *Handler) HandleScenarioRollback(w http.ResponseWriter, r *http.Request,
 		if err != nil {
 			log.FromContext(r.Context()).Error(err, "Failed to load original scenario registry for rollback", "registryName", run.Spec.Scenario.RegistryName)
 			if r.Method == http.MethodGet {
-				writeJSON(w, http.StatusOK, RollbackAvailability{JobID: jobID, State: "unavailable", Message: "The original scenario registry is unavailable"})
+				writeJSON(w, http.StatusOK, RollbackAvailability{JobID: jobID, State: RollbackStateUnavailable, Message: "The original scenario registry is unavailable"})
 			} else {
 				writeJSONError(w, http.StatusConflict, ErrorResponse{Error: "rollback_registry_unavailable", Message: "The original scenario registry is unavailable"})
 			}
@@ -336,7 +350,7 @@ func (h *Handler) HandleScenarioRollback(w http.ResponseWriter, r *http.Request,
 		}
 		if !h.canAccessRegistry(r.Context(), secret) {
 			if r.Method == http.MethodGet {
-				writeJSON(w, http.StatusOK, RollbackAvailability{JobID: jobID, State: "unavailable", Message: "Access to the original scenario registry is required"})
+				writeJSON(w, http.StatusOK, RollbackAvailability{JobID: jobID, State: RollbackStateUnavailable, Message: "Access to the original scenario registry is required"})
 			} else {
 				writeJSONError(w, http.StatusForbidden, ErrorResponse{Error: "forbidden", Message: "Access to the original scenario registry is required"})
 			}
@@ -357,15 +371,15 @@ func (h *Handler) HandleScenarioRollback(w http.ResponseWriter, r *http.Request,
 		if r.Method == http.MethodPost {
 			writeJSONError(w, http.StatusServiceUnavailable, ErrorResponse{Error: "rollback_inspection_failed", Message: "Rollback inspection failed"})
 		} else {
-			writeJSON(w, http.StatusOK, RollbackAvailability{JobID: jobID, State: "error", Message: "Rollback inspection failed"})
+			writeJSON(w, http.StatusOK, RollbackAvailability{JobID: jobID, State: RollbackStateError, Message: "Rollback inspection failed"})
 		}
 		return
 	}
 	if r.Method == http.MethodGet {
 		response := RollbackAvailability{JobID: jobID, State: state, CanExecute: canExecute, Message: probeMessage}
-		if kubeconfigErr != nil && state == "available" {
+		if kubeconfigErr != nil && state == RollbackStateAvailable {
 			response.Message = "Original attempt kubeconfig is unavailable"
-		} else if !canExecute && state == "available" {
+		} else if !canExecute && state == RollbackStateAvailable {
 			response.Message = "Cluster run permission is required"
 		}
 		if existing != nil {
@@ -381,10 +395,10 @@ func (h *Handler) HandleScenarioRollback(w http.ResponseWriter, r *http.Request,
 				}
 			}
 		}
-		if response.State != "available" && response.State != "failed" {
+		if response.State != RollbackStateAvailable && response.State != RollbackStateFailed {
 			response.CanExecute = false
 		}
-		if response.CanExecute && (response.State == "available" || response.State == "failed") {
+		if response.CanExecute && (response.State == RollbackStateAvailable || response.State == RollbackStateFailed) {
 			imageCheck := h.checkRollbackImage(r.Context(), run, true)
 			if !imageCheck.available() {
 				response.CanExecute = false
@@ -394,7 +408,7 @@ func (h *Handler) HandleScenarioRollback(w http.ResponseWriter, r *http.Request,
 		writeJSON(w, http.StatusOK, response)
 		return
 	}
-	if state != "available" {
+	if state != RollbackStateAvailable {
 		message := probeMessage
 		if message == "" {
 			message = "Rollback files are not available"
@@ -450,5 +464,5 @@ func (h *Handler) HandleScenarioRollback(w http.ResponseWriter, r *http.Request,
 	if probe := rollbackProbeName(jobID); probe != "" {
 		_ = h.client.Delete(r.Context(), &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: probe, Namespace: h.namespace}})
 	}
-	writeJSON(w, http.StatusAccepted, RollbackAvailability{JobID: jobID, State: "running", RollbackRunName: rollbackName})
+	writeJSON(w, http.StatusAccepted, RollbackAvailability{JobID: jobID, State: RollbackStateRunning, RollbackRunName: rollbackName})
 }

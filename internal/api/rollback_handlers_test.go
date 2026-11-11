@@ -125,7 +125,7 @@ func TestScenarioRollbackRequiresRetainedFilesAndReusesOriginalAttempt(t *testin
 	h := rollbackTestHandler(t)
 	first := rollbackRequest(h, http.MethodGet, "admin", rollbackAttemptID)
 	require.Equal(t, http.StatusOK, first.Code, first.Body.String())
-	require.Equal(t, "checking", decodeRollbackResponse(t, first).State)
+	require.Equal(t, RollbackStateChecking, decodeRollbackResponse(t, first).State)
 
 	probe := &corev1.Pod{}
 	require.NoError(t, h.client.Get(t.Context(), client.ObjectKey{Namespace: "default", Name: rollbackProbeName(rollbackAttemptID)}, probe))
@@ -147,17 +147,17 @@ func TestScenarioRollbackRequiresRetainedFilesAndReusesOriginalAttempt(t *testin
 	probe.Status.ContainerStatuses = []corev1.ContainerStatus{{State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{Message: "absent"}}}}
 	require.NoError(t, h.client.Status().Update(t.Context(), probe))
 	absent := rollbackRequest(h, http.MethodGet, "admin", rollbackAttemptID)
-	require.Equal(t, "absent", decodeRollbackResponse(t, absent).State)
+	require.Equal(t, RollbackStateAbsent, decodeRollbackResponse(t, absent).State)
 	require.Equal(t, http.StatusConflict, rollbackRequest(h, http.MethodPost, "admin", rollbackAttemptID).Code)
 
 	require.NoError(t, h.client.Get(t.Context(), client.ObjectKeyFromObject(probe), probe))
 	probe.Status.ContainerStatuses[0].State.Terminated.Message = "available"
 	require.NoError(t, h.client.Status().Update(t.Context(), probe))
 	available := rollbackRequest(h, http.MethodGet, "admin", rollbackAttemptID)
-	require.Equal(t, "available", decodeRollbackResponse(t, available).State)
+	require.Equal(t, RollbackStateAvailable, decodeRollbackResponse(t, available).State)
 	started := rollbackRequest(h, http.MethodPost, "admin", rollbackAttemptID)
 	require.Equal(t, http.StatusAccepted, started.Code, started.Body.String())
-	require.Equal(t, "running", decodeRollbackResponse(t, started).State)
+	require.Equal(t, RollbackStateRunning, decodeRollbackResponse(t, started).State)
 	rollback := &krknv1alpha1.KrknScenarioRun{}
 	require.NoError(t, h.client.Get(t.Context(), client.ObjectKey{Namespace: "default", Name: rollbackRunName(rollbackAttemptID)}, rollback))
 	require.Equal(t, "workload-rollback", rollback.Spec.Scenario.Name)
@@ -178,7 +178,7 @@ func TestScenarioRollbackRequiresRetainedFilesAndReusesOriginalAttempt(t *testin
 	probe.Status.ContainerStatuses = []corev1.ContainerStatus{{State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{Message: "available"}}}}
 	require.NoError(t, h.client.Status().Update(t.Context(), probe))
 	failed := rollbackRequest(h, http.MethodGet, "admin", rollbackAttemptID)
-	require.Equal(t, "failed", decodeRollbackResponse(t, failed).State)
+	require.Equal(t, RollbackStateFailed, decodeRollbackResponse(t, failed).State)
 	retry := rollbackRequest(h, http.MethodPost, "admin", rollbackAttemptID)
 	require.Equal(t, http.StatusAccepted, retry.Code, retry.Body.String())
 	require.Equal(t, rollbackRunAttemptName(rollbackAttemptID, 2), decodeRollbackResponse(t, retry).RollbackRunName)
@@ -215,7 +215,7 @@ func TestScenarioRollbackProbeCannotInspectWorkspace(t *testing.T) {
 				response := rollbackRequest(h, http.MethodGet, "admin", rollbackAttemptID)
 				require.Equal(t, http.StatusOK, response.Code, response.Body.String())
 				result := decodeRollbackResponse(t, response)
-				require.Equal(t, "unavailable", result.State)
+				require.Equal(t, RollbackStateUnavailable, result.State)
 				require.False(t, result.CanExecute)
 				require.Contains(t, result.Message, tc.message)
 			}
@@ -233,7 +233,7 @@ func TestScenarioRollbackProbeRequiresPinnedOperatorImage(t *testing.T) {
 			response := rollbackRequest(h, http.MethodGet, "admin", rollbackAttemptID)
 			require.Equal(t, http.StatusOK, response.Code)
 			result := decodeRollbackResponse(t, response)
-			require.Equal(t, "unavailable", result.State)
+			require.Equal(t, RollbackStateUnavailable, result.State)
 			require.False(t, result.CanExecute)
 			probe := &corev1.Pod{}
 			require.True(t, apierrors.IsNotFound(h.client.Get(t.Context(), client.ObjectKey{Namespace: "default", Name: rollbackProbeName(rollbackAttemptID)}, probe)))
@@ -263,10 +263,10 @@ func TestScenarioRollbackReplacesLegacyProbeBeforeReadingResult(t *testing.T) {
 	legacy.Status.ContainerStatuses = []corev1.ContainerStatus{{State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{Message: "available"}}}}
 	require.NoError(t, h.client.Status().Update(t.Context(), legacy))
 	response := rollbackRequest(h, http.MethodGet, "admin", rollbackAttemptID)
-	require.Equal(t, "checking", decodeRollbackResponse(t, response).State)
+	require.Equal(t, RollbackStateChecking, decodeRollbackResponse(t, response).State)
 	require.True(t, apierrors.IsNotFound(h.client.Get(t.Context(), client.ObjectKeyFromObject(legacy), &corev1.Pod{})))
 	response = rollbackRequest(h, http.MethodGet, "admin", rollbackAttemptID)
-	require.Equal(t, "checking", decodeRollbackResponse(t, response).State)
+	require.Equal(t, RollbackStateChecking, decodeRollbackResponse(t, response).State)
 	probe := &corev1.Pod{}
 	require.NoError(t, h.client.Get(t.Context(), client.ObjectKeyFromObject(legacy), probe))
 	require.Equal(t, testRollbackInspectorImage, probe.Spec.Containers[0].Image)
@@ -367,7 +367,7 @@ func TestScenarioRollbackRejectsMissingOrUntrustedImage(t *testing.T) {
 			available := rollbackRequest(h, http.MethodGet, "admin", rollbackAttemptID)
 			require.Equal(t, http.StatusOK, available.Code)
 			result := decodeRollbackResponse(t, available)
-			require.Equal(t, "available", result.State)
+			require.Equal(t, RollbackStateAvailable, result.State)
 			require.False(t, result.CanExecute)
 			require.NotEmpty(t, result.Message)
 
@@ -418,7 +418,7 @@ func TestScenarioRollbackPrivateRegistryRequiresAccess(t *testing.T) {
 	response := rollbackRequest(h, http.MethodGet, "user", rollbackAttemptID)
 	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
 	result := decodeRollbackResponse(t, response)
-	require.Equal(t, "unavailable", result.State)
+	require.Equal(t, RollbackStateUnavailable, result.State)
 	require.False(t, result.CanExecute)
 	require.Contains(t, result.Message, "registry")
 	probe := &corev1.Pod{}
@@ -445,7 +445,7 @@ func TestScenarioRollbackPrivateRegistryMissingWorkload(t *testing.T) {
 	response := rollbackRequest(h, http.MethodGet, "admin", rollbackAttemptID)
 	require.Equal(t, http.StatusOK, response.Code)
 	result := decodeRollbackResponse(t, response)
-	require.Equal(t, "available", result.State)
+	require.Equal(t, RollbackStateAvailable, result.State)
 	require.False(t, result.CanExecute)
 	require.Contains(t, result.Message, rollbackImageName)
 	started := rollbackRequest(h, http.MethodPost, "admin", rollbackAttemptID)
@@ -481,14 +481,14 @@ func TestScenarioRollbackAuthorizationAndMissingPVC(t *testing.T) {
 	response := rollbackRequest(h, http.MethodGet, "admin", rollbackAttemptID)
 	require.Equal(t, http.StatusOK, response.Code)
 	result := decodeRollbackResponse(t, response)
-	require.Equal(t, "unavailable", result.State)
+	require.Equal(t, RollbackStateUnavailable, result.State)
 	require.False(t, result.CanExecute)
 	require.Equal(t, http.StatusConflict, rollbackRequest(h, http.MethodPost, "admin", rollbackAttemptID).Code)
 	replacement := testWorkspacePVC()
 	replacement.UID = "8f53d5ab-fca8-464f-877c-9bb72dcdb319"
 	require.NoError(t, h.client.Create(t.Context(), replacement))
 	result = decodeRollbackResponse(t, rollbackRequest(h, http.MethodGet, "admin", rollbackAttemptID))
-	require.Equal(t, "unavailable", result.State)
+	require.Equal(t, RollbackStateUnavailable, result.State)
 	require.False(t, result.CanExecute)
 }
 
@@ -503,7 +503,7 @@ func TestScenarioRollbackViewerCannotExecute(t *testing.T) {
 	response := rollbackRequest(h, http.MethodGet, "user", rollbackAttemptID)
 	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
 	require.False(t, decodeRollbackResponse(t, response).CanExecute)
-	require.Equal(t, "unavailable", decodeRollbackResponse(t, response).State)
+	require.Equal(t, RollbackStateUnavailable, decodeRollbackResponse(t, response).State)
 	probe := &corev1.Pod{}
 	require.True(t, apierrors.IsNotFound(h.client.Get(t.Context(), client.ObjectKey{Namespace: "default", Name: rollbackProbeName(rollbackAttemptID)}, probe)))
 	require.Equal(t, http.StatusForbidden, rollbackRequest(h, http.MethodPost, "user", rollbackAttemptID).Code)
@@ -523,7 +523,7 @@ func TestScenarioRollbackSucceededIsIdempotent(t *testing.T) {
 		response := rollbackRequest(h, method, "admin", rollbackAttemptID)
 		require.Equal(t, http.StatusOK, response.Code, response.Body.String())
 		result := decodeRollbackResponse(t, response)
-		require.Equal(t, "succeeded", result.State)
+		require.Equal(t, RollbackStateSucceeded, result.State)
 		require.False(t, result.CanExecute)
 		require.Equal(t, rollback.Name, result.RollbackRunName)
 	}
@@ -553,7 +553,7 @@ func TestScenarioRollbackFailedWithoutFilesIsUnavailable(t *testing.T) {
 	response := rollbackRequest(h, http.MethodGet, "admin", rollbackAttemptID)
 	require.Equal(t, http.StatusOK, response.Code)
 	result := decodeRollbackResponse(t, response)
-	require.Equal(t, "unavailable", result.State)
+	require.Equal(t, RollbackStateUnavailable, result.State)
 	require.False(t, result.CanExecute)
 	require.Contains(t, result.Message, "failed")
 }
@@ -566,7 +566,7 @@ func TestScenarioRollbackRetryingDoesNotInspect(t *testing.T) {
 	require.NoError(t, h.client.Update(t.Context(), run))
 	response := rollbackRequest(h, http.MethodGet, "admin", rollbackAttemptID)
 	require.Equal(t, http.StatusOK, response.Code)
-	require.Equal(t, "unavailable", decodeRollbackResponse(t, response).State)
+	require.Equal(t, RollbackStateUnavailable, decodeRollbackResponse(t, response).State)
 	require.False(t, decodeRollbackResponse(t, response).CanExecute)
 	probe := &corev1.Pod{}
 	require.True(t, apierrors.IsNotFound(h.client.Get(t.Context(), client.ObjectKey{Namespace: "default", Name: rollbackProbeName(rollbackAttemptID)}, probe)))
@@ -587,7 +587,7 @@ func TestScenarioRollbackInspectsEarlierRetryAttempt(t *testing.T) {
 	}))
 	response := rollbackRequest(h, http.MethodGet, "admin", priorRollbackAttemptID)
 	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
-	require.Equal(t, "checking", decodeRollbackResponse(t, response).State)
+	require.Equal(t, RollbackStateChecking, decodeRollbackResponse(t, response).State)
 	probe := &corev1.Pod{}
 	require.NoError(t, h.client.Get(t.Context(), client.ObjectKey{Namespace: "default", Name: rollbackProbeName(priorRollbackAttemptID)}, probe))
 	expected, err := workspace.SubPath(run.UID, "provider", "cluster", priorRollbackAttemptID)
@@ -610,7 +610,7 @@ func TestScenarioRollbackCannotUseMissingOriginalKubeconfig(t *testing.T) {
 	probe.Status.ContainerStatuses = []corev1.ContainerStatus{{State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{Message: "available"}}}}
 	require.NoError(t, h.client.Status().Update(t.Context(), probe))
 	available := rollbackRequest(h, http.MethodGet, "admin", rollbackAttemptID)
-	require.Equal(t, "available", decodeRollbackResponse(t, available).State)
+	require.Equal(t, RollbackStateAvailable, decodeRollbackResponse(t, available).State)
 	require.False(t, decodeRollbackResponse(t, available).CanExecute)
 	require.Equal(t, http.StatusConflict, rollbackRequest(h, http.MethodPost, "admin", rollbackAttemptID).Code)
 }

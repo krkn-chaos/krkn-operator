@@ -1491,8 +1491,49 @@ definitions:
       rollbackRunName:
         type: string
       state:
+        $ref: '#/definitions/internal_api.RollbackState'
+    type: object
+  internal_api.RollbackRunSummary:
+    properties:
+      createdAt:
+        type: string
+      iteration:
+        type: integer
+      jobId:
+        type: string
+      jobPhase:
+        type: string
+      ownerUserId:
+        type: string
+      phase:
+        type: string
+      podName:
+        type: string
+      scenarioRunName:
+        type: string
+      sourceJobId:
         type: string
     type: object
+  internal_api.RollbackState:
+    enum:
+    - checking
+    - available
+    - absent
+    - unavailable
+    - running
+    - succeeded
+    - failed
+    - error
+    type: string
+    x-enum-varnames:
+    - RollbackStateChecking
+    - RollbackStateAvailable
+    - RollbackStateAbsent
+    - RollbackStateUnavailable
+    - RollbackStateRunning
+    - RollbackStateSucceeded
+    - RollbackStateFailed
+    - RollbackStateError
   internal_api.ScenarioDetailResponse:
     properties:
       description:
@@ -1688,7 +1729,7 @@ definitions:
         type: string
       workspace:
         allOf:
-        - $ref: '#/definitions/github_com_krkn-chaos_krkn-operator_api_v1alpha1.WorkspaceReference'
+        - $ref: '#/definitions/internal_api.WorkspaceSelection'
         description: Workspace names a published PVC. The server resolves and pins
           its UID.
     type: object
@@ -1749,6 +1790,12 @@ definitions:
       name:
         description: Name is the resource name
         type: string
+      rollbackRuns:
+        description: RollbackRuns are executions linked to this scenario run in the
+          grouped Jobs view.
+        items:
+          $ref: '#/definitions/internal_api.RollbackRunSummary'
+        type: array
       scenarioRun:
         allOf:
         - $ref: '#/definitions/internal_api.ScenarioRunListItem'
@@ -1786,6 +1833,17 @@ definitions:
           type: string
         type: array
     type: object
+  internal_api.WorkspaceSelection:
+    properties:
+      claimName:
+        type: string
+      claimUid:
+        type: string
+      name:
+        type: string
+      workspaceUid:
+        type: string
+    type: object
   internal_api.workspaceInfo:
     properties:
       available:
@@ -1795,8 +1853,10 @@ definitions:
       claimName:
         type: string
       groups:
+        description: Groups contains zero or one visibility group.
         items:
           type: string
+        maxItems: 1
         type: array
       name:
         type: string
@@ -1810,8 +1870,11 @@ definitions:
       claimName:
         type: string
       groups:
+        description: Groups accepts at most one group because a workspace has one
+          visibility group.
         items:
           type: string
+        maxItems: 1
         type: array
     type: object
   internal_api_v2_websocket.ErrorMessage:
@@ -3905,6 +3968,11 @@ paths:
         in: query
         name: limit
         type: integer
+      - description: Nest rollback runs under their source run before pagination.
+          Defaults to false.
+        in: query
+        name: groupRollbacks
+        type: boolean
       produces:
       - application/json
       responses:

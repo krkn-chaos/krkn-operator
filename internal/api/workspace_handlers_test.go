@@ -132,6 +132,9 @@ func TestWorkspaceReferenceVisibilityPreservesPinnedIdentity(t *testing.T) {
 	require.Equal(t, ref.WorkspaceUID, visible.WorkspaceUID)
 	require.Equal(t, ref.ClaimUID, visible.ClaimUID)
 	require.Empty(t, visible.ClaimName)
+	selectionJSON, err := json.Marshal(workspaceSelectionFromReference(visible))
+	require.NoError(t, err)
+	require.JSONEq(t, `{"name":"friendly","workspaceUid":"`+testEntryUID+`","claimUid":"`+testWorkspaceUID+`"}`, string(selectionJSON))
 	require.Equal(t, "shared", ref.ClaimName, "response redaction must not mutate the run")
 	outsider := newCategoryRequestAs(http.MethodGet, WorkspacesPath, "", "user", "outsider@example.com")
 	visible, err = h.visibleWorkspaceReference(outsider.Context(), ref)
@@ -200,6 +203,9 @@ func TestWorkspacePublicationAndAccess(t *testing.T) {
 	published := httptest.NewRecorder()
 	h.WorkspaceRouter(published, newCategoryRequestAs(http.MethodPut, WorkspacesPath+"/friendly", `{"claimName":"shared","groups":["team-a"]}`, "admin", "admin@example.com"))
 	require.Equal(t, http.StatusOK, published.Code, published.Body.String())
+	multipleGroups := httptest.NewRecorder()
+	h.WorkspaceRouter(multipleGroups, newCategoryRequestAs(http.MethodPut, WorkspacesPath+"/friendly", `{"claimName":"shared","groups":["team-a","team-b"]}`, "admin", "admin@example.com"))
+	require.Equal(t, http.StatusBadRequest, multipleGroups.Code, multipleGroups.Body.String())
 	require.NotContains(t, published.Body.String(), "displayName")
 	legacyName := httptest.NewRecorder()
 	h.WorkspaceRouter(legacyName, newCategoryRequestAs(http.MethodPut, WorkspacesPath+"/another", `{"claimName":"shared","displayName":"Duplicate"}`, "admin", "admin@example.com"))
@@ -265,7 +271,7 @@ func TestScenarioRunWorkspaceSelectionAndMissingReplayPVC(t *testing.T) {
 
 	replay, err := h.reconstructScenarioRunPayload(request.Context(), run)
 	require.NoError(t, err)
-	require.Equal(t, run.Spec.Workspace, replay.Workspace)
+	require.Equal(t, workspaceSelectionFromReference(run.Spec.Workspace), replay.Workspace)
 	require.NoError(t, h.client.Delete(t.Context(), pvc))
 	replayJSON, err := json.Marshal(replay)
 	require.NoError(t, err)
@@ -308,7 +314,7 @@ func TestScenarioRollbackRequiresWorkspaceAndPersistsSelection(t *testing.T) {
 	require.True(t, replay.RollbackEnabled)
 	require.NotNil(t, replay.MaxRetries)
 	require.Zero(t, *replay.MaxRetries)
-	require.Equal(t, run.Spec.Workspace, replay.Workspace)
+	require.Equal(t, workspaceSelectionFromReference(run.Spec.Workspace), replay.Workspace)
 }
 
 func TestGraphRunPinsNodeWorkspace(t *testing.T) {

@@ -170,6 +170,17 @@ type FileMount struct {
 	MountPath string `json:"mountPath"`
 }
 
+// WorkspaceSelection identifies a published workspace in a REST request or
+// replay payload. Optional UIDs reject a workspace or PVC replaced since the
+// payload was prepared. The PVC name is accepted for legacy replay clients;
+// the server never includes it in a response.
+type WorkspaceSelection struct {
+	Name         string `json:"name"`
+	WorkspaceUID string `json:"workspaceUid,omitempty"`
+	ClaimName    string `json:"claimName,omitempty"`
+	ClaimUID     string `json:"claimUid,omitempty"`
+}
+
 // ScenarioRunRequest represents the request body for POST /scenarios/run
 type ScenarioRunRequest struct {
 	// TargetRequestID is the UUID of the KrknTargetRequest (required)
@@ -201,7 +212,7 @@ type ScenarioRunRequest struct {
 	// FileReferences are references to centrally-managed files by UUID (optional)
 	FileReferences []files.FileReference `json:"fileReferences,omitempty"`
 	// Workspace names a published PVC. The server resolves and pins its UID.
-	Workspace *krknv1alpha1.WorkspaceReference `json:"workspace,omitempty"`
+	Workspace *WorkspaceSelection `json:"workspace,omitempty"`
 	// RollbackEnabled persists rollback files in the selected workspace.
 	RollbackEnabled bool `json:"rollbackEnabled,omitempty"`
 	// CustomRunName is a user-provided label for the run (optional)

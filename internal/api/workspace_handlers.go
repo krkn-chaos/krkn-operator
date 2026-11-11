@@ -24,18 +24,34 @@ import (
 )
 
 type workspacePublishRequest struct {
-	ClaimName      string   `json:"claimName"`
-	Groups         []string `json:"groups,omitempty"`
+	ClaimName string `json:"claimName"`
+	// Groups accepts at most one group because a workspace has one visibility group.
+	Groups         []string `json:"groups,omitempty" validate:"max=1"`
 	AvailableToAll bool     `json:"availableToAll,omitempty"`
 }
 
 type workspaceInfo struct {
-	Name           string   `json:"name"`
-	ClaimName      string   `json:"claimName,omitempty"`
-	Groups         []string `json:"groups,omitempty"`
+	Name      string `json:"name"`
+	ClaimName string `json:"claimName,omitempty"`
+	// Groups contains zero or one visibility group.
+	Groups         []string `json:"groups,omitempty" validate:"max=1"`
 	AvailableToAll bool     `json:"availableToAll"`
 	Available      bool     `json:"available"`
 	Reason         string   `json:"reason,omitempty"`
+}
+
+func workspaceSelectionFromReference(ref *krknv1alpha1.WorkspaceReference) *WorkspaceSelection {
+	if ref == nil {
+		return nil
+	}
+	return &WorkspaceSelection{Name: ref.Name, WorkspaceUID: ref.WorkspaceUID, ClaimName: ref.ClaimName, ClaimUID: ref.ClaimUID}
+}
+
+func (selection *WorkspaceSelection) reference() *krknv1alpha1.WorkspaceReference {
+	if selection == nil {
+		return nil
+	}
+	return &krknv1alpha1.WorkspaceReference{Name: selection.Name, WorkspaceUID: selection.WorkspaceUID, ClaimName: selection.ClaimName, ClaimUID: selection.ClaimUID}
 }
 
 type availableWorkspacePVC struct {
@@ -306,7 +322,7 @@ func (h *Handler) publishWorkspace(w http.ResponseWriter, r *http.Request, name 
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&request); err != nil || request.ClaimName == "" || len(request.Groups) > 1 ||
 		(request.AvailableToAll && len(request.Groups) != 0) {
-		writeJSONError(w, http.StatusBadRequest, ErrorResponse{Error: "bad_request", Message: "claimName and one visibility choice are required"})
+		writeJSONError(w, http.StatusBadRequest, ErrorResponse{Error: "bad_request", Message: "claimName is required; groups accepts at most one name and cannot be combined with availableToAll"})
 		return
 	}
 	if len(request.Groups) == 1 {

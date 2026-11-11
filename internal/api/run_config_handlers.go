@@ -139,7 +139,8 @@ func (h *Handler) GetScenarioRunConfig(w http.ResponseWriter, r *http.Request) {
 	}
 
 	originalWorkspace := payload.Workspace
-	payload.Workspace, err = h.visibleWorkspaceReference(ctx, payload.Workspace)
+	visibleWorkspace, err := h.visibleWorkspaceReference(ctx, payload.Workspace.reference())
+	payload.Workspace = workspaceSelectionFromReference(visibleWorkspace)
 	if err != nil {
 		logger.Error(err, "Failed to check workspace for scenario configuration", "scenarioRunName", scenarioRunName)
 		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{Error: "internal_error", Message: "Failed to retrieve scenario run configuration"})

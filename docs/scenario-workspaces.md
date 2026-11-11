@@ -116,6 +116,9 @@ unavailable, or has been recreated with the same name and a different UID, the
 request is rejected before a new run is created. The controller repeats the
 identity and PVC checks before creating each scenario pod. An administrator
 must explicitly select a new workspace to change the replay's storage dependency.
+The REST selection uses `name` and optional `workspaceUid` and `claimUid` pins;
+the persisted run also records `claimName`. Older clients may still submit
+`claimName` as a pin, but responses never expose it.
 Replay and configuration APIs omit the cluster PVC name from their responses.
 For nonadmins, they include the pinned UIDs only when the caller may still
 select that workspace; otherwise they omit the workspace reference. Admins
@@ -255,20 +258,21 @@ platform can offer rollback. Run status alone is insufficient.
 
 `GET /api/v1/scenarios/run/{runName}/rollback/{jobID}` checks one attempt.
 It validates the pinned workspace and PVC, then starts a short-lived inspection
-Pod using the original scenario image with a read-only mount of that attempt's
+Pod using the installed, digest-pinned operator image with a read-only mount of that attempt's
 `subPath`. The Pod checks for unexecuted Krkn rollback version files; it does
 not execute them. It uses the scenario runner ServiceAccount for the same
 UID/GID `1001:1001` storage access as scenario Pods, without mounting a service
 account token. The API returns `checking`, `available`, `absent`, `unavailable`,
-`error`, or a rollback execution state. Successful inspection results expire
+`running`, `succeeded`, `failed`, or `error`. Successful inspection results expire
 after 30 seconds and are checked again. If the inspection Pod cannot start,
 fails, or remains pending for more than two minutes, the API returns
 `unavailable` with `canExecute: false` instead of recreating it on every poll.
 This reports that rollback cannot currently be offered; it does not claim the
 files are absent. Viewing requires cluster view permission;
 the inspection Pod is created only for callers with cluster run permission.
-`canExecute` is true only with cluster run permission and the original
-kubeconfig still available. An active scenario retry returns `unavailable`
+`canExecute` can be true only for `available` or a retryable `failed` rollback,
+and only with cluster run permission, the original kubeconfig, workspace PVC,
+and rollback image available. An active scenario retry returns `unavailable`
 without starting an inspection Pod. A succeeded rollback returns `succeeded`
 with the existing rollback run name, even when its files have been removed.
 For private scenarios, the caller must also have access to the original

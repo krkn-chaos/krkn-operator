@@ -194,7 +194,8 @@ func (h *Handler) GetScenarioReplay(w http.ResponseWriter, r *http.Request) {
 
 	// Step 6: Return payload (identical to wizard output)
 	originalWorkspace := payload.Workspace
-	payload.Workspace, err = h.visibleWorkspaceReference(ctx, payload.Workspace)
+	visibleWorkspace, err := h.visibleWorkspaceReference(ctx, payload.Workspace.reference())
+	payload.Workspace = workspaceSelectionFromReference(visibleWorkspace)
 	if err != nil {
 		logger.Error(err, "Failed to check workspace for scenario replay", "scenarioRunName", scenarioRunName)
 		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{Error: "internal_error", Message: "Failed to reconstruct scenario payload"})
@@ -277,7 +278,7 @@ func (h *Handler) reconstructScenarioRunPayload(ctx context.Context, scenarioRun
 		Environment:     scenarioRun.Spec.Environment,
 		KubeconfigPath:  scenarioRun.Spec.KubeconfigPath,
 		MaxRetries:      intPtr(scenarioRun.Spec.MaxRetries),
-		Workspace:       scenarioRun.Spec.Workspace,
+		Workspace:       workspaceSelectionFromReference(scenarioRun.Spec.Workspace),
 		RollbackEnabled: scenarioRun.Spec.RollbackEnabled,
 	}
 	if ref := h.replayableCloudCredentialRef(ctx, scenarioRun.Spec.CloudCredentialRef); ref != "" {

@@ -1363,7 +1363,7 @@ func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Process file references: validate access and translate to FileMount
-	workspaceRef, ok := h.resolveWorkspaceSelection(w, r, req.Workspace)
+	workspaceRef, ok := h.resolveWorkspaceSelection(w, r, req.Workspace.reference())
 	if !ok {
 		return
 	}

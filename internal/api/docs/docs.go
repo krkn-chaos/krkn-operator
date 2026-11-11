@@ -3095,6 +3095,12 @@ const docTemplate = `{
                         "description": "Items per page. Defaults to jobs.defaultPageSize from ConfigMap.",
                         "name": "limit",
                         "in": "query"
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "Nest rollback runs under their source run before pagination. Defaults to false.",
+                        "name": "groupRollbacks",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -5627,9 +5633,64 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "state": {
+                    "$ref": "#/definitions/internal_api.RollbackState"
+                }
+            }
+        },
+        "internal_api.RollbackRunSummary": {
+            "type": "object",
+            "properties": {
+                "createdAt": {
+                    "type": "string"
+                },
+                "iteration": {
+                    "type": "integer"
+                },
+                "jobId": {
+                    "type": "string"
+                },
+                "jobPhase": {
+                    "type": "string"
+                },
+                "ownerUserId": {
+                    "type": "string"
+                },
+                "phase": {
+                    "type": "string"
+                },
+                "podName": {
+                    "type": "string"
+                },
+                "scenarioRunName": {
+                    "type": "string"
+                },
+                "sourceJobId": {
                     "type": "string"
                 }
             }
+        },
+        "internal_api.RollbackState": {
+            "type": "string",
+            "enum": [
+                "checking",
+                "available",
+                "absent",
+                "unavailable",
+                "running",
+                "succeeded",
+                "failed",
+                "error"
+            ],
+            "x-enum-varnames": [
+                "RollbackStateChecking",
+                "RollbackStateAvailable",
+                "RollbackStateAbsent",
+                "RollbackStateUnavailable",
+                "RollbackStateRunning",
+                "RollbackStateSucceeded",
+                "RollbackStateFailed",
+                "RollbackStateError"
+            ]
         },
         "internal_api.ScenarioDetailResponse": {
             "type": "object",
@@ -5859,7 +5920,7 @@ const docTemplate = `{
                     "description": "Workspace names a published PVC. The server resolves and pins its UID.",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/github_com_krkn-chaos_krkn-operator_api_v1alpha1.WorkspaceReference"
+                            "$ref": "#/definitions/internal_api.WorkspaceSelection"
                         }
                     ]
                 }
@@ -5947,6 +6008,13 @@ const docTemplate = `{
                     "description": "Name is the resource name",
                     "type": "string"
                 },
+                "rollbackRuns": {
+                    "description": "RollbackRuns are executions linked to this scenario run in the grouped Jobs view.",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_api.RollbackRunSummary"
+                    }
+                },
                 "scenarioRun": {
                     "description": "ScenarioRun contains the scenario run data (when Type == \"scenarioRun\")",
                     "allOf": [
@@ -6007,6 +6075,23 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_api.WorkspaceSelection": {
+            "type": "object",
+            "properties": {
+                "claimName": {
+                    "type": "string"
+                },
+                "claimUid": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "workspaceUid": {
+                    "type": "string"
+                }
+            }
+        },
         "internal_api.workspaceInfo": {
             "type": "object",
             "properties": {
@@ -6020,7 +6105,9 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "groups": {
+                    "description": "Groups contains zero or one visibility group.",
                     "type": "array",
+                    "maxItems": 1,
                     "items": {
                         "type": "string"
                     }
@@ -6043,7 +6130,9 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "groups": {
+                    "description": "Groups accepts at most one group because a workspace has one visibility group.",
                     "type": "array",
+                    "maxItems": 1,
                     "items": {
                         "type": "string"
                     }
