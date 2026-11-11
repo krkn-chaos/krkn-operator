@@ -28,7 +28,7 @@ const (
 	// RobotNameLabel identifies the robot a token Secret belongs to.
 	RobotNameLabel = "krkn.krkn-chaos.dev/robot"
 	// RobotTokenLabel marks a Secret holding a robot token hash.
-	RobotTokenLabel = "krkn.krkn-chaos.dev/robot-token"
+	RobotTokenLabel = "krkn.krkn-chaos.dev/robot-token" // #nosec G101 -- Kubernetes label key, not a credential value
 )
 
 // KrknRobotSpec defines the desired state of KrknRobot.

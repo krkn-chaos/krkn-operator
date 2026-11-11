@@ -43,7 +43,7 @@ import (
 
 const (
 	// robotTokenPrefix is the prefix of every robot bearer token.
-	robotTokenPrefix = "krkn_robot_"
+	robotTokenPrefix = "krkn_robot_" // #nosec G101 -- Token prefix (format marker), not a credential value; the secret is 32 random bytes
 	// robotTokenTTL is how long an issued robot token remains valid.
 	robotTokenTTL = 90 * 24 * time.Hour
 	// robotLastUsedRefresh throttles LastUsedAt status updates.
