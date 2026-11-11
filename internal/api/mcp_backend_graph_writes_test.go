@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
+	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -33,6 +34,12 @@ const (
 	graphTR1ID = "tr1"
 	// robotCIBotPrincipal is the principal ID of the test robot.
 	robotCIBotPrincipal = "robot:ci-bot"
+	// graphRunKind is the kind reported for started graph runs.
+	graphRunKind = "graph_run"
+	// zzzRunFixture sorts first by name but is the oldest run (created earlier).
+	zzzRunFixture = "zzz-run"
+	// aaaRunFixture sorts last by name but is the newer run.
+	aaaRunFixture = "aaa-run"
 )
 
 // countGraphRuns counts graph runs in the test namespace.
@@ -102,7 +109,7 @@ func TestMCPRunWorkflow_CreatesGraphRunOwnedByRobot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunWorkflow failed: %v", err)
 	}
-	if out.Kind != "graph_run" || out.Name == "" {
+	if out.Kind != graphRunKind || out.Name == "" {
 		t.Fatalf("out = %+v", out)
 	}
 	created := &krknv1alpha1.KrknGraphRun{}
@@ -186,7 +193,7 @@ func TestMCPReplayGraphRun_ResubmitsSameGraph(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReplayGraphRun failed: %v", err)
 	}
-	if out.Kind != "graph_run" || out.Name == "" || out.Name == "g1" {
+	if out.Kind != graphRunKind || out.Name == "" || out.Name == "g1" {
 		t.Fatalf("out = %+v", out)
 	}
 	created := &krknv1alpha1.KrknGraphRun{}
@@ -278,14 +285,103 @@ func TestMCPDeleteGraphRun_MissingCancelOnOneTarget(t *testing.T) {
 }
 
 func TestDeleteGraphRun_UnresolvableTargetDenied(t *testing.T) {
+	// The run's target request is gone, so visibility cannot be verified.
+	// The visibility check runs first and fails closed: not_found, not the
+	// ownership/forbidden path, so the run's existence is not leaked.
 	g1 := graphFixture("g1", map[string][]string{"krkn-operator": {"cluster-a"}})
 	h, _, _ := newMCPRunsTestHandler(t, g1) // TR deleted
 	backend := &mcpBackend{h: h}
 
 	_, err := backend.DeleteGraphRun(context.Background(), robotPrincipalFixture(), mcpserver.GraphRunRefInput{GraphRunName: "g1"})
-	be := isBackendCode(t, err, mcpserver.CodeForbidden)
-	if !containsStr(be.Message, "cannot verify cancel permission") {
-		t.Errorf("message = %q, want unresolvable-target denial", be.Message)
+	_ = isBackendCode(t, err, mcpserver.CodeNotFound)
+}
+
+// TestMCPDeleteGraphRun_VisibilityBeforeOwnership proves deletion is not an
+// existence oracle: a graph run the robot cannot see is not_found even though
+// the ownership check (which would answer forbidden) never runs.
+func TestMCPDeleteGraphRun_VisibilityBeforeOwnership(t *testing.T) {
+	// g2 targets only cluster-b, which ci-bot cannot view, and was created by
+	// another principal. Before the reorder this returned forbidden ("robots
+	// can only delete graph runs they created"), revealing that g2 exists.
+	g2 := graphFixture("g2", map[string][]string{"krkn-operator": {"cluster-b"}})
+	g2.Spec.TargetRequestID = graphTR1ID
+	g2.Spec.OwnerUserID = "alice@x.io"
+	h, _, _ := newMCPRunsTestHandler(t, g2, targetRequestTR1())
+	backend := &mcpBackend{h: h}
+
+	_, err := backend.DeleteGraphRun(context.Background(), robotPrincipalFixture(), mcpserver.GraphRunRefInput{GraphRunName: "g2"})
+	be := isBackendCode(t, err, mcpserver.CodeNotFound)
+	if containsStr(be.Message, "robots can only delete") {
+		t.Errorf("message = %q leaks the ownership denial for a hidden run", be.Message)
+	}
+}
+
+// TestMCPReplayGraphRun_NonOwnerFreshTargetRequestNotFound closes the
+// visibility bypass: a robot that does not own the run cannot replay it by
+// supplying a fresh targetRequestId when the original target request is gone
+// (the graph's contents, including env, must stay unreadable), while the
+// owning robot can still replay with a fresh target request.
+func TestMCPReplayGraphRun_NonOwnerFreshTargetRequestNotFound(t *testing.T) {
+	// g1 is owned by ci-bot; its original target request does not exist, but a
+	// fresh completed one (tr1) does.
+	g1 := graphFixture("g1", map[string][]string{"krkn-operator": {"cluster-a"}})
+	g1.Spec.TargetRequestID = "tr-gone"
+	h, c, _ := newMCPRunsTestHandler(t, g1, targetRequestTR1())
+	backend := &mcpBackend{h: h}
+
+	// qa-bot has no view on any cluster and does not own g1: not_found, and
+	// no graph run may be created.
+	otherRobot := robotFixture("qa-bot", false)
+	if err := c.Create(context.Background(), otherRobot); err != nil {
+		t.Fatal(err)
+	}
+	before := countGraphRuns(t, c)
+	_, err := backend.ReplayGraphRun(context.Background(), mcpserver.Principal{RobotName: "qa-bot"},
+		mcpserver.ReplayGraphRunInput{GraphRunName: "g1", TargetRequestID: graphTR1ID})
+	_ = isBackendCode(t, err, mcpserver.CodeNotFound)
+	if after := countGraphRuns(t, c); after != before {
+		t.Errorf("graph run count = %d, want %d (non-owner replay must not create a run)", after, before)
+	}
+
+	// The owning robot replays successfully with the fresh target request.
+	out, err := backend.ReplayGraphRun(context.Background(), robotPrincipalFixture(),
+		mcpserver.ReplayGraphRunInput{GraphRunName: "g1", TargetRequestID: graphTR1ID})
+	if err != nil {
+		t.Fatalf("owner ReplayGraphRun with fresh target request failed: %v", err)
+	}
+	if out.Kind != graphRunKind || out.Name == "" || out.Name == "g1" {
+		t.Errorf("out = %+v, want a new graph run", out)
+	}
+}
+
+// TestMCPRunWorkflow_IdempotencyKeyReturnsOldest proves duplicate graph-run
+// keys resolve to the first-created run by creation timestamp, not by
+// lexicographic name order.
+func TestMCPRunWorkflow_IdempotencyKeyReturnsOldest(t *testing.T) {
+	now := time.Now().UTC()
+	// aaaRunFixture sorts first by name but was created later; zzzRunFixture is older.
+	newer := graphFixture(aaaRunFixture, map[string][]string{"krkn-operator": {"cluster-a"}})
+	newer.Spec.TargetRequestID = graphTR1ID
+	newer.Labels = map[string]string{mcpIdempotencyKeyLabel: "dupe-key"}
+	newer.CreationTimestamp = metav1.NewTime(now)
+	older := graphFixture(zzzRunFixture, map[string][]string{"krkn-operator": {"cluster-a"}})
+	older.Spec.TargetRequestID = graphTR1ID
+	older.Labels = map[string]string{mcpIdempotencyKeyLabel: "dupe-key"}
+	older.CreationTimestamp = metav1.NewTime(now.Add(-time.Hour))
+	h, _, _ := newMCPRunsTestHandler(t, newer, older, targetRequestTR1())
+	backend := &mcpBackend{h: h}
+
+	out, err := backend.RunWorkflow(context.Background(), robotPrincipalFixture(), mcpserver.RunWorkflowInput{
+		TargetRequestID: graphTR1ID,
+		TargetClusters:  map[string][]string{"krkn-operator": {"cluster-a"}},
+		IdempotencyKey:  "dupe-key",
+		WorkflowID:      "wf-unset",
+	})
+	if err != nil {
+		t.Fatalf("RunWorkflow failed: %v", err)
+	}
+	if out.Name != zzzRunFixture {
+		t.Errorf("idempotent retry returned %q, want the oldest run %q (not name-sorted %q)", out.Name, zzzRunFixture, aaaRunFixture)
 	}
 }
 

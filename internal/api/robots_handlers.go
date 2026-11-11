@@ -24,6 +24,7 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -38,6 +39,15 @@ import (
 
 // robotTokenPathSegment is the sub-resource segment of the robot token route.
 const robotTokenPathSegment = "token"
+
+// maxRobotDescriptionLength mirrors the KrknRobotSpec.Description CRD
+// validation (MaxLength=256). The CRD limit counts characters, not bytes, so
+// the handlers must measure with utf8.RuneCountInString to stay consistent.
+const maxRobotDescriptionLength = 256
+
+// errGroupLookup marks a group lookup failure that is not simply a missing
+// group (API failure, RBAC denial); it maps to a 500 rather than a 400.
+var errGroupLookup = errors.New("failed to look up group")
 
 // +kubebuilder:rbac:groups=krkn.krkn-chaos.dev,resources=krknrobots,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=krkn.krkn-chaos.dev,resources=krknrobots/status,verbs=get;update;patch
@@ -171,14 +181,14 @@ func (h *Handler) CreateRobot(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{Error: "bad_request", Message: "Invalid robot name"})
 		return
 	}
-	if len(req.Description) > 256 {
-		writeJSONError(w, http.StatusBadRequest, ErrorResponse{Error: "bad_request", Message: "Description exceeds 256 characters"})
+	if robotDescriptionTooLong(req.Description) {
+		writeJSONError(w, http.StatusBadRequest, ErrorResponse{Error: "bad_request", Message: fmt.Sprintf("Description exceeds %d characters", maxRobotDescriptionLength)})
 		return
 	}
 
 	labels, err := h.resolveGroupLabels(ctx, req.Groups)
 	if err != nil {
-		writeJSONError(w, http.StatusBadRequest, ErrorResponse{Error: "bad_request", Message: err.Error()})
+		writeGroupLabelsError(w, err)
 		return
 	}
 	labels[krknv1alpha1.RobotAccountLabel] = "true"
@@ -229,6 +239,7 @@ func (h *Handler) GetRobot(w http.ResponseWriter, r *http.Request, name string) 
 // @Success 200 {object} RobotResponse "Updated robot"
 // @Failure 400 {object} ErrorResponse "Invalid request"
 // @Failure 404 {object} ErrorResponse "Robot not found"
+// @Failure 409 {object} ErrorResponse "Robot was modified concurrently"
 // @Security BearerAuth
 // @Router /robots/{name} [patch]
 func (h *Handler) UpdateRobot(w http.ResponseWriter, r *http.Request, name string) {
@@ -250,8 +261,8 @@ func (h *Handler) UpdateRobot(w http.ResponseWriter, r *http.Request, name strin
 		labels[k] = v
 	}
 	if req.Description != nil {
-		if len(*req.Description) > 256 {
-			writeJSONError(w, http.StatusBadRequest, ErrorResponse{Error: "bad_request", Message: "Description exceeds 256 characters"})
+		if robotDescriptionTooLong(*req.Description) {
+			writeJSONError(w, http.StatusBadRequest, ErrorResponse{Error: "bad_request", Message: fmt.Sprintf("Description exceeds %d characters", maxRobotDescriptionLength)})
 			return
 		}
 		updated.Spec.Description = *req.Description
@@ -262,7 +273,7 @@ func (h *Handler) UpdateRobot(w http.ResponseWriter, r *http.Request, name strin
 	if req.Groups != nil {
 		groupLabels, err := h.resolveGroupLabels(ctx, *req.Groups)
 		if err != nil {
-			writeJSONError(w, http.StatusBadRequest, ErrorResponse{Error: "bad_request", Message: err.Error()})
+			writeGroupLabelsError(w, err)
 			return
 		}
 		for key := range labels {
@@ -277,6 +288,10 @@ func (h *Handler) UpdateRobot(w http.ResponseWriter, r *http.Request, name strin
 	updated.Labels = labels
 
 	if err := h.client.Update(ctx, updated); err != nil {
+		if apierrors.IsConflict(err) {
+			writeJSONError(w, http.StatusConflict, ErrorResponse{Error: "conflict", Message: "Robot was modified concurrently; fetch it again and retry"})
+			return
+		}
 		log.FromContext(ctx).Error(err, "Failed to update robot", "robot", name)
 		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{Error: "internal_error", Message: "Failed to update robot"})
 		return
@@ -336,7 +351,7 @@ func (h *Handler) IssueRobotToken(w http.ResponseWriter, r *http.Request, name s
 	}
 	issued, err := h.robotTokens.Issue(ctx, name)
 	if err != nil {
-		writeRobotsServiceError(w, err)
+		writeRobotsServiceError(ctx, w, name, err)
 		return
 	}
 
@@ -390,6 +405,9 @@ func (h *Handler) getRobotOr404(w http.ResponseWriter, r *http.Request, name str
 }
 
 // resolveGroupLabels validates that each group exists and returns its labels.
+// A missing group yields a client error; any other lookup failure (API
+// failure, RBAC denial) is logged and wrapped with errGroupLookup so callers
+// can map it to a 500 instead of blaming the request.
 func (h *Handler) resolveGroupLabels(ctx context.Context, groups []string) (map[string]string, error) {
 	labels := make(map[string]string, len(groups))
 	for _, g := range groups {
@@ -399,11 +417,34 @@ func (h *Handler) resolveGroupLabels(ctx context.Context, groups []string) (map[
 		name := groupauth.SanitizeGroupName(g)
 		group := &krknv1alpha1.KrknUserGroup{}
 		if err := h.client.Get(ctx, client.ObjectKey{Name: name, Namespace: h.namespace}, group); err != nil {
-			return nil, fmt.Errorf("group %q not found", g)
+			if apierrors.IsNotFound(err) {
+				return nil, fmt.Errorf("group %q not found", g)
+			}
+			log.FromContext(ctx).Error(err, "Failed to get group", "group", name)
+			return nil, fmt.Errorf("failed to look up group %q: %w", g, errGroupLookup)
 		}
 		labels[groupauth.GroupLabelKey(name)] = "true"
 	}
 	return labels, nil
+}
+
+// writeGroupLabelsError maps resolveGroupLabels errors: unknown or empty
+// group names are client errors (400); lookup failures are already logged in
+// resolveGroupLabels and map to a generic 500 that leaks no internals.
+func writeGroupLabelsError(w http.ResponseWriter, err error) {
+	if errors.Is(err, errGroupLookup) {
+		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{Error: "internal_error", Message: "Failed to resolve groups"})
+		return
+	}
+	writeJSONError(w, http.StatusBadRequest, ErrorResponse{Error: "bad_request", Message: err.Error()})
+}
+
+// robotDescriptionTooLong reports whether a robot description exceeds the
+// CRD's MaxLength limit. The limit counts characters (not bytes), matching
+// Kubernetes string validation, so multibyte descriptions are measured with
+// utf8.RuneCountInString.
+func robotDescriptionTooLong(description string) bool {
+	return utf8.RuneCountInString(description) > maxRobotDescriptionLength
 }
 
 // decodeRobotsBody decodes a strict JSON body, writing the error response.
@@ -417,14 +458,17 @@ func decodeRobotsBody(w http.ResponseWriter, r *http.Request, target any) error 
 	return nil
 }
 
-// writeRobotsServiceError maps token service errors to HTTP responses.
-func writeRobotsServiceError(w http.ResponseWriter, err error) {
+// writeRobotsServiceError maps token service errors to HTTP responses. The
+// cause of unexpected failures is logged (structured, without token
+// material) so operators can diagnose them.
+func writeRobotsServiceError(ctx context.Context, w http.ResponseWriter, robotName string, err error) {
 	switch {
 	case isErrRobotDisabled(err):
 		writeJSONError(w, http.StatusConflict, ErrorResponse{Error: "conflict", Message: "Robot is disabled"})
 	case apierrors.IsNotFound(err):
 		writeJSONError(w, http.StatusNotFound, ErrorResponse{Error: "not_found", Message: "Robot not found"})
 	default:
+		log.FromContext(ctx).Error(err, "Failed to issue robot token", "robot", robotName)
 		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{Error: "internal_error", Message: "Failed to issue token"})
 	}
 }

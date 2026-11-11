@@ -33,6 +33,7 @@ import (
 
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
 	"github.com/krkn-chaos/krkn-operator/internal/mcpserver"
+	"github.com/krkn-chaos/krkn-operator/pkg/cloudcreds"
 	"github.com/krkn-chaos/krkn-operator/pkg/files"
 	"github.com/krkn-chaos/krkn-operator/pkg/registry"
 )
@@ -249,14 +250,59 @@ func TestMCPGetJobLogs_Bounds(t *testing.T) {
 	if captured == nil {
 		t.Fatal("PodLogOptions were not captured")
 	}
-	if captured.TailLines == nil || *captured.TailLines != 1000 {
-		t.Errorf("TailLines = %v, want 1000 (clamped)", captured.TailLines)
+	if captured.TailLines != nil {
+		t.Errorf("TailLines = %v, want nil (the tail is applied client-side, after report-block filtering)", captured.TailLines)
 	}
 	if captured.LimitBytes == nil || *captured.LimitBytes != 262144 {
 		t.Errorf("LimitBytes = %v, want 262144", captured.LimitBytes)
 	}
 	if captured.Container != "scenario" {
 		t.Errorf("Container = %q, want scenario", captured.Container)
+	}
+}
+
+// TestMCPGetJobLogs_FiltersReportBlocksBeforeTail mirrors the REST log path:
+// the ===KRKN_REPORT_*=== blocks (base64 report payloads) must be stripped
+// BEFORE the tail window is applied, so a tail starting mid-block can never
+// leak encoded report content.
+func TestMCPGetJobLogs_FiltersReportBlocksBeforeTail(t *testing.T) {
+	h, _, clientset := newMCPRunsTestHandler(t)
+
+	var captured *corev1.PodLogOptions
+	clientset.PrependReactor("get", "pods/log", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		if generic, ok := action.(k8stesting.GenericAction); ok {
+			if opts, ok := generic.GetValue().(*corev1.PodLogOptions); ok {
+				captured = opts
+			}
+		}
+		logs := strings.Join([]string{
+			"line-1",
+			"line-2",
+			"===KRKN_REPORT_HTML_START===",
+			"ZXhhbXBsZS1iYXNlNjQtcmVwb3J0LXBheWxvYWQ=",
+			"===KRKN_REPORT_HTML_END===",
+			"line-3",
+		}, "\n") + "\n"
+		return true, &runtime.Unknown{Raw: []byte(logs)}, nil
+	})
+
+	backend := &mcpBackend{h: h}
+	out, err := backend.GetJobLogs(context.Background(), robotPrincipalFixture(), mcpserver.JobLogsInput{
+		ScenarioRunName: "r1",
+		JobID:           jobAFixture,
+		TailLines:       2,
+	})
+	if err != nil {
+		t.Fatalf("GetJobLogs failed: %v", err)
+	}
+	if captured == nil || captured.TailLines != nil {
+		t.Fatalf("TailLines sent to Kubernetes = %v, want nil", captured)
+	}
+	if out.Logs != "line-2\nline-3\n" {
+		t.Errorf("Logs = %q, want the last two report-free lines", out.Logs)
+	}
+	if containsStr(out.Logs, "KRKN_REPORT") || containsStr(out.Logs, "ZXhhbXBsZS1iYXNlNjQtcmVwb3J0LXBheWxvYWQ") {
+		t.Errorf("logs leak report block content: %q", out.Logs)
 	}
 }
 
@@ -272,11 +318,166 @@ func TestMCPGetJobLogs_NegativeTail(t *testing.T) {
 	_ = isBackendCode(t, err, mcpserver.CodeInvalidArg)
 }
 
-func TestMCPGetScenarioRunConfig_Redacted(t *testing.T) {
-	h, _, _ := newMCPRunsTestHandler(t)
+// TestMCPGetScenarioRun_ClusterNameCollisionAcrossProviders guards against the
+// authorization bypass where flattening TargetData into a name->URL map let a
+// duplicate cluster name resolve to a provider the robot can view. The run has
+// no jobs yet, so visibility is decided via its declared targets.
+func TestMCPGetScenarioRun_ClusterNameCollisionAcrossProviders(t *testing.T) {
+	rColl := &krknv1alpha1.KrknScenarioRun{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              "r-coll",
+			Namespace:         "default",
+			CreationTimestamp: metav1.NewTime(time.Now().UTC()),
+		},
+		Spec: krknv1alpha1.KrknScenarioRunSpec{
+			TargetRequestID: "tr-coll",
+			// cluster-a under prov-b resolves to URL B (no view); the same
+			// name under prov-a resolves to URL A (view granted).
+			TargetClusters: map[string][]string{"prov-b": {"cluster-a"}},
+			Scenario:       krknv1alpha1.ScenarioReference{Name: "scenario-x"},
+		},
+	}
+	h, _, _ := newMCPRunsTestHandler(t, rColl, collisionTargetRequest("tr-coll"))
 	backend := &mcpBackend{h: h}
 
-	out, err := backend.GetScenarioRunConfig(context.Background(), robotPrincipalFixture(), mcpserver.ScenarioRunRefInput{ScenarioRunName: "r1"})
+	out, err := backend.ListScenarioRuns(context.Background(), robotPrincipalFixture(), mcpserver.ListScenarioRunsInput{})
+	if err != nil {
+		t.Fatalf("ListScenarioRuns failed: %v", err)
+	}
+	// r1 is legitimately visible; r-coll must not be.
+	if out.Total != 1 || len(out.Runs) != 1 || out.Runs[0].Name != "r1" {
+		t.Errorf("runs = %+v, want only r1 (r-coll must resolve within prov-b, whose URL the robot cannot view)", out.Runs)
+	}
+
+	_, err = backend.GetScenarioRun(context.Background(), robotPrincipalFixture(), mcpserver.ScenarioRunRefInput{ScenarioRunName: "r-coll"})
+	_ = isBackendCode(t, err, mcpserver.CodeNotFound)
+}
+
+// viewOnlyFixtures builds a viewers group granting view (but not run) on URL A
+// plus a robot in it.
+func viewOnlyFixtures() []runtime.Object {
+	group := &krknv1alpha1.KrknUserGroup{
+		ObjectMeta: metav1.ObjectMeta{Name: "viewers", Namespace: "default"},
+		Spec: krknv1alpha1.KrknUserGroupSpec{
+			Name: "viewers",
+			ClusterPermissions: map[string]krknv1alpha1.ClusterPermissionSet{
+				urlA: {Actions: []string{"view"}},
+			},
+		},
+	}
+	viewBot := robotFixture("view-bot", false)
+	viewBot.Labels = map[string]string{"group.krkn.krkn-chaos.dev/viewers": "true"}
+	return []runtime.Object{group, viewBot}
+}
+
+// runnableScenarioRun builds a run confined to cluster-a (URL A) with a job,
+// sensitive environment values and the given cloud credential reference.
+func runnableScenarioRun(name, cloudCredRef string) *krknv1alpha1.KrknScenarioRun {
+	return &krknv1alpha1.KrknScenarioRun{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              name,
+			Namespace:         "default",
+			CreationTimestamp: metav1.NewTime(time.Now().UTC().Add(-time.Minute)),
+		},
+		Spec: krknv1alpha1.KrknScenarioRunSpec{
+			TargetRequestID:    "tr1",
+			TargetClusters:     map[string][]string{"krkn-operator": {"cluster-a"}},
+			Scenario:           krknv1alpha1.ScenarioReference{Name: "scenario-x"},
+			Environment:        map[string]string{"PASSWORD": "hunter2"},
+			CloudCredentialRef: cloudCredRef,
+			OwnerUserID:        "robot:ci-bot",
+		},
+		Status: krknv1alpha1.KrknScenarioRunStatus{
+			Phase: "Running",
+			ClusterJobs: []krknv1alpha1.ClusterJobStatus{
+				{ProviderName: "krkn-operator", ClusterName: "cluster-a", ClusterAPIURL: urlA, JobID: "job-" + name, Phase: "Running", PodName: "pod-" + name},
+			},
+		},
+	}
+}
+
+// restrictedCloudCredential builds a cloud credential Secret scoped to the ops
+// group (not sre), so the ci-bot robot cannot use it.
+func restrictedCloudCredential(name string) *corev1.Secret {
+	return &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: "default",
+			Labels: map[string]string{
+				cloudcreds.AppNameLabel:                   cloudcreds.AppName,
+				cloudcreds.AppComponentLabel:              cloudcreds.ComponentCloudCredential,
+				"group.krkn.krkn-chaos.dev/ops":           "true",
+				"cloudcreds.krkn.krkn-chaos.dev/provider": "aws",
+			},
+		},
+		Data: map[string][]byte{"key": []byte("hunter2")},
+	}
+}
+
+// publicCloudCredential builds an available-to-all cloud credential Secret.
+func publicCloudCredential(name string) *corev1.Secret {
+	secret := restrictedCloudCredential(name)
+	secret.Labels[cloudcreds.AvailableToAllLabel] = "true"
+	return secret
+}
+
+// TestMCPGetScenarioRunConfig_RequiresRunPermission mirrors the REST policy:
+// krkn_get_scenario_run_config must require run permission on ALL target
+// clusters, not just view on any visible one.
+func TestMCPGetScenarioRunConfig_RequiresRunPermission(t *testing.T) {
+	objs := append(viewOnlyFixtures(),
+		targetRequestTR1(),
+		runnableScenarioRun("r-run", "cred-ops"),
+		runnableScenarioRun("r-run-pub", "cred-public"),
+		restrictedCloudCredential("cred-ops"),
+		publicCloudCredential("cred-public"),
+	)
+	h, _, _ := newMCPRunsTestHandler(t, objs...)
+	backend := &mcpBackend{h: h}
+	ctx := context.Background()
+
+	// View-only robot: forbidden even though the run is visible.
+	_, err := backend.GetScenarioRunConfig(ctx, mcpserver.Principal{RobotName: "view-bot"}, mcpserver.ScenarioRunRefInput{ScenarioRunName: "r-run"})
+	be := isBackendCode(t, err, mcpserver.CodeForbidden)
+	if containsStr(be.Message, urlA) || containsStr(be.Message, urlB) {
+		t.Errorf("forbidden message leaks cluster URLs: %q", be.Message)
+	}
+
+	// Run permission on cluster-a but not on cluster-b (r1 spans both): forbidden.
+	_, err = backend.GetScenarioRunConfig(ctx, robotPrincipalFixture(), mcpserver.ScenarioRunRefInput{ScenarioRunName: "r1"})
+	_ = isBackendCode(t, err, mcpserver.CodeForbidden)
+
+	// Run permission on every target: allowed, with a redacted config.
+	out, err := backend.GetScenarioRunConfig(ctx, robotPrincipalFixture(), mcpserver.ScenarioRunRefInput{ScenarioRunName: "r-run"})
+	if err != nil {
+		t.Fatalf("GetScenarioRunConfig(r-run) failed: %v", err)
+	}
+	raw, err := json.Marshal(out)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if containsStr(string(raw), "hunter2") {
+		t.Errorf("config leaks secret values: %s", raw)
+	}
+	if out.CloudCredentialRef != "" {
+		t.Errorf("CloudCredentialRef = %q, want empty (credential not accessible to the robot)", out.CloudCredentialRef)
+	}
+
+	// An accessible credential reference is preserved.
+	pubOut, err := backend.GetScenarioRunConfig(ctx, robotPrincipalFixture(), mcpserver.ScenarioRunRefInput{ScenarioRunName: "r-run-pub"})
+	if err != nil {
+		t.Fatalf("GetScenarioRunConfig(r-run-pub) failed: %v", err)
+	}
+	if pubOut.CloudCredentialRef != "cred-public" {
+		t.Errorf("CloudCredentialRef = %q, want cred-public (accessible credential must be preserved)", pubOut.CloudCredentialRef)
+	}
+}
+
+func TestMCPGetScenarioRunConfig_Redacted(t *testing.T) {
+	h, _, _ := newMCPRunsTestHandler(t, targetRequestTR1(), runnableScenarioRun("r-run", ""), restrictedCloudCredential("cred-ops"))
+	backend := &mcpBackend{h: h}
+
+	out, err := backend.GetScenarioRunConfig(context.Background(), robotPrincipalFixture(), mcpserver.ScenarioRunRefInput{ScenarioRunName: "r-run"})
 	if err != nil {
 		t.Fatalf("GetScenarioRunConfig failed: %v", err)
 	}
@@ -284,8 +485,11 @@ func TestMCPGetScenarioRunConfig_Redacted(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
-	if containsStr(string(raw), "s3cr3t") || containsStr(string(raw), "c2VjcmV0") {
+	if containsStr(string(raw), "hunter2") {
 		t.Errorf("config leaks secrets: %s", raw)
+	}
+	if len(out.EnvKeys) != 1 || out.EnvKeys[0] != "PASSWORD" {
+		t.Errorf("EnvKeys = %v, want [PASSWORD]", out.EnvKeys)
 	}
 }
 
@@ -399,6 +603,55 @@ func TestMCPListClusters_PendingAfterTimeout(t *testing.T) {
 	}
 	if len(out.Clusters) != 0 {
 		t.Errorf("clusters = %+v, want none while pending", out.Clusters)
+	}
+}
+
+// TestMCPListClusters_ReturnsClustersOnFirstCompletedCall covers the case the
+// pre-completed fixtures never hit: discovery finishes while the very first
+// krkn_list_clusters call is still polling, and that same call must return the
+// discovered clusters instead of an empty Completed result.
+func TestMCPListClusters_ReturnsClustersOnFirstCompletedCall(t *testing.T) {
+	oldInterval := mcpTargetPollInterval
+	oldTimeout := mcpTargetPollTimeout
+	mcpTargetPollInterval = 5 * time.Millisecond
+	mcpTargetPollTimeout = 5 * time.Second
+	defer func() {
+		mcpTargetPollInterval = oldInterval
+		mcpTargetPollTimeout = oldTimeout
+	}()
+
+	tr := completedTRForRobot("tr-slow", 0)
+	tr.Status.Status = "Pending"
+	tr.Status.TargetData = nil
+	h, c, _ := newMCPRunsTestHandler(t, tr)
+
+	// Discovery completes shortly after polling starts.
+	go func() {
+		time.Sleep(20 * time.Millisecond)
+		updated := &krknv1alpha1.KrknTargetRequest{}
+		if err := c.Get(context.Background(), client.ObjectKey{Name: "tr-slow", Namespace: "default"}, updated); err != nil {
+			return
+		}
+		updated.Status.Status = "Completed"
+		updated.Status.TargetData = map[string][]krknv1alpha1.ClusterTarget{
+			"krkn-operator": {
+				{ClusterName: "cluster-a", ClusterAPIURL: urlA},
+				{ClusterName: "cluster-b", ClusterAPIURL: urlB},
+			},
+		}
+		_ = c.Update(context.Background(), updated)
+	}()
+
+	backend := &mcpBackend{h: h}
+	out, err := backend.ListClusters(context.Background(), robotPrincipalFixture(), mcpserver.ListClustersInput{TargetRequestID: "tr-slow"})
+	if err != nil {
+		t.Fatalf("ListClusters failed: %v", err)
+	}
+	if out.Status != "Completed" {
+		t.Fatalf("Status = %q, want Completed", out.Status)
+	}
+	if len(out.Clusters) != 1 || out.Clusters[0].ClusterName != "cluster-a" {
+		t.Errorf("clusters = %+v, want [cluster-a] on the same first call that observed completion", out.Clusters)
 	}
 }
 

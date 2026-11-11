@@ -48,11 +48,18 @@ const (
 	robotTokenTTL = 90 * 24 * time.Hour
 	// robotLastUsedRefresh throttles LastUsedAt status updates.
 	robotLastUsedRefresh = 5 * time.Minute
+	// maxTokenStatusAttempts bounds retries when concurrent status writers
+	// (LastUsedAt refreshes from in-flight verifications, or a competing
+	// rotation) conflict with a token status write.
+	maxTokenStatusAttempts = 3
 )
 
 var (
 	errRobotTokenInvalid = errors.New("invalid robot token")
 	errRobotDisabled     = errors.New("robot is disabled")
+	// errRobotTokenSuperseded signals that a concurrent rotation replaced the
+	// token this attempt issued; the caller retries with a fresh token.
+	errRobotTokenSuperseded = errors.New("robot token superseded by concurrent rotation")
 )
 
 // RobotIdentity identifies an authenticated robot principal.
@@ -93,7 +100,32 @@ func robotTokenSecretName(robotName string) string {
 }
 
 // Issue creates a new token for the robot, replacing any previous one.
+// Rotation invalidates the old token immediately (the Secret is replaced
+// first), so Issue must not fail after that point merely because a concurrent
+// status writer (e.g. an in-flight Verify refreshing LastUsedAt, or a
+// competing rotation) bumped the robot's resourceVersion: the admin would get
+// an error while the old token is already dead. Status writes therefore
+// re-read and retry on conflict, and Issue verifies the final state is
+// consistent (status.tokenId matches the Secret's tokenId) before returning
+// success, retrying the whole rotation if it was superseded.
 func (s *robotTokenService) Issue(ctx context.Context, robotName string) (IssuedRobotToken, error) {
+	for attempt := 0; attempt < maxTokenStatusAttempts; attempt++ {
+		issued, err := s.issueAttempt(ctx, robotName)
+		if err == nil {
+			return issued, nil
+		}
+		if !errors.Is(err, errRobotTokenSuperseded) {
+			return IssuedRobotToken{}, err
+		}
+	}
+	return IssuedRobotToken{}, fmt.Errorf("robot %q: token rotation kept being superseded by concurrent rotations: %w", robotName, errRobotTokenSuperseded)
+}
+
+// issueAttempt performs one rotation attempt: generate a fresh token, replace
+// the Secret, record it on the robot status, and verify the result is still
+// the active token. It returns an error wrapping errRobotTokenSuperseded when
+// a concurrent rotation won the race.
+func (s *robotTokenService) issueAttempt(ctx context.Context, robotName string) (IssuedRobotToken, error) {
 	robot := &krknv1alpha1.KrknRobot{}
 	if err := s.client.Get(ctx, client.ObjectKey{Name: robotName, Namespace: s.namespace}, robot); err != nil {
 		if apierrors.IsNotFound(err) {
@@ -122,36 +154,63 @@ func (s *robotTokenService) Issue(ctx context.Context, robotName string) (Issued
 	if err := s.upsertTokenSecret(ctx, robot, token, tokenID, expiresAt); err != nil {
 		return IssuedRobotToken{}, err
 	}
-	if err := s.updateRobotTokenStatus(ctx, robot, tokenID, now, expiresAt); err != nil {
+	if err := s.updateRobotTokenStatus(ctx, robotName, tokenID, now, expiresAt); err != nil {
 		return IssuedRobotToken{}, err
+	}
+
+	active, err := s.tokenIsActive(ctx, robotName, tokenID)
+	if err != nil {
+		return IssuedRobotToken{}, err
+	}
+	if !active {
+		return IssuedRobotToken{}, fmt.Errorf("robot %q: %w", robotName, errRobotTokenSuperseded)
 	}
 
 	return IssuedRobotToken{Token: token, TokenID: tokenID, ExpiresAt: expiresAt}, nil
 }
 
 // Revoke deletes the robot's token Secret and clears its token status.
-// It is idempotent.
+// It is idempotent, and robust to concurrent status writers: the status clear
+// re-reads and retries on conflict.
 func (s *robotTokenService) Revoke(ctx context.Context, robotName string) error {
 	secret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: robotTokenSecretName(robotName), Namespace: s.namespace}}
 	if err := s.client.Delete(ctx, secret); err != nil && !apierrors.IsNotFound(err) {
 		return fmt.Errorf("failed to delete token secret: %w", err)
 	}
 
-	robot := &krknv1alpha1.KrknRobot{}
-	if err := s.client.Get(ctx, client.ObjectKey{Name: robotName, Namespace: s.namespace}, robot); err != nil {
+	if err := s.updateRobotStatusWithRetry(ctx, robotName, func(status *krknv1alpha1.KrknRobotStatus) {
+		status.TokenID = ""
+		status.TokenIssuedAt = nil
+		status.TokenExpiresAt = nil
+	}); err != nil {
+		// The robot may have been deleted concurrently; revoke stays
+		// idempotent.
 		if apierrors.IsNotFound(err) {
 			return nil
 		}
-		return fmt.Errorf("failed to get robot %q: %w", robotName, err)
-	}
-	updated := robot.DeepCopy()
-	updated.Status.TokenID = ""
-	updated.Status.TokenIssuedAt = nil
-	updated.Status.TokenExpiresAt = nil
-	if err := s.client.Status().Update(ctx, updated); err != nil {
-		return fmt.Errorf("failed to clear robot token status: %w", err)
+		return err
 	}
 	return nil
+}
+
+// tokenIsActive reports whether tokenID is still the robot's active token:
+// both the robot status and the token Secret must point at it.
+func (s *robotTokenService) tokenIsActive(ctx context.Context, robotName, tokenID string) (bool, error) {
+	robot := &krknv1alpha1.KrknRobot{}
+	if err := s.client.Get(ctx, client.ObjectKey{Name: robotName, Namespace: s.namespace}, robot); err != nil {
+		return false, fmt.Errorf("failed to get robot %q: %w", robotName, err)
+	}
+	if robot.Status.TokenID != tokenID {
+		return false, nil
+	}
+	secretObj := &corev1.Secret{}
+	if err := s.client.Get(ctx, client.ObjectKey{Name: robotTokenSecretName(robotName), Namespace: s.namespace}, secretObj); err != nil {
+		if apierrors.IsNotFound(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("failed to get token secret: %w", err)
+	}
+	return string(secretObj.Data["tokenId"]) == tokenID, nil
 }
 
 // Verify validates a bearer token and returns the robot identity. Every
@@ -282,16 +341,39 @@ func (s *robotTokenService) upsertTokenSecret(ctx context.Context, robot *krknv1
 	return nil
 }
 
-// updateRobotTokenStatus records the active token metadata on the robot.
-func (s *robotTokenService) updateRobotTokenStatus(ctx context.Context, robot *krknv1alpha1.KrknRobot, tokenID string, issuedAt, expiresAt time.Time) error {
-	updated := robot.DeepCopy()
-	updated.Status.TokenID = tokenID
-	updated.Status.TokenIssuedAt = &metav1.Time{Time: issuedAt.UTC()}
-	updated.Status.TokenExpiresAt = &metav1.Time{Time: expiresAt.UTC()}
-	if err := s.client.Status().Update(ctx, updated); err != nil {
-		return fmt.Errorf("failed to update robot token status: %w", err)
+// updateRobotTokenStatus records the active token metadata on the robot's
+// status via the conflict-retrying status writer.
+func (s *robotTokenService) updateRobotTokenStatus(ctx context.Context, robotName, tokenID string, issuedAt, expiresAt time.Time) error {
+	return s.updateRobotStatusWithRetry(ctx, robotName, func(status *krknv1alpha1.KrknRobotStatus) {
+		status.TokenID = tokenID
+		status.TokenIssuedAt = &metav1.Time{Time: issuedAt.UTC()}
+		status.TokenExpiresAt = &metav1.Time{Time: expiresAt.UTC()}
+	})
+}
+
+// updateRobotStatusWithRetry applies mutate to a fresh copy of the robot's
+// status and persists it. Concurrent status writers (Verify's LastUsedAt
+// refresh, other rotations) can conflict with the write; on conflict the robot
+// is re-read and the write retried, up to maxTokenStatusAttempts times.
+func (s *robotTokenService) updateRobotStatusWithRetry(ctx context.Context, robotName string, mutate func(status *krknv1alpha1.KrknRobotStatus)) error {
+	var lastErr error
+	for attempt := 0; attempt < maxTokenStatusAttempts; attempt++ {
+		robot := &krknv1alpha1.KrknRobot{}
+		if err := s.client.Get(ctx, client.ObjectKey{Name: robotName, Namespace: s.namespace}, robot); err != nil {
+			return fmt.Errorf("failed to get robot %q: %w", robotName, err)
+		}
+		updated := robot.DeepCopy()
+		mutate(&updated.Status)
+		if err := s.client.Status().Update(ctx, updated); err != nil {
+			if !apierrors.IsConflict(err) {
+				return fmt.Errorf("failed to update robot status: %w", err)
+			}
+			lastErr = fmt.Errorf("failed to update robot status (conflict): %w", err)
+			continue
+		}
+		return nil
 	}
-	return nil
+	return lastErr
 }
 
 // parseRobotToken splits "krkn_robot_<name>.<secret>" and validates the name

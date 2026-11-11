@@ -22,6 +22,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -249,6 +250,176 @@ func TestMCPRunScenario_IdempotencyKeyScopedToRobot(t *testing.T) {
 	}
 	if second.Name == first.Name {
 		t.Errorf("qa-bot's run %q reused ci-bot's run; idempotency keys must be scoped per robot", second.Name)
+	}
+}
+
+// TestMCPRunScenario_IdempotencyKeyConcurrent proves a concurrent duplicate
+// submission with the same key cannot create two runs: the deterministic run
+// name makes Kubernetes reject the second create with AlreadyExists, which the
+// backend maps to the existing run.
+func TestMCPRunScenario_IdempotencyKeyConcurrent(t *testing.T) {
+	h, c, _ := newMCPRunsTestHandler(t, targetRequestTR1())
+	backend := &mcpBackend{h: h}
+	baseline := countScenarioRuns(t, c)
+
+	in := mcpWriteInput()
+	in.IdempotencyKey = "race-key"
+
+	var wg sync.WaitGroup
+	results := make([]mcpserver.RunStartedOutput, 2)
+	errs := make([]error, 2)
+	for i := range 2 {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			results[i], errs[i] = backend.RunScenario(context.Background(), robotPrincipalFixture(), in)
+		}(i)
+	}
+	wg.Wait()
+
+	for i := range 2 {
+		if errs[i] != nil {
+			t.Fatalf("concurrent RunScenario %d failed: %v", i, errs[i])
+		}
+	}
+	if results[0].Name != results[1].Name {
+		t.Errorf("concurrent submissions returned different runs %q and %q, want the same run", results[0].Name, results[1].Name)
+	}
+	if after := countScenarioRuns(t, c); after != baseline+1 {
+		t.Errorf("scenario run count = %d, want %d (exactly one run from concurrent duplicates)", after, baseline+1)
+	}
+}
+
+// TestMCPRunScenario_IdempotencyKeyConflictReturnsExisting covers the recovery
+// path when the label lookup misses but the deterministic name collides: the
+// create returns 409 and the backend returns the robot's existing run instead
+// of an error (and never creates a second run).
+func TestMCPRunScenario_IdempotencyKeyConflictReturnsExisting(t *testing.T) {
+	h, c, _ := newMCPRunsTestHandler(t, targetRequestTR1())
+	backend := &mcpBackend{h: h}
+
+	// An existing run under the deterministic name, owned by this robot, with
+	// no idempotency label (as after a label-patch failure).
+	key := "recover-key"
+	existing := &krknv1alpha1.KrknScenarioRun{
+		ObjectMeta: metav1.ObjectMeta{Name: idempotentRunName("ci-bot", key), Namespace: "default"},
+		Spec: krknv1alpha1.KrknScenarioRunSpec{
+			TargetRequestID: "tr1",
+			TargetClusters:  map[string][]string{"krkn-operator": {"cluster-a"}},
+			Scenario:        krknv1alpha1.ScenarioReference{Name: "scenario-x"},
+			OwnerUserID:     "robot:ci-bot",
+		},
+	}
+	if err := c.Create(context.Background(), existing); err != nil {
+		t.Fatal(err)
+	}
+	baseline := countScenarioRuns(t, c)
+
+	in := mcpWriteInput()
+	in.IdempotencyKey = key
+	out, err := backend.RunScenario(context.Background(), robotPrincipalFixture(), in)
+	if err != nil {
+		t.Fatalf("RunScenario after name conflict failed: %v", err)
+	}
+	if out.Name != existing.Name {
+		t.Errorf("out.Name = %q, want the existing run %q", out.Name, existing.Name)
+	}
+	if after := countScenarioRuns(t, c); after != baseline {
+		t.Errorf("scenario run count = %d, want %d (no duplicate on conflict)", after, baseline)
+	}
+}
+
+// TestMCPRunScenario_IdempotencyKeyConflictNotOtherOwnersRun proves the 409
+// recovery path never hands back another principal's run: a run under the
+// derived name but owned by someone else propagates the conflict error.
+func TestMCPRunScenario_IdempotencyKeyConflictNotOtherOwnersRun(t *testing.T) {
+	h, c, _ := newMCPRunsTestHandler(t, targetRequestTR1())
+	backend := &mcpBackend{h: h}
+
+	key := "foreign-key"
+	foreign := &krknv1alpha1.KrknScenarioRun{
+		ObjectMeta: metav1.ObjectMeta{Name: idempotentRunName("ci-bot", key), Namespace: "default"},
+		Spec: krknv1alpha1.KrknScenarioRunSpec{
+			TargetRequestID: "tr1",
+			TargetClusters:  map[string][]string{"krkn-operator": {"cluster-a"}},
+			Scenario:        krknv1alpha1.ScenarioReference{Name: "scenario-x"},
+			OwnerUserID:     "someone-else",
+		},
+	}
+	if err := c.Create(context.Background(), foreign); err != nil {
+		t.Fatal(err)
+	}
+
+	in := mcpWriteInput()
+	in.IdempotencyKey = key
+	_, err := backend.RunScenario(context.Background(), robotPrincipalFixture(), in)
+	_ = isBackendCode(t, err, mcpserver.CodeConflict)
+}
+
+// TestMCPRunScenario_IdempotencyKeyReturnsOldest proves duplicate keys resolve
+// to the first-created run by creation timestamp, not by lexicographic name
+// order (run names are "<scenario>-<uuid8>", so name order is arbitrary).
+func TestMCPRunScenario_IdempotencyKeyReturnsOldest(t *testing.T) {
+	now := time.Now().UTC()
+	// "aaa-run" sorts first by name but was created later; "zzz-run" is older.
+	newer := &krknv1alpha1.KrknScenarioRun{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              "aaa-run",
+			Namespace:         "default",
+			CreationTimestamp: metav1.NewTime(now),
+			Labels:            map[string]string{mcpIdempotencyKeyLabel: "dupe-key"},
+		},
+		Spec: krknv1alpha1.KrknScenarioRunSpec{
+			TargetRequestID: "tr1",
+			TargetClusters:  map[string][]string{"krkn-operator": {"cluster-a"}},
+			Scenario:        krknv1alpha1.ScenarioReference{Name: "scenario-x"},
+			OwnerUserID:     "robot:ci-bot",
+		},
+	}
+	older := newer.DeepCopy()
+	older.Name = "zzz-run"
+	older.CreationTimestamp = metav1.NewTime(now.Add(-time.Hour))
+	h, _, _ := newMCPRunsTestHandler(t, targetRequestTR1(), newer, older)
+	backend := &mcpBackend{h: h}
+
+	in := mcpWriteInput()
+	in.IdempotencyKey = "dupe-key"
+	out, err := backend.RunScenario(context.Background(), robotPrincipalFixture(), in)
+	if err != nil {
+		t.Fatalf("RunScenario failed: %v", err)
+	}
+	if out.Name != "zzz-run" {
+		t.Errorf("idempotent retry returned %q, want the oldest run %q (not name-sorted %q)", out.Name, "zzz-run", "aaa-run")
+	}
+}
+
+// TestMCPRunScenario_IdempotencyKeyWithCustomRunName covers the combination of
+// a client-supplied customRunName and an idempotency key: the user's name is
+// preserved and a retry with the same key and name returns the same run.
+func TestMCPRunScenario_IdempotencyKeyWithCustomRunName(t *testing.T) {
+	h, c, _ := newMCPRunsTestHandler(t, targetRequestTR1())
+	backend := &mcpBackend{h: h}
+	baseline := countScenarioRuns(t, c)
+
+	in := mcpWriteInput()
+	in.IdempotencyKey = "named-key"
+	in.CustomRunName = "my-named-run"
+	first, err := backend.RunScenario(context.Background(), robotPrincipalFixture(), in)
+	if err != nil {
+		t.Fatalf("first RunScenario failed: %v", err)
+	}
+	if first.Name != "my-named-run" {
+		t.Errorf("run name = %q, want the client-supplied customRunName", first.Name)
+	}
+	second, err := backend.RunScenario(context.Background(), robotPrincipalFixture(), in)
+	if err != nil {
+		t.Fatalf("retry RunScenario failed: %v", err)
+	}
+	if second.Name != first.Name {
+		t.Errorf("retry returned run %q, want the existing run %q", second.Name, first.Name)
+	}
+	if after := countScenarioRuns(t, c); after != baseline+1 {
+		t.Errorf("scenario run count = %d, want %d (no duplicate)", after, baseline+1)
 	}
 }
 

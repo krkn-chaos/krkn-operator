@@ -20,17 +20,21 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/kubernetes/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	fakeclient "sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
 	"github.com/krkn-chaos/krkn-operator/pkg/auth"
@@ -274,6 +278,185 @@ func TestDeleteRobot_RemovesTokenSecret(t *testing.T) {
 	secret := &corev1.Secret{}
 	if err := c.Get(context.Background(), client.ObjectKey{Name: "krknrobot-ci-bot-token", Namespace: "default"}, secret); err == nil {
 		t.Error("token Secret still exists")
+	}
+}
+
+// TestCreateRobot_DescriptionLength covers the description limit: the CRD's
+// MaxLength=256 counts characters, so a 200-character multibyte description
+// must be accepted even though it exceeds 256 bytes, while 257 ASCII
+// characters must be rejected.
+func TestCreateRobot_DescriptionLength(t *testing.T) {
+	cases := []struct {
+		name string
+		desc string
+		want int
+	}{
+		{"multibyte 200 chars accepted", strings.Repeat("漢", 200), http.StatusCreated},
+		{"emoji 256 chars accepted", strings.Repeat("🤖", 128), http.StatusCreated},
+		{"ascii 256 chars accepted", strings.Repeat("a", 256), http.StatusCreated},
+		{"ascii 257 chars rejected", strings.Repeat("a", 257), http.StatusBadRequest},
+		{"multibyte 257 chars rejected", strings.Repeat("漢", 257), http.StatusBadRequest},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h, c := newRobotsTestHandler(t, sreGroupFixture())
+			body := CreateRobotRequest{Name: "ci-bot", Description: tc.desc}
+			w := doRobotsRequest(t, h, http.MethodPost, RobotsPath, body, createAdminContext())
+			if w.Code != tc.want {
+				t.Fatalf("status %d, want %d. Body: %s", w.Code, tc.want, w.Body.String())
+			}
+			if tc.want == http.StatusCreated {
+				robot := &krknv1alpha1.KrknRobot{}
+				if err := c.Get(context.Background(), client.ObjectKey{Name: "ci-bot", Namespace: "default"}, robot); err != nil {
+					t.Fatalf("robot CR not created: %v", err)
+				}
+				if robot.Spec.Description != tc.desc {
+					t.Errorf("description not persisted faithfully")
+				}
+			}
+		})
+	}
+}
+
+// TestUpdateRobot_DescriptionLength mirrors TestCreateRobot_DescriptionLength
+// on the PATCH path.
+func TestUpdateRobot_DescriptionLength(t *testing.T) {
+	cases := []struct {
+		name string
+		desc string
+		want int
+	}{
+		{"multibyte 200 chars accepted", strings.Repeat("漢", 200), http.StatusOK},
+		{"ascii 257 chars rejected", strings.Repeat("a", 257), http.StatusBadRequest},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h, c := newRobotsTestHandler(t, robotFixture("ci-bot", false))
+			desc := tc.desc
+			body := UpdateRobotRequest{Description: &desc}
+			w := doRobotsRequest(t, h, http.MethodPatch, RobotsPath+"/ci-bot", body, createAdminContext())
+			if w.Code != tc.want {
+				t.Fatalf("status %d, want %d. Body: %s", w.Code, tc.want, w.Body.String())
+			}
+			if tc.want == http.StatusOK {
+				robot := &krknv1alpha1.KrknRobot{}
+				if err := c.Get(context.Background(), client.ObjectKey{Name: "ci-bot", Namespace: "default"}, robot); err != nil {
+					t.Fatal(err)
+				}
+				if robot.Spec.Description != tc.desc {
+					t.Errorf("description not persisted faithfully")
+				}
+			}
+		})
+	}
+}
+
+// TestResolveGroupLabels_ErrorMapping covers the group lookup error mappings:
+// a missing group is a 400 client error, but an infrastructure failure during
+// the lookup must be a generic 500 that leaks no internal details.
+func TestResolveGroupLabels_ErrorMapping(t *testing.T) {
+	cases := []struct {
+		name   string
+		groups []string
+		getErr error
+		want   int
+		wantIn string
+	}{
+		{
+			name:   "unknown group is a client error",
+			groups: []string{"nope"},
+			getErr: nil,
+			want:   http.StatusBadRequest,
+			wantIn: `group \"nope\" not found`,
+		},
+		{
+			name:   "empty group name is a client error",
+			groups: []string{"  "},
+			getErr: nil,
+			want:   http.StatusBadRequest,
+			wantIn: "group name must not be empty",
+		},
+		{
+			name:   "lookup failure is a generic server error",
+			groups: []string{"sre"},
+			getErr: apierrors.NewInternalError(errors.New("etcd connection refused")),
+			want:   http.StatusInternalServerError,
+			wantIn: "Failed to resolve groups",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h, _ := newRobotsTestHandler(t, sreGroupFixture())
+			if tc.getErr != nil {
+				h.client = interceptor.NewClient(h.client.(client.WithWatch), interceptor.Funcs{
+					Get: func(ctx context.Context, cl client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+						if _, ok := obj.(*krknv1alpha1.KrknUserGroup); ok {
+							return tc.getErr
+						}
+						return cl.Get(ctx, key, obj, opts...)
+					},
+				})
+			}
+			body := CreateRobotRequest{Name: "ci-bot", Groups: tc.groups}
+			w := doRobotsRequest(t, h, http.MethodPost, RobotsPath, body, createAdminContext())
+			if w.Code != tc.want {
+				t.Fatalf("status %d, want %d. Body: %s", w.Code, tc.want, w.Body.String())
+			}
+			if !strings.Contains(w.Body.String(), tc.wantIn) {
+				t.Errorf("body %s lacks %q", w.Body.String(), tc.wantIn)
+			}
+			if tc.getErr != nil && strings.Contains(w.Body.String(), "etcd") {
+				t.Errorf("body leaks internal error details: %s", w.Body.String())
+			}
+		})
+	}
+}
+
+// TestUpdateRobot_ConflictReturns409 verifies a resourceVersion conflict on
+// the robot update maps to 409, not 500.
+func TestUpdateRobot_ConflictReturns409(t *testing.T) {
+	h, _ := newRobotsTestHandler(t, robotFixture("ci-bot", false))
+	h.client = interceptor.NewClient(h.client.(client.WithWatch), interceptor.Funcs{
+		Update: func(ctx context.Context, cl client.WithWatch, obj client.Object, opts ...client.UpdateOption) error {
+			if _, ok := obj.(*krknv1alpha1.KrknRobot); ok {
+				return apierrors.NewConflict(schema.GroupResource{Group: "krkn.krkn-chaos.dev", Resource: "krknrobots"}, "ci-bot", errors.New("stale resourceVersion"))
+			}
+			return cl.Update(ctx, obj, opts...)
+		},
+	})
+	desc := "new description"
+	body := UpdateRobotRequest{Description: &desc}
+	w := doRobotsRequest(t, h, http.MethodPatch, RobotsPath+"/ci-bot", body, createAdminContext())
+	if w.Code != http.StatusConflict {
+		t.Fatalf("status %d, want 409. Body: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "conflict") {
+		t.Errorf("body %s lacks conflict error code", w.Body.String())
+	}
+}
+
+// TestIssueRobotToken_InternalErrorMapsTo500 verifies that an unexpected
+// token service failure (here: persistent status conflicts) maps to a generic
+// 500 without leaking internals.
+func TestIssueRobotToken_InternalErrorMapsTo500(t *testing.T) {
+	h, _ := newRobotsTestHandler(t, robotFixture("ci-bot", false))
+	h.client = interceptor.NewClient(h.client.(client.WithWatch), interceptor.Funcs{
+		SubResourceUpdate: func(ctx context.Context, cl client.Client, subResourceName string, obj client.Object, opts ...client.SubResourceUpdateOption) error {
+			if _, ok := obj.(*krknv1alpha1.KrknRobot); ok && subResourceName == "status" {
+				return apierrors.NewConflict(schema.GroupResource{Group: "krkn.krkn-chaos.dev", Resource: "krknrobots"}, "ci-bot", errors.New("stale resourceVersion"))
+			}
+			return cl.Status().Update(ctx, obj, opts...)
+		},
+	})
+	// The token service captured the raw client at construction; point it at
+	// the intercepted one.
+	h.robotTokens.client = h.client
+	w := doRobotsRequest(t, h, http.MethodPost, RobotsPath+"/ci-bot/token", nil, createAdminContext())
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("status %d, want 500. Body: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "Failed to issue token") {
+		t.Errorf("body %s lacks generic message", w.Body.String())
 	}
 }
 

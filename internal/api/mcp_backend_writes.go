@@ -18,6 +18,9 @@ package api
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
 	"regexp"
 	"sort"
 	"strconv"
@@ -36,6 +39,13 @@ import (
 // mcpIdempotencyKeyLabel marks a run created through the MCP endpoint with the
 // client-supplied idempotency key, so retries do not start duplicate
 // experiments. The key is scoped to the submitting robot via the owner check.
+//
+// For scenario runs the label is a secondary lookup aid: the primary duplicate
+// suppression is the deterministic run name derived by idempotentRunName, which
+// the REST create enforces atomically via Kubernetes name uniqueness. For graph
+// runs the REST create contract (GraphRunCreateRequest) accepts neither a run
+// name nor labels, so the label is the only available match and a small
+// create-to-label window remains; see findIdempotencyGraphRun.
 const mcpIdempotencyKeyLabel = "krkn.krkn-chaos.dev/mcp-idempotency-key"
 
 // idempotencyKeyRegexp constrains client-supplied keys to a valid Kubernetes
@@ -50,6 +60,53 @@ func validateIdempotencyKey(key string) error {
 	return nil
 }
 
+// idempotentRunName derives a deterministic, DNS-1123-safe run name from the
+// robot and idempotency key. PostScenarioRun uses the sanitized customRunName
+// as the KrknScenarioRun resource name, so a retry or concurrent duplicate
+// submission with the same key hits Kubernetes name uniqueness and the create
+// fails with AlreadyExists — making the key atomic with creation, with no
+// create-then-label window. The robot name is hashed in so keys are scoped per
+// robot, and the "mcp-idem-" prefix namespaces the derived name away from
+// client-supplied custom run names.
+func idempotentRunName(robotName, key string) string {
+	sum := sha256.Sum256([]byte("robot:" + robotName + "\x00" + key))
+	return "mcp-idem-" + hex.EncodeToString(sum[:8])
+}
+
+// scenarioRunStartedOutputFromRun builds the run-started output returned to a
+// duplicate submission from an existing run's status.
+func scenarioRunStartedOutputFromRun(run *krknv1alpha1.KrknScenarioRun) mcpserver.RunStartedOutput {
+	out := mcpserver.RunStartedOutput{Kind: "scenario_run", Name: run.Name}
+	for _, job := range run.Status.ClusterJobs {
+		out.Jobs = append(out.Jobs, mcpserver.StartedJobOutput{
+			ClusterName: job.ClusterName,
+			JobID:       job.JobID,
+			Status:      job.Phase,
+			Success:     true,
+		})
+	}
+	return out
+}
+
+// idempotencyCandidate pairs a run name with its creation time so candidates
+// can be ordered oldest-first.
+type idempotencyCandidate struct {
+	name    string
+	created metav1.Time
+}
+
+// sortIdempotencyCandidates orders candidates oldest-first by creation
+// timestamp (name as tie-breaker), so a duplicate key deterministically
+// resolves to the first-created run.
+func sortIdempotencyCandidates(cands []idempotencyCandidate) {
+	sort.Slice(cands, func(i, j int) bool {
+		if cands[i].created.Time.Equal(cands[j].created.Time) {
+			return cands[i].name < cands[j].name
+		}
+		return cands[i].created.Time.Before(cands[j].created.Time)
+	})
+}
+
 // findIdempotencyScenarioRun returns the robot-owned run previously created
 // with the given idempotency key, if any. Only runs owned by this robot and
 // visible to it are considered, so a key never leaks another principal's run.
@@ -62,38 +119,62 @@ func (b *mcpBackend) findIdempotencyScenarioRun(ctx context.Context, p mcpserver
 		return mcpserver.RunStartedOutput{}, false, err
 	}
 
-	names := make([]string, 0, len(runs.Items))
+	cands := make([]idempotencyCandidate, 0, len(runs.Items))
 	for i := range runs.Items {
 		if runs.Items[i].Spec.OwnerUserID == "robot:"+p.RobotName {
-			names = append(names, runs.Items[i].Name)
+			cands = append(cands, idempotencyCandidate{
+				name:    runs.Items[i].Name,
+				created: runs.Items[i].CreationTimestamp,
+			})
 		}
 	}
-	if len(names) == 0 {
+	if len(cands) == 0 {
 		return mcpserver.RunStartedOutput{}, false, nil
 	}
-	sort.Strings(names)
+	sortIdempotencyCandidates(cands)
 
-	// Multiple matches can only result from a race or a label patch failure;
-	// deterministically return the oldest (first created) run.
-	run, err := b.getVisibleScenarioRun(ctx, p, names[0])
+	// Multiple matches can only result from a label patch failure on a
+	// pre-deterministic-name run; deterministically return the oldest
+	// (first created) run.
+	run, err := b.getVisibleScenarioRun(ctx, p, cands[0].name)
 	if err != nil {
 		return mcpserver.RunStartedOutput{}, false, err
 	}
-	out := mcpserver.RunStartedOutput{Kind: "scenario_run", Name: run.Name}
-	for _, job := range run.Status.ClusterJobs {
-		out.Jobs = append(out.Jobs, mcpserver.StartedJobOutput{
-			ClusterName: job.ClusterName,
-			JobID:       job.JobID,
-			Status:      job.Phase,
-			Success:     true,
-		})
+	return scenarioRunStartedOutputFromRun(run), true, nil
+}
+
+// resolveIdempotencyScenarioConflict maps a 409 conflict from the create
+// dispatch to the existing run when that run belongs to this robot and was
+// created with the same idempotency key — either because a concurrent
+// duplicate submission won the deterministic-name race, or because an earlier
+// attempt succeeded but its label patch failed. handled is false when the
+// conflicting run belongs to another principal or does not carry this key, in
+// which case the conflict error must be propagated unchanged.
+func (b *mcpBackend) resolveIdempotencyScenarioConflict(ctx context.Context, p mcpserver.Principal, runName, key, derivedName string) (mcpserver.RunStartedOutput, bool) {
+	run := &krknv1alpha1.KrknScenarioRun{}
+	if err := b.h.client.Get(ctx, client.ObjectKey{Name: runName, Namespace: b.h.namespace}, run); err != nil {
+		return mcpserver.RunStartedOutput{}, false
 	}
-	return out, true, nil
+	if run.Spec.OwnerUserID != "robot:"+p.RobotName {
+		return mcpserver.RunStartedOutput{}, false
+	}
+	if run.Labels[mcpIdempotencyKeyLabel] != key && runName != derivedName {
+		return mcpserver.RunStartedOutput{}, false
+	}
+	visible, err := b.getVisibleScenarioRun(ctx, p, runName)
+	if err != nil {
+		return mcpserver.RunStartedOutput{}, false
+	}
+	return scenarioRunStartedOutputFromRun(visible), true
 }
 
 // labelScenarioRunIdempotent records the idempotency key on a newly created
-// run. A failure is logged but not fatal: the run did start, and the loss only
-// affects duplicate suppression for a later retry of the same key.
+// run so the label-based lookup in findIdempotencyScenarioRun can find it.
+// Duplicate suppression does not depend on this patch: the run was created
+// under a deterministic idempotentRunName, so a retry that misses the label
+// still conflicts on the name and is resolved by
+// resolveIdempotencyScenarioConflict. A patch failure is therefore logged but
+// not fatal.
 func (b *mcpBackend) labelScenarioRunIdempotent(ctx context.Context, runName, key string) {
 	run := &krknv1alpha1.KrknScenarioRun{ObjectMeta: metav1.ObjectMeta{Name: runName, Namespace: b.h.namespace}}
 	patch := client.MergeFrom(run.DeepCopy())
@@ -108,6 +189,14 @@ func (b *mcpBackend) labelScenarioRunIdempotent(ctx context.Context, runName, ke
 
 // findIdempotencyGraphRun returns the robot-owned graph run previously created
 // with the given idempotency key, if any.
+//
+// Unlike scenario runs, graph runs cannot use deterministic naming:
+// GraphRunCreateRequest (parsed with DisallowUnknownFields) accepts neither a
+// run name nor labels, and CreateGraphRun always generates a
+// "graphrun-<uuid8>" name server-side. The label-based check-create-label
+// sequence is therefore the best the REST contract allows; a submission racing
+// the post-create label patch can still create a second run, though the owner
+// scoping below means it can only ever duplicate this robot's own run.
 func (b *mcpBackend) findIdempotencyGraphRun(ctx context.Context, p mcpserver.Principal, key string) (mcpserver.RunStartedOutput, bool, error) {
 	runs := &krknv1alpha1.KrknGraphRunList{}
 	if err := b.h.client.List(ctx, runs,
@@ -117,19 +206,23 @@ func (b *mcpBackend) findIdempotencyGraphRun(ctx context.Context, p mcpserver.Pr
 		return mcpserver.RunStartedOutput{}, false, err
 	}
 
-	names := make([]string, 0, len(runs.Items))
+	cands := make([]idempotencyCandidate, 0, len(runs.Items))
 	for i := range runs.Items {
 		if runs.Items[i].Spec.OwnerUserID == "robot:"+p.RobotName {
-			names = append(names, runs.Items[i].Name)
+			cands = append(cands, idempotencyCandidate{
+				name:    runs.Items[i].Name,
+				created: runs.Items[i].CreationTimestamp,
+			})
 		}
 	}
-	if len(names) == 0 {
+	if len(cands) == 0 {
 		return mcpserver.RunStartedOutput{}, false, nil
 	}
-	sort.Strings(names)
+	sortIdempotencyCandidates(cands)
 
+	// Deterministically return the oldest (first created) run.
 	gr := &krknv1alpha1.KrknGraphRun{}
-	if err := b.h.client.Get(ctx, client.ObjectKey{Name: names[0], Namespace: b.h.namespace}, gr); err != nil {
+	if err := b.h.client.Get(ctx, client.ObjectKey{Name: cands[0].name, Namespace: b.h.namespace}, gr); err != nil {
 		return mcpserver.RunStartedOutput{}, false, err
 	}
 	if _, ok := b.graphRunVisible(ctx, p, gr); !ok {
@@ -139,7 +232,9 @@ func (b *mcpBackend) findIdempotencyGraphRun(ctx context.Context, p mcpserver.Pr
 }
 
 // labelGraphRunIdempotent records the idempotency key on a newly created graph
-// run. A failure is logged but not fatal; see labelScenarioRunIdempotent.
+// run. A failure is logged but not fatal: the run did start, and the loss only
+// affects duplicate suppression for a later retry of the same key (see
+// findIdempotencyGraphRun for why graph runs have no stronger mechanism).
 func (b *mcpBackend) labelGraphRunIdempotent(ctx context.Context, runName, key string) {
 	gr := &krknv1alpha1.KrknGraphRun{ObjectMeta: metav1.ObjectMeta{Name: runName, Namespace: b.h.namespace}}
 	patch := client.MergeFrom(gr.DeepCopy())
@@ -167,6 +262,19 @@ func (b *mcpBackend) RunScenario(ctx context.Context, p mcpserver.Principal, in 
 		}
 	}
 
+	// PostScenarioRun uses the sanitized customRunName as the resource name,
+	// so deriving the name from (robot, key) makes the idempotency key atomic
+	// with creation: a retry or concurrent duplicate gets AlreadyExists from
+	// Kubernetes instead of starting a second experiment. When the client
+	// supplies its own customRunName, that name already provides uniqueness
+	// and is left untouched.
+	customRunName := in.CustomRunName
+	derivedRunName := ""
+	if in.IdempotencyKey != "" && customRunName == "" {
+		derivedRunName = idempotentRunName(p.RobotName, in.IdempotencyKey)
+		customRunName = derivedRunName
+	}
+
 	private := in.PrivateRegistry
 	req := ScenarioRunRequest{
 		TargetRequestID:         in.TargetRequestID,
@@ -175,7 +283,7 @@ func (b *mcpBackend) RunScenario(ctx context.Context, p mcpserver.Principal, in 
 		Scenario:                krknv1alpha1.ScenarioReference{Name: in.ScenarioName, Private: &private, RegistryName: in.RegistryName},
 		Environment:             in.Environment,
 		FileReferences:          fileReferencesToAPI(in.FileReferences),
-		CustomRunName:           in.CustomRunName,
+		CustomRunName:           customRunName,
 		MaxRetries:              in.MaxRetries,
 		CloudCredentialRef:      in.CloudCredentialRef,
 		ElasticsearchConfigName: in.ElasticsearchConfigName,
@@ -187,6 +295,22 @@ func (b *mcpBackend) RunScenario(ctx context.Context, p mcpserver.Principal, in 
 		return mcpserver.RunStartedOutput{}, errMCPInternal()
 	}
 	if err := backendErrorFromWriteDispatch(res); err != nil {
+		// A 409 means a run with the effective name already exists. When it is
+		// this robot's run for the same key, return it instead of the error.
+		if in.IdempotencyKey != "" {
+			var be *mcpserver.BackendError
+			if errors.As(err, &be) && be.Code == mcpserver.CodeConflict {
+				effectiveName := derivedRunName
+				if effectiveName == "" && in.CustomRunName != "" {
+					effectiveName = sanitizeResourceName(in.CustomRunName)
+				}
+				if effectiveName != "" {
+					if existing, handled := b.resolveIdempotencyScenarioConflict(ctx, p, effectiveName, in.IdempotencyKey, derivedRunName); handled {
+						return existing, nil
+					}
+				}
+			}
+		}
 		return mcpserver.RunStartedOutput{}, err
 	}
 
@@ -428,14 +552,16 @@ func (b *mcpBackend) ReplayGraphRun(ctx context.Context, p mcpserver.Principal, 
 		return mcpserver.RunStartedOutput{}, errMCPNotFound("graph run %q not found", in.GraphRunName)
 	}
 
-	// A run hidden by permissions (with a resolvable target request) is
-	// not_found, so replay is not an existence oracle. Only when the target
-	// request itself is unresolvable do we fall through to the stale-request
-	// error below.
-	if _, err := b.h.graphTargetURLs(ctx, gr); err == nil {
-		if _, ok := b.graphRunVisible(ctx, p, gr); !ok {
-			return mcpserver.RunStartedOutput{}, errMCPNotFound("graph run %q not found", in.GraphRunName)
-		}
+	// Visibility is enforced for every principal. The only exception is the
+	// owning robot when the run's original target request is unresolvable:
+	// graphRunVisible cannot distinguish "request gone" from "hidden", and the
+	// owner must be able to replay with a fresh targetRequestId. A non-owner
+	// in that situation gets not_found (fail closed) — supplying a fresh
+	// targetRequestId must not expose a graph the robot cannot view.
+	if _, urlErr := b.h.graphTargetURLs(ctx, gr); urlErr != nil && gr.Spec.OwnerUserID == "robot:"+p.RobotName {
+		logMCP(ctx, "graph run target request unresolvable; owner may replay with a fresh targetRequestId", "graphRun", gr.Name)
+	} else if _, ok := b.graphRunVisible(ctx, p, gr); !ok {
+		return mcpserver.RunStartedOutput{}, errMCPNotFound("graph run %q not found", in.GraphRunName)
 	}
 
 	// A stale target request fails with a clear invalid_argument asking for a
@@ -487,17 +613,20 @@ func (b *mcpBackend) ReplayGraphRun(ctx context.Context, p mcpserver.Principal, 
 }
 
 // DeleteGraphRun deletes a graph run the robot created, requiring cancel
-// permission on every target cluster. The dispatched handler re-checks owner.
+// permission on every target cluster. Visibility is checked before ownership
+// so deletion is not an existence oracle: a hidden run is not_found whether or
+// not the robot created it, while a visible run created by someone else is
+// forbidden. The dispatched handler re-checks owner.
 func (b *mcpBackend) DeleteGraphRun(ctx context.Context, p mcpserver.Principal, in mcpserver.GraphRunRefInput) (mcpserver.ActionOutput, error) {
 	gr := &krknv1alpha1.KrknGraphRun{}
 	if err := b.h.client.Get(ctx, client.ObjectKey{Name: in.GraphRunName, Namespace: b.h.namespace}, gr); err != nil {
 		return mcpserver.ActionOutput{}, errMCPNotFound("graph run %q not found", in.GraphRunName)
 	}
-	if err := b.h.robotCanDeleteGraphRun(ctx, p.RobotName, gr); err != nil {
-		return mcpserver.ActionOutput{}, err
-	}
 	if _, ok := b.graphRunVisible(ctx, p, gr); !ok {
 		return mcpserver.ActionOutput{}, errMCPNotFound("graph run %q not found", in.GraphRunName)
+	}
+	if err := b.h.robotCanDeleteGraphRun(ctx, p.RobotName, gr); err != nil {
+		return mcpserver.ActionOutput{}, err
 	}
 
 	res, err := b.h.dispatchAsRobot(ctx, p.RobotName, "DELETE", GraphRunsPath+"/"+in.GraphRunName, nil, nil, nil, b.h.DeleteGraphRun)

@@ -78,7 +78,8 @@ type KrknRobotStatus struct {
 //
 // The KrknRobot CRD must be labeled with:
 //   - krkn.krkn-chaos.dev/robot-account: "true"
-//   - krkn.krkn-chaos.dev/<group>: "true" for each group the robot belongs to
+//   - group.krkn.krkn-chaos.dev/<group>: "true" for each group the robot
+//     belongs to (see groupauth.GroupLabelPrefix)
 type KrknRobot struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`

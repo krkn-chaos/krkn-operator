@@ -194,8 +194,11 @@ func (p clusterPerms) can(clusterURL string, a groupauth.Action) bool {
 }
 
 // graphTargetURLs resolves the target clusters of a graph run to their API
-// URLs via the run's KrknTargetRequest. A missing request is an error so
-// callers can fail closed.
+// URLs via the run's KrknTargetRequest. Each cluster name is resolved within
+// its own provider's TargetData slice, mirroring the REST semantics of
+// checkGraphRunGroupAccess, so a duplicate cluster name under another provider
+// can never satisfy visibility. A missing request or an ambiguous cluster name
+// is an error so callers can fail closed.
 func (h *Handler) graphTargetURLs(ctx context.Context, gr *krknv1alpha1.KrknGraphRun) (map[string]string, error) {
 	logger := log.FromContext(ctx)
 
@@ -205,10 +208,51 @@ func (h *Handler) graphTargetURLs(ctx context.Context, gr *krknv1alpha1.KrknGrap
 		return nil, fmt.Errorf("target request %q not found", gr.Spec.TargetRequestID)
 	}
 
+	urls, err := resolveTargetClusterURLs(gr.Spec.TargetClusters, tr)
+	if err != nil {
+		logger.V(1).Info("Failed to resolve target cluster URLs for graph run", "graphRun", gr.Name, "error", err.Error())
+		return nil, err
+	}
+	return urls, nil
+}
+
+// resolveTargetClusterURLs maps the cluster names declared by a run to their
+// API URLs, resolving each name only within its own provider's TargetData
+// slice (REST equivalent: authorization.go checkGraphRunGroupAccess and
+// groupauth.ValidateScenarioRunAccess). It fails closed with a
+// groupauth.ClusterNameCollisionError when the run declares the same cluster
+// name under two providers that register it with different API URLs, because
+// a name-keyed map cannot express both and picking either could grant
+// visibility on a cluster the caller has no permission on. A name that is not
+// registered under its declared provider is simply absent from the result, so
+// visibility checks fail closed for it.
+func resolveTargetClusterURLs(targetClusters map[string][]string, tr *krknv1alpha1.KrknTargetRequest) (map[string]string, error) {
 	urls := make(map[string]string)
-	for _, clusters := range tr.Status.TargetData {
-		for _, cluster := range clusters {
-			urls[cluster.ClusterName] = cluster.ClusterAPIURL
+	for provider, names := range targetClusters {
+		index := make(map[string]string, len(tr.Status.TargetData[provider]))
+		for _, cluster := range tr.Status.TargetData[provider] {
+			if existing, ok := index[cluster.ClusterName]; ok && existing != cluster.ClusterAPIURL {
+				return nil, &groupauth.ClusterNameCollisionError{
+					ClusterName: cluster.ClusterName,
+					ExistingURL: existing,
+					ConflictURL: cluster.ClusterAPIURL,
+				}
+			}
+			index[cluster.ClusterName] = cluster.ClusterAPIURL
+		}
+		for _, name := range names {
+			clusterURL, ok := index[name]
+			if !ok {
+				continue
+			}
+			if existing, ok := urls[name]; ok && existing != clusterURL {
+				return nil, &groupauth.ClusterNameCollisionError{
+					ClusterName: name,
+					ExistingURL: existing,
+					ConflictURL: clusterURL,
+				}
+			}
+			urls[name] = clusterURL
 		}
 	}
 	return urls, nil

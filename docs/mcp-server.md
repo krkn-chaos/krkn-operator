@@ -89,12 +89,15 @@ operator API).
 
 3. **Rotate** = issue again (`POST .../token`); the old token stops working immediately.
 
-4. **Revoke**:
+4. **Revoke** (permanent — the token Secret is deleted and can never be recovered;
+   works whether or not the robot is disabled):
    ```bash
    curl -X DELETE https://<host>/api/v1/robots/ci-bot/token -H "Authorization: Bearer <admin-jwt>"
    ```
 
-5. **Disable** (keeps the robot, rejects all tokens):
+5. **Disable** (reversible suspension — rejects all tokens while disabled, but
+   the token Secret is kept; re-enabling the robot makes the same unexpired
+   token valid again immediately. Revoke instead for permanent invalidation):
    ```bash
    curl -X PATCH https://<host>/api/v1/robots/ci-bot \
      -H "Authorization: Bearer <admin-jwt>" -H "Content-Type: application/json" \

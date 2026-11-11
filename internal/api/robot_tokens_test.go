@@ -33,6 +33,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	fakeclient "sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
 )
@@ -315,5 +316,115 @@ func TestRevoke_Idempotent(t *testing.T) {
 	}
 	if err := svc.Revoke(context.Background(), "ci-bot"); err != nil {
 		t.Fatalf("second Revoke failed: %v", err)
+	}
+}
+
+// TestIssue_ConcurrentStatusWriteStillSucceeds reproduces the rotation race:
+// a Verify-triggered LastUsedAt status write lands between Issue's initial
+// robot Get and its status update. The stale resourceVersion used to make the
+// status update conflict, so the admin got an error while the old token was
+// already dead. Issue must re-read and retry instead.
+func TestIssue_ConcurrentStatusWriteStillSucceeds(t *testing.T) {
+	svc, c, _ := newRobotTokenTestService(t, robotFixture("ci-bot", false))
+	old, err := svc.Issue(context.Background(), "ci-bot")
+	if err != nil {
+		t.Fatalf("initial Issue failed: %v", err)
+	}
+
+	// Wrap the client so the next token Secret update (Issue's rotation) is
+	// preceded by a concurrent LastUsedAt status patch, as an in-flight
+	// Verify would do between Issue's Get and its status write.
+	bumped := false
+	svc.client = interceptor.NewClient(c.(client.WithWatch), interceptor.Funcs{
+		Update: func(ctx context.Context, cl client.WithWatch, obj client.Object, opts ...client.UpdateOption) error {
+			if _, ok := obj.(*corev1.Secret); ok && !bumped {
+				bumped = true
+				robot := &krknv1alpha1.KrknRobot{}
+				if err := cl.Get(ctx, client.ObjectKey{Name: "ci-bot", Namespace: "default"}, robot); err != nil {
+					return err
+				}
+				patch := client.MergeFrom(robot.DeepCopy())
+				robot.Status.LastUsedAt = &metav1.Time{Time: time.Now().UTC()}
+				if err := cl.Status().Patch(ctx, robot, patch); err != nil {
+					return err
+				}
+			}
+			return cl.Update(ctx, obj, opts...)
+		},
+	})
+
+	issued, err := svc.Issue(context.Background(), "ci-bot")
+	if err != nil {
+		t.Fatalf("Issue under concurrent status write failed: %v", err)
+	}
+	if _, err := svc.Verify(context.Background(), old.Token); !errors.Is(err, errRobotTokenInvalid) {
+		t.Errorf("old token err = %v, want errRobotTokenInvalid", err)
+	}
+	if _, err := svc.Verify(context.Background(), issued.Token); err != nil {
+		t.Errorf("new token err = %v, want nil", err)
+	}
+
+	robot := &krknv1alpha1.KrknRobot{}
+	if err := c.Get(context.Background(), client.ObjectKey{Name: "ci-bot", Namespace: "default"}, robot); err != nil {
+		t.Fatal(err)
+	}
+	secret := &corev1.Secret{}
+	if err := c.Get(context.Background(), client.ObjectKey{Name: "krknrobot-ci-bot-token", Namespace: "default"}, secret); err != nil {
+		t.Fatal(err)
+	}
+	if robot.Status.TokenID != issued.TokenID {
+		t.Errorf("status tokenId = %q, want %q", robot.Status.TokenID, issued.TokenID)
+	}
+	if string(secret.Data["tokenId"]) != issued.TokenID {
+		t.Errorf("secret tokenId = %q, want %q", string(secret.Data["tokenId"]), issued.TokenID)
+	}
+}
+
+// TestRevoke_ConcurrentStatusWriteStillSucceeds reproduces the revoke race: a
+// concurrent status write (LastUsedAt refresh) lands between Revoke's robot
+// read and its status clear, conflicting the stale status update. Revoke must
+// re-read and retry instead of failing.
+func TestRevoke_ConcurrentStatusWriteStillSucceeds(t *testing.T) {
+	svc, c, _ := newRobotTokenTestService(t, robotFixture("ci-bot", false))
+	if _, err := svc.Issue(context.Background(), "ci-bot"); err != nil {
+		t.Fatalf("Issue failed: %v", err)
+	}
+
+	// Wrap the client so the first robot status update goes through with a
+	// concurrently bumped resourceVersion: the interceptor patches LastUsedAt
+	// right before delegating the (now stale) status update, forcing a
+	// conflict the revoke path must survive.
+	bumped := false
+	svc.client = interceptor.NewClient(c.(client.WithWatch), interceptor.Funcs{
+		SubResourceUpdate: func(ctx context.Context, cl client.Client, subResourceName string, obj client.Object, opts ...client.SubResourceUpdateOption) error {
+			if _, ok := obj.(*krknv1alpha1.KrknRobot); ok && subResourceName == "status" && !bumped {
+				bumped = true
+				fresh := &krknv1alpha1.KrknRobot{}
+				if err := cl.Get(ctx, client.ObjectKey{Name: "ci-bot", Namespace: "default"}, fresh); err != nil {
+					return err
+				}
+				patch := client.MergeFrom(fresh.DeepCopy())
+				fresh.Status.LastUsedAt = &metav1.Time{Time: time.Now().UTC()}
+				if err := cl.Status().Patch(ctx, fresh, patch); err != nil {
+					return err
+				}
+			}
+			return cl.Status().Update(ctx, obj, opts...)
+		},
+	})
+
+	if err := svc.Revoke(context.Background(), "ci-bot"); err != nil {
+		t.Fatalf("Revoke under concurrent status write failed: %v", err)
+	}
+	robot := &krknv1alpha1.KrknRobot{}
+	if err := c.Get(context.Background(), client.ObjectKey{Name: "ci-bot", Namespace: "default"}, robot); err != nil {
+		t.Fatal(err)
+	}
+	if robot.Status.TokenID != "" || robot.Status.TokenIssuedAt != nil || robot.Status.TokenExpiresAt != nil {
+		t.Errorf("token status not cleared: %+v", robot.Status)
+	}
+	secret := &corev1.Secret{}
+	if err := c.Get(context.Background(), client.ObjectKey{Name: "krknrobot-ci-bot-token", Namespace: "default"}, secret); err == nil {
+		t.Error("token Secret still exists after revoke")
 	}
 }

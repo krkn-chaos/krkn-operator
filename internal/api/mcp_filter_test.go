@@ -216,7 +216,7 @@ func TestRedactScenarioConfig_NoSecrets(t *testing.T) {
 	run := filterTestRun()
 	perms := permsFor(map[string][]groupauth.Action{urlA: {groupauth.ActionView}})
 
-	out := redactScenarioConfig(run, perms, nil)
+	out := redactScenarioConfig(run, perms, nil, run.Spec.CloudCredentialRef)
 	raw, err := json.Marshal(out)
 	if err != nil {
 		t.Fatalf("marshal: %v", err)

@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -99,10 +100,12 @@ func (b *mcpBackend) ListClusters(ctx context.Context, p mcpserver.Principal, in
 
 	if tr.Status.Status != "Completed" {
 		completed := b.pollTargetRequest(ctx, trID)
-		if !completed {
+		if completed == nil {
 			return mcpserver.ListClustersOutput{TargetRequestID: trID, Status: "Pending"}, nil
 		}
-		tr.Status.Status = "Completed"
+		// Use the fetched object: the local tr predates completion and has no
+		// TargetData, which would yield an empty cluster list.
+		tr = completed
 	}
 
 	return b.buildClusterList(ctx, p, tr)
@@ -158,19 +161,21 @@ func (b *mcpBackend) createRobotTargetRequest(ctx context.Context, robotName str
 }
 
 // pollTargetRequest waits for a target request to complete, respecting ctx.
-func (b *mcpBackend) pollTargetRequest(ctx context.Context, trID string) bool {
+// It returns the completed KrknTargetRequest (including its TargetData), or
+// nil if the deadline or context expired first.
+func (b *mcpBackend) pollTargetRequest(ctx context.Context, trID string) *krknv1alpha1.KrknTargetRequest {
 	deadline := time.Now().Add(mcpTargetPollTimeout)
 	for {
 		tr := &krknv1alpha1.KrknTargetRequest{}
 		if err := b.h.client.Get(ctx, client.ObjectKey{Name: trID, Namespace: b.h.namespace}, tr); err == nil && tr.Status.Status == "Completed" {
-			return true
+			return tr
 		}
 		if time.Now().After(deadline) {
-			return false
+			return nil
 		}
 		select {
 		case <-ctx.Done():
-			return false
+			return nil
 		case <-time.After(mcpTargetPollInterval):
 		}
 	}
@@ -312,20 +317,15 @@ func (b *mcpBackend) getVisibleScenarioRun(ctx context.Context, p mcpserver.Prin
 }
 
 // scenarioRunURLs resolves a run's target cluster URLs via its target
-// request. A missing request yields an empty map (callers fail closed for
-// runs without jobs).
+// request. Each cluster name is resolved within its own provider's
+// TargetData slice (see resolveTargetClusterURLs); a missing request or an
+// ambiguous cluster name is an error so callers fail closed.
 func (b *mcpBackend) scenarioRunURLs(ctx context.Context, run *krknv1alpha1.KrknScenarioRun) (map[string]string, error) {
 	tr := &krknv1alpha1.KrknTargetRequest{}
 	if err := b.h.client.Get(ctx, client.ObjectKey{Name: run.Spec.TargetRequestID, Namespace: b.h.namespace}, tr); err != nil {
 		return nil, fmt.Errorf("target request %q not found", run.Spec.TargetRequestID)
 	}
-	urls := make(map[string]string)
-	for _, clusters := range tr.Status.TargetData {
-		for _, cluster := range clusters {
-			urls[cluster.ClusterName] = cluster.ClusterAPIURL
-		}
-	}
-	return urls, nil
+	return resolveTargetClusterURLs(run.Spec.TargetClusters, tr)
 }
 
 // scenarioRunURLsOrEmpty is scenarioRunURLs with a fail-closed empty result.
@@ -391,9 +391,13 @@ func (b *mcpBackend) GetJobLogs(ctx context.Context, p mcpserver.Principal, in m
 	}
 	limitBytes := int64(mcpLogLimitBytes)
 
+	// Fetch WITHOUT TailLines and filter report blocks BEFORE applying the
+	// tail, mirroring the REST log path (handlers.go): the scenario container
+	// prints the base64 report payload between ===KRKN_REPORT_*=== markers as
+	// its last output, and a Kubernetes-side tail window starting mid-block
+	// would leak that encoded content.
 	logReq := b.h.clientset.CoreV1().Pods(b.h.namespace).GetLogs(job.PodName, &corev1.PodLogOptions{
 		Container:  "scenario",
-		TailLines:  &[]int64{int64(tail)}[0],
 		LimitBytes: &limitBytes,
 	})
 	raw, err := logReq.DoRaw(ctx)
@@ -404,25 +408,65 @@ func (b *mcpBackend) GetJobLogs(ctx context.Context, p mcpserver.Principal, in m
 		return mcpserver.JobLogsOutput{}, errMCPInternal()
 	}
 
+	logs := tailFilteredLogs(string(raw), tail)
+
 	return mcpserver.JobLogsOutput{
 		JobID:     job.JobID,
 		PodName:   job.PodName,
 		Truncated: len(raw) >= mcpLogLimitBytes,
-		Logs:      string(raw),
+		Logs:      logs,
 	}, nil
 }
 
+// tailFilteredLogs strips KRKN report blocks and then keeps the last tail
+// lines. The filtering order matches the REST handler's completed-stream path
+// (handlers.go, filterReportLines).
+func tailFilteredLogs(raw string, tail int) string {
+	lines := strings.Split(raw, "\n")
+	if len(lines) > 0 && lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1]
+	}
+	filtered := filterReportLines(lines)
+	if len(filtered) > tail {
+		filtered = filtered[len(filtered)-tail:]
+	}
+	if len(filtered) == 0 {
+		return ""
+	}
+	return strings.Join(filtered, "\n") + "\n"
+}
+
 // GetScenarioRunConfig returns the redacted configuration of a visible run.
+// Like the REST handler (run_config_handlers.go GetScenarioRunConfig), it
+// requires run permission on ALL target clusters, not merely view on a
+// visible one, because the config exposes replay-ready material.
 func (b *mcpBackend) GetScenarioRunConfig(ctx context.Context, p mcpserver.Principal, in mcpserver.ScenarioRunRefInput) (mcpserver.ScenarioRunConfigOutput, error) {
 	run, err := b.getVisibleScenarioRun(ctx, p, in.ScenarioRunName)
 	if err != nil {
 		return mcpserver.ScenarioRunConfigOutput{}, err
 	}
+
+	// Mirror REST: groupauth.ValidateScenarioRunAccess with the run's own
+	// target request. Any denial (including an unresolvable target request or
+	// a cluster-name collision) fails closed with a generic forbidden message
+	// that does not leak cluster API URLs.
+	tr := &krknv1alpha1.KrknTargetRequest{}
+	if err := b.h.client.Get(ctx, client.ObjectKey{Name: run.Spec.TargetRequestID, Namespace: b.h.namespace}, tr); err != nil {
+		return mcpserver.ScenarioRunConfigOutput{}, &mcpserver.BackendError{Code: mcpserver.CodeForbidden, Message: "permission denied"}
+	}
+	if err := groupauth.ValidateScenarioRunAccess(ctx, b.h.client, "robot:"+p.RobotName, b.h.namespace, run.Spec.TargetClusters, tr); err != nil {
+		return mcpserver.ScenarioRunConfigOutput{}, &mcpserver.BackendError{Code: mcpserver.CodeForbidden, Message: "permission denied"}
+	}
+
 	perms, err := b.h.robotClusterPerms(ctx, p.RobotName)
 	if err != nil {
 		return mcpserver.ScenarioRunConfigOutput{}, errMCPInternal()
 	}
-	return redactScenarioConfig(run, perms, b.scenarioRunURLsOrEmpty(ctx, run)), nil
+	// The cloud credential reference is only disclosed when the robot can
+	// actually use it, mirroring replayableCloudCredentialRef in REST replay
+	// responses.
+	cloudCredRef := b.h.replayableCloudCredentialRef(withRobotClaims(ctx, p.RobotName), run.Spec.CloudCredentialRef)
+	return redactScenarioConfig(run, perms, b.scenarioRunURLsOrEmpty(ctx, run), cloudCredRef), nil
 }
 
 // GetReportStatus returns report generation status; Location is never included.

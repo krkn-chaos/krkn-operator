@@ -134,7 +134,10 @@ func registerScenarioRunReadTools(srv *mcp.Server, backend Backend) {
 }
 
 // toolHandler adapts a Backend method to a tool handler with principal
-// extraction and client-safe error mapping.
+// extraction and client-safe error mapping. Backend errors are converted to
+// IsError results and also returned as Go errors so the audit wrapper can
+// classify them; withAudit strips the Go error before the result reaches the
+// SDK, so clients still see an IsError result rather than a protocol error.
 func toolHandler[In, Out any](method func(context.Context, Principal, In) (Out, error)) mcp.ToolHandlerFor[In, Out] {
 	return func(ctx context.Context, req *mcp.CallToolRequest, in In) (*mcp.CallToolResult, Out, error) {
 		principal, err := principalFromRequest(req)

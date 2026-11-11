@@ -157,6 +157,64 @@ func TestGraphVisibility_TargetRequestMissing(t *testing.T) {
 	_ = isBackendCode(t, err, mcpserver.CodeNotFound)
 }
 
+// collisionTargetRequest registers the same cluster name under two providers
+// with different API URLs.
+func collisionTargetRequest(name string) *krknv1alpha1.KrknTargetRequest {
+	return &krknv1alpha1.KrknTargetRequest{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"},
+		Spec:       krknv1alpha1.KrknTargetRequestSpec{UUID: name},
+		Status: krknv1alpha1.KrknTargetRequestStatus{
+			Status: "Completed",
+			TargetData: map[string][]krknv1alpha1.ClusterTarget{
+				"prov-a": {{ClusterName: "cluster-a", ClusterAPIURL: urlA}},
+				"prov-b": {{ClusterName: "cluster-a", ClusterAPIURL: urlB}},
+			},
+		},
+	}
+}
+
+// TestMCPGraphVisibility_ClusterNameCollisionAcrossProviders guards against
+// the authorization bypass where flattening TargetData into a name->URL map
+// let a duplicate cluster name resolve to a provider the robot can view. The
+// run targets cluster-a under prov-b (URL B, no view); the same name under
+// prov-a (URL A, view granted) must never satisfy visibility.
+func TestMCPGraphVisibility_ClusterNameCollisionAcrossProviders(t *testing.T) {
+	g1 := graphFixture("g-coll", map[string][]string{"prov-b": {"cluster-a"}})
+	h := newMCPGraphsTestHandler(t, g1, collisionTargetRequest("tr-g-coll"))
+	backend := &mcpBackend{h: h}
+
+	out, err := backend.ListGraphRuns(context.Background(), robotPrincipalFixture(), mcpserver.ListGraphRunsInput{})
+	if err != nil {
+		t.Fatalf("ListGraphRuns failed: %v", err)
+	}
+	if out.Total != 0 {
+		t.Errorf("Total = %d, want 0 (cluster-a must resolve within prov-b, whose URL the robot cannot view)", out.Total)
+	}
+
+	_, err = backend.GetGraphRun(context.Background(), robotPrincipalFixture(), mcpserver.GraphRunRefInput{GraphRunName: "g-coll"})
+	_ = isBackendCode(t, err, mcpserver.CodeNotFound)
+}
+
+// TestMCPGraphVisibility_ClusterNameCollisionDeclaredTwice covers a run that
+// declares the colliding cluster name under BOTH providers: the name alone
+// cannot disambiguate the URL, so the run must fail closed.
+func TestMCPGraphVisibility_ClusterNameCollisionDeclaredTwice(t *testing.T) {
+	g1 := graphFixture("g-coll2", map[string][]string{"prov-a": {"cluster-a"}, "prov-b": {"cluster-a"}})
+	h := newMCPGraphsTestHandler(t, g1, collisionTargetRequest("tr-g-coll2"))
+	backend := &mcpBackend{h: h}
+
+	out, err := backend.ListGraphRuns(context.Background(), robotPrincipalFixture(), mcpserver.ListGraphRunsInput{})
+	if err != nil {
+		t.Fatalf("ListGraphRuns failed: %v", err)
+	}
+	if out.Total != 0 {
+		t.Errorf("Total = %d, want 0 (ambiguous cluster name must fail closed)", out.Total)
+	}
+
+	_, err = backend.GetGraphRun(context.Background(), robotPrincipalFixture(), mcpserver.GraphRunRefInput{GraphRunName: "g-coll2"})
+	_ = isBackendCode(t, err, mcpserver.CodeNotFound)
+}
+
 // workflowConfigMap builds a workflow file ConfigMap.
 func workflowConfigMap(fileID string, groups []string, availableToAll bool) *corev1.ConfigMap {
 	labels := map[string]string{

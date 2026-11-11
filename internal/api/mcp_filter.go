@@ -27,6 +27,9 @@ import (
 	"github.com/krkn-chaos/krkn-operator/pkg/groupauth"
 )
 
+// jobPhaseRunning is the job phase counted as running in visible-job counts.
+const jobPhaseRunning = "Running"
+
 // filterScenarioRun builds the robot-visible view of a scenario run. ok is
 // false when no target cluster is visible. For runs that already have jobs,
 // visibility is decided per job cluster; for runs with no jobs yet (for
@@ -111,7 +114,7 @@ func countVisibleJobs(jobs []krknv1alpha1.ClusterJobStatus) (succeeded, failed, 
 			succeeded++
 		case "Failed", "Cancelled", "MaxRetriesExceeded":
 			failed++
-		case "Running", "Retrying":
+		case jobPhaseRunning, "Retrying":
 			running++
 		}
 	}
@@ -309,8 +312,11 @@ func copyStringSlice(in []string) []string {
 }
 
 // redactScenarioConfig builds the redacted configuration view of a run:
-// environment values and file contents are never included.
-func redactScenarioConfig(run *krknv1alpha1.KrknScenarioRun, perms clusterPerms, urlsByCluster map[string]string) mcpserver.ScenarioRunConfigOutput {
+// environment values and file contents are never included. cloudCredentialRef
+// is the pre-filtered reference (empty when the requester cannot use the
+// credential), mirroring REST replay responses; the raw spec value is never
+// copied.
+func redactScenarioConfig(run *krknv1alpha1.KrknScenarioRun, perms clusterPerms, urlsByCluster map[string]string, cloudCredentialRef string) mcpserver.ScenarioRunConfigOutput {
 	out := mcpserver.ScenarioRunConfigOutput{
 		Name:            run.Name,
 		TargetRequestID: run.Spec.TargetRequestID,
@@ -319,7 +325,7 @@ func redactScenarioConfig(run *krknv1alpha1.KrknScenarioRun, perms clusterPerms,
 			RegistryName: run.Spec.Scenario.RegistryName,
 			Private:      boolPtrCopy(run.Spec.Scenario.Private),
 		},
-		CloudCredentialRef:     run.Spec.CloudCredentialRef,
+		CloudCredentialRef:     cloudCredentialRef,
 		MaxRetries:             run.Spec.MaxRetries,
 		RetryBackoff:           run.Spec.RetryBackoff,
 		RetryDelay:             run.Spec.RetryDelay,

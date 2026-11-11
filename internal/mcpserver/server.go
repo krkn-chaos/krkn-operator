@@ -100,7 +100,11 @@ func toolError(err error) *mcp.CallToolResult {
 }
 
 // handlerToolError converts a tool error into (result, zero output, err).
+//
+// The error is returned alongside the client-safe IsError result so the audit
+// wrapper can classify the outcome; the wrapper then strips it before the
+// result reaches the SDK, preserving the IsError wire behavior.
 func handlerToolError[Out any](err error) (*mcp.CallToolResult, Out, error) {
 	var zero Out
-	return toolError(err), zero, nil
+	return toolError(err), zero, err
 }
