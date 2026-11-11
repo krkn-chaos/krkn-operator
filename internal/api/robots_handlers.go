@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"sort"
 	"strings"
 	"unicode/utf8"
@@ -155,7 +156,11 @@ func (h *Handler) ListRobots(w http.ResponseWriter, r *http.Request) {
 	for i := range list.Items {
 		robots = append(robots, robotToResponse(&list.Items[i]))
 	}
-	writeJSON(w, http.StatusOK, RobotListResponse{Robots: robots, Total: len(robots)})
+	writeJSON(w, http.StatusOK, RobotListResponse{
+		Robots:     robots,
+		Total:      len(robots),
+		MCPEnabled: os.Getenv(MCPEnabledEnv) == "true",
+	})
 }
 
 // CreateRobot handles POST /api/v1/robots

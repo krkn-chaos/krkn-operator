@@ -47,10 +47,13 @@ type RobotResponse struct {
 	CreatedAt      time.Time  `json:"createdAt"`
 }
 
-// RobotListResponse is the body of GET /api/v1/robots.
+// RobotListResponse is the body of GET /api/v1/robots. MCPEnabled reports
+// whether the operator's MCP endpoint is currently mounted, so the console
+// can tell admins whether issued robot tokens are usable.
 type RobotListResponse struct {
-	Robots []RobotResponse `json:"robots"`
-	Total  int             `json:"total"`
+	Robots     []RobotResponse `json:"robots"`
+	Total      int             `json:"total"`
+	MCPEnabled bool            `json:"mcpEnabled"`
 }
 
 // IssueRobotTokenResponse is the one-time response of POST /api/v1/robots/{name}/token.

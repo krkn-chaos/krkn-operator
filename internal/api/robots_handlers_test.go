@@ -89,6 +89,35 @@ func sreGroupFixture() *krknv1alpha1.KrknUserGroup {
 	}
 }
 
+// TestListRobots_ReportsMCPEnabled verifies the list response tells the
+// console whether the MCP endpoint is mounted, for both flag states.
+func TestListRobots_ReportsMCPEnabled(t *testing.T) {
+	for _, tc := range []struct {
+		env      string
+		expected bool
+	}{
+		{"", false},
+		{"false", false},
+		{"true", true},
+	} {
+		t.Run("env="+tc.env, func(t *testing.T) {
+			t.Setenv(MCPEnabledEnv, tc.env)
+			h, _ := newRobotsTestHandler(t, sreGroupFixture())
+			w := doRobotsRequest(t, h, http.MethodGet, RobotsPath, nil, createAdminContext())
+			if w.Code != http.StatusOK {
+				t.Fatalf("status %d, want 200", w.Code)
+			}
+			var resp RobotListResponse
+			if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+				t.Fatalf("unmarshal: %v", err)
+			}
+			if resp.MCPEnabled != tc.expected {
+				t.Errorf("mcpEnabled = %v, want %v", resp.MCPEnabled, tc.expected)
+			}
+		})
+	}
+}
+
 func TestRobotsRouter_NonAdminForbidden(t *testing.T) {
 	h, _ := newRobotsTestHandler(t, sreGroupFixture())
 	admin := createAdminContext()
