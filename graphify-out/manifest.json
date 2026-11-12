@@ -450,9 +450,9 @@
     "semantic_hash": "ab824d31922a92db7c0f8cc7b491a8ac"
   },
   "internal/api/handlers.go": {
-    "mtime": 1794482269.7243102,
-    "seen": 1794482292.299427,
-    "ast_hash": "6d50bb1d2fc5abb80ad79842c02911cc",
+    "mtime": 1794482931.370772,
+    "seen": 1794482978.7311082,
+    "ast_hash": "231d2d07bd55fe235dbb732bc472f138",
     "semantic_hash": ""
   },
   "internal/api/handlers_test.go": {
@@ -624,9 +624,9 @@
     "semantic_hash": "252241ce7dd31cbefc5a153720ad6df6"
   },
   "internal/api/scenario_filter_test.go": {
-    "mtime": 1794482216.2089431,
-    "seen": 1794482292.299447,
-    "ast_hash": "4c93e082a283e5b7edc7bfa3516daf44",
+    "mtime": 1794482890.5025113,
+    "seen": 1794482978.7311292,
+    "ast_hash": "e1f7c1b13e626fc71ef9089a84caf41c",
     "semantic_hash": ""
   },
   "internal/api/scenario_replay_handlers.go": {
@@ -1896,9 +1896,9 @@
     "semantic_hash": ""
   },
   "ROADMAP.md": {
-    "mtime": 1792655701.8575363,
-    "seen": 1793612567.857425,
-    "ast_hash": "80c21b1fd0352ad3904778b64aee41e2",
+    "mtime": 1794482389.856538,
+    "seen": 1794482978.731251,
+    "ast_hash": "0fc7331f87d9ee643645b55817e26059",
     "semantic_hash": ""
   },
   "agent-specs/PROGRESS-MVP.md": {
@@ -2652,9 +2652,9 @@
     "semantic_hash": ""
   },
   "internal/api/scenario_catalog_cache_test.go": {
-    "mtime": 1794482216.1844013,
-    "seen": 1794482292.299447,
-    "ast_hash": "2e240c525acf6c6c8011e069a44e1219",
+    "mtime": 1794482947.110662,
+    "seen": 1794482978.731128,
+    "ast_hash": "aa3431aae51af4d01fed0f9bf3b7db02",
     "semantic_hash": ""
   }
 }

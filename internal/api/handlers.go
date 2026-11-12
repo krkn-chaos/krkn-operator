@@ -123,7 +123,12 @@ func sanitizeRunNameLabel(name string) string {
 }
 
 const (
-	publicScenarioCacheTTL       = time.Hour
+	// Public catalog and definitive signature results can be stale for at most
+	// one hour. Public scenario images change infrequently, so this bounds stale
+	// signature state while avoiding registry and verification round-trips per request.
+	publicScenarioCacheTTL = time.Hour
+	// A catalog refresh runs independently of any one request, but remains bounded
+	// so an upstream registry or verifier cannot hold the shared refresh indefinitely.
 	publicScenarioRefreshTimeout = 5 * time.Minute
 )
 
@@ -208,7 +213,7 @@ func (c *publicSignatureCache) set(key string, status verify.SignatureStatus) {
 	}
 }
 
-func (c *publicSignatureCache) getOrLoad(ctx context.Context, key string, load func() (verify.SignatureStatus, error)) (verify.SignatureStatus, error) {
+func (c *publicSignatureCache) getOrLoad(ctx context.Context, key string, load func(context.Context) (verify.SignatureStatus, error)) (verify.SignatureStatus, error) {
 	if status, ok := c.get(key); ok {
 		log.FromContext(ctx).Info("Public image signature cache hit", "image", key, "status", status)
 		return status, nil
@@ -219,8 +224,12 @@ func (c *publicSignatureCache) getOrLoad(ctx context.Context, key string, load f
 			log.FromContext(ctx).Info("Public image signature cache hit", "image", key, "status", status)
 			return status, nil
 		}
-		status, err := load()
-		if err == nil && ctx.Err() == nil {
+		// Signature lookups are shared between requests. Detach the load from the
+		// first waiter's cancellation, while keeping a fixed upper bound on it.
+		loadCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), publicScenarioRefreshTimeout)
+		defer cancel()
+		status, err := load(loadCtx)
+		if err == nil && isDefinitiveSignatureStatus(status) && loadCtx.Err() == nil {
 			c.set(key, status)
 		}
 		return status, err
@@ -242,20 +251,29 @@ func (c *publicSignatureCache) getOrLoad(ctx context.Context, key string, load f
 	return status, nil
 }
 
+func isDefinitiveSignatureStatus(status verify.SignatureStatus) bool {
+	switch status {
+	case verify.SignatureSigned, verify.SignatureUnsigned, verify.SignatureUntrusted:
+		return true
+	default:
+		return false
+	}
+}
+
 type publicSignatureCachingProvider struct {
 	provider.ScenarioDataProvider
 	cache *publicSignatureCache
 }
 
 func (p *publicSignatureCachingProvider) GetImageSignatureStatus(ctx context.Context, registry *models.RegistryV2, tag models.ScenarioTag) (verify.SignatureStatus, error) {
-	key := tag.Name
-	if tag.Digest != nil && strings.TrimSpace(*tag.Digest) != "" {
-		key = "digest:" + strings.TrimSpace(*tag.Digest)
-	} else {
-		key = "tag:" + key
-	}
-	return p.cache.getOrLoad(ctx, key, func() (verify.SignatureStatus, error) {
+	if tag.Digest == nil || strings.TrimSpace(*tag.Digest) == "" {
+		// A mutable tag can be retargeted without changing its name; do not reuse
+		// trust state until the caller resolves it to an immutable digest.
 		return p.ScenarioDataProvider.GetImageSignatureStatus(ctx, registry, tag)
+	}
+	key := "digest:" + strings.TrimSpace(*tag.Digest)
+	return p.cache.getOrLoad(ctx, key, func(loadCtx context.Context) (verify.SignatureStatus, error) {
+		return p.ScenarioDataProvider.GetImageSignatureStatus(loadCtx, registry, tag)
 	})
 }
 
@@ -285,7 +303,11 @@ type scenarioCatalogError struct {
 }
 
 func (e *scenarioCatalogError) Error() string {
-	return e.err.Error()
+	return fmt.Sprintf("%s: %v", e.operation, e.err)
+}
+
+func (e *scenarioCatalogError) Unwrap() error {
+	return e.err
 }
 
 // Handler contains the dependencies for API handlers
@@ -1064,64 +1086,15 @@ func (h *Handler) PostScenarios(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
-		if response, ok := h.publicScenarios.get(); ok {
-			log.FromContext(ctx).Info("Public scenario catalog cache hit", "scenarioCount", len(response.Scenarios))
-			writeJSON(w, http.StatusOK, response)
+		response, err := h.loadPublicScenarioCatalog(ctx, providerFactory, mode, apiRegistry)
+		if err != nil {
+			if ctx.Err() == nil {
+				writeScenarioCatalogError(w, ctx, err)
+			}
 			return
 		}
-
-		result := h.publicScenarioFlights.DoChan("public-scenario-catalog", func() (any, error) {
-			if response, ok := h.publicScenarios.get(); ok {
-				log.FromContext(ctx).Info("Public scenario catalog cache hit", "scenarioCount", len(response.Scenarios))
-				return response, nil
-			}
-
-			refreshBase := h.baseCtx
-			if refreshBase == nil {
-				refreshBase = context.Background()
-			}
-			refreshCtx, cancel := context.WithTimeout(refreshBase, publicScenarioRefreshTimeout)
-			defer cancel()
-
-			scenarioProvider, err := providerFactory(mode)
-			if err != nil {
-				return nil, &scenarioCatalogError{
-					operation: "Failed to create scenario provider",
-					message:   err.Error(),
-					err:       err,
-				}
-			}
-
-			signatureProvider := &publicSignatureCachingProvider{
-				ScenarioDataProvider: scenarioProvider,
-				cache:                &h.publicSignatures,
-			}
-			response, cacheable, err := fetchScenarioCatalog(refreshCtx, signatureProvider, apiRegistry)
-			if err != nil {
-				return nil, err
-			}
-			if cacheable {
-				h.publicScenarios.set(response)
-			}
-			return response, nil
-		})
-
-		select {
-		case <-ctx.Done():
-			return
-		case result := <-result:
-			if result.Err != nil {
-				writeScenarioCatalogError(w, ctx, result.Err)
-				return
-			}
-			response, ok := result.Val.(ScenariosResponse)
-			if !ok {
-				writeScenarioCatalogError(w, ctx, fmt.Errorf("unexpected public scenario cache result type %T", result.Val))
-				return
-			}
-			writeJSON(w, http.StatusOK, response)
-			return
-		}
+		writeJSON(w, http.StatusOK, response)
+		return
 	}
 
 	scenarioProvider, err := providerFactory(mode)
@@ -1141,8 +1114,67 @@ func (h *Handler) PostScenarios(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, response)
 }
 
+func (h *Handler) loadPublicScenarioCatalog(ctx context.Context, providerFactory func(provider.Mode) (provider.ScenarioDataProvider, error), mode provider.Mode, registry *models.RegistryV2) (ScenariosResponse, error) {
+	if response, ok := h.publicScenarios.get(); ok {
+		log.FromContext(ctx).Info("Public scenario catalog cache hit", "scenarioCount", len(response.Scenarios))
+		return response, nil
+	}
+
+	resultCh := h.publicScenarioFlights.DoChan("public-scenario-catalog", func() (any, error) {
+		if response, ok := h.publicScenarios.get(); ok {
+			log.FromContext(ctx).Info("Public scenario catalog cache hit", "scenarioCount", len(response.Scenarios))
+			return response, nil
+		}
+
+		refreshBase := h.baseCtx
+		if refreshBase == nil {
+			refreshBase = context.Background()
+		}
+		// This refresh is shared by all waiters, so it must outlive any one
+		// request disconnect; publicScenarioRefreshTimeout bounds its lifetime.
+		refreshCtx, cancel := context.WithTimeout(refreshBase, publicScenarioRefreshTimeout)
+		defer cancel()
+
+		scenarioProvider, err := providerFactory(mode)
+		if err != nil {
+			return nil, &scenarioCatalogError{
+				operation: "Failed to create scenario provider",
+				message:   err.Error(),
+				err:       err,
+			}
+		}
+
+		signatureProvider := &publicSignatureCachingProvider{
+			ScenarioDataProvider: scenarioProvider,
+			cache:                &h.publicSignatures,
+		}
+		response, cacheable, err := fetchScenarioCatalog(refreshCtx, signatureProvider, registry)
+		if err != nil {
+			return nil, err
+		}
+		if cacheable {
+			h.publicScenarios.set(response)
+		}
+		return response, nil
+	})
+
+	select {
+	case <-ctx.Done():
+		return ScenariosResponse{}, ctx.Err()
+	case result := <-resultCh:
+		if result.Err != nil {
+			return ScenariosResponse{}, result.Err
+		}
+		response, ok := result.Val.(ScenariosResponse)
+		if !ok {
+			return ScenariosResponse{}, fmt.Errorf("unexpected public scenario cache result type %T", result.Val)
+		}
+		return response, nil
+	}
+}
+
 func fetchScenarioCatalog(ctx context.Context, scenarioProvider provider.ScenarioDataProvider, registry *models.RegistryV2) (ScenariosResponse, bool, error) {
-	scenarioTags, err := scenarioProvider.GetRegistryImages(registry)
+	scenarioTags, err := getRegistryImagesWithContext(ctx, scenarioProvider, registry)
 	if err != nil {
 		return ScenariosResponse{}, false, &scenarioCatalogError{
 			operation: "Failed to get scenarios from registry",
@@ -1150,6 +1182,14 @@ func fetchScenarioCatalog(ctx context.Context, scenarioProvider provider.Scenari
 			err:       err,
 		}
 	}
+	if err := ctx.Err(); err != nil {
+		return ScenariosResponse{}, false, &scenarioCatalogError{
+			operation: "Timed out while getting scenarios from registry",
+			message:   "Failed to get scenarios from registry",
+			err:       err,
+		}
+	}
+	cacheable := true
 	if scenarioTags != nil {
 		statuses, err := provider.VerifyImageSignatures(ctx, scenarioProvider, registry, *scenarioTags)
 		if err != nil {
@@ -1168,11 +1208,51 @@ func fetchScenarioCatalog(ctx context.Context, scenarioProvider provider.Scenari
 		}
 		for i := range *scenarioTags {
 			(*scenarioTags)[i].SignatureStatus = string(statuses[i])
+			if !isDefinitiveSignatureStatus(statuses[i]) {
+				cacheable = false
+			}
+			if (*scenarioTags)[i].Digest == nil || strings.TrimSpace(*(*scenarioTags)[i].Digest) == "" {
+				cacheable = false
+			}
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return ScenariosResponse{}, false, &scenarioCatalogError{
+			operation: "Timed out while verifying scenario image signatures",
+			message:   "Failed to verify scenario image signatures",
+			err:       err,
 		}
 	}
 
 	scenarios, complete := filterScenariosByIsAScenarioComplete(ctx, scenarioProvider, scenarioTags, registry)
-	return ScenariosResponse{Scenarios: scenarios}, complete, nil
+	if err := ctx.Err(); err != nil {
+		return ScenariosResponse{}, false, &scenarioCatalogError{
+			operation: "Timed out while getting scenario details",
+			message:   "Failed to get scenarios from registry",
+			err:       err,
+		}
+	}
+	return ScenariosResponse{Scenarios: scenarios}, cacheable && complete, nil
+}
+
+type registryImagesResult struct {
+	tags *[]models.ScenarioTag
+	err  error
+}
+
+func getRegistryImagesWithContext(ctx context.Context, scenarioProvider provider.ScenarioDataProvider, registry *models.RegistryV2) (*[]models.ScenarioTag, error) {
+	resultCh := make(chan registryImagesResult, 1)
+	go func() {
+		tags, err := scenarioProvider.GetRegistryImages(registry)
+		resultCh <- registryImagesResult{tags: tags, err: err}
+	}()
+
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case result := <-resultCh:
+		return result.tags, result.err
+	}
 }
 
 func writeScenarioCatalogError(w http.ResponseWriter, ctx context.Context, err error) {
@@ -1261,7 +1341,7 @@ func filterScenariosByIsAScenarioComplete(ctx context.Context, scenarioProvider 
 				}
 
 				t := tags[i]
-				detail, err := scenarioProvider.GetScenarioDetail(t.Name, registry)
+				detail, err := getScenarioDetailWithContext(gCtx, scenarioProvider, t.Name, registry)
 				processed[i] = true
 				if err != nil {
 					log.FromContext(ctx).V(1).Info("Skipping scenario: failed to get detail", "scenario", t.Name, "error", err)
@@ -1270,8 +1350,13 @@ func filterScenariosByIsAScenarioComplete(ctx context.Context, scenarioProvider 
 					}
 					continue
 				}
+				if detail == nil {
+					// A nil detail without ErrLabelNotFound can mean the tag vanished
+					// from the provider's second listing; retry before caching it away.
+					continue
+				}
 				detailClassified[i] = true
-				if detail == nil || !detail.IsAScenario {
+				if !detail.IsAScenario {
 					continue
 				}
 
@@ -1305,6 +1390,26 @@ func filterScenariosByIsAScenarioComplete(ctx context.Context, scenarioProvider 
 		}
 	}
 	return scenarios, complete
+}
+
+type scenarioDetailResult struct {
+	detail *models.ScenarioDetail
+	err    error
+}
+
+func getScenarioDetailWithContext(ctx context.Context, scenarioProvider provider.ScenarioDataProvider, scenario string, registry *models.RegistryV2) (*models.ScenarioDetail, error) {
+	resultCh := make(chan scenarioDetailResult, 1)
+	go func() {
+		detail, err := scenarioProvider.GetScenarioDetail(scenario, registry)
+		resultCh <- scenarioDetailResult{detail: detail, err: err}
+	}()
+
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case result := <-resultCh:
+		return result.detail, result.err
+	}
 }
 
 // extractPathSuffix extracts a suffix from a URL path given a prefix.
