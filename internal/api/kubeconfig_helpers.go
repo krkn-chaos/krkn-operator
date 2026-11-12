@@ -67,9 +67,8 @@ func (h *Handler) getKubeconfigFromOperatorTarget(ctx context.Context, targetUUI
 }
 
 // getKubeconfigFromTargetRequest retrieves kubeconfig from KrknTargetRequest (legacy)
-// This is for backward compatibility with the old krkn-operator-acm flow
 // Returns base64-encoded kubeconfig string
-func (h *Handler) getKubeconfigFromTargetRequest(ctx context.Context, targetID string, clusterName string) (string, error) {
+func (h *Handler) getKubeconfigFromTargetRequest(ctx context.Context, targetID string, clusterName string, provider string) (string, error) {
 	// Fetch the secret with the same name as the KrknTargetRequest ID
 	var secret corev1.Secret
 	err := h.client.Get(ctx, types.NamespacedName{
@@ -88,7 +87,7 @@ func (h *Handler) getKubeconfigFromTargetRequest(ctx context.Context, targetID s
 	}
 
 	// Parse the JSON to extract cluster configurations
-	// Structure: { "krkn-operator-acm": { "cluster-name": { "kubeconfig": "base64..." } } }
+	// Structure: { "operator-name": { "cluster-name": { "kubeconfig": "base64..." } } }
 	var managedClusters map[string]map[string]struct {
 		Kubeconfig string `json:"kubeconfig"`
 	}
@@ -96,20 +95,28 @@ func (h *Handler) getKubeconfigFromTargetRequest(ctx context.Context, targetID s
 		return "", fmt.Errorf("failed to parse managed-clusters JSON: %w", err)
 	}
 
-	// Get the krkn-operator-acm object
-	acmClusters, exists := managedClusters["krkn-operator-acm"]
-	if !exists {
-		return "", fmt.Errorf("krkn-operator-acm not found in managed-clusters")
+	if provider != "" {
+		if cluster, exists := managedClusters[provider][clusterName]; exists {
+			return cluster.Kubeconfig, nil
+		}
+		return "", fmt.Errorf("cluster '%s' not found under provider '%s' in managed-clusters", clusterName, provider)
 	}
 
-	// Check if the requested cluster exists
-	clusterConfig, exists := acmClusters[clusterName]
-	if !exists {
-		return "", fmt.Errorf("cluster '%s' not found in krkn-operator-acm", clusterName)
+	var kubeconfig string
+	found := false
+	for _, clusters := range managedClusters {
+		if cluster, exists := clusters[clusterName]; exists {
+			if found {
+				return "", fmt.Errorf("cluster '%s' found under multiple operators in managed-clusters", clusterName)
+			}
+			kubeconfig = cluster.Kubeconfig
+			found = true
+		}
 	}
-
-	// Return the base64-encoded kubeconfig
-	return clusterConfig.Kubeconfig, nil
+	if !found {
+		return "", fmt.Errorf("cluster '%s' not found in managed-clusters", clusterName)
+	}
+	return kubeconfig, nil
 }
 
 // getClusterAPIURL retrieves the cluster API URL from either:
@@ -117,7 +124,7 @@ func (h *Handler) getKubeconfigFromTargetRequest(ctx context.Context, targetID s
 // 2. KrknTargetRequest (legacy) - if targetID and clusterName are provided
 //
 // Returns cluster API URL string for permission checks
-func (h *Handler) getClusterAPIURL(ctx context.Context, targetUUID string, targetID string, clusterName string) (string, error) {
+func (h *Handler) getClusterAPIURL(ctx context.Context, targetUUID string, targetID string, clusterName string, provider string) (string, error) {
 	// Try new system first (KrknOperatorTarget)
 	if targetUUID != "" {
 		var target krknv1alpha1.KrknOperatorTarget
@@ -145,12 +152,29 @@ func (h *Handler) getClusterAPIURL(ctx context.Context, targetUUID string, targe
 		}
 
 		// Find the cluster in TargetData
-		for _, targets := range targetRequest.Status.TargetData {
-			for _, cluster := range targets {
+		if provider != "" {
+			for _, cluster := range targetRequest.Status.TargetData[provider] {
 				if cluster.ClusterName == clusterName {
 					return cluster.ClusterAPIURL, nil
 				}
 			}
+			return "", fmt.Errorf("cluster '%s' not found under provider '%s' in target request", clusterName, provider)
+		}
+		var clusterAPIURL string
+		found := false
+		for _, targets := range targetRequest.Status.TargetData {
+			for _, cluster := range targets {
+				if cluster.ClusterName == clusterName {
+					if found {
+						return "", fmt.Errorf("cluster '%s' found under multiple operators in target request", clusterName)
+					}
+					clusterAPIURL = cluster.ClusterAPIURL
+					found = true
+				}
+			}
+		}
+		if found {
+			return clusterAPIURL, nil
 		}
 
 		return "", fmt.Errorf("cluster '%s' not found in target request", clusterName)
@@ -164,7 +188,7 @@ func (h *Handler) getClusterAPIURL(ctx context.Context, targetUUID string, targe
 // 2. KrknTargetRequest (legacy) - if targetID and clusterName are provided
 //
 // Returns base64-encoded kubeconfig string
-func (h *Handler) getKubeconfig(ctx context.Context, targetUUID string, targetID string, clusterName string) (string, error) {
+func (h *Handler) getKubeconfig(ctx context.Context, targetUUID string, targetID string, clusterName string, provider string) (string, error) {
 	// Try new system first (KrknOperatorTarget)
 	if targetUUID != "" {
 		kubeconfigBase64, err := h.getKubeconfigFromOperatorTarget(ctx, targetUUID)
@@ -179,7 +203,7 @@ func (h *Handler) getKubeconfig(ctx context.Context, targetUUID string, targetID
 
 	// Fall back to legacy system (KrknTargetRequest)
 	if targetID != "" && clusterName != "" {
-		return h.getKubeconfigFromTargetRequest(ctx, targetID, clusterName)
+		return h.getKubeconfigFromTargetRequest(ctx, targetID, clusterName, provider)
 	}
 
 	return "", fmt.Errorf("insufficient parameters: provide either targetUUID (new) or targetID+clusterName (legacy)")

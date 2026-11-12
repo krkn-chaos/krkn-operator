@@ -274,7 +274,7 @@ func (h *Handler) GetClusters(w http.ResponseWriter, r *http.Request) {
 // GetNodes handles GET /api/v1/nodes endpoint
 // Supports both new and legacy parameter formats:
 // - New: ?targetUUID=<uuid>
-// - Legacy: ?id=<targetRequestId>&cluster-name=<clusterName>
+// - Legacy: ?id=<targetRequestId>&cluster-name=<clusterName>&provider=<optionalProviderName>
 // GetNodes handles GET /api/v1/nodes
 // Gets cluster nodes from a target
 //
@@ -285,6 +285,7 @@ func (h *Handler) GetClusters(w http.ResponseWriter, r *http.Request) {
 // @Param targetUUID query string false "KrknOperatorTarget UUID (new API)"
 // @Param id query string false "KrknTargetRequest ID (legacy)"
 // @Param cluster-name query string false "Cluster name (legacy, required with id)"
+// @Param provider query string false "Provider name (legacy; required when cluster names overlap)"
 // @Success 200 {object} object "List of nodes"
 // @Failure 400 {object} ErrorResponse "Missing or invalid parameters"
 // @Failure 404 {object} ErrorResponse "Target not found"
@@ -300,6 +301,7 @@ func (h *Handler) GetNodes(w http.ResponseWriter, r *http.Request) {
 	// Legacy parameters (KrknTargetRequest)
 	id := r.URL.Query().Get("id")
 	clusterName := r.URL.Query().Get("cluster-name")
+	provider := r.URL.Query().Get("provider")
 
 	// Validate that at least one set of parameters is provided
 	if targetUUID == "" && (id == "" || clusterName == "") {
@@ -315,7 +317,7 @@ func (h *Handler) GetNodes(w http.ResponseWriter, r *http.Request) {
 	claims := auth.GetClaimsFromContext(ctx)
 	if claims != nil && !auth.IsAdmin(ctx) {
 		// Get cluster API URL for permission check
-		clusterAPIURL, err := h.getClusterAPIURL(ctx, targetUUID, id, clusterName)
+		clusterAPIURL, err := h.getClusterAPIURL(ctx, targetUUID, id, clusterName, provider)
 		if err != nil {
 			log.FromContext(ctx).Error(err, "Failed to get cluster API URL for permission check")
 			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
@@ -357,7 +359,7 @@ func (h *Handler) GetNodes(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get kubeconfig using unified helper function
-	kubeconfigBase64, err := h.getKubeconfig(ctx, targetUUID, id, clusterName)
+	kubeconfigBase64, err := h.getKubeconfig(ctx, targetUUID, id, clusterName, provider)
 	if err != nil {
 		if client.IgnoreNotFound(err) == nil || strings.Contains(err.Error(), "not found") {
 			writeJSONError(w, http.StatusNotFound, ErrorResponse{
