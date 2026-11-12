@@ -64,7 +64,7 @@ func (h *Handler) ExecuteTerminal(w http.ResponseWriter, r *http.Request) {
 	if claims != nil && !auth.IsAdmin(ctx) {
 		// Get cluster API URL for permission check
 		// Terminal API uses UUID (maps to target ID) and ClusterID (maps to cluster name)
-		clusterAPIURL, err := h.getClusterAPIURL(ctx, "", req.UUID, req.ClusterID)
+		clusterAPIURL, err := h.getClusterAPIURL(ctx, "", req.UUID, req.ClusterID, req.Provider)
 		if err != nil {
 			log.FromContext(ctx).Error(err, "Failed to get cluster API URL for permission check")
 			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
@@ -118,7 +118,7 @@ func (h *Handler) ExecuteTerminal(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get kubeconfig using legacy helper (UUID maps to target ID, ClusterID maps to cluster name)
-	kubeconfigBase64, err := h.getKubeconfig(ctx, "", req.UUID, req.ClusterID)
+	kubeconfigBase64, err := h.getKubeconfig(ctx, "", req.UUID, req.ClusterID, req.Provider)
 	if err != nil {
 		writeJSONError(w, http.StatusNotFound, ErrorResponse{
 			Error:   "not_found",

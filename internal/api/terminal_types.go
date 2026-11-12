@@ -24,6 +24,9 @@ type TerminalRequest struct {
 	// UUID is the KrknTargetRequest UUID containing cluster kubeconfig
 	UUID string `json:"uuid" binding:"required"`
 
+	// Provider selects the legacy target provider when cluster names overlap.
+	Provider string `json:"provider,omitempty"`
+
 	// Command is the full command string to execute
 	// Example: "kubectl get pods -n default --output=yaml"
 	Command string `json:"command" binding:"required"`
