@@ -19,6 +19,7 @@ package api
 import (
 	"context"
 	"fmt"
+	"sync/atomic"
 	"testing"
 
 	"github.com/krkn-chaos/krknctl/pkg/provider"
@@ -28,14 +29,18 @@ import (
 )
 
 type mockScenarioProvider struct {
-	details      map[string]*models.ScenarioDetail
-	err          map[string]error
-	tags         []models.ScenarioTag
-	signature    verify.SignatureStatus
-	signatureErr error
+	details            map[string]*models.ScenarioDetail
+	err                map[string]error
+	tags               []models.ScenarioTag
+	signature          verify.SignatureStatus
+	signatureErr       error
+	registryImageCalls atomic.Int32
+	detailCalls        atomic.Int32
+	signatureCalls     atomic.Int32
 }
 
 func (m *mockScenarioProvider) GetRegistryImages(_ *models.RegistryV2) (*[]models.ScenarioTag, error) {
+	m.registryImageCalls.Add(1)
 	return &m.tags, nil
 }
 
@@ -44,6 +49,7 @@ func (m *mockScenarioProvider) GetGlobalEnvironment(_ *models.RegistryV2, _ stri
 }
 
 func (m *mockScenarioProvider) GetScenarioDetail(scenario string, _ *models.RegistryV2) (*models.ScenarioDetail, error) {
+	m.detailCalls.Add(1)
 	if e, ok := m.err[scenario]; ok {
 		return nil, e
 	}
@@ -55,6 +61,7 @@ func (m *mockScenarioProvider) GetScenarioDetail(scenario string, _ *models.Regi
 }
 
 func (m *mockScenarioProvider) GetImageSignatureStatus(_ context.Context, _ *models.RegistryV2, _ models.ScenarioTag) (verify.SignatureStatus, error) {
+	m.signatureCalls.Add(1)
 	return m.signature, m.signatureErr
 }
 
