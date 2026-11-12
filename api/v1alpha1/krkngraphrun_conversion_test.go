@@ -29,6 +29,7 @@ func TestToKrknctlScenarioSetUsesScenarioReference(t *testing.T) {
 			ResiliencyWeight: 2.5,
 		},
 		"scenario2": {Scenario: publicScenario("scenario-2"), DependsOn: &parent},
+		"trigger":   {NodeType: GraphNodeTypeTrigger, Scenario: publicScenario(GraphNodeTypeTrigger)},
 	}
 
 	set := ToKrknctlScenarioSet(graph)
@@ -41,6 +42,9 @@ func TestToKrknctlScenarioSetUsesScenarioReference(t *testing.T) {
 	if set["scenario1"].ResiliencyWeight != 2.5 {
 		t.Fatalf("expected resiliency weight 2.5, got %v", set["scenario1"].ResiliencyWeight)
 	}
+	if set["trigger"].Name != GraphNodeTypeTrigger {
+		t.Fatalf("trigger identity was not preserved for dependency resolution: %+v", set["trigger"].Scenario)
+	}
 }
 
 func TestFromKrknctlScenarioSetCreatesPublicReferences(t *testing.T) {
@@ -48,6 +52,7 @@ func TestFromKrknctlScenarioSetCreatesPublicReferences(t *testing.T) {
 	set := krknctlmodels.ScenarioSet{
 		"scenario1": {Scenario: krknctlmodels.Scenario{Name: "scenario-1", Image: "legacy-image", ResiliencyWeight: 3.5}},
 		"scenario2": {Scenario: krknctlmodels.Scenario{Name: "scenario-2"}, Parent: &parent},
+		"trigger":   {Scenario: krknctlmodels.Scenario{Name: GraphNodeTypeTrigger}},
 	}
 
 	graph := FromKrknctlScenarioSet(set)
@@ -65,5 +70,8 @@ func TestFromKrknctlScenarioSetCreatesPublicReferences(t *testing.T) {
 	}
 	if graph["scenario1"].ResiliencyWeight != 3.5 {
 		t.Fatalf("expected resiliency weight 3.5, got %v", graph["scenario1"].ResiliencyWeight)
+	}
+	if graph["trigger"].NodeType != GraphNodeTypeTrigger {
+		t.Fatalf("trigger identity was not reconstructed, got nodeType %q", graph["trigger"].NodeType)
 	}
 }

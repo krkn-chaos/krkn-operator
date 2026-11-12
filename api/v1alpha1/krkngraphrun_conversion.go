@@ -28,7 +28,8 @@ func publicScenarioReference(name string) ScenarioReference {
 }
 
 // ToKrknctlScenarioSet converts a GraphScenarioNode map to a krknctl ScenarioSet
-// This enables seamless integration with krknctl's dependency graph resolution
+// for dependency graph resolution. The pinned krknctl model has no NodeType
+// field; the operator retains node types on the original GraphScenarioNode map.
 func ToKrknctlScenarioSet(graph map[string]GraphScenarioNode) krknctlmodels.ScenarioSet {
 	result := make(krknctlmodels.ScenarioSet)
 	for nodeID, node := range graph {
@@ -52,7 +53,12 @@ func ToKrknctlScenarioSet(graph map[string]GraphScenarioNode) krknctlmodels.Scen
 func FromKrknctlScenarioSet(scenarioSet krknctlmodels.ScenarioSet) map[string]GraphScenarioNode {
 	result := make(map[string]GraphScenarioNode)
 	for nodeID, node := range scenarioSet {
+		nodeType := ""
+		if node.Name == GraphNodeTypeTrigger {
+			nodeType = GraphNodeTypeTrigger
+		}
 		result[nodeID] = GraphScenarioNode{
+			NodeType:         nodeType,
 			Comment:          node.Comment,
 			Scenario:         publicScenarioReference(node.Name),
 			Name:             node.Name,

@@ -856,11 +856,17 @@ func (h *Handler) TargetsHandler(w http.ResponseWriter, r *http.Request) {
 func convertInputFields(fields []typing.InputField) []InputFieldResponse {
 	result := make([]InputFieldResponse, 0, len(fields))
 	for _, field := range fields {
+		variable := field.Variable
+		if field.Type == typing.Group && variable == nil {
+			variable = field.Name
+		}
 		result = append(result, InputFieldResponse{
 			Name:              field.Name,
 			ShortDescription:  field.ShortDescription,
 			Description:       field.Description,
-			Variable:          field.Variable,
+			Variable:          variable,
+			TriggerType:       triggerTypeForField(variable),
+			Requires:          field.Requires,
 			Type:              field.Type.String(),
 			Default:           field.Default,
 			Validator:         field.Validator,
@@ -869,13 +875,34 @@ func convertInputFields(fields []typing.InputField) []InputFieldResponse {
 			AllowedValues:     field.AllowedValues,
 			Required:          field.Required,
 			MountPath:         field.MountPath,
-			Requires:          field.Requires,
 			MutuallyExcludes:  field.MutuallyExcludes,
 			Secret:            field.Secret,
 			Group:             field.Group,
 		})
 	}
 	return result
+}
+
+// triggerTypeForField supplies trigger field metadata while the operator's
+// pinned krknctl version does not yet expose InputField.TriggerType.
+func triggerTypeForField(variable *string) *string {
+	if variable == nil {
+		return nil
+	}
+	var triggerType string
+	switch {
+	case *variable == "TRIGGER_COMMAND", *variable == "TRIGGER_EXPECTED_RC":
+		triggerType = "command"
+	case strings.HasPrefix(*variable, "TRIGGER_HTTP_"):
+		triggerType = "http"
+	case strings.HasPrefix(*variable, "TRIGGER_K8S_"):
+		triggerType = "k8s"
+	case strings.HasPrefix(*variable, "TRIGGER_PROM_"):
+		triggerType = "prometheus"
+	default:
+		return nil
+	}
+	return &triggerType
 }
 
 // maskToken redacts the middle of a sensitive token string for safe logging.
@@ -1579,8 +1606,31 @@ func (h *Handler) PostScenarioGlobals(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Get global environment
-	globalDetail, err := scenarioProvider.GetGlobalEnvironment(apiRegistry, scenarioName)
+	// Trigger execution images are utility nodes and are intentionally absent
+	// from the scenario catalog. Their trigger inputs are part of Krkn's shared
+	// global environment metadata, which is published on regular scenario tags.
+	// Resolve that shared metadata from an available public scenario tag instead
+	// of looking up the utility tag named "trigger".
+	var globalDetail *models.ScenarioDetail
+	if scenarioName == "trigger" && mode == provider.Quay {
+		tags, tagsErr := scenarioProvider.GetRegistryImages(apiRegistry)
+		if tagsErr != nil {
+			err = tagsErr
+		} else if tags != nil {
+			for _, tag := range *tags {
+				globalDetail, err = scenarioProvider.GetGlobalEnvironment(apiRegistry, tag.Name)
+				if err == nil && globalDetail != nil {
+					break
+				}
+				if err != nil && !errors.Is(err, provider.ErrLabelNotFound) {
+					break
+				}
+				err = nil
+			}
+		}
+	} else {
+		globalDetail, err = scenarioProvider.GetGlobalEnvironment(apiRegistry, scenarioName)
+	}
 	if err != nil {
 		if errors.Is(err, provider.ErrLabelNotFound) {
 			writeJSONError(w, http.StatusNotFound, ErrorResponse{

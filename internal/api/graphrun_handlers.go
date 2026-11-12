@@ -373,6 +373,10 @@ func (h *Handler) CreateGraphRun(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		normalizeLegacyGraphScenarioNode(&node)
+		if err := node.ValidateNodeType(nodeID); err != nil {
+			writeJSONError(w, http.StatusBadRequest, ErrorResponse{Error: "bad_request", Message: err.Error()})
+			return
+		}
 		if err := node.Scenario.Validate(); err != nil {
 			writeJSONError(w, http.StatusBadRequest, ErrorResponse{
 				Error:   "bad_request",
@@ -380,7 +384,7 @@ func (h *Handler) CreateGraphRun(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
-		if *node.Scenario.Private {
+		if node.NodeType != krknv1alpha1.GraphNodeTypeTrigger && *node.Scenario.Private {
 			secret, err := h.loadRegistrySecret(ctx, node.Scenario.RegistryName)
 			if err != nil {
 				writeJSONError(w, http.StatusNotFound, ErrorResponse{

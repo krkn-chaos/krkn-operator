@@ -185,6 +185,11 @@ func (r ScenarioReference) Validate() error {
 
 // KrknScenarioRunSpec defines the desired state of KrknScenarioRun
 type KrknScenarioRunSpec struct {
+	// NodeType selects a built-in non-scenario execution image when set.
+	// +optional
+	// +kubebuilder:validation:Enum=scenario;trigger
+	NodeType string `json:"nodeType,omitempty"`
+
 	// TargetRequestID is the reference to the KrknTargetRequest CR
 	TargetRequestID string `json:"targetRequestId"`
 

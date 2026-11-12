@@ -95,6 +95,12 @@ definitions:
           API translates it into a public ScenarioReference.
           +optional
         type: string
+      nodeType:
+        description: |-
+          NodeType selects a built-in non-scenario graph node implementation.
+          +optional
+          +kubebuilder:validation:Enum=scenario;trigger
+        type: string
       registryName:
         description: |-
           RegistryName is the legacy private registry identity field. Image remains
@@ -1282,12 +1288,18 @@ definitions:
       required:
         type: boolean
       requires:
+        description: |-
+          Requires is retained for compatibility with older scenario metadata.
+          New trigger fields use TriggerType instead.
+          Deprecated: This field is not used to configure trigger node fields.
         type: string
       secret:
         type: boolean
       separator:
         type: string
       short_description:
+        type: string
+      trigger_type:
         type: string
       type:
         description: String representation instead of int64 enum
