@@ -20,6 +20,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -153,5 +156,79 @@ func TestLegacyTargetKubeconfigRejectsAmbiguousProvider(t *testing.T) {
 	_, err := handler.getKubeconfig(context.Background(), "", targetID, "", clusterName)
 	if !errors.Is(err, errAmbiguousClusterProvider) {
 		t.Fatalf("error = %v, want ambiguous provider error", err)
+	}
+}
+
+func TestLegacyTargetClusterAPIURLRejectsAmbiguousProvider(t *testing.T) {
+	const targetID = "target-request"
+	const clusterName = "shared-cluster"
+	handler := newKubeconfigHelperHandler(t, targetID, nil,
+		map[string][]krknv1alpha1.ClusterTarget{
+			"krkn-operator": {
+				{ClusterName: clusterName, ClusterAPIURL: "https://operator.cluster"},
+			},
+			"krkn-operator-acm": {
+				{ClusterName: clusterName, ClusterAPIURL: "https://acm.cluster"},
+			},
+		},
+	)
+
+	_, err := handler.getClusterAPIURL(context.Background(), "", targetID, "", clusterName)
+	if !errors.Is(err, errAmbiguousClusterProvider) {
+		t.Fatalf("error = %v, want ambiguous provider error", err)
+	}
+}
+
+func TestLegacyTargetClusterAPIURLPreservesEmptyURL(t *testing.T) {
+	const targetID = "target-request"
+	const clusterName = "legacy-cluster"
+	handler := newKubeconfigHelperHandler(t, targetID, nil,
+		map[string][]krknv1alpha1.ClusterTarget{
+			"krkn-operator-acm": {{ClusterName: clusterName}},
+		},
+	)
+
+	apiURL, err := handler.getClusterAPIURL(context.Background(), "", targetID, "", clusterName)
+	if err != nil || apiURL != "" {
+		t.Fatalf("API URL = %q, error = %v; want empty URL without error", apiURL, err)
+	}
+}
+
+func TestLegacyEndpointsForwardOperatorName(t *testing.T) {
+	const targetID = "target-request"
+	const clusterName = "shared-cluster"
+	handler := newKubeconfigHelperHandler(t, targetID,
+		map[string]map[string]map[string]string{
+			"krkn-operator": {
+				clusterName: {"kubeconfig": "operator-kubeconfig"},
+			},
+		},
+		nil,
+	)
+
+	tests := []struct {
+		name    string
+		request *http.Request
+		serve   func(http.ResponseWriter, *http.Request)
+	}{
+		{
+			name:    "nodes",
+			request: httptest.NewRequest(http.MethodGet, "/nodes?id=target-request&cluster-name=shared-cluster&operator-name=missing", nil),
+			serve:   handler.GetNodes,
+		},
+		{
+			name:    "terminal",
+			request: httptest.NewRequest(http.MethodPost, "/terminal", strings.NewReader(`{"uuid":"target-request","cluster_id":"shared-cluster","operator_name":"missing","command":"kubectl get pods"}`)),
+			serve:   handler.ExecuteTerminal,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			response := httptest.NewRecorder()
+			tt.serve(response, tt.request)
+			if response.Code != http.StatusNotFound || !strings.Contains(response.Body.String(), "provider 'missing'") {
+				t.Fatalf("status = %d, body = %s; want provider-specific 404", response.Code, response.Body.String())
+			}
+		})
 	}
 }
