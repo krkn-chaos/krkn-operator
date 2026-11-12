@@ -277,16 +277,6 @@ func TestDeleteVisualizeInstance(t *testing.T) {
 			},
 		},
 	}
-	unrelatedConfigMap := &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "unrelated",
-			Namespace: "krkn-operator",
-			Annotations: map[string]string{
-				visualize.AnnotationNamespace: "sensitive-target",
-			},
-		},
-	}
-
 	tests := []struct {
 		name           string
 		instanceName   string
@@ -357,6 +347,16 @@ func TestGetVisualizeInstanceLogs(t *testing.T) {
 				visualize.AnnotationNamespace:     "krkn-visualize",
 				visualize.AnnotationStatus:        visualize.StatusReady,
 				visualize.AnnotationGrafanaURL:    "https://grafana.example.com",
+			},
+		},
+	}
+
+	unrelatedConfigMap := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "unrelated",
+			Namespace: "krkn-operator",
+			Annotations: map[string]string{
+				visualize.AnnotationNamespace: "sensitive-target",
 			},
 		},
 	}
