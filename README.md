@@ -422,12 +422,18 @@ Query alert documents from the `alertsIndex` configured on a saved Elasticsearch
   "size": 50,
   "startDate": "2026-08-01",
   "endDate": "2026-08-26",
+  "filters": [
+    {"key": "phase", "value": "during"},
+    {"key": "alertname", "value": "APIDown"}
+  ],
   "sortBy": "severity",
   "sortOrder": "desc"
 }
 ```
 
 `size` defaults to `50` and is capped at `500`. Date bounds use `yyyy-MM-dd` and filter the alert index's `created_at` field.
+
+Optional `filters` is an AND-ed list of case-insensitive substring matches. Allowed keys are `run_uuid`, `severity`, `phase`, and `alertname`; an empty value matches documents where that field exists. Filters apply before sorting and the `size` limit, so sorting with active filters returns the top matching alerts rather than the top unfiltered alerts.
 
 Optional `sortBy`/`sortOrder` sort the results. `sortBy` must be one of `uuid`, `phase`, `created_at`, `severity`; `sortOrder` must be `asc` or `desc`. The two must be supplied together. When omitted, results are sorted newest-first by `created_at`. Supplying only one, an unknown `sortBy`, or an invalid `sortOrder` returns `400`.
 

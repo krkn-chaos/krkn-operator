@@ -401,6 +401,16 @@ definitions:
           this group.
         type: string
     type: object
+  github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.AlertFieldFilter:
+    properties:
+      key:
+        description: Key is one of run_uuid, severity, phase, or alertname.
+        type: string
+      value:
+        description: Value is a case-insensitive substring; an empty value requires
+          field presence.
+        type: string
+    type: object
   github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.QueryAlertsRequest:
     properties:
       configName:
@@ -412,6 +422,14 @@ definitions:
         description: EndDate is the inclusive calendar-date upper bound in yyyy-MM-dd
           format.
         type: string
+      filters:
+        description: |-
+          Filters are applied before sorting and the size limit. Each filter is
+          case-insensitive substring matching; filters are AND-ed. An empty value
+          matches documents where the selected field exists. Unknown keys are rejected.
+        items:
+          $ref: '#/definitions/github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.AlertFieldFilter'
+        type: array
       size:
         description: |-
           Size is the maximum number of alert documents to return. Zero uses the
@@ -2169,9 +2187,11 @@ paths:
       consumes:
       - application/json
       description: Run an alerts search against the alerts index of a saved Elasticsearch
-        config. Optional sortBy and sortOrder fields sort by allowlisted alert fields
-        before the result limit. Credentials are resolved server-side and alert sources
-        are redacted before returning.
+        config. Optional filters apply AND-ed, case-insensitive substring matches to
+        run_uuid, severity, phase, or alertname before sorting and the result limit;
+        empty values require field presence. Optional sortBy and sortOrder fields sort
+        by allowlisted alert fields. Credentials are resolved server-side and alert
+        sources are redacted before returning.
       parameters:
       - description: Query parameters
         in: body

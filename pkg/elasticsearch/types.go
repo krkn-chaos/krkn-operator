@@ -402,11 +402,23 @@ type QueryAlertsRequest struct {
 	StartDate string `json:"startDate,omitempty"`
 	// EndDate is the inclusive calendar-date upper bound in yyyy-MM-dd format.
 	EndDate string `json:"endDate,omitempty"`
+	// Filters are applied before sorting and the size limit. Each filter is
+	// case-insensitive substring matching; filters are AND-ed. An empty value
+	// matches documents where the selected field exists. Unknown keys are rejected.
+	Filters []AlertFieldFilter `json:"filters,omitempty"`
 	// SortBy selects an allowlisted alert source field. It must be provided
 	// together with SortOrder; omitted values retain created_at descending.
 	SortBy string `json:"sortBy,omitempty"`
 	// SortOrder is "asc" or "desc" and must be provided together with SortBy.
 	SortOrder string `json:"sortOrder,omitempty"`
+}
+
+// AlertFieldFilter selects an allowlisted alert source field and search value.
+type AlertFieldFilter struct {
+	// Key is one of run_uuid, severity, phase, or alertname.
+	Key   string `json:"key"`
+	// Value is a case-insensitive substring; an empty value requires field presence.
+	Value string `json:"value"`
 }
 
 // AlertDocument is an alert index document. Source is returned as raw JSON
@@ -441,7 +453,19 @@ func ValidateAlertsQueryRequest(req *QueryAlertsRequest) error {
 	if err := validateQueryOptions(&req.Size, req.StartDate, req.EndDate); err != nil {
 		return err
 	}
+	if err := validateAlertFilters(req.Filters); err != nil {
+		return err
+	}
 	return validateSortOptions(req.SortBy, req.SortOrder, alertSortFields)
+}
+
+func validateAlertFilters(filters []AlertFieldFilter) error {
+	for _, filter := range filters {
+		if _, ok := alertFilterFields[filter.Key]; !ok {
+			return fmt.Errorf("unsupported alert filter field %q", filter.Key)
+		}
+	}
+	return nil
 }
 
 func validateQueryOptions(size *int, startDate, endDate string) error {

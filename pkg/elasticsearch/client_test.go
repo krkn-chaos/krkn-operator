@@ -426,6 +426,53 @@ func TestValidateAlertsQueryRequestSort(t *testing.T) {
 	}
 }
 
+func TestValidateAlertsQueryRequestFilters(t *testing.T) {
+	tests := []struct {
+		name    string
+		body    string
+		wantErr bool
+	}{
+		{
+			name: "known filters including empty value",
+			body: `{"configName":"saved","filters":[{"key":"run_uuid","value":"run"},{"key":"severity","value":""},{"key":"phase","value":"during"},{"key":"alertname","value":"api"}]}`,
+		},
+		{
+			name:    "unknown field",
+			body:    `{"configName":"saved","filters":[{"key":"labels.component","value":"api"}]}`,
+			wantErr: true,
+		},
+		{
+			name:    "empty key",
+			body:    `{"configName":"saved","filters":[{"key":"","value":"api"}]}`,
+			wantErr: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var req QueryAlertsRequest
+			if err := json.Unmarshal([]byte(tt.body), &req); err != nil {
+				t.Fatalf("decode request: %v", err)
+			}
+			err := ValidateAlertsQueryRequest(&req)
+			if tt.wantErr && err == nil {
+				t.Fatal("expected validation error")
+			}
+			if !tt.wantErr && err != nil {
+				t.Fatalf("unexpected validation error: %v", err)
+			}
+			if !tt.wantErr {
+				encoded, err := json.Marshal(req)
+				if err != nil {
+					t.Fatalf("encode request: %v", err)
+				}
+				if !strings.Contains(string(encoded), `"filters"`) {
+					t.Fatalf("filters were discarded: %s", encoded)
+				}
+			}
+		})
+	}
+}
+
 func TestConnectionParamsTLSConfig(t *testing.T) {
 	// A syntactically valid self-signed certificate in PEM form.
 	const caPEM = `-----BEGIN CERTIFICATE-----

@@ -90,6 +90,13 @@ var alertSortFields = map[string]sortField{
 	"severity": {Field: "severity", UnmappedType: "keyword"},
 }
 
+var alertFilterFields = map[string]string{
+	"run_uuid":  "run_uuid.keyword",
+	"severity":  "severity",
+	"phase":     "phase.keyword",
+	"alertname": "alertname.keyword",
+}
+
 func validateSortOptions(sortBy, sortOrder string, fields map[string]sortField) error {
 	if sortBy == "" && sortOrder == "" {
 		return nil
@@ -905,17 +912,26 @@ func (c *Client) QueryAlerts(ctx context.Context, conn ConnectionParams, size in
 // Elasticsearch returns a non-success status, when the response exceeds the
 // configured size limit, or when the response cannot be decoded.
 func (c *Client) QueryAlertsWithSort(ctx context.Context, conn ConnectionParams, size int, startDate, endDate, sortBy, sortOrder string) ([]AlertDocument, error) {
+	return c.QueryAlertsWithFiltersAndSort(ctx, conn, size, startDate, endDate, nil, sortBy, sortOrder)
+}
+
+// QueryAlertsWithFiltersAndSort applies allowlisted field filters before sorting
+// and the requested result limit.
+func (c *Client) QueryAlertsWithFiltersAndSort(ctx context.Context, conn ConnectionParams, size int, startDate, endDate string, filters []AlertFieldFilter, sortBy, sortOrder string) ([]AlertDocument, error) {
 	if conn.Index == "" {
 		return nil, fmt.Errorf("alerts index is not configured for this Elasticsearch config")
 	}
 	if err := validateQueryOptions(&size, startDate, endDate); err != nil {
 		return nil, err
 	}
+	if err := validateAlertFilters(filters); err != nil {
+		return nil, err
+	}
 	if err := validateSortOptions(sortBy, sortOrder, alertSortFields); err != nil {
 		return nil, err
 	}
 	respBody, err := c.executeQuery(ctx, conn, size, startDate, endDate, func(size int, startDate, endDate string) ([]byte, error) {
-		return buildAlertsSearchBodyWithSort(size, startDate, endDate, sortBy, sortOrder)
+		return buildAlertsSearchBodyWithSort(size, startDate, endDate, sortBy, sortOrder, filters)
 	})
 	if err != nil {
 		return nil, err
@@ -1057,7 +1073,7 @@ func buildSearchBodyWithSort(size, from int, startDate, endDate string, filters 
 	return payload, nil
 }
 
-func buildAlertsSearchBodyWithSort(size int, startDate, endDate, sortBy, sortOrder string) ([]byte, error) {
+func buildAlertsSearchBodyWithSort(size int, startDate, endDate, sortBy, sortOrder string, filters []AlertFieldFilter) ([]byte, error) {
 	payload, err := buildSearchBody(size, 0, startDate, endDate, nil)
 	if err != nil {
 		return nil, err
@@ -1080,11 +1096,31 @@ func buildAlertsSearchBodyWithSort(size int, startDate, endDate, sortBy, sortOrd
 		return nil, err
 	}
 	body["sort"] = sort
+	queryFilters := []any{
+		map[string]any{"range": map[string]any{"created_at": timestampRange}},
+	}
+	wildcardEscaper := strings.NewReplacer(`\`, `\\`, `*`, `\*`, `?`, `\?`)
+	for _, filter := range filters {
+		field := alertFilterFields[filter.Key]
+		value := strings.TrimSpace(filter.Value)
+		if value == "" {
+			queryFilters = append(queryFilters, map[string]any{
+				"exists": map[string]any{"field": field},
+			})
+			continue
+		}
+		queryFilters = append(queryFilters, map[string]any{
+			"wildcard": map[string]any{
+				field: map[string]any{
+					"value":            "*" + wildcardEscaper.Replace(value) + "*",
+					"case_insensitive": true,
+				},
+			},
+		})
+	}
 	body["query"] = map[string]any{
 		"bool": map[string]any{
-			"filter": []any{
-				map[string]any{"range": map[string]any{"created_at": timestampRange}},
-			},
+			"filter": queryFilters,
 		},
 	}
 	return json.Marshal(body)

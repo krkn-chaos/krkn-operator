@@ -702,7 +702,7 @@ func (h *Handler) QueryElasticsearchTelemetry(w http.ResponseWriter, r *http.Req
 // alerts index is configured by the Elasticsearch deployment.
 //
 // @Summary Query Elasticsearch alerts
-// @Description Run an alerts search against the alerts index of a saved Elasticsearch config. Optional sortBy and sortOrder fields sort by allowlisted alert fields before the result limit. Credentials are resolved server-side and alert sources are redacted before returning.
+// @Description Run an alerts search against the alerts index of a saved Elasticsearch config. Optional filters apply AND-ed, case-insensitive substring matches to run_uuid, severity, phase, or alertname before sorting and the result limit; empty values require field presence. Optional sortBy and sortOrder fields sort by allowlisted alert fields. Credentials are resolved server-side and alert sources are redacted before returning.
 // @Tags elasticsearch
 // @Accept json
 // @Produce json
@@ -767,7 +767,7 @@ func (h *Handler) QueryElasticsearchAlerts(w http.ResponseWriter, r *http.Reques
 		})
 		return
 	}
-	docs, err := h.esClient.QueryAlertsWithSort(ctx, conn, req.Size, req.StartDate, req.EndDate, req.SortBy, req.SortOrder)
+	docs, err := h.esClient.QueryAlertsWithFiltersAndSort(ctx, conn, req.Size, req.StartDate, req.EndDate, req.Filters, req.SortBy, req.SortOrder)
 	if err != nil {
 		var statusErr *elasticsearch.StatusError
 		if errors.As(err, &statusErr) {

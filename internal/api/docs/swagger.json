@@ -293,7 +293,7 @@
                         "BearerAuth": []
                     }
                 ],
-                "description": "Run an alerts search against the alerts index of a saved Elasticsearch config. Optional sortBy and sortOrder fields sort by allowlisted alert fields before the result limit. Credentials are resolved server-side and alert sources are redacted before returning.",
+                "description": "Run an alerts search against the alerts index of a saved Elasticsearch config. Optional filters apply AND-ed, case-insensitive substring matches to run_uuid, severity, phase, or alertname before sorting and the result limit; empty values require field presence. Optional sortBy and sortOrder fields sort by allowlisted alert fields. Credentials are resolved server-side and alert sources are redacted before returning.",
                 "consumes": [
                     "application/json"
                 ],
@@ -4192,6 +4192,19 @@
                 }
             }
         },
+        "github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.AlertFieldFilter": {
+            "type": "object",
+            "properties": {
+                "key": {
+                    "description": "Key is one of run_uuid, severity, phase, or alertname.",
+                    "type": "string"
+                },
+                "value": {
+                    "description": "Value is a case-insensitive substring; an empty value requires field presence.",
+                    "type": "string"
+                }
+            }
+        },
         "github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.QueryAlertsRequest": {
             "type": "object",
             "properties": {
@@ -4202,6 +4215,13 @@
                 "endDate": {
                     "description": "EndDate is the inclusive calendar-date upper bound in yyyy-MM-dd format.",
                     "type": "string"
+                },
+                "filters": {
+                    "description": "Filters are applied before sorting and the size limit. Each filter is\ncase-insensitive substring matching; filters are AND-ed. An empty value\nmatches documents where the selected field exists. Unknown keys are rejected.",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_krkn-chaos_krkn-operator_pkg_elasticsearch.AlertFieldFilter"
+                    }
                 },
                 "size": {
                     "description": "Size is the maximum number of alert documents to return. Zero uses the\ndefault and values above MaxQuerySize are clamped.",
