@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -32,12 +33,26 @@ func visibleCategoryNames(ctx context.Context, checker AuthorizationChecker) (ma
 // WSUnifiedJobItem represents a single item in the unified jobs list for WebSocket responses.
 // Uses the same typed envelope as REST UnifiedJobItem for frontend compatibility.
 type WSUnifiedJobItem struct {
-	Type        string                     `json:"type"` // "scenarioRun" or "graphRun"
-	Name        string                     `json:"name"`
-	CreatedAt   string                     `json:"createdAt"` // RFC3339 timestamp
-	Categories  []string                   `json:"categories,omitempty"`
-	ScenarioRun *ScenarioRunStatusResponse `json:"scenarioRun,omitempty"`
-	GraphRun    *GraphRunResponse          `json:"graphRun,omitempty"`
+	Type         string                     `json:"type"` // "scenarioRun" or "graphRun"
+	Name         string                     `json:"name"`
+	CreatedAt    string                     `json:"createdAt"` // RFC3339 timestamp
+	Categories   []string                   `json:"categories,omitempty"`
+	ScenarioRun  *ScenarioRunStatusResponse `json:"scenarioRun,omitempty"`
+	GraphRun     *GraphRunResponse          `json:"graphRun,omitempty"`
+	RollbackRuns []WSRollbackRunSummary     `json:"rollbackRuns,omitempty"`
+}
+
+// WSRollbackRunSummary describes one rollback execution in the grouped Jobs view.
+type WSRollbackRunSummary struct {
+	ScenarioRunName string `json:"scenarioRunName"`
+	SourceJobID     string `json:"sourceJobId"`
+	Iteration       int    `json:"iteration,omitempty"`
+	Phase           string `json:"phase"`
+	OwnerUserID     string `json:"ownerUserId,omitempty"`
+	CreatedAt       string `json:"createdAt"`
+	JobID           string `json:"jobId,omitempty"`
+	PodName         string `json:"podName,omitempty"`
+	JobPhase        string `json:"jobPhase,omitempty"`
 }
 
 func (w WSUnifiedJobItem) JobType() string { return w.Type }
@@ -126,6 +141,55 @@ func buildUnifiedJobList(scenarioRuns []krknv1alpha1.KrknScenarioRun, graphRuns 
 	})
 
 	return jobs
+}
+
+// groupRollbackJobs nests visible rollback runs under their visible source run.
+// Runs without a matching standalone parent remain top-level history.
+func groupRollbackJobs(jobs []WSUnifiedJobItem, scenarioRuns []krknv1alpha1.KrknScenarioRun) []WSUnifiedJobItem {
+	jobs = append([]WSUnifiedJobItem(nil), jobs...)
+	byName := make(map[string]*krknv1alpha1.KrknScenarioRun, len(scenarioRuns))
+	for i := range scenarioRuns {
+		byName[scenarioRuns[i].Name] = &scenarioRuns[i]
+	}
+	parents := make(map[string]int)
+	for i := range jobs {
+		if run := byName[jobs[i].Name]; run != nil && run.UID != "" && run.Spec.RollbackSource == nil && run.Labels["krkn.dev/graph-run"] == "" {
+			parents[run.Name+"/"+string(run.UID)] = i
+		}
+	}
+	grouped := make([]bool, len(jobs))
+	for i := range jobs {
+		run := byName[jobs[i].Name]
+		if run == nil || run.Spec.RollbackSource == nil || run.Spec.RollbackSource.RunUID == "" {
+			continue
+		}
+		source := run.Spec.RollbackSource
+		parentIndex, ok := parents[source.RunName+"/"+source.RunUID]
+		if !ok {
+			continue
+		}
+		summary := WSRollbackRunSummary{
+			ScenarioRunName: run.Name,
+			SourceJobID:     source.JobID,
+			Phase:           run.Status.Phase,
+			OwnerUserID:     run.Spec.OwnerUserID,
+			CreatedAt:       run.CreationTimestamp.Format(time.RFC3339),
+		}
+		summary.Iteration, _ = strconv.Atoi(run.Labels["krkn-rollback-iteration"])
+		if len(run.Status.ClusterJobs) > 0 {
+			job := run.Status.ClusterJobs[0]
+			summary.JobID, summary.PodName, summary.JobPhase = job.JobID, job.PodName, job.Phase
+		}
+		jobs[parentIndex].RollbackRuns = append(jobs[parentIndex].RollbackRuns, summary)
+		grouped[i] = true
+	}
+	result := make([]WSUnifiedJobItem, 0, len(jobs))
+	for i := range jobs {
+		if !grouped[i] {
+			result = append(result, jobs[i])
+		}
+	}
+	return result
 }
 
 func runCategoryNames(labels map[string]string) []string {
@@ -228,6 +292,8 @@ func computeWSJobStats(jobs []WSUnifiedJobItem) WSJobStatsSummary {
 func buildScenarioRunResponse(run *krknv1alpha1.KrknScenarioRun) ScenarioRunStatusResponse {
 	return ScenarioRunStatusResponse{
 		ScenarioRunName:        run.Name,
+		RollbackEnabled:        run.Spec.RollbackEnabled,
+		IsRollback:             run.Spec.RollbackSource != nil,
 		ScenarioName:           run.Spec.Scenario.Name,
 		Phase:                  run.Status.Phase,
 		TotalTargets:           run.Status.TotalTargets,
@@ -251,6 +317,8 @@ func buildScenarioRunResponse(run *krknv1alpha1.KrknScenarioRun) ScenarioRunStat
 func buildScenarioRunDetailResponse(run *krknv1alpha1.KrknScenarioRun) ScenarioRunStatusResponse {
 	return ScenarioRunStatusResponse{
 		ScenarioRunName:        run.Name,
+		RollbackEnabled:        run.Spec.RollbackEnabled,
+		IsRollback:             run.Spec.RollbackSource != nil,
 		ScenarioName:           run.Spec.Scenario.Name,
 		Phase:                  run.Status.Phase,
 		TotalTargets:           run.Status.TotalTargets,
@@ -294,6 +362,7 @@ func convertClusterJobs(jobs []krknv1alpha1.ClusterJobStatus) []ClusterJobRespon
 			JobID:           job.JobID,
 			PodName:         job.PodName,
 			ScenarioImage:   job.ScenarioImage,
+			AttemptHistory:  job.AttemptHistory,
 			Phase:           job.Phase,
 			StartTime:       convertMetaTime(job.StartTime),
 			CompletionTime:  convertMetaTime(job.CompletionTime),

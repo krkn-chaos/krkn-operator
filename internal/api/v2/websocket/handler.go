@@ -319,6 +319,7 @@ func (h *Handler) handleClientMessage(client *Client, msg *ClientMessage) {
 				Page:           page,
 				Limit:          limit,
 				Categories:     append([]string(nil), msg.Categories...),
+				GroupRollbacks: msg.GroupRollbacks,
 				SubscriptionID: msg.SubscriptionID,
 			}
 			client.mu.Unlock()
@@ -620,22 +621,25 @@ func (h *Handler) sendJobsSnapshot(ctx context.Context, client *Client, logger l
 	filteredScenarioRuns := h.authz.FilterScenarioRunsByGroupPermission(scenarioRuns.Items, ctx)
 	filteredGraphRuns := h.authz.FilterGraphRunsByGroupPermission(graphRuns.Items, ctx)
 
-	// Build unified sorted list
-	allJobs := buildUnifiedJobList(filteredScenarioRuns, filteredGraphRuns)
-	visibleCategories, err := visibleCategoryNames(ctx, h.authz)
-	if err != nil {
-		logger.Error(err, "Failed to determine category visibility for jobs snapshot")
-		return
-	}
-	filterJobCategoriesByVisibility(allJobs, visibleCategories)
-
-	// Get pagination state
+	// Get pagination state before building the selected Jobs view.
 	client.mu.RLock()
 	var state PaginationClientState
 	if current := client.paginationState["jobs"]; current != nil {
 		state = *current
 	}
 	client.mu.RUnlock()
+
+	// Build unified sorted list
+	allJobs := buildUnifiedJobList(filteredScenarioRuns, filteredGraphRuns)
+	if state.GroupRollbacks {
+		allJobs = groupRollbackJobs(allJobs, filteredScenarioRuns)
+	}
+	visibleCategories, err := visibleCategoryNames(ctx, h.authz)
+	if err != nil {
+		logger.Error(err, "Failed to determine category visibility for jobs snapshot")
+		return
+	}
+	filterJobCategoriesByVisibility(allJobs, visibleCategories)
 
 	page := 1
 	limit := h.getDefaultPageSize()

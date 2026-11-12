@@ -6,6 +6,7 @@ command -v yq >/dev/null || { echo "yq is required" >&2; exit 1; }
 
 chart_source_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../charts/krkn-operator" && pwd)
 repo_root=$(cd "$chart_source_dir/../.." && pwd)
+test -f "$chart_source_dir/crds/krkn.krkn-chaos.dev_krknworkspaces.yaml"
 work_dir=$(mktemp -d "${TMPDIR:-/tmp}/krkn-chart-exposure.XXXXXX")
 trap 'rm -rf "$work_dir"' EXIT
 chart_dir="$work_dir/chart"
@@ -24,6 +25,8 @@ helm show crds "$chart_dir" > "$work_dir/crds.yaml"
 yq -e 'select(.kind == "CustomResourceDefinition")' \
   "$work_dir/crds.yaml" >/dev/null
 yq -e 'select(.kind == "CustomResourceDefinition" and .metadata.name == "krkncategories.krkn.krkn-chaos.dev") | .metadata.labels."app.kubernetes.io/name" == "krkn-operator"' \
+  "$work_dir/crds.yaml" >/dev/null
+yq -e 'select(.kind == "CustomResourceDefinition" and .metadata.name == "krknworkspaces.krkn.krkn-chaos.dev") | .metadata.labels."app.kubernetes.io/name" == "krkn-operator"' \
   "$work_dir/crds.yaml" >/dev/null
 if ! yq -e '[select(.kind == "CustomResourceDefinition" and .metadata.labels."app.kubernetes.io/name" != "krkn-operator")] | length == 0' \
   "$work_dir/crds.yaml" >/dev/null; then

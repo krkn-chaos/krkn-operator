@@ -57,6 +57,31 @@ func TestShouldRetryJobHonorsConfiguredRetryLimit(t *testing.T) {
 	}
 }
 
+func TestFailedAttemptRetainsRollbackIdentityBeforeRetry(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = krknv1alpha1.AddToScheme(scheme)
+	_ = corev1.AddToScheme(scheme)
+	failedPod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "failed-attempt", Namespace: "default"}, Status: corev1.PodStatus{Phase: corev1.PodFailed}}
+	run := &krknv1alpha1.KrknScenarioRun{
+		ObjectMeta: metav1.ObjectMeta{Name: "run", Namespace: "default"},
+		Spec:       krknv1alpha1.KrknScenarioRunSpec{MaxRetries: 1},
+		Status: krknv1alpha1.KrknScenarioRunStatus{
+			ReportStatus: &krknv1alpha1.ReportStatus{Generated: true},
+			ClusterJobs: []krknv1alpha1.ClusterJobStatus{{
+				ProviderName: "provider", ClusterName: "cluster", JobID: "attempt-id", PodName: failedPod.Name,
+				ScenarioImage: "quay.io/scenario@sha256:abc", Phase: "Running", MaxRetries: 1,
+			}},
+		},
+	}
+	reconciler := &KrknScenarioRunReconciler{Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(run, failedPod).Build(), Scheme: scheme, Namespace: "default"}
+	if err := reconciler.updateClusterJobStatuses(context.Background(), run); err != nil {
+		t.Fatalf("updateClusterJobStatuses() error = %v", err)
+	}
+	if len(run.Status.ClusterJobs[0].AttemptHistory) != 1 || run.Status.ClusterJobs[0].AttemptHistory[0].JobID != "attempt-id" || run.Status.ClusterJobs[0].AttemptHistory[0].ScenarioImage != "quay.io/scenario@sha256:abc" {
+		t.Fatalf("prior attempt was not retained: %+v", run.Status.ClusterJobs[0].AttemptHistory)
+	}
+}
+
 func TestBackfillLegacyMaxRetries(t *testing.T) {
 	tests := []struct {
 		name          string
@@ -113,6 +138,30 @@ func TestUpdateClusterJobStatuses_PreservesExplicitZero(t *testing.T) {
 	}
 	if got := scenarioRun.Status.ClusterJobs[0].Phase; got != "MaxRetriesExceeded" {
 		t.Fatalf("job phase = %q, want MaxRetriesExceeded", got)
+	}
+}
+
+func TestUpdateClusterJobStatuses_RollbackRunDisablesRetriesForDirectCR(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = krknv1alpha1.AddToScheme(scheme)
+	_ = corev1.AddToScheme(scheme)
+	now := metav1.Now()
+	failedPod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "rollback-failed", Namespace: "default"}, Status: corev1.PodStatus{Phase: corev1.PodFailed}}
+	run := &krknv1alpha1.KrknScenarioRun{
+		ObjectMeta: metav1.ObjectMeta{Name: "direct-run", Namespace: "default"},
+		Spec:       krknv1alpha1.KrknScenarioRunSpec{MaxRetries: 3, RollbackEnabled: true},
+		Status: krknv1alpha1.KrknScenarioRunStatus{
+			ReportStatus: &krknv1alpha1.ReportStatus{Generated: true},
+			ClusterJobs:  []krknv1alpha1.ClusterJobStatus{{PodName: failedPod.Name, Phase: "Running", StartTime: &now, MaxRetries: 3, MaxRetriesConfigured: true}},
+		},
+	}
+	reconciler := &KrknScenarioRunReconciler{Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(run, failedPod).Build(), Scheme: scheme, Namespace: "default"}
+	if err := reconciler.updateClusterJobStatuses(context.Background(), run); err != nil {
+		t.Fatalf("updateClusterJobStatuses() error = %v", err)
+	}
+	job := run.Status.ClusterJobs[0]
+	if job.Phase != "MaxRetriesExceeded" || job.MaxRetries != 0 || job.RetryCount != 0 {
+		t.Fatalf("rollback job retried or retained its old retry limit: %+v", job)
 	}
 }
 

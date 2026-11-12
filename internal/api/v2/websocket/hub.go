@@ -30,6 +30,7 @@ type PaginationClientState struct {
 	Page           int
 	Limit          int
 	Categories     []string
+	GroupRollbacks bool
 	SubscriptionID string
 	LastHash       uint64 // fingerprint of last sent page content
 }

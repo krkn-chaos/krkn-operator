@@ -37,6 +37,7 @@ import (
 	"github.com/krkn-chaos/krkn-operator/pkg/auth"
 	"github.com/krkn-chaos/krkn-operator/pkg/cloudcreds"
 	"github.com/krkn-chaos/krkn-operator/pkg/groupauth"
+	"github.com/krkn-chaos/krkn-operator/pkg/workspace"
 )
 
 // ListGraphRuns handles GET /api/v1/graphruns
@@ -187,13 +188,19 @@ func (h *Handler) GetGraphRun(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	visibleGraph, err := h.publicGraphWorkspaces(r.Context(), graphRun.Spec.Graph)
+	if err != nil {
+		logger.Error(err, "Failed to check workspaces for graph run", "graphRunName", name)
+		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{Error: "internal_error", Message: "Failed to retrieve graph run"})
+		return
+	}
 	// Build response
 	response := GraphRunDetailResponse{
 		Name:              graphRun.Name,
 		Namespace:         graphRun.Namespace,
 		CreationTimestamp: graphRun.CreationTimestamp.Time,
 		Spec: GraphRunSpecResponse{
-			Graph:                   graphRun.Spec.Graph,
+			Graph:                   visibleGraph,
 			TargetRequestID:         graphRun.Spec.TargetRequestID,
 			TargetClusters:          graphRun.Spec.TargetClusters,
 			OwnerUserID:             graphRun.Spec.OwnerUserID,
@@ -234,6 +241,7 @@ func (h *Handler) GetGraphRun(w http.ResponseWriter, r *http.Request) {
 // @Failure 400 {object} ErrorResponse "Invalid request body or validation error"
 // @Failure 403 {object} ErrorResponse "Insufficient permissions"
 // @Failure 404 {object} ErrorResponse "Referenced resource not found"
+// @Failure 409 {object} ErrorResponse "Workspace is no longer available"
 // @Failure 500 {object} ErrorResponse "Internal server error"
 // @Failure 503 {object} ErrorResponse "Run operations are temporarily unavailable during CRD migration"
 // @Security BearerAuth
@@ -451,6 +459,27 @@ func (h *Handler) CreateGraphRun(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Validate file access for Volumes references in graph nodes
+	for nodeID, node := range req.Graph {
+		resolved, ok := h.resolveWorkspaceSelection(w, r, node.Workspace)
+		if !ok {
+			return
+		}
+		if node.RollbackEnabled && resolved == nil {
+			writeJSONError(w, http.StatusBadRequest, ErrorResponse{Error: "bad_request", Message: "Rollback requires a workspace for node " + nodeID})
+			return
+		}
+		if resolved != nil {
+			for _, mountPath := range node.Volumes {
+				if workspace.ConflictsWithMount(mountPath) {
+					writeJSONError(w, http.StatusBadRequest, ErrorResponse{Error: "bad_request", Message: "File mount overlaps the workspace path"})
+					return
+				}
+			}
+		}
+		node.Workspace = resolved
+		req.Graph[nodeID] = node
+	}
+
 	// Volumes format: {"<file-uuid>": "/mount/path"}
 	for nodeID, node := range req.Graph {
 		for fileID := range node.Volumes {
@@ -575,6 +604,19 @@ func (h *Handler) CreateGraphRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	visibleGraph, err := h.publicGraphWorkspaces(ctx, req.Graph)
+	if err != nil {
+		logger.Error(err, "Failed to check workspaces for graph run creation")
+		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{Error: "internal_error", Message: "Failed to verify graph workspaces"})
+		return
+	}
+	for id, node := range req.Graph {
+		if node.Workspace != nil && visibleGraph[id].Workspace == nil {
+			writeJSONError(w, http.StatusConflict, ErrorResponse{Error: "workspace_unavailable", Message: "Workspace is no longer available"})
+			return
+		}
+	}
+
 	// Create KrknGraphRun CR
 	graphRun := &krknv1alpha1.KrknGraphRun{
 		ObjectMeta: metav1.ObjectMeta{
@@ -615,7 +657,7 @@ func (h *Handler) CreateGraphRun(w http.ResponseWriter, r *http.Request) {
 		Namespace:         graphRun.Namespace,
 		CreationTimestamp: graphRun.CreationTimestamp.Time,
 		Spec: GraphRunSpecResponse{
-			Graph:                   graphRun.Spec.Graph,
+			Graph:                   visibleGraph,
 			TargetRequestID:         graphRun.Spec.TargetRequestID,
 			TargetClusters:          graphRun.Spec.TargetClusters,
 			MaxRetries:              graphRun.Spec.MaxRetries,

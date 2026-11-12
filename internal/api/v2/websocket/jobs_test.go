@@ -48,6 +48,7 @@ func TestHandleClientMessage_JobsSubscribe(t *testing.T) {
 		Page:           &page,
 		Limit:          &limit,
 		Categories:     []string{"resilience", "network"},
+		GroupRollbacks: true,
 		SubscriptionID: "jobs-sub-2",
 	}
 
@@ -73,6 +74,9 @@ func TestHandleClientMessage_JobsSubscribe(t *testing.T) {
 	}
 	if ps.SubscriptionID != "jobs-sub-2" {
 		t.Errorf("expected subscription ID jobs-sub-2, got %q", ps.SubscriptionID)
+	}
+	if !ps.GroupRollbacks {
+		t.Error("expected grouped rollback mode to be stored")
 	}
 	if len(ps.Categories) != 2 || ps.Categories[0] != "resilience" || ps.Categories[1] != "network" {
 		t.Errorf("expected category filters to be stored, got %v", ps.Categories)

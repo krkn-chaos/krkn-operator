@@ -355,22 +355,25 @@ func (b *Broadcaster) BroadcastJobsPageUpdate(ctx context.Context) {
 		filteredScenarioRuns := b.authz.FilterScenarioRunsByGroupPermission(scenarioRuns.Items, ctx)
 		filteredGraphRuns := b.authz.FilterGraphRunsByGroupPermission(graphRuns.Items, ctx)
 
-		// Build unified sorted list
-		allJobs := buildUnifiedJobList(filteredScenarioRuns, filteredGraphRuns)
-		visibleCategories, err := visibleCategoryNames(ctx, b.authz)
-		if err != nil {
-			logger.Error(err, "Failed to determine category visibility for jobs update", "user", client.userID)
-			return
-		}
-		filterJobCategoriesByVisibility(allJobs, visibleCategories)
-
-		// Get this client's pagination state
+		// Get this client's pagination state before building the selected Jobs view.
 		client.mu.RLock()
 		var state PaginationClientState
 		if current := client.paginationState["jobs"]; current != nil {
 			state = *current
 		}
 		client.mu.RUnlock()
+
+		// Build unified sorted list
+		allJobs := buildUnifiedJobList(filteredScenarioRuns, filteredGraphRuns)
+		if state.GroupRollbacks {
+			allJobs = groupRollbackJobs(allJobs, filteredScenarioRuns)
+		}
+		visibleCategories, err := visibleCategoryNames(ctx, b.authz)
+		if err != nil {
+			logger.Error(err, "Failed to determine category visibility for jobs update", "user", client.userID)
+			return
+		}
+		filterJobCategoriesByVisibility(allJobs, visibleCategories)
 
 		if state.Page <= 0 || state.Limit <= 0 {
 			return

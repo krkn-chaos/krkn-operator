@@ -78,7 +78,9 @@ func TestGetScenarioReplay_Success(t *testing.T) {
 			TargetClusters: map[string][]string{
 				"krkn-operator": {"cluster1"},
 			},
-			Scenario:           publicScenarioReference("dummy-scenario"),
+			Scenario: publicScenarioReference("dummy-scenario"),
+			Workspace: &krknv1alpha1.WorkspaceReference{Name: "friendly", WorkspaceUID: "workspace-uid",
+				ClaimName: "cluster-internal-pvc", ClaimUID: "claim-uid"},
 			MaxRetries:         5,
 			CloudCredentialRef: "aws-ci",
 			Environment: map[string]string{
@@ -147,6 +149,10 @@ func TestGetScenarioReplay_Success(t *testing.T) {
 	assert.Equal(t, map[string][]string{"krkn-operator": {"cluster1"}}, payload.TargetClusters)
 	assert.Equal(t, map[string]string{"EXIT_STATUS": "0"}, payload.Environment)
 	assert.Equal(t, "aws-ci", payload.CloudCredentialRef)
+	require.NotNil(t, payload.Workspace)
+	assert.Equal(t, "friendly", payload.Workspace.Name)
+	assert.Equal(t, "claim-uid", payload.Workspace.ClaimUID)
+	assert.NotContains(t, w.Body.String(), "cluster-internal-pvc")
 
 	// Verify fileReferences reconstructed
 	require.Len(t, payload.FileReferences, 1)

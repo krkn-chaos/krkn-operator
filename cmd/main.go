@@ -56,10 +56,11 @@ import (
 	"github.com/krkn-chaos/krkn-operator/internal/controller"
 	"github.com/krkn-chaos/krkn-operator/internal/crdinstaller"
 	olmbootstrap "github.com/krkn-chaos/krkn-operator/internal/olm"
+	"github.com/krkn-chaos/krkn-operator/internal/rollbackinspector"
 	"github.com/krkn-chaos/krkn-operator/pkg/auth"
 	"github.com/krkn-chaos/krkn-operator/pkg/componentversion"
 	"github.com/krkn-chaos/krkn-operator/pkg/configmap"
-	"github.com/krkn-chaos/krkn-operator/pkg/configstore"
+	kvstore "github.com/krkn-chaos/krkn-operator/pkg/configstore"
 	"github.com/krkn-chaos/krkn-operator/pkg/provider"
 	// +kubebuilder:scaffold:imports
 )
@@ -80,6 +81,13 @@ func init() {
 
 // nolint:gocyclo
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "inspect-rollback" {
+		if err := rollbackinspector.Run(os.Getenv("ROLLBACK_VERSIONS_DIRECTORY"), os.Getenv("UUID"), "/dev/termination-log"); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
 	var metricsAddr string
 	var metricsCertPath, metricsCertName, metricsCertKey string
 	var webhookCertPath, webhookCertName, webhookCertKey string
@@ -343,6 +351,12 @@ func main() {
 		Namespace: krknNamespace,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "KrknScenarioRun")
+		os.Exit(1)
+	}
+	if err = (&controller.KrknWorkspaceReconciler{
+		Client: mgr.GetClient(), Namespace: krknNamespace,
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "KrknWorkspace")
 		os.Exit(1)
 	}
 

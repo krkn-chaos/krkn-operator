@@ -127,11 +127,11 @@ type InputFieldResponse struct {
 	AllowedValues     *string `json:"allowed_values,omitempty"`
 	Required          bool    `json:"required,omitempty"`
 	// MountPath is the absolute container path for file-type scenario parameters.
-	MountPath         *string `json:"mount_path,omitempty"`
-	Requires          *string `json:"requires,omitempty"`
-	MutuallyExcludes  *string `json:"mutually_excludes,omitempty"`
-	Secret            bool    `json:"secret,omitempty"`
-	Group             *string `json:"group,omitempty"`
+	MountPath        *string `json:"mount_path,omitempty"`
+	Requires         *string `json:"requires,omitempty"`
+	MutuallyExcludes *string `json:"mutually_excludes,omitempty"`
+	Secret           bool    `json:"secret,omitempty"`
+	Group            *string `json:"group,omitempty"`
 }
 
 // ScenarioDetailResponse represents the response for POST /scenarios/detail/{scenario_name}
@@ -170,6 +170,17 @@ type FileMount struct {
 	MountPath string `json:"mountPath"`
 }
 
+// WorkspaceSelection identifies a published workspace in a REST request or
+// replay payload. Optional UIDs reject a workspace or PVC replaced since the
+// payload was prepared. The PVC name is accepted for legacy replay clients;
+// the server never includes it in a response.
+type WorkspaceSelection struct {
+	Name         string `json:"name"`
+	WorkspaceUID string `json:"workspaceUid,omitempty"`
+	ClaimName    string `json:"claimName,omitempty"`
+	ClaimUID     string `json:"claimUid,omitempty"`
+}
+
 // ScenarioRunRequest represents the request body for POST /scenarios/run
 type ScenarioRunRequest struct {
 	// TargetRequestID is the UUID of the KrknTargetRequest (required)
@@ -200,6 +211,10 @@ type ScenarioRunRequest struct {
 	Files []FileMount `json:"files,omitempty"`
 	// FileReferences are references to centrally-managed files by UUID (optional)
 	FileReferences []files.FileReference `json:"fileReferences,omitempty"`
+	// Workspace names a published PVC. The server resolves and pins its UID.
+	Workspace *WorkspaceSelection `json:"workspace,omitempty"`
+	// RollbackEnabled persists rollback files in the selected workspace.
+	RollbackEnabled bool `json:"rollbackEnabled,omitempty"`
 	// CustomRunName is a user-provided label for the run (optional)
 	CustomRunName string `json:"customRunName,omitempty"`
 	// ElasticsearchConfigName, if set, names a saved Elasticsearch config Secret whose
@@ -369,7 +384,10 @@ type ScenarioRunStatusResponse struct {
 	// ScenarioRunName is the name of the KrknScenarioRun CR
 	ScenarioRunName string `json:"scenarioRunName"`
 	// ScenarioName is the scenario tag/name being executed
-	ScenarioName string `json:"scenarioName,omitempty"`
+	ScenarioName    string `json:"scenarioName,omitempty"`
+	RollbackEnabled bool   `json:"rollbackEnabled,omitempty"`
+	// IsRollback identifies runs created from a pinned rollback source attempt.
+	IsRollback bool `json:"isRollback,omitempty"`
 	// Phase is the overall phase of the scenario run
 	Phase string `json:"phase"`
 	// TotalTargets is the total number of target clusters
@@ -408,6 +426,8 @@ type ClusterJobStatusResponse struct {
 	ClusterName string `json:"clusterName"`
 	// JobID is the unique identifier for this job
 	JobID string `json:"jobId"`
+	// AttemptHistory lists earlier attempts retained for rollback discovery.
+	AttemptHistory []krknv1alpha1.ScenarioAttemptStatus `json:"attemptHistory,omitempty"`
 	// PodName is the name of the pod running the scenario
 	PodName string `json:"podName,omitempty"`
 	// ScenarioImage is the resolved container image path being run
@@ -435,7 +455,10 @@ type ScenarioRunListItem struct {
 	// ScenarioRunName is the name of the KrknScenarioRun CR
 	ScenarioRunName string `json:"scenarioRunName"`
 	// ScenarioName is the name of the scenario being executed
-	ScenarioName string `json:"scenarioName"`
+	ScenarioName    string `json:"scenarioName"`
+	RollbackEnabled bool   `json:"rollbackEnabled,omitempty"`
+	// IsRollback identifies runs created from a pinned rollback source attempt.
+	IsRollback bool `json:"isRollback,omitempty"`
 	// ScenarioImage is the resolved container image used by the scenario jobs
 	ScenarioImage string `json:"scenarioImage,omitempty"`
 	// Phase is the overall phase of the scenario run
@@ -501,6 +524,22 @@ type UnifiedJobItem struct {
 	ScenarioRun *ScenarioRunListItem `json:"scenarioRun,omitempty"`
 	// GraphRun contains the graph run data (when Type == "graphRun")
 	GraphRun *GraphRunListItem `json:"graphRun,omitempty"`
+	// RollbackRuns are executions linked to this scenario run in the grouped Jobs view.
+	RollbackRuns []RollbackRunSummary `json:"rollbackRuns,omitempty"`
+}
+
+// RollbackRunSummary identifies one rollback execution and its original attempt.
+// It is derived from the rollback ScenarioRun; the source run status is unchanged.
+type RollbackRunSummary struct {
+	ScenarioRunName string    `json:"scenarioRunName"`
+	SourceJobID     string    `json:"sourceJobId"`
+	Iteration       int       `json:"iteration,omitempty"`
+	Phase           string    `json:"phase"`
+	OwnerUserID     string    `json:"ownerUserId,omitempty"`
+	CreatedAt       time.Time `json:"createdAt"`
+	JobID           string    `json:"jobId,omitempty"`
+	PodName         string    `json:"podName,omitempty"`
+	JobPhase        string    `json:"jobPhase,omitempty"`
 }
 
 func (u UnifiedJobItem) JobType() string { return u.Type }

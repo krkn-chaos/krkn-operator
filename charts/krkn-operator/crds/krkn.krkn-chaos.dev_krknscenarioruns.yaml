@@ -138,6 +138,29 @@ spec:
                 description: RetryDelay is the initial delay before retrying (e.g.,
                   "10s")
                 type: string
+              rollbackEnabled:
+                description: |-
+                  RollbackEnabled persists rollback version files in the selected workspace.
+                  It does not trigger automatic rollback execution.
+                type: boolean
+              rollbackSource:
+                description: RollbackSource identifies the attempt whose workspace
+                  is mounted by a rollback run.
+                properties:
+                  clusterApiUrl:
+                    type: string
+                  jobId:
+                    type: string
+                  runName:
+                    type: string
+                  runUid:
+                    type: string
+                required:
+                - clusterApiUrl
+                - jobId
+                - runName
+                - runUid
+                type: object
               scenario:
                 description: |-
                   Scenario identifies the scenario and registry to resolve. It is the only
@@ -173,6 +196,28 @@ spec:
                 description: TargetRequestID is the reference to the KrknTargetRequest
                   CR
                 type: string
+              workspace:
+                description: Workspace is the published PVC selected for this run.
+                properties:
+                  claimName:
+                    description: ClaimName is the PVC name in the operator namespace.
+                    type: string
+                  claimUid:
+                    description: ClaimUID prevents a recreated PVC with the same name
+                      from replacing the data.
+                    type: string
+                  name:
+                    description: Name is the platform workspace name.
+                    type: string
+                  workspaceUid:
+                    description: WorkspaceUID pins the run to this workspace CR instance.
+                    type: string
+                required:
+                - claimName
+                - claimUid
+                - name
+                - workspaceUid
+                type: object
             required:
             - scenario
             - targetClusters
@@ -187,6 +232,21 @@ spec:
                   description: ClusterJobStatus represents the status of a scenario
                     job for a specific cluster
                   properties:
+                    attemptHistory:
+                      description: AttemptHistory retains earlier attempt IDs so their
+                        rollback files remain discoverable after retries.
+                      items:
+                        description: ScenarioAttemptStatus identifies an earlier execution
+                          attempt for a target.
+                        properties:
+                          jobId:
+                            type: string
+                          scenarioImage:
+                            type: string
+                        required:
+                        - jobId
+                        type: object
+                      type: array
                     cancelRequested:
                       description: CancelRequested indicates if the user has requested
                         cancellation
@@ -385,12 +445,12 @@ spec:
                       description: ClusterName is the name of the cluster this score
                         applies to
                       type: string
-                    providerName:
-                      description: ProviderName is the provider that owns this cluster.
-                      type: string
                     message:
                       description: Message provides human-readable context about the
                         score or error
+                      type: string
+                    providerName:
+                      description: ProviderName is the provider that owns this cluster.
                       type: string
                     score:
                       description: Score is the calculated resiliency score for this

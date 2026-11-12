@@ -34,6 +34,7 @@ rules:
   - krkntargetrequests
   - krknusergroups
   - krknusers
+  - krknworkspaces
   verbs:
   - create
   - delete
@@ -63,6 +64,7 @@ rules:
   - krkntargetrequests/status
   - krknusergroups/status
   - krknusers/status
+  - krknworkspaces/status
   verbs:
   - get
   - patch

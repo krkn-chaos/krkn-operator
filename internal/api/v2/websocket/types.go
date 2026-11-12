@@ -3,12 +3,15 @@ package websocket
 import (
 	"time"
 
+	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // ScenarioRunStatusResponse - copy of internal/api type to avoid import cycle
 type ScenarioRunStatusResponse struct {
 	ScenarioRunName        string                           `json:"scenarioRunName"`
+	RollbackEnabled        bool                             `json:"rollbackEnabled,omitempty"`
+	IsRollback             bool                             `json:"isRollback,omitempty"`
 	ScenarioName           string                           `json:"scenarioName,omitempty"`
 	Phase                  string                           `json:"phase"`
 	TotalTargets           int                              `json:"totalTargets"`
@@ -89,19 +92,20 @@ type GraphRunSummaryResponse struct {
 // ClusterJobResponse is the sanitized WebSocket response for a cluster job.
 // Mirrors internal/api.ClusterJobStatusResponse — omits ClusterAPIURL for security.
 type ClusterJobResponse struct {
-	ProviderName    string     `json:"providerName"`
-	ClusterName     string     `json:"clusterName"`
-	JobID           string     `json:"jobId"`
-	PodName         string     `json:"podName,omitempty"`
-	ScenarioImage   string     `json:"scenarioImage,omitempty"`
-	Phase           string     `json:"phase"`
-	StartTime       *time.Time `json:"startTime,omitempty"`
-	CompletionTime  *time.Time `json:"completionTime,omitempty"`
-	Message         string     `json:"message,omitempty"`
-	RetryCount      int        `json:"retryCount,omitempty"`
-	MaxRetries      int        `json:"maxRetries,omitempty"`
-	CancelRequested bool       `json:"cancelRequested,omitempty"`
-	FailureReason   string     `json:"failureReason,omitempty"`
+	ProviderName    string                               `json:"providerName"`
+	ClusterName     string                               `json:"clusterName"`
+	JobID           string                               `json:"jobId"`
+	PodName         string                               `json:"podName,omitempty"`
+	ScenarioImage   string                               `json:"scenarioImage,omitempty"`
+	AttemptHistory  []krknv1alpha1.ScenarioAttemptStatus `json:"attemptHistory,omitempty"`
+	Phase           string                               `json:"phase"`
+	StartTime       *time.Time                           `json:"startTime,omitempty"`
+	CompletionTime  *time.Time                           `json:"completionTime,omitempty"`
+	Message         string                               `json:"message,omitempty"`
+	RetryCount      int                                  `json:"retryCount,omitempty"`
+	MaxRetries      int                                  `json:"maxRetries,omitempty"`
+	CancelRequested bool                                 `json:"cancelRequested,omitempty"`
+	FailureReason   string                               `json:"failureReason,omitempty"`
 }
 
 // WSJobStatsSummary contains aggregate job statistics for WebSocket responses.
@@ -140,6 +144,7 @@ type ClientMessage struct {
 	Page           *int     `json:"page,omitempty"`           // page number for paginated subscriptions (1-based)
 	Limit          *int     `json:"limit,omitempty"`          // items per page for paginated subscriptions
 	Categories     []string `json:"categories,omitempty"`     // any matching category for jobs subscriptions
+	GroupRollbacks bool     `json:"groupRollbacks,omitempty"` // nest rollback runs under their visible source run
 	SubscriptionID string   `json:"subscriptionId,omitempty"` // request correlation for jobs snapshots
 }
 
