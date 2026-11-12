@@ -19,6 +19,7 @@ package api
 import (
 	"context"
 	"fmt"
+	"sync/atomic"
 	"testing"
 
 	"github.com/krkn-chaos/krknctl/pkg/provider"
@@ -28,14 +29,24 @@ import (
 )
 
 type mockScenarioProvider struct {
-	details      map[string]*models.ScenarioDetail
-	err          map[string]error
-	tags         []models.ScenarioTag
-	signature    verify.SignatureStatus
-	signatureErr error
+	details            map[string]*models.ScenarioDetail
+	err                map[string]error
+	tags               []models.ScenarioTag
+	signature          verify.SignatureStatus
+	signatureErr       error
+	registryImagesFn   func(*models.RegistryV2) (*[]models.ScenarioTag, error)
+	detailFn           func(string, *models.RegistryV2) (*models.ScenarioDetail, error)
+	signatureFn        func(context.Context, *models.RegistryV2, models.ScenarioTag) (verify.SignatureStatus, error)
+	registryImageCalls atomic.Int32
+	detailCalls        atomic.Int32
+	signatureCalls     atomic.Int32
 }
 
-func (m *mockScenarioProvider) GetRegistryImages(_ *models.RegistryV2) (*[]models.ScenarioTag, error) {
+func (m *mockScenarioProvider) GetRegistryImages(registry *models.RegistryV2) (*[]models.ScenarioTag, error) {
+	m.registryImageCalls.Add(1)
+	if m.registryImagesFn != nil {
+		return m.registryImagesFn(registry)
+	}
 	return &m.tags, nil
 }
 
@@ -43,7 +54,11 @@ func (m *mockScenarioProvider) GetGlobalEnvironment(_ *models.RegistryV2, _ stri
 	return nil, nil
 }
 
-func (m *mockScenarioProvider) GetScenarioDetail(scenario string, _ *models.RegistryV2) (*models.ScenarioDetail, error) {
+func (m *mockScenarioProvider) GetScenarioDetail(scenario string, registry *models.RegistryV2) (*models.ScenarioDetail, error) {
+	m.detailCalls.Add(1)
+	if m.detailFn != nil {
+		return m.detailFn(scenario, registry)
+	}
 	if e, ok := m.err[scenario]; ok {
 		return nil, e
 	}
@@ -54,7 +69,11 @@ func (m *mockScenarioProvider) GetScenarioDetail(scenario string, _ *models.Regi
 	return detail, nil
 }
 
-func (m *mockScenarioProvider) GetImageSignatureStatus(_ context.Context, _ *models.RegistryV2, _ models.ScenarioTag) (verify.SignatureStatus, error) {
+func (m *mockScenarioProvider) GetImageSignatureStatus(ctx context.Context, registry *models.RegistryV2, tag models.ScenarioTag) (verify.SignatureStatus, error) {
+	m.signatureCalls.Add(1)
+	if m.signatureFn != nil {
+		return m.signatureFn(ctx, registry, tag)
+	}
 	return m.signature, m.signatureErr
 }
 
