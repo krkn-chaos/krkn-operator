@@ -133,7 +133,6 @@ type InputFieldResponse struct {
 	Required          bool    `json:"required,omitempty"`
 	// MountPath is the absolute container path for file-type scenario parameters.
 	MountPath        *string `json:"mount_path,omitempty"`
-	Requires         *string `json:"requires,omitempty"`
 	MutuallyExcludes *string `json:"mutually_excludes,omitempty"`
 	Secret           bool    `json:"secret,omitempty"`
 	Group            *string `json:"group,omitempty"`
@@ -838,8 +837,6 @@ type UserGroupResponse struct {
 	ID string `json:"id"`
 	// Name is the human-readable display name
 	Name string `json:"name"`
-	// ID is the canonical Kubernetes-safe group identifier used by access labels.
-	ID string `json:"id"`
 	// Description is the group description (optional)
 	Description string `json:"description,omitempty"`
 	// ClusterPermissions is a map of clusterAPIURL to permitted actions

@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
     - 'charts/krkn-operator/**'
+    - 'config/crd/bases/**'
     - 'config/olm/**'
     - 'hack/olm/**'
     - '.github/workflows/olm-bundles.yml'
@@ -67,6 +68,12 @@ jobs:
 
     - name: Render and validate bundle
       run: |
+        for crd_file in krkn.krkn-chaos.dev_krkngraphruns.yaml krkn.krkn-chaos.dev_krknscenarioruns.yaml; do
+          if ! cmp -s "config/crd/bases/$crd_file" "charts/krkn-operator/crds/$crd_file"; then
+            echo "Chart CRD is out of sync with generated CRD: $crd_file" >&2
+            exit 1
+          fi
+        done
         chmod +x hack/olm/render-bundle.sh
         output_dir="dist/bundle-${{ matrix.profile }}"
         hack/olm/render-bundle.sh "${{ matrix.profile }}" "$VERSION" "$output_dir"
@@ -83,6 +90,16 @@ jobs:
         test -f "$workspace_crd"
         test "$(yq -r '.spec.customresourcedefinitions.owned[] | select(.name == "krknworkspaces.krkn.krkn-chaos.dev") | .displayName' "$csv_file")" = "Krkn Workspace"
         test "$(yq -r '.metadata.annotations."alm-examples" | from_json | length' "$workspace_crd")" -gt 0
+        graph_run_crd="$output_dir/manifests/krkn.krkn-chaos.dev_krkngraphruns.yaml"
+        scenario_run_crd="$output_dir/manifests/krkn.krkn-chaos.dev_krknscenarioruns.yaml"
+        test -f "$graph_run_crd"
+        test -f "$scenario_run_crd"
+        graph_node_type='.spec.versions[] | select(.name == "v1alpha1") | .schema.openAPIV3Schema.properties.spec.properties.graph.additionalProperties.properties.nodeType'
+        scenario_node_type='.spec.versions[] | select(.name == "v1alpha1") | .schema.openAPIV3Schema.properties.spec.properties.nodeType'
+        test "$(yq -r "$graph_node_type.type" "$graph_run_crd")" = "string"
+        test "$(yq -r "$scenario_node_type.type" "$scenario_run_crd")" = "string"
+        test "$(yq -r "$graph_node_type.enum | contains([\"trigger\"])" "$graph_run_crd")" = "true"
+        test "$(yq -r "$scenario_node_type.enum | contains([\"trigger\"])" "$scenario_run_crd")" = "true"
         test "$(yq -r '.metadata.annotations.capabilities' "$csv_file")" = "Basic Install"
         test "$(yq -r '.metadata.annotations.repository' "$csv_file")" = "https://github.com/krkn-chaos/krkn-operator"
         test "$(yq '.spec.keywords | length' "$csv_file")" -gt 0
