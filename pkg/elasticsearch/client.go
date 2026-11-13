@@ -69,15 +69,16 @@ type sortField struct {
 	UnmappedType string
 }
 
-// telemetrySortFields is the allowlist and Elasticsearch field mapping for
-// sortable telemetry columns. Scenario fields are multi-valued because scenarios
-// are stored as an array; buildSortClause selects the minimum value for ascending
-// order and maximum for descending order.
+const telemetrySortValueField = "krkn_console_sort_value"
+
+// telemetrySortFields is the allowlist and runtime type for sortable telemetry
+// columns. The query-time field reads the representative scenario from _source,
+// matching the values used by rawTelemetrySource.flatten.
 var telemetrySortFields = map[string]sortField{
-	"scenario_type":   {Field: "scenarios.scenario_type.keyword", UnmappedType: "keyword"},
-	"start_timestamp": {Field: "scenarios.start_timestamp", UnmappedType: "double"},
-	"end_timestamp":   {Field: "scenarios.end_timestamp", UnmappedType: "double"},
-	"status":          {Field: "job_status", UnmappedType: "boolean"},
+	"scenario_type":   {Field: telemetrySortValueField, UnmappedType: "keyword"},
+	"start_timestamp": {Field: telemetrySortValueField, UnmappedType: "double"},
+	"end_timestamp":   {Field: telemetrySortValueField, UnmappedType: "double"},
+	"status":          {Field: telemetrySortValueField, UnmappedType: "boolean"},
 }
 
 var alertSortFields = map[string]sortField{
@@ -144,14 +145,83 @@ func buildSortClause(sortBy, sortOrder string, fields map[string]sortField, defa
 	}, nil
 }
 
-// buildTelemetrySortClause maps requested table columns to concrete Elasticsearch
-// fields. When no sort is requested it preserves timestamp-descending default.
-// Sorting by mapped fields avoids Painless script sorts, whose sort context cannot
-// access _source. Elasticsearch applies scenario arrays' min/max sort semantics;
-// status sorts the top-level job_status field. The _doc tie-breaker keeps equal
-// keys stable across pages.
+// buildTelemetrySortClause sorts the query-time value that represents the same
+// scenario and status shown in each flattened row. When no sort is requested it
+// preserves timestamp-descending default. The _doc tie-breaker keeps equal keys
+// stable across pages.
 func buildTelemetrySortClause(sortBy, sortOrder string) ([]any, error) {
-	return buildSortClause(sortBy, sortOrder, telemetrySortFields, "timestamp", "desc")
+	if sortBy == "" && sortOrder == "" {
+		return []any{
+			map[string]any{"timestamp": map[string]any{"order": "desc", "unmapped_type": "date"}},
+			map[string]any{"_doc": map[string]any{"order": "asc"}},
+		}, nil
+	}
+	if err := validateSortOptions(sortBy, sortOrder, telemetrySortFields); err != nil {
+		return nil, err
+	}
+	field := telemetrySortFields[sortBy]
+	return []any{
+		map[string]any{field.Field: map[string]any{
+			"order":         sortOrder,
+			"unmapped_type": field.UnmappedType,
+		}},
+		map[string]any{"_doc": map[string]any{"order": "asc"}},
+	}, nil
+}
+
+const telemetryRepresentativeScenarioScript = `
+def source = params['_source'];
+def scenarios = source['scenarios'];
+def scenario = null;
+if (scenarios != null && !scenarios.isEmpty()) {
+    scenario = scenarios.get(0);
+    if (!params['selected_scenario_types'].isEmpty()) {
+        for (def candidate : scenarios) {
+            if (params['selected_scenario_types'].contains(candidate['scenario_type'])) {
+                scenario = candidate;
+                break;
+            }
+        }
+    }
+}
+`
+
+func buildTelemetrySortRuntimeMapping(sortBy string, selectedScenarioTypes []string) map[string]any {
+	valueScripts := map[string]string{
+		"scenario_type": `if (scenario != null && scenario['scenario_type'] != null && scenario['scenario_type'] != '') emit(scenario['scenario_type']);`,
+		"start_timestamp": `if (scenario != null) {
+    def value = scenario['start_timestamp'];
+    if (value != null) {
+        double timestamp = ((Number) value).doubleValue();
+        if (timestamp != 0.0) emit(timestamp);
+    }
+}`,
+		"end_timestamp": `if (scenario != null) {
+    def value = scenario['end_timestamp'];
+    if (value != null) {
+        double timestamp = ((Number) value).doubleValue();
+        if (timestamp != 0.0) emit(timestamp);
+    }
+}`,
+		"status": `
+boolean status = source['job_status'] == true;
+if (scenario != null && scenario['exit_status'] != null && ((Number) scenario['exit_status']).intValue() != 0) {
+    status = false;
+}
+emit(status);`,
+	}
+	field := telemetrySortFields[sortBy]
+	return map[string]any{
+		telemetrySortValueField: map[string]any{
+			"type": field.UnmappedType,
+			"script": map[string]any{
+				"source": telemetryRepresentativeScenarioScript + valueScripts[sortBy],
+				"params": map[string]any{
+					"selected_scenario_types": selectedScenarioTypes,
+				},
+			},
+		},
+	}
 }
 
 // facetFields is the single source of truth for the filterable categories. It
@@ -418,7 +488,7 @@ type esAlertSearchResponse struct {
 
 // rawTelemetrySource mirrors the subset of a krkn telemetry document _source we
 // need to populate the table columns. Scenario-level fields (type, start/end,
-// namespace) live inside the scenarios array; we surface the run's first
+// namespace) live inside the scenarios array; we surface the representative
 // scenario for the flattened row.
 type rawTelemetrySource struct {
 	RunUUID   string `json:"run_uuid"`
@@ -816,8 +886,7 @@ func (c *Client) QueryTelemetryPage(ctx context.Context, conn ConnectionParams, 
 // are empty the default ordering (timestamp descending) is preserved. When set,
 // sortBy must be an allowlisted telemetry column (scenario_type, start_timestamp,
 // end_timestamp, status) and sortOrder must be "asc" or "desc". Scenario columns
-// sort on their mapped fields; Elasticsearch selects the minimum array value for
-// ascending order and maximum for descending order. Status sorts on job_status.
+// and status sort on the same representative values that flatten returns.
 // A missing field, an invalid direction, or only one of the two being set returns
 // an error before any request is made.
 //
@@ -1064,6 +1133,13 @@ func buildSearchBodyWithSort(size, from int, startDate, endDate string, filters 
 		// aggregation applies all filters to feed the pass/fail summary. Aggregations
 		// span the whole matched window (independent of the hits size limit).
 		"aggs": buildFacetAggs(filters),
+	}
+	if sortBy != "" {
+		selectedScenarioTypes := filters[scenarioTypeFacetKey]
+		if selectedScenarioTypes == nil {
+			selectedScenarioTypes = []string{}
+		}
+		body["runtime_mappings"] = buildTelemetrySortRuntimeMapping(sortBy, selectedScenarioTypes)
 	}
 
 	payload, err := json.Marshal(body)

@@ -191,9 +191,9 @@ type QueryTelemetryRequest struct {
 	// category keys are rejected by ValidateQueryRequest.
 	Filters map[string][]string `json:"filters,omitempty"`
 	// SortBy selects scenario_type, start_timestamp, end_timestamp, or status.
-	// Scenario-backed columns use Elasticsearch multi-value sorting (minimum value
-	// ascending, maximum descending); status sorts job_status. It must be provided
-	// with SortOrder; omitted values retain the default timestamp-descending sort.
+	// These values are derived from the same representative scenario and status
+	// surfaced in each row. It must be provided with SortOrder; omitted values
+	// retain the default timestamp-descending sort.
 	SortBy string `json:"sortBy,omitempty"`
 	// SortOrder is "asc" or "desc" and must be provided together with SortBy.
 	SortOrder string `json:"sortOrder,omitempty"`
@@ -314,19 +314,19 @@ type ScenarioDetail struct {
 
 // TelemetryDocument is the set of telemetry fields surfaced to the UI. Each
 // document corresponds to one telemetry run. The scalar table columns (type,
-// start/end, namespace) are taken from the run's first scenario for backward
-// compatibility with the table view, while Metadata and Scenarios carry the
-// full run detail used to render an expanded row.
+// start/end, namespace) are taken from the first scenario, or the first scenario
+// matching an active scenario_type filter. Metadata and Scenarios carry the full
+// run detail used to render an expanded row.
 type TelemetryDocument struct {
 	// RunUUID uniquely identifies the telemetry run this document represents.
 	RunUUID string `json:"run_uuid"`
-	// ScenarioType is the chaos scenario type from the run's first scenario.
+	// ScenarioType is the chaos scenario type from the representative scenario.
 	ScenarioType string `json:"scenario_type"`
 	// StartTimestamp is the scenario start time. Unit: Unix seconds (UTC), with fractional precision.
 	StartTimestamp float64 `json:"start_timestamp"`
 	// EndTimestamp is the scenario end time. Unit: Unix seconds (UTC), with fractional precision.
 	EndTimestamp float64 `json:"end_timestamp"`
-	// Namespace is the target namespace from the run's first scenario.
+	// Namespace is the target namespace from the representative scenario.
 	Namespace string `json:"namespace"`
 	// Status is the run outcome: true = pass, false = fail. It applies the
 	// per-scenario exit_status downgrade, so it may differ from the run-level

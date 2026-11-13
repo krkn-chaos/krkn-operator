@@ -222,7 +222,7 @@ func TestQueryAlertsReturnsRawDocuments(t *testing.T) {
 	}
 }
 
-func TestQueryTelemetryPageWithSortSendsMappedSort(t *testing.T) {
+func TestQueryTelemetryPageWithSortSendsRepresentativeSort(t *testing.T) {
 	var request map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
@@ -240,12 +240,79 @@ func TestQueryTelemetryPageWithSortSendsMappedSort(t *testing.T) {
 		t.Fatalf("query failed: %v", err)
 	}
 	sort := request["sort"].([]any)
-	scenarioTypeSort := sort[0].(map[string]any)["scenarios.scenario_type.keyword"].(map[string]any)
-	if scenarioTypeSort["order"] != "asc" || scenarioTypeSort["unmapped_type"] != "keyword" || scenarioTypeSort["mode"] != "min" {
+	scenarioTypeSort := sort[0].(map[string]any)[telemetrySortValueField].(map[string]any)
+	if scenarioTypeSort["order"] != "asc" || scenarioTypeSort["unmapped_type"] != "keyword" || scenarioTypeSort["mode"] != nil {
 		t.Errorf("unexpected scenario_type sort: %v", scenarioTypeSort)
+	}
+	runtimeMapping := request["runtime_mappings"].(map[string]any)[telemetrySortValueField].(map[string]any)
+	if runtimeMapping["type"] != "keyword" {
+		t.Errorf("runtime field type = %v, want keyword", runtimeMapping["type"])
+	}
+	params := runtimeMapping["script"].(map[string]any)["params"].(map[string]any)
+	if !reflect.DeepEqual(params["selected_scenario_types"], []any{}) {
+		t.Errorf("selected scenario types = %v, want empty list", params["selected_scenario_types"])
 	}
 	if sort[1].(map[string]any)["_doc"].(map[string]any)["order"] != "asc" {
 		t.Errorf("missing _doc tie-breaker: %v", sort)
+	}
+}
+
+func TestBuildTelemetrySortUsesFlattenedScenarioValues(t *testing.T) {
+	tests := []struct {
+		name, sortBy, runtimeType, valueExpression string
+	}{
+		{name: "scenario type", sortBy: "scenario_type", runtimeType: "keyword", valueExpression: "scenario['scenario_type'] != ''"},
+		{name: "start time", sortBy: "start_timestamp", runtimeType: "double", valueExpression: "if (timestamp != 0.0) emit(timestamp)"},
+		{name: "end time", sortBy: "end_timestamp", runtimeType: "double", valueExpression: "if (timestamp != 0.0) emit(timestamp)"},
+		{name: "status", sortBy: "status", runtimeType: "boolean", valueExpression: "source['job_status'] == true"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			payload, err := buildSearchBodyWithSort(
+				20, 0, "", "", map[string][]string{scenarioTypeFacetKey: {"node", "pod"}}, tt.sortBy, "asc",
+			)
+			if err != nil {
+				t.Fatalf("build search body: %v", err)
+			}
+			var body map[string]any
+			if err := json.Unmarshal(payload, &body); err != nil {
+				t.Fatalf("decode search body: %v", err)
+			}
+
+			sort := body["sort"].([]any)[0].(map[string]any)
+			fieldSort, ok := sort["krkn_console_sort_value"].(map[string]any)
+			if !ok || fieldSort["order"] != "asc" {
+				t.Fatalf("sort = %v, want ascending representative value sort", sort)
+			}
+			mappings, ok := body["runtime_mappings"].(map[string]any)
+			if !ok {
+				t.Fatalf("runtime_mappings missing: %v", body)
+			}
+			mapping, ok := mappings["krkn_console_sort_value"].(map[string]any)
+			if !ok || mapping["type"] != tt.runtimeType {
+				t.Fatalf("runtime mapping = %v, want type %s", mapping, tt.runtimeType)
+			}
+			script := mapping["script"].(map[string]any)
+			source := script["source"].(string)
+			for _, want := range []string{
+				"scenarios.get(0)",
+				"for (def candidate : scenarios)",
+				"selected_scenario_types",
+				"break;",
+				tt.valueExpression,
+			} {
+				if !strings.Contains(source, want) {
+					t.Errorf("script source %q does not contain %q", source, want)
+				}
+			}
+			if tt.sortBy == "status" && !strings.Contains(source, "scenario['exit_status']") {
+				t.Errorf("status sort script %q does not apply representative exit_status", source)
+			}
+			params := script["params"].(map[string]any)
+			if !reflect.DeepEqual(params["selected_scenario_types"], []any{"node", "pod"}) {
+				t.Errorf("selected scenario types = %v, want [node pod]", params["selected_scenario_types"])
+			}
+		})
 	}
 }
 
@@ -283,10 +350,10 @@ func TestBuildSearchSortMappingsAndDefaults(t *testing.T) {
 		defaultField, defaultOrder                                  string
 	}{
 		{name: "telemetry default", fields: telemetrySortFields, defaultField: "timestamp", defaultOrder: "desc", wantField: "timestamp", wantOrder: "desc", wantUnmapped: "date"},
-		{name: "telemetry scenario_type", sortBy: "scenario_type", sortOrder: "asc", fields: telemetrySortFields, defaultField: "timestamp", defaultOrder: "desc", wantField: "scenarios.scenario_type.keyword", wantOrder: "asc", wantUnmapped: "keyword"},
-		{name: "telemetry start_timestamp", sortBy: "start_timestamp", sortOrder: "desc", fields: telemetrySortFields, defaultField: "timestamp", defaultOrder: "desc", wantField: "scenarios.start_timestamp", wantOrder: "desc", wantUnmapped: "double"},
-		{name: "telemetry end_timestamp", sortBy: "end_timestamp", sortOrder: "asc", fields: telemetrySortFields, defaultField: "timestamp", defaultOrder: "desc", wantField: "scenarios.end_timestamp", wantOrder: "asc", wantUnmapped: "double"},
-		{name: "telemetry status", sortBy: "status", sortOrder: "desc", fields: telemetrySortFields, defaultField: "timestamp", defaultOrder: "desc", wantField: "job_status", wantOrder: "desc", wantUnmapped: "boolean"},
+		{name: "telemetry scenario_type", sortBy: "scenario_type", sortOrder: "asc", fields: telemetrySortFields, defaultField: "timestamp", defaultOrder: "desc", wantField: telemetrySortValueField, wantOrder: "asc", wantUnmapped: "keyword"},
+		{name: "telemetry start_timestamp", sortBy: "start_timestamp", sortOrder: "desc", fields: telemetrySortFields, defaultField: "timestamp", defaultOrder: "desc", wantField: telemetrySortValueField, wantOrder: "desc", wantUnmapped: "double"},
+		{name: "telemetry end_timestamp", sortBy: "end_timestamp", sortOrder: "asc", fields: telemetrySortFields, defaultField: "timestamp", defaultOrder: "desc", wantField: telemetrySortValueField, wantOrder: "asc", wantUnmapped: "double"},
+		{name: "telemetry status", sortBy: "status", sortOrder: "desc", fields: telemetrySortFields, defaultField: "timestamp", defaultOrder: "desc", wantField: telemetrySortValueField, wantOrder: "desc", wantUnmapped: "boolean"},
 		{name: "alerts default", fields: alertSortFields, defaultField: "created_at", defaultOrder: "desc", wantField: "created_at", wantOrder: "desc", wantUnmapped: "date"},
 		{name: "alerts uuid", sortBy: "uuid", sortOrder: "asc", fields: alertSortFields, defaultField: "created_at", defaultOrder: "desc", wantField: "run_uuid.keyword", wantOrder: "asc", wantUnmapped: "keyword"},
 		{name: "alerts phase", sortBy: "phase", sortOrder: "desc", fields: alertSortFields, defaultField: "created_at", defaultOrder: "desc", wantField: "phase.keyword", wantOrder: "desc", wantUnmapped: "keyword"},
@@ -310,15 +377,15 @@ func TestBuildSearchSortMappingsAndDefaults(t *testing.T) {
 	}
 }
 
-func TestBuildTelemetrySortsUseMappedFields(t *testing.T) {
-	// Requested telemetry columns sort by fixed mapped fields in both directions.
+func TestBuildTelemetrySortsUseRuntimeField(t *testing.T) {
+	// Requested telemetry columns sort by a scalar representative value in both directions.
 	cases := []struct {
 		field, wantField, wantUnmapped string
 	}{
-		{"scenario_type", "scenarios.scenario_type.keyword", "keyword"},
-		{"start_timestamp", "scenarios.start_timestamp", "double"},
-		{"end_timestamp", "scenarios.end_timestamp", "double"},
-		{"status", "job_status", "boolean"},
+		{"scenario_type", telemetrySortValueField, "keyword"},
+		{"start_timestamp", telemetrySortValueField, "double"},
+		{"end_timestamp", telemetrySortValueField, "double"},
+		{"status", telemetrySortValueField, "boolean"},
 	}
 	for _, tc := range cases {
 		for _, order := range []string{"asc", "desc"} {
@@ -328,12 +395,8 @@ func TestBuildTelemetrySortsUseMappedFields(t *testing.T) {
 					t.Fatalf("build sort: %v", err)
 				}
 				fieldSort := sort[0].(map[string]any)[tc.wantField].(map[string]any)
-				wantMode := "min"
-				if order == "desc" {
-					wantMode = "max"
-				}
-				if fieldSort["order"] != order || fieldSort["unmapped_type"] != tc.wantUnmapped || fieldSort["mode"] != wantMode {
-					t.Errorf("%s mapped sort = %v, want order %s unmapped_type %s mode %s", tc.field, fieldSort, order, tc.wantUnmapped, wantMode)
+				if fieldSort["order"] != order || fieldSort["unmapped_type"] != tc.wantUnmapped || fieldSort["mode"] != nil {
+					t.Errorf("%s mapped sort = %v, want order %s unmapped_type %s and single representative value", tc.field, fieldSort, order, tc.wantUnmapped)
 				}
 				if sort[1].(map[string]any)["_doc"].(map[string]any)["order"] != "asc" {
 					t.Errorf("%s sort missing _doc tie-breaker: %v", tc.field, sort)
@@ -369,7 +432,7 @@ func TestQueryTelemetryPaginatedSortForwardsWindow(t *testing.T) {
 			if request["from"].(float64) != 20 || request["size"].(float64) != 20 {
 				t.Errorf("window = from %v size %v, want from 20 size 20", request["from"], request["size"])
 			}
-			fieldSort := request["sort"].([]any)[0].(map[string]any)["scenarios.start_timestamp"].(map[string]any)
+			fieldSort := request["sort"].([]any)[0].(map[string]any)[telemetrySortValueField].(map[string]any)
 			if fieldSort["order"] != order {
 				t.Errorf("sort order = %v, want %s", fieldSort["order"], order)
 			}
@@ -1249,6 +1312,26 @@ func TestFlattenRepresentativeScenario(t *testing.T) {
 			t.Errorf("got type=%q, want pod fallback", got.ScenarioType)
 		}
 	})
+}
+
+func TestFlattenRepresentativeScenarioDeterminesDisplayedStatusAndTimes(t *testing.T) {
+	var src rawTelemetrySource
+	if err := json.Unmarshal([]byte(`{"job_status":true,"scenarios":[
+		{"scenario_type":"pod","start_timestamp":300,"end_timestamp":400,"exit_status":7},
+		{"scenario_type":"node","start_timestamp":100,"end_timestamp":200,"exit_status":0}
+	]}`), &src); err != nil {
+		t.Fatalf("unmarshal source: %v", err)
+	}
+
+	firstScenario := src.flatten(nil)
+	if firstScenario.ScenarioType != "pod" || firstScenario.StartTimestamp != 300 || firstScenario.EndTimestamp != 400 || firstScenario.Status {
+		t.Errorf("unfiltered row = type %q, start %v, end %v, status %v; want pod/300/400/Fail", firstScenario.ScenarioType, firstScenario.StartTimestamp, firstScenario.EndTimestamp, firstScenario.Status)
+	}
+
+	filteredScenario := src.flatten(map[string]bool{"node": true})
+	if filteredScenario.ScenarioType != "node" || filteredScenario.StartTimestamp != 100 || filteredScenario.EndTimestamp != 200 || !filteredScenario.Status {
+		t.Errorf("filtered row = type %q, start %v, end %v, status %v; want node/100/200/Pass", filteredScenario.ScenarioType, filteredScenario.StartTimestamp, filteredScenario.EndTimestamp, filteredScenario.Status)
+	}
 }
 
 // scenarioParametersSchema loads the generated Swagger contract and returns the schema
