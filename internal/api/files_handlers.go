@@ -415,6 +415,23 @@ func (h *Handler) UpdateFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	inUse, err := h.krknAIConfigInUse(ctx, configMap)
+	if err != nil {
+		logger.Error(err, "Failed to check Krkn-AI config usage", "fileID", fileID)
+		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+			Error:   "internal_error",
+			Message: "Failed to check whether file is in use",
+		})
+		return
+	}
+	if inUse {
+		writeJSONError(w, http.StatusConflict, ErrorResponse{
+			Error:   "conflict",
+			Message: "Krkn-AI configuration cannot be changed while a run is active",
+		})
+		return
+	}
+
 	// Derive the logical name and annotation pointer.
 	// For workflows: nil req.WorkflowName means preserve existing (pointer semantics).
 	// For regular files: always sync annotation to fileName.
@@ -466,10 +483,12 @@ func (h *Handler) UpdateFile(w http.ResponseWriter, r *http.Request) {
 		workflowNamePtr,
 	)
 
-	// Update data
-	configMap.Data = map[string]string{
-		req.FileName: req.Content,
+	// Krkn-AI configurations always keep their fixed mount key.
+	dataKey := req.FileName
+	if req.FilePurpose == files.FilePurposeKrknAIConfig {
+		dataKey = files.KrknAIConfigFileName
 	}
+	configMap.Data = map[string]string{dataKey: req.Content}
 
 	if err := h.client.Update(ctx, configMap); err != nil {
 		logger.Error(err, "Failed to update file", "fileID", fileID)
@@ -551,6 +570,23 @@ func (h *Handler) DeleteFile(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusForbidden, ErrorResponse{
 			Error:   "forbidden",
 			Message: "Only the file owner or an admin can delete this file",
+		})
+		return
+	}
+
+	inUse, err := h.krknAIConfigInUse(ctx, configMap)
+	if err != nil {
+		logger.Error(err, "Failed to check Krkn-AI config usage", "fileID", fileID)
+		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+			Error:   "internal_error",
+			Message: "Failed to check whether file is in use",
+		})
+		return
+	}
+	if inUse {
+		writeJSONError(w, http.StatusConflict, ErrorResponse{
+			Error:   "conflict",
+			Message: "Krkn-AI configuration cannot be deleted while a run is active",
 		})
 		return
 	}
@@ -781,7 +817,31 @@ func (h *Handler) loadFileConfigMapByID(ctx context.Context, fileID string) (*co
 	return &configMapList.Items[0], nil
 }
 
-// canAccessFile checks if the current user can access a file
+// krknAIConfigInUse reports whether a Krkn-AI configuration has a nonterminal run.
+func (h *Handler) krknAIConfigInUse(ctx context.Context, configMap *corev1.ConfigMap) (bool, error) {
+	if files.ExtractFilePurposeFromLabels(configMap.Labels) != files.FilePurposeKrknAIConfig {
+		return false, nil
+	}
+
+	var runs krknv1alpha1.KrknAIRunList
+	if err := h.client.List(ctx, &runs, client.InNamespace(h.namespace)); err != nil {
+		return false, err
+	}
+	for _, run := range runs.Items {
+		if run.Spec.ConfigMapName != configMap.Name {
+			continue
+		}
+		switch run.Status.Phase {
+		case "Succeeded", "Failed", "Cancelled":
+			continue
+		default:
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// canAccessFile checks if the current user can access a file.
 func (h *Handler) canAccessFile(ctx context.Context, configMap *corev1.ConfigMap) (bool, error) {
 	claims := auth.GetClaimsFromContext(ctx)
 	if claims == nil {
@@ -793,7 +853,14 @@ func (h *Handler) canAccessFile(ctx context.Context, configMap *corev1.ConfigMap
 		return true, nil
 	}
 
-	// Check available-to-all flag
+	// Krkn-AI configs are private by default. Their creator is the owner and
+	// needs access to discover/review the saved config; the annotation is
+	// written only by the authenticated config-creation path.
+	if files.ExtractFilePurposeFromLabels(configMap.Labels) == files.FilePurposeKrknAIConfig &&
+		configMap.Annotations[files.CreatedByAnnotation] == claims.UserID {
+		return true, nil
+	}
+
 	if configMap.Labels[files.AvailableToAllLabel] == "true" {
 		return true, nil
 	}
@@ -864,8 +931,11 @@ func buildFileResponse(configMap *corev1.ConfigMap) files.FileResponse {
 	// user-facing name, not a Data key). Regular files store content under their
 	// logical file name.
 	contentKey := logicalName
-	if files.ExtractFilePurposeFromLabels(configMap.Labels) == files.FilePurposeWorkflow {
+	switch files.ExtractFilePurposeFromLabels(configMap.Labels) {
+	case files.FilePurposeWorkflow:
 		contentKey = files.WorkflowFileName
+	case files.FilePurposeKrknAIConfig:
+		contentKey = files.KrknAIConfigFileName
 	}
 
 	// Look up the content by the resolved key. If the key is missing or empty (e.g.

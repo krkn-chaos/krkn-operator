@@ -65,6 +65,9 @@ spec:
         - --metrics-secure=true
         - --api-port={{ .Values.operator.service.port }}
         - --grpc-server-address=localhost:{{ .Values.operator.service.grpcPort }}
+        {{- if not .Values.operator.olmBootstrap }}
+        - --enable-krkn-ai={{ .Values.krknAI.enabled }}
+        {{- end }}
         ports:
         - containerPort: {{ .Values.operator.service.port }}
           name: http
@@ -80,6 +83,68 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: metadata.namespace
+        {{- if .Values.operator.olmBootstrap }}
+        - name: KRKN_OLM_ENABLED
+          value: "true"
+        - name: KRKN_OLM_OPENSHIFT
+          value: {{ .Values.operator.olmOpenShift | quote }}
+        - name: KRKNAI_ENABLED
+          value: "false"
+        - name: KRKNAI_ORCHESTRATOR_IMAGE
+          value: {{ .Values.images.aiOrchestrator.image | quote }}
+        - name: KRKNAI_ORCHESTRATOR_IMAGE_PULL_POLICY
+          value: {{ .Values.images.aiOrchestrator.pullPolicy | quote }}
+        - name: KRKNAI_SERVICE_IMAGE
+          value: {{ .Values.images.aiService.image | quote }}
+        - name: KRKNAI_SERVICE_IMAGE_PULL_POLICY
+          value: {{ .Values.images.aiService.pullPolicy | quote }}
+        - name: KRKNAI_IMAGE_PULL_SECRETS
+          value: {{ .Values.images.pullSecrets | toJson | quote }}
+        - name: KRKNAI_STORAGE_EXISTING_CLAIM
+          value: {{ .Values.aiService.storage.existingClaim | quote }}
+        - name: KRKNAI_STORAGE_CLASS_NAME
+          value: {{ .Values.aiService.storage.storageClassName | quote }}
+        - name: KRKNAI_STORAGE_SIZE
+          value: {{ .Values.aiService.storage.size | quote }}
+        - name: KRKNAI_SERVICE_RESOURCES
+          value: {{ .Values.aiService.resources | toJson | quote }}
+        - name: KRKNAI_NETWORK_POLICY_ENABLED
+          value: {{ .Values.aiService.networkPolicy.enabled | quote }}
+        {{- else if .Values.krknAI.enabled }}
+        - name: KRKNAI_ORCHESTRATOR_IMAGE
+          value: {{ .Values.images.aiOrchestrator.image | quote }}
+        - name: KRKNAI_ORCHESTRATOR_IMAGE_PULL_POLICY
+          value: {{ .Values.images.aiOrchestrator.pullPolicy | quote }}
+        - name: KRKNAI_SERVICE_IMAGE
+          value: {{ .Values.images.aiService.image | quote }}
+        - name: KRKNAI_SERVICE_IMAGE_PULL_POLICY
+          value: {{ .Values.images.aiService.pullPolicy | quote }}
+        - name: KRKNAI_SERVICE_URL
+          value: {{ printf "http://%s-ai-service:8080" (include "krkn-operator.fullname" .) | quote }}
+        - name: KRKNAI_SERVICE_TOKEN_SECRET_NAME
+          value: {{ printf "%s-ai-service-token" (include "krkn-operator.fullname" .) | quote }}
+        - name: KRKNAI_ORCHESTRATOR_SERVICE_ACCOUNT_NAME
+          value: {{ printf "%s-krkn-ai-orchestrator" (include "krkn-operator.fullname" .) | quote }}
+        - name: KRKNAI_IMAGE_PULL_SECRETS
+          value: {{ .Values.images.pullSecrets | toJson | quote }}
+        - name: KRKNAI_SERVICE_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: {{ printf "%s-ai-service-token" (include "krkn-operator.fullname" .) | quote }}
+              key: token
+        {{- end }}
+        {{- if or .Values.operator.olmBootstrap .Values.krknAI.enabled }}
+        - name: KRKNAI_ORCHESTRATOR_RESOURCES
+          value: {{ .Values.krknAI.orchestrator.resources | toJson | quote }}
+        - name: KRKNAI_RESULT_UPLOADER_RESOURCES
+          value: {{ .Values.krknAI.resultUploader.resources | toJson | quote }}
+        - name: KRKNAI_OUTPUT_SIZE_LIMIT
+          value: {{ .Values.krknAI.volumes.output.sizeLimit | quote }}
+        - name: KRKNAI_TMP_SIZE_LIMIT
+          value: {{ .Values.krknAI.volumes.tmp.sizeLimit | quote }}
+        - name: KRKNAI_UPLOAD_STATE_SIZE_LIMIT
+          value: {{ .Values.krknAI.volumes.uploadState.sizeLimit | quote }}
+        {{- end }}
         - name: KRKN_ROLLBACK_INSPECTOR_IMAGE
           value: {{ .Values.images.operator.image | quote }}
         - name: KRKN_ROLLBACK_INSPECTOR_PULL_SECRETS

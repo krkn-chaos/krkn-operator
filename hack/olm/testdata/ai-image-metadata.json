@@ -1,0 +1,121 @@
+{
+  "compatible-pair": {
+    "operator": {
+      "0.2.0": {
+        "manifest": {"digest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b851"},
+        "image": {"config": {"Labels": {"io.krkn.operator-contract.major": "1"}}}
+      },
+      "0.1.10": {
+        "manifest": {"digest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b852"},
+        "image": {
+          "linux/amd64": {"config": {"Labels": {"io.krkn.operator-contract.major": "1"}}},
+          "linux/arm64": {"config": {"Labels": {"io.krkn.operator-contract.major": "1"}}}
+        }
+      },
+      "0.1.9": {
+        "manifest": {"digest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b853"},
+        "image": {"config": {"Labels": {"io.krkn.operator-contract.major": "1"}}}
+      },
+      "0.1.2": {
+        "manifest": {"digest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b854"},
+        "image": {"config": {"Labels": {"io.krkn.operator-contract.major": "1"}}}
+      }
+    },
+    "service": {
+      "0.2.0": {
+        "manifest": {"digest": "sha256:7007b387ccd52bd42a050f2e8020e56e64622c9269bf7bbe257b326fe99daf11"},
+        "image": {
+          "linux/amd64": {"config": {"Labels": {"io.krkn.operator-contract.major": "1"}}},
+          "linux/arm64": {"config": {"Labels": {"io.krkn.operator-contract.major": "2"}}}
+        }
+      },
+      "0.1.10": {
+        "manifest": {"digest": "sha256:7007b387ccd52bd42a050f2e8020e56e64622c9269bf7bbe257b326fe99daf12"},
+        "image": {"config": {"Labels": {"io.krkn.operator-contract.major": "1"}}}
+      },
+      "0.1.9": {
+        "manifest": {"digest": "sha256:7007b387ccd52bd42a050f2e8020e56e64622c9269bf7bbe257b326fe99daf13"},
+        "image": {"config": {"Labels": {"io.krkn.operator-contract.major": "1"}}}
+      },
+      "0.1.2": {
+        "manifest": {"digest": "sha256:7007b387ccd52bd42a050f2e8020e56e64622c9269bf7bbe257b326fe99daf14"},
+        "image": {"config": {"Labels": {"io.krkn.operator-contract.major": "1"}}}
+      }
+    }
+  },
+  "service-missing-label": {
+    "operator": {
+      "0.2.0": {
+        "manifest": {"digest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b861"},
+        "image": {"config": {"Labels": {"io.krkn.operator-contract.major": "1"}}}
+      }
+    },
+    "service": {
+      "0.2.0": {
+        "manifest": {"digest": "sha256:7007b387ccd52bd42a050f2e8020e56e64622c9269bf7bbe257b326fe99daf21", "annotations": {"io.krkn.operator-contract.major": "1"}},
+        "image": {"config": {}}
+      }
+    }
+  },
+  "service-null-label": {
+    "operator": {
+      "0.2.0": {
+        "manifest": {"digest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b865"},
+        "image": {"config": {"Labels": {"io.krkn.operator-contract.major": "1"}}}
+      }
+    },
+    "service": {
+      "0.2.0": {
+        "manifest": {"digest": "sha256:7007b387ccd52bd42a050f2e8020e56e64622c9269bf7bbe257b326fe99daf25"},
+        "image": {"config": {"Labels": null}}
+      }
+    }
+  },
+  "operator-wrong-major": {
+    "operator": {
+      "0.2.0": {
+        "manifest": {"digest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b862"},
+        "image": {"config": {"Labels": {"io.krkn.operator-contract.major": "2"}}}
+      }
+    },
+    "service": {
+      "0.2.0": {
+        "manifest": {"digest": "sha256:7007b387ccd52bd42a050f2e8020e56e64622c9269bf7bbe257b326fe99daf22"},
+        "image": {"config": {"Labels": {"io.krkn.operator-contract.major": "1"}}}
+      }
+    }
+  },
+  "no-compatible-pair": {
+    "operator": {
+      "0.2.0": {
+        "manifest": {"digest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b863"},
+        "image": {"config": {"Labels": {"io.krkn.operator-contract.major": "2"}}}
+      }
+    },
+    "service": {
+      "0.2.0": {
+        "manifest": {"digest": "sha256:7007b387ccd52bd42a050f2e8020e56e64622c9269bf7bbe257b326fe99daf23"},
+        "image": {"config": {"Labels": {"io.krkn.operator-contract.major": "2"}}}
+      }
+    }
+  },
+  "malformed-labels": {
+    "operator": {
+      "0.2.0": {
+        "manifest": {"digest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b864"},
+        "image": {"config": {"Labels": {"io.krkn.operator-contract.major": "1"}}}
+      }
+    },
+    "service": {
+      "0.2.0": {
+        "manifest": {"digest": "sha256:7007b387ccd52bd42a050f2e8020e56e64622c9269bf7bbe257b326fe99daf24"},
+        "image": {"config": {"Labels": "1"}}
+      }
+    }
+  },
+  "registry-failure": {
+    "operator": {
+      "0.2.0": {"error": "registry unavailable"}
+    }
+  }
+}

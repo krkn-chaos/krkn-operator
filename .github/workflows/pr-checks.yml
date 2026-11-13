@@ -24,7 +24,9 @@ jobs:
           go-version-file: go.mod
 
       - name: Test release component selection
-        run: hack/olm/test-select-compatible-release.sh
+        run: |
+          bash hack/olm/test-select-compatible-release.sh
+          bash hack/olm/test-select-ai-release.sh
 
       - name: Run gosec security scanner
         uses: securego/gosec@master

@@ -20,11 +20,13 @@ import (
 	"context"
 	"crypto/tls"
 	_ "embed"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -35,6 +37,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
@@ -101,6 +104,7 @@ func main() {
 	var syncCRDs bool
 	var stageCRDMigration bool
 	var crdDirectory string
+	var enableKrknAI bool
 	var tlsOpts []func(*tls.Config)
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
 		"Use :8443 for HTTPS or :8080 for HTTP, or leave as 0 to disable the metrics service.")
@@ -125,6 +129,7 @@ func main() {
 	flag.BoolVar(&stageCRDMigration, "stage-crd-migration", false, "Snapshot legacy custom-resource fields and install missing CRDs before an operator rollout")
 	flag.BoolVar(&syncCRDs, "sync-crds", false, "Synchronize CRDs and complete staged custom-resource migrations after an operator rollout")
 	flag.StringVar(&crdDirectory, "crd-dir", "/crds", "Directory containing CustomResourceDefinition manifests")
+	flag.BoolVar(&enableKrknAI, "enable-krkn-ai", false, "Enable Krkn-AI controllers")
 	opts := zap.Options{
 		Development: true,
 	}
@@ -132,6 +137,18 @@ func main() {
 	flag.Parse()
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
+	enableKrknAIExplicit := false
+	flag.Visit(func(f *flag.Flag) {
+		if f.Name == "enable-krkn-ai" {
+			enableKrknAIExplicit = true
+		}
+	})
+	var err error
+	enableKrknAI, err = resolveKrknAIEnabled(enableKrknAI, enableKrknAIExplicit, os.Getenv("KRKNAI_ENABLED"))
+	if err != nil {
+		setupLog.Error(err, "invalid Krkn-AI enablement configuration")
+		os.Exit(1)
+	}
 	componentManifest, err := componentversion.Load(componentManifestJSON)
 	if err != nil {
 		setupLog.Error(err, "invalid embedded component manifest")
@@ -340,6 +357,54 @@ func main() {
 		setupLog.Error(err, "unable to create Kubernetes clientset")
 		os.Exit(1)
 	}
+	olmManagedAI := os.Getenv("KRKN_OLM_ENABLED") == "true"
+	aiAPIConfig := api.KrknAIServiceConfig{
+		Enabled: enableKrknAI,
+		URL:     os.Getenv("KRKNAI_SERVICE_URL"),
+		Token:   os.Getenv("KRKNAI_SERVICE_TOKEN"),
+	}
+	var olmAIConfig olmbootstrap.AIConfig
+	if olmManagedAI {
+		if enableKrknAI && krknNamespace != operatorNamespace {
+			setupLog.Error(fmt.Errorf("OLM AI resources must use the operator namespace"), "invalid KRKN_NAMESPACE")
+			os.Exit(1)
+		}
+		olmAIConfig, err = olmbootstrap.AIConfigFromEnv(operatorNamespace, func(key string) string {
+			if key == "KRKNAI_ENABLED" {
+				return strconv.FormatBool(enableKrknAI)
+			}
+			return os.Getenv(key)
+		})
+		if err != nil {
+			setupLog.Error(err, "invalid OLM Krkn-AI configuration")
+			os.Exit(1)
+		}
+		aiResources := &olmbootstrap.AIResources{Clientset: clientset, Config: olmAIConfig}
+		startupCtx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		installed, installErr := aiResources.Ensure(startupCtx)
+		if installErr == nil && installed {
+			var tokenSecret *corev1.Secret
+			tokenSecret, installErr = clientset.CoreV1().Secrets(operatorNamespace).Get(
+				startupCtx, olmbootstrap.AIServiceTokenSecretName, metav1.GetOptions{},
+			)
+			if installErr == nil {
+				aiAPIConfig.URL = olmbootstrap.AIServiceURL
+				aiAPIConfig.Token = string(tokenSecret.Data["token"])
+				if aiAPIConfig.Token == "" {
+					installErr = fmt.Errorf("Krkn-AI service Secret has no non-empty token key")
+				}
+			}
+		}
+		cancel()
+		if installErr != nil {
+			setupLog.Error(installErr, "unable to provision OLM Krkn-AI resources")
+			os.Exit(1)
+		}
+		if err := mgr.Add(aiResources); err != nil {
+			setupLog.Error(err, "unable to add OLM Krkn-AI resource reconciler")
+			os.Exit(1)
+		}
+	}
 	if err := api.RemoveElasticsearchGrafanaURLAnnotations(context.Background(), clientset, krknNamespace); err != nil {
 		setupLog.Error(err, "unable to remove retired Grafana URL annotations")
 	}
@@ -389,6 +454,52 @@ func main() {
 		setupLog.Error(err, "unable to create controller", "controller", "KrknOperatorTargetProviderConfig")
 		os.Exit(1)
 	}
+	if enableKrknAI || olmManagedAI {
+		runPodConfig, err := controller.KrknAIRunPodConfigFromEnv(os.Getenv)
+		if err != nil {
+			setupLog.Error(err, "invalid Krkn-AI run configuration")
+			os.Exit(1)
+		}
+		imagePullSecrets := olmAIConfig.ImagePullSecrets
+		if raw := os.Getenv("KRKNAI_IMAGE_PULL_SECRETS"); !olmManagedAI && raw != "" {
+			if err := json.Unmarshal([]byte(raw), &imagePullSecrets); err != nil {
+				setupLog.Error(err, "invalid KRKNAI_IMAGE_PULL_SECRETS")
+				os.Exit(1)
+			}
+		}
+		aiRunReconciler := &controller.KrknAIRunReconciler{
+			Client:                         mgr.GetClient(),
+			APIReader:                      mgr.GetAPIReader(),
+			Scheme:                         mgr.GetScheme(),
+			Clientset:                      clientset,
+			Namespace:                      krknNamespace,
+			OrchestratorImage:              os.Getenv("KRKNAI_ORCHESTRATOR_IMAGE"),
+			OrchestratorImagePullPolicy:    corev1.PullPolicy(os.Getenv("KRKNAI_ORCHESTRATOR_IMAGE_PULL_POLICY")),
+			ServiceImage:                   os.Getenv("KRKNAI_SERVICE_IMAGE"),
+			ServiceImagePullPolicy:         corev1.PullPolicy(os.Getenv("KRKNAI_SERVICE_IMAGE_PULL_POLICY")),
+			ServiceURL:                     os.Getenv("KRKNAI_SERVICE_URL"),
+			ServiceTokenSecretName:         os.Getenv("KRKNAI_SERVICE_TOKEN_SECRET_NAME"),
+			OrchestratorServiceAccountName: os.Getenv("KRKNAI_ORCHESTRATOR_SERVICE_ACCOUNT_NAME"),
+			ImagePullSecrets:               imagePullSecrets,
+			RunPodConfig:                   runPodConfig,
+			RejectNewRuns:                  olmManagedAI && !enableKrknAI,
+		}
+		if olmManagedAI {
+			aiRunReconciler.OrchestratorImage = olmAIConfig.OrchestratorImage
+			aiRunReconciler.OrchestratorImagePullPolicy = olmAIConfig.OrchestratorImagePullPolicy
+			aiRunReconciler.ServiceImage = olmAIConfig.ServiceImage
+			aiRunReconciler.ServiceImagePullPolicy = olmAIConfig.ServiceImagePullPolicy
+			aiRunReconciler.ServiceURL = olmbootstrap.AIServiceURL
+			aiRunReconciler.ServiceTokenSecretName = olmbootstrap.AIServiceTokenSecretName
+			aiRunReconciler.OrchestratorServiceAccountName = olmbootstrap.AIOrchestratorServiceAccountName
+			aiRunReconciler.ImagePullSecrets = olmAIConfig.ImagePullSecrets
+		}
+		if err = aiRunReconciler.SetupWithManager(mgr); err != nil {
+			setupLog.Error(err, "unable to create controller", "controller", "KrknAIRun")
+			os.Exit(1)
+		}
+	}
+
 	// +kubebuilder:scaffold:builder
 
 	// Setup JWT SecretManager (must start BEFORE API server)
@@ -408,7 +519,10 @@ func main() {
 
 	// Setup and add REST API server
 	// SecretManager must be added to manager before API server
-	apiServer := api.NewServerWithComponentNamespace(apiPort, mgr.GetClient(), clientset, krknNamespace, operatorNamespace, grpcServerAddr, jwtSecretManager)
+	apiServer := api.NewServerWithComponentNamespace(
+		apiPort, mgr.GetClient(), clientset, krknNamespace, operatorNamespace,
+		grpcServerAddr, jwtSecretManager, aiAPIConfig,
+	)
 	setupLog.Info("gRPC server address", "address", grpcServerAddr)
 	if err := mgr.Add(apiServer); err != nil {
 		setupLog.Error(err, "unable to add REST API server to manager")
@@ -480,6 +594,19 @@ func main() {
 		setupLog.Error(err, "problem running manager")
 		os.Exit(1)
 	}
+}
+
+// resolveKrknAIEnabled keeps explicit CLI configuration authoritative over the
+// Subscription environment setting. With neither setting, AI remains disabled.
+func resolveKrknAIEnabled(flagValue, flagSet bool, environment string) (bool, error) {
+	if flagSet || environment == "" {
+		return flagValue, nil
+	}
+	enabled, err := strconv.ParseBool(environment)
+	if err != nil {
+		return false, fmt.Errorf("parse KRKNAI_ENABLED: %w", err)
+	}
+	return enabled, nil
 }
 
 func resolveMigrationNamespace(getenv func(string) string) string {

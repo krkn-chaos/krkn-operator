@@ -89,6 +89,40 @@ rules:
   - patch
   - update
   - watch
+{{- if or .Values.krknAI.enabled .Values.operator.olmBootstrap }}
+- apiGroups:
+  - krkn.krkn-chaos.dev
+  resources:
+  - krknairuns
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - serviceaccounts
+  verbs:
+  - get
+- apiGroups:
+  - krkn.krkn-chaos.dev
+  resources:
+  - krknairuns/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - krkn.krkn-chaos.dev
+  resources:
+  - krknairuns/finalizers
+  verbs:
+  - update
+{{- end }}
 - apiGroups:
   - krkn.krkn-chaos.dev
   resources:
@@ -115,6 +149,69 @@ rules:
   - get
   - patch
   - update
+{{- if .Values.operator.olmBootstrap }}
+- apiGroups:
+  - apps
+  resources:
+  - deployments
+  verbs:
+  - create
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - persistentvolumeclaims
+  - services
+  - serviceaccounts
+  verbs:
+  - create
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - networking.k8s.io
+  resources:
+  - networkpolicies
+  verbs:
+  - create
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - networking.k8s.io
+  resources:
+  - networkpolicies
+  resourceNames:
+  - krkn-operator-ai-service
+  verbs:
+  - delete
+- apiGroups:
+  - rbac.authorization.k8s.io
+  resources:
+  - roles
+  - rolebindings
+  verbs:
+  - create
+  - get
+  - update
+- apiGroups:
+  - rbac.authorization.k8s.io
+  resources:
+  - roles
+  resourceNames:
+  - krkn-operator-krkn-ai-orchestrator
+  verbs:
+  - bind
+  - escalate
+{{- end }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding

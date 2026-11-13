@@ -29,9 +29,36 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	"github.com/krkn-chaos/krkn-operator/pkg/configstore"
+	kvstore "github.com/krkn-chaos/krkn-operator/pkg/configstore"
 	"github.com/krkn-chaos/krkn-operator/pkg/provider"
 )
+
+func TestResolveKrknAIEnabledPrecedence(t *testing.T) {
+	tests := []struct {
+		name        string
+		flagValue   bool
+		flagSet     bool
+		environment string
+		enabled     bool
+		wantError   bool
+	}{
+		{name: "default disabled"},
+		{name: "Subscription opt-in", environment: "true", enabled: true},
+		{name: "Subscription opt-out", environment: "false"},
+		{name: "CLI disables environment opt-in", flagSet: true, environment: "true"},
+		{name: "CLI enables environment opt-out", flagSet: true, flagValue: true, environment: "false", enabled: true},
+		{name: "explicit CLI ignores environment", flagSet: true, flagValue: true, environment: "invalid", enabled: true},
+		{name: "invalid environment fails", environment: "invalid", wantError: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			enabled, err := resolveKrknAIEnabled(tt.flagValue, tt.flagSet, tt.environment)
+			if (err != nil) != tt.wantError || enabled != tt.enabled {
+				t.Fatalf("enabled=%t error=%v, want enabled=%t error=%t", enabled, err, tt.enabled, tt.wantError)
+			}
+		})
+	}
+}
 
 func TestResolveMigrationNamespacePrefersHookNamespace(t *testing.T) {
 	values := map[string]string{"POD_NAMESPACE": "release-ns", "KRKN_NAMESPACE": "override-ns"}

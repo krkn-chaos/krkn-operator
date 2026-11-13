@@ -63,9 +63,16 @@ func (h *Handler) ExecuteTerminal(w http.ResponseWriter, r *http.Request) {
 	claims := auth.GetClaimsFromContext(ctx)
 	if claims != nil && !auth.IsAdmin(ctx) {
 		// Get cluster API URL for permission check
-		// Terminal API uses UUID (maps to target ID) and ClusterID (maps to cluster name)
-		clusterAPIURL, err := h.getClusterAPIURL(ctx, "", req.UUID, req.ClusterID)
+		// UUID identifies the target request; ClusterID and OperatorName identify its target cluster.
+		clusterAPIURL, err := h.getClusterAPIURL(ctx, "", req.UUID, req.OperatorName, req.ClusterID)
 		if err != nil {
+			if errors.Is(err, errAmbiguousClusterProvider) {
+				writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+					Error:   "ambiguous_cluster",
+					Message: err.Error(),
+				})
+				return
+			}
 			log.FromContext(ctx).Error(err, "Failed to get cluster API URL for permission check")
 			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
 				Error:   "internal_error",
@@ -117,9 +124,16 @@ func (h *Handler) ExecuteTerminal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get kubeconfig using legacy helper (UUID maps to target ID, ClusterID maps to cluster name)
-	kubeconfigBase64, err := h.getKubeconfig(ctx, "", req.UUID, req.ClusterID)
+	// Get kubeconfig using the selected provider, cluster name, and target request UUID.
+	kubeconfigBase64, err := h.getKubeconfig(ctx, "", req.UUID, req.OperatorName, req.ClusterID)
 	if err != nil {
+		if errors.Is(err, errAmbiguousClusterProvider) {
+			writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+				Error:   "ambiguous_cluster",
+				Message: err.Error(),
+			})
+			return
+		}
 		writeJSONError(w, http.StatusNotFound, ErrorResponse{
 			Error:   "not_found",
 			Message: fmt.Sprintf("Failed to get kubeconfig: %v", err),

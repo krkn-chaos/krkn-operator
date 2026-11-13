@@ -703,9 +703,9 @@ func (r *KrknGraphRunReconciler) updateNodeStatusFromRun(
 	switch scenarioRun.Status.Phase {
 	case "Succeeded":
 		phase = "Completed"
-	case "Failed", "PartiallyFailed":
+	case "Failed", "PartiallyFailed", "Cancelled":
 		phase = "Failed"
-	case "Running":
+	case "Running", "Cancelling":
 		phase = "Running"
 	case "Pending":
 		phase = "Pending"

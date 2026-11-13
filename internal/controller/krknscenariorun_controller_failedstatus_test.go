@@ -20,6 +20,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -30,6 +31,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
+	krknctlconfig "github.com/krkn-chaos/krknctl/pkg/config"
+	krknctlmodels "github.com/krkn-chaos/krknctl/pkg/provider/models"
 )
 
 // newTestScheme builds a scheme with all types needed for controller tests.
@@ -262,5 +265,82 @@ func TestReconcile_FailedJobStatus_IncludesClusterAPIURL(t *testing.T) {
 	}
 	if job.CompletionTime == nil {
 		t.Error("job.CompletionTime should be set on creation failure")
+	}
+}
+
+func TestReconcile_ImageResolutionFailureHasSafeDiagnostic(t *testing.T) {
+	const namespace = "default"
+	scheme := newTestScheme(t)
+	private := false
+	run := &krknv1alpha1.KrknScenarioRun{
+		ObjectMeta: metav1.ObjectMeta{Name: "image-failure", Namespace: namespace, UID: "run-uid"},
+		Spec: krknv1alpha1.KrknScenarioRunSpec{
+			Scenario:        krknv1alpha1.ScenarioReference{Name: "dummy-scenario", Private: &private},
+			TargetRequestID: "target",
+			TargetClusters:  map[string][]string{"provider": {"cluster"}},
+		},
+		Status: krknv1alpha1.KrknScenarioRunStatus{Phase: "Pending"},
+	}
+	target := newTargetRequest("target", namespace, "provider", "cluster", "https://cluster.example.com")
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "target", Namespace: namespace},
+		Data:       map[string][]byte{"managed-clusters": []byte(`{"provider":{"cluster":{"kubeconfig":"Y29uZmln"}}}`)},
+	}
+	k8sClient := fake.NewClientBuilder().WithScheme(scheme).
+		WithStatusSubresource(&krknv1alpha1.KrknScenarioRun{}, &krknv1alpha1.KrknTargetRequest{}).
+		WithObjects(run, target, secret).Build()
+	reconciler := &KrknScenarioRunReconciler{
+		Client: k8sClient, Scheme: scheme, Namespace: namespace,
+		imageResolver: func(context.Context, *krknctlconfig.Config, krknv1alpha1.ScenarioReference, *krknctlmodels.RegistryV2) (string, error) {
+			return "", errors.New("registry denied access: token=must-not-be-persisted")
+		},
+	}
+	key := types.NamespacedName{Name: run.Name, Namespace: namespace}
+	if _, err := reconciler.Reconcile(t.Context(), ctrl.Request{NamespacedName: key}); err != nil {
+		t.Fatal(err)
+	}
+	var updated krknv1alpha1.KrknScenarioRun
+	if err := k8sClient.Get(t.Context(), key, &updated); err != nil {
+		t.Fatal(err)
+	}
+	if updated.Status.Phase != "Failed" || len(updated.Status.ClusterJobs) != 1 {
+		t.Fatalf("expected one failed target, got %+v", updated.Status)
+	}
+	job := updated.Status.ClusterJobs[0]
+	if job.FailureReason != "ImageResolutionFailed" {
+		t.Fatalf("unexpected failure reason: %q", job.FailureReason)
+	}
+	if job.Message != "Failed to resolve scenario image; check the image tag and registry access." {
+		t.Fatalf("unexpected or unsafe diagnostic: %q", job.Message)
+	}
+	var pods corev1.PodList
+	if err := k8sClient.List(t.Context(), &pods); err != nil {
+		t.Fatal(err)
+	}
+	if len(pods.Items) != 0 {
+		t.Fatal("image resolution failure must not create a scenario pod")
+	}
+}
+
+func TestCalculateOverallStatus_CreatingReservationIsRunning(t *testing.T) {
+	reconciler := &KrknScenarioRunReconciler{}
+	run := &krknv1alpha1.KrknScenarioRun{
+		Status: krknv1alpha1.KrknScenarioRunStatus{
+			ClusterJobs: []krknv1alpha1.ClusterJobStatus{
+				{ClusterName: "self", JobID: "job-1", Phase: "Creating"},
+			},
+		},
+	}
+
+	reconciler.calculateOverallStatus(run)
+
+	if run.Status.Phase != "Running" {
+		t.Fatalf("run.Status.Phase = %q, want %q", run.Status.Phase, "Running")
+	}
+	if run.Status.RunningJobs != 0 {
+		t.Errorf("run.Status.RunningJobs = %d, want 0", run.Status.RunningJobs)
+	}
+	if run.Status.FailedJobs != 0 {
+		t.Errorf("run.Status.FailedJobs = %d, want 0", run.Status.FailedJobs)
 	}
 }

@@ -53,13 +53,14 @@ func TestPrepareJobResourcesRejectsUnavailableWorkspaceBeforeCreatingPod(t *test
 				Scheme: scheme, Namespace: "default",
 			}
 			run := &krknv1alpha1.KrknScenarioRun{
-				ObjectMeta: metav1.ObjectMeta{UID: "9e70715d-9154-4b9e-aa76-1ae6c6b2594e"},
+				ObjectMeta: metav1.ObjectMeta{Name: "run", Namespace: "default", UID: "9e70715d-9154-4b9e-aa76-1ae6c6b2594e"},
 				Spec: krknv1alpha1.KrknScenarioRunSpec{Workspace: &krknv1alpha1.WorkspaceReference{
 					Name: "friendly", WorkspaceUID: "e7b95e74-ffec-4574-8c7a-e102444decae",
 					ClaimName: "shared", ClaimUID: "9e70715d-9154-4b9e-aa76-1ae6c6b2594e",
 				}},
 			}
-			_, err := r.prepareJobResources(t.Context(), run, "provider", "cluster", "")
+			require.NoError(t, r.Create(t.Context(), run))
+			_, err := r.prepareJobResources(t.Context(), run, "provider", "cluster", "", "11111111-1111-4111-8111-111111111111")
 			require.True(t, errors.Is(err, tc.want), "error: %v", err)
 			var pods corev1.PodList
 			require.NoError(t, r.List(t.Context(), &pods))
@@ -69,6 +70,7 @@ func TestPrepareJobResourcesRejectsUnavailableWorkspaceBeforeCreatingPod(t *test
 }
 
 func TestScenarioPodMountsOnlyAssignedWorkspaceDirectory(t *testing.T) {
+	jobID := "11111111-1111-4111-8111-111111111111"
 	scheme := runtime.NewScheme()
 	require.NoError(t, corev1.AddToScheme(scheme))
 	require.NoError(t, krknv1alpha1.AddToScheme(scheme))
@@ -110,11 +112,11 @@ func TestScenarioPodMountsOnlyAssignedWorkspaceDirectory(t *testing.T) {
 	}
 	for _, mountPath := range []string{workspace.MountPath, workspace.MountPath + "/config", "/var/lib/krkn"} {
 		run.Spec.KubeconfigPath = mountPath
-		_, err := r.prepareJobResources(t.Context(), run, "provider", "cluster", "https://cluster.example.com")
+		_, err := r.prepareJobResources(t.Context(), run, "provider", "cluster", "https://cluster.example.com", jobID)
 		require.ErrorContains(t, err, "overlaps workspace mount")
 	}
 	run.Spec.KubeconfigPath = ""
-	resources, err := r.prepareJobResources(t.Context(), run, "provider", "cluster", "https://cluster.example.com")
+	resources, err := r.prepareJobResources(t.Context(), run, "provider", "cluster", "https://cluster.example.com", jobID)
 	require.NoError(t, err)
 	expected, err := workspace.SubPath(run.UID, "provider", "cluster", resources.jobID)
 	require.NoError(t, err)
@@ -124,7 +126,6 @@ func TestScenarioPodMountsOnlyAssignedWorkspaceDirectory(t *testing.T) {
 	require.NoError(t, r.List(t.Context(), &pods))
 	require.Len(t, pods.Items, 1)
 	pod := pods.Items[0]
-	require.Equal(t, "shared", pod.Spec.Volumes[len(pod.Spec.Volumes)-2].PersistentVolumeClaim.ClaimName)
 	var workspaceMounts []corev1.VolumeMount
 	for _, mount := range pod.Spec.Containers[0].VolumeMounts {
 		if mount.Name == "workspace" {
@@ -134,6 +135,14 @@ func TestScenarioPodMountsOnlyAssignedWorkspaceDirectory(t *testing.T) {
 	require.Len(t, workspaceMounts, 1)
 	require.Equal(t, workspace.MountPath, workspaceMounts[0].MountPath)
 	require.Equal(t, expected, workspaceMounts[0].SubPath)
+	var workspaceClaim string
+	for _, volume := range pod.Spec.Volumes {
+		if volume.Name == workspaceMounts[0].Name {
+			require.NotNil(t, volume.PersistentVolumeClaim)
+			workspaceClaim = volume.PersistentVolumeClaim.ClaimName
+		}
+	}
+	require.Equal(t, "shared", workspaceClaim)
 	var rollbackPaths []string
 	for _, env := range pod.Spec.Containers[0].Env {
 		if env.Name == "ROLLBACK_VERSIONS_DIRECTORY" {
@@ -157,7 +166,7 @@ func TestScenarioPodMountsOnlyAssignedWorkspaceDirectory(t *testing.T) {
 
 	run.Spec.RollbackEnabled = false
 	run.Spec.Environment = nil
-	workspaceOnly, err := r.prepareJobResources(t.Context(), run, "provider", "cluster", "https://cluster.example.com")
+	workspaceOnly, err := r.prepareJobResources(t.Context(), run, "provider", "cluster", "https://cluster.example.com", "22222222-2222-4222-8222-222222222222")
 	require.NoError(t, err)
 	for _, env := range workspaceOnly.envVars {
 		require.NotEqual(t, "ROLLBACK_VERSIONS_DIRECTORY", env.Name)
@@ -179,11 +188,13 @@ func TestScenarioPodMountsOnlyAssignedWorkspaceDirectory(t *testing.T) {
 	rollback.UID = "8a44fb1b-1c03-4f17-af55-674e096b356e"
 	rollback.Spec.Scenario.Name = "workload-rollback"
 	rollback.Spec.RollbackSource = &krknv1alpha1.RollbackSource{RunName: "run", RunUID: string(original.UID), JobID: resources.jobID, ClusterAPIURL: "https://cluster.example.com"}
+	rollback.ResourceVersion = ""
+	require.NoError(t, r.Create(t.Context(), rollback))
 	changedTarget := &corev1.Secret{}
 	require.NoError(t, r.Get(t.Context(), client.ObjectKey{Namespace: "default", Name: "target"}, changedTarget))
 	changedTarget.Data["managed-clusters"] = []byte(`{"provider":{"cluster":{"kubeconfig":"bmV3"}}}`)
 	require.NoError(t, r.Update(t.Context(), changedTarget))
-	rollbackResources, err := r.prepareJobResources(t.Context(), rollback, "provider", "cluster", "https://cluster.example.com")
+	rollbackResources, err := r.prepareJobResources(t.Context(), rollback, "provider", "cluster", "https://cluster.example.com", "33333333-3333-4333-8333-333333333333")
 	require.NoError(t, err)
 	rollbackConfig := &corev1.ConfigMap{}
 	require.NoError(t, r.Get(t.Context(), client.ObjectKey{Namespace: "default", Name: "krkn-job-" + rollbackResources.jobID + "-kubeconfig"}, rollbackConfig))
@@ -194,14 +205,21 @@ func TestScenarioPodMountsOnlyAssignedWorkspaceDirectory(t *testing.T) {
 		}
 	}
 	rollback.Spec.RollbackSource.RunUID = "replaced-run-uid"
-	_, err = r.prepareJobResources(t.Context(), rollback, "provider", "cluster", "https://cluster.example.com")
+	_, err = r.prepareJobResources(t.Context(), rollback, "provider", "cluster", "https://cluster.example.com", "33333333-3333-4333-8333-333333333333")
 	require.ErrorContains(t, err, "workspace identity changed")
 }
 
 func TestPrepareJobResourcesRequiresWorkspaceForRollback(t *testing.T) {
-	r := &KrknScenarioRunReconciler{}
-	run := &krknv1alpha1.KrknScenarioRun{Spec: krknv1alpha1.KrknScenarioRunSpec{RollbackEnabled: true}}
-	_, err := r.prepareJobResources(t.Context(), run, "provider", "cluster", "")
+	scheme := runtime.NewScheme()
+	require.NoError(t, krknv1alpha1.AddToScheme(scheme))
+	run := &krknv1alpha1.KrknScenarioRun{
+		ObjectMeta: metav1.ObjectMeta{Name: "run", Namespace: "default"},
+		Spec:       krknv1alpha1.KrknScenarioRunSpec{RollbackEnabled: true},
+	}
+	r := &KrknScenarioRunReconciler{
+		Client: fakeclient.NewClientBuilder().WithScheme(scheme).WithObjects(run).Build(),
+	}
+	_, err := r.prepareJobResources(t.Context(), run, "provider", "cluster", "", "11111111-1111-4111-8111-111111111111")
 	require.ErrorContains(t, err, "rollback requires a workspace")
 }
 

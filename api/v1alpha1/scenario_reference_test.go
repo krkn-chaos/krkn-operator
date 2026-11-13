@@ -1,6 +1,7 @@
 package v1alpha1
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -33,5 +34,57 @@ func TestScenarioReferenceValidate(t *testing.T) {
 				t.Fatalf("Validate() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+func TestResolveScenarioReferenceMigratesOnlyLegacyIdentity(t *testing.T) {
+	spec := KrknScenarioRunSpec{
+		ScenarioName:       "legacy-scenario",
+		RegistryName:       "private-registry",
+		ScenarioImage:      "attacker.example/ignored:latest",
+		RegistryURL:        "https://attacker.example",
+		ScenarioRepository: "ignored",
+		Token:              "ignored",
+		Username:           "ignored",
+		Password:           "ignored",
+	}
+
+	reference, legacy, err := spec.ResolveScenarioReference()
+	if err != nil {
+		t.Fatalf("ResolveScenarioReference() error = %v", err)
+	}
+	if !legacy {
+		t.Fatal("ResolveScenarioReference() did not identify legacy storage")
+	}
+	if reference.Name != "legacy-scenario" || reference.Private == nil || !*reference.Private || reference.RegistryName != "private-registry" {
+		t.Fatalf("ResolveScenarioReference() = %+v", reference)
+	}
+}
+
+func TestLegacyScenarioIdentityRemainsDecodable(t *testing.T) {
+	var spec KrknScenarioRunSpec
+	if err := json.Unmarshal([]byte(`{
+		"scenarioName":"legacy-scenario",
+		"registryName":"private-registry",
+		"scenarioImage":"attacker.example/ignored:latest",
+		"token":"ignored"
+	}`), &spec); err != nil {
+		t.Fatal(err)
+	}
+	reference, legacy, err := spec.ResolveScenarioReference()
+	if err != nil || !legacy {
+		t.Fatalf("legacy identity was not resolved: reference=%+v legacy=%v error=%v", reference, legacy, err)
+	}
+	if reference.Name != "legacy-scenario" || reference.RegistryName != "private-registry" ||
+		reference.Private == nil || !*reference.Private {
+		t.Fatalf("unexpected legacy reference: %+v", reference)
+	}
+
+	encoded, err := json.Marshal(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), "scenarioImage") || strings.Contains(string(encoded), "token") {
+		t.Fatalf("legacy executable or credential fields were serialized: %s", encoded)
 	}
 }

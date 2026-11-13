@@ -61,6 +61,15 @@ jobs:
           -l app.kubernetes.io/component=operator \
           -n "$OLM_NAMESPACE" \
           --timeout=5m
+        kubectl get crd krknairuns.krkn.krkn-chaos.dev
+        if kubectl get deployment krkn-operator-ai-service -n "$OLM_NAMESPACE" >/dev/null 2>&1; then
+          echo "Krkn-AI runtime Deployment must not be installed by the CSV" >&2
+          exit 1
+        fi
+        if kubectl get secret krkn-operator-ai-service-token -n "$OLM_NAMESPACE" >/dev/null 2>&1; then
+          echo "Krkn-AI token Secret must be created only by runtime opt-in" >&2
+          exit 1
+        fi
         kubectl get csv -n "$OLM_NAMESPACE"
         kubectl get deployment -n "$OLM_NAMESPACE"
 
@@ -78,6 +87,11 @@ jobs:
           -n "$OLM_NAMESPACE" \
           --timeout=5m
         kubectl get csv -n "$OLM_NAMESPACE"
+        kubectl get crd krknairuns.krkn.krkn-chaos.dev
+        if kubectl get deployment krkn-operator-ai-service -n "$OLM_NAMESPACE" >/dev/null 2>&1; then
+          echo "Krkn-AI runtime Deployment must remain absent after upgrade" >&2
+          exit 1
+        fi
         kubectl get deployment -n "$OLM_NAMESPACE"
 
     - name: Collect cluster diagnostics
