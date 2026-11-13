@@ -101,7 +101,6 @@ func (h *Handler) CreateRegistry(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Build labels and annotations
 	labels := registry.BuildRegistryLabels(req.AuthType, req.Groups, req.AvailableToAll)
 	annotations := registry.BuildRegistryAnnotations(
 		req.RegistryURL,
@@ -110,6 +109,7 @@ func (h *Handler) CreateRegistry(w http.ResponseWriter, r *http.Request) {
 		req.SkipTLS,
 		req.Insecure,
 		createdBy,
+		req.AITagMetadata,
 	)
 
 	// Create Secret
@@ -334,6 +334,17 @@ func (h *Handler) UpdateRegistry(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	existingAITags, err := registry.AIRegistryTagMetadata(secret)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{Error: "internal_error", Message: "Failed to read registry image tag metadata"})
+		return
+	}
+	updatedAITags := req.MergeAITagMetadata(existingAITags)
+	if err := registry.ValidateAITagMetadata(updatedAITags); err != nil {
+		writeJSONError(w, http.StatusBadRequest, ErrorResponse{Error: "bad_request", Message: err.Error()})
+		return
+	}
+
 	// Build new dockerconfigjson with determined credentials
 	dockerConfigJSON, err := registry.BuildDockerConfigJSON(
 		req.RegistryURL,
@@ -359,6 +370,7 @@ func (h *Handler) UpdateRegistry(w http.ResponseWriter, r *http.Request) {
 		req.SkipTLS,
 		req.Insecure,
 		updatedBy,
+		updatedAITags,
 	)
 	secret.Data[corev1.DockerConfigJsonKey] = dockerConfigJSON
 
@@ -653,8 +665,9 @@ func (h *Handler) canAccessRegistry(ctx context.Context, secret *corev1.Secret) 
 	return false
 }
 
-// buildRegistryResponse builds a RegistryResponse from a Secret
+// buildRegistryResponse builds a RegistryResponse from a Secret.
 func buildRegistryResponse(secret *corev1.Secret) registry.RegistryResponse {
+	metadata, _ := registry.AIRegistryTagMetadata(secret)
 	return registry.RegistryResponse{
 		Name:               secret.Name,
 		RegistryURL:        secret.Annotations[registry.RegistryURLAnnotation],
@@ -669,16 +682,19 @@ func buildRegistryResponse(secret *corev1.Secret) registry.RegistryResponse {
 		CreatedBy:          secret.Annotations[registry.CreatedByAnnotation],
 		UpdatedAt:          secret.Annotations[registry.UpdatedAtAnnotation],
 		UpdatedBy:          secret.Annotations[registry.UpdatedByAnnotation],
+		AITagMetadata:      metadata,
 	}
 }
 
 // buildRegistryInfo builds a RegistryInfo from a Secret (minimal user-facing info)
 func buildRegistryInfo(secret *corev1.Secret) registry.RegistryInfo {
+	metadata, _ := registry.AIRegistryTagMetadata(secret)
 	return registry.RegistryInfo{
 		Name:               secret.Name,
 		RegistryURL:        secret.Annotations[registry.RegistryURLAnnotation],
 		ScenarioRepository: secret.Annotations[registry.ScenarioRepositoryAnnotation],
 		Description:        secret.Annotations[registry.DescriptionAnnotation],
+		AITagMetadata:      metadata,
 	}
 }
 
@@ -726,6 +742,9 @@ func validateCreateRegistryRequest(ctx context.Context, k8sClient client.Client,
 			return fmt.Errorf("failed to validate group '%s': %w", groupName, err)
 		}
 	}
+	if err := registry.ValidateAITagMetadata(req.AITagMetadata); err != nil {
+		return err
+	}
 
 	return nil
 }
@@ -770,6 +789,10 @@ func validateUpdateRegistryRequest(ctx context.Context, k8sClient client.Client,
 			}
 			return fmt.Errorf("failed to validate group '%s': %w", groupName, err)
 		}
+	}
+
+	if err := req.ValidateAITagMetadata(); err != nil {
+		return err
 	}
 
 	return nil

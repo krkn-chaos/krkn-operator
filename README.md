@@ -125,6 +125,12 @@ Prerelease tags publish bundle images for testing but do not submit bundles to
 the public Kubernetes or OpenShift catalogs.
 The OLM bundle declares Kubernetes `1.19.0` as its minimum version, matching the
 published compatibility matrix.
+
+Local bundle rendering with `hack/olm/render-bundle.sh` requires Helm, Operator SDK,
+yq, and Python 3. The renderer preserves scalar values, including CEL validation
+expressions, while wrapping generated YAML to meet the catalog's 180-character
+line limit.
+
 For a disposable cluster with OLM installed, a published bundle can be tested
 with:
 
@@ -452,6 +458,21 @@ For example, the `resiliency-file` global parameter is described as:
   "mount_path": "/home/krkn/resiliency-file.yaml"
 }
 ```
+
+## Krkn-AI Operator API
+
+Krkn-AI supports discovery, configuration validation, optimization runs,
+results, and live logs. It is optional and disabled by default:
+
+- **Helm:** set `krknAI.enabled=true`.
+- **OLM:** set `KRKNAI_ENABLED=true` in the Subscription's `spec.config.env`.
+
+REST endpoints are under `/api/v1/krkn-ai` and require authentication and
+appropriate target permissions. The status endpoint reports enablement, not
+readiness. Disabling OLM AI preserves active runs, cleanup, and artifact access.
+
+See [OpenShift OLM quickstart](docs/olm-openshift-krkn-ai.md) for installation
+and `/api/swagger/index.html` on the operator for REST endpoint schemas.
 
 ## Ecosystem
 

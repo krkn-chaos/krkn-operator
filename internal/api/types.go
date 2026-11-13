@@ -396,6 +396,8 @@ type ScenarioRunStatusResponse struct {
 	SuccessfulJobs int `json:"successfulJobs"`
 	// FailedJobs is the number of failed jobs
 	FailedJobs int `json:"failedJobs"`
+	// CancelledJobs is the number of jobs stopped without treating cancellation as failure.
+	CancelledJobs int `json:"cancelledJobs"`
 	// RunningJobs is the number of currently running jobs
 	RunningJobs int `json:"runningJobs"`
 	// ClusterJobs contains the status of each cluster job
@@ -469,6 +471,8 @@ type ScenarioRunListItem struct {
 	SuccessfulJobs int `json:"successfulJobs"`
 	// FailedJobs is the number of failed jobs
 	FailedJobs int `json:"failedJobs"`
+	// CancelledJobs is the number of jobs stopped without treating cancellation as failure.
+	CancelledJobs int `json:"cancelledJobs"`
 	// RunningJobs is the number of currently running jobs
 	RunningJobs int `json:"runningJobs"`
 	// CreatedAt is the creation timestamp

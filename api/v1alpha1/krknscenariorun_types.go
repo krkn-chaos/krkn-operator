@@ -97,8 +97,8 @@ type ClusterJobStatus struct {
 	// ScenarioImage is the resolved container image path (registry/repository:tag) being run
 	// +optional
 	ScenarioImage string `json:"scenarioImage,omitempty"`
-	// Phase is the current phase of the job (Pending, Running, Succeeded, Failed, Retrying, Cancelled, MaxRetriesExceeded)
-	// +kubebuilder:validation:Enum=Pending;Running;Succeeded;Failed;Retrying;Cancelled;MaxRetriesExceeded
+	// Phase is the current execution phase; cancellation is distinct from failure.
+	// +kubebuilder:validation:Enum=Pending;Creating;Running;Retrying;Cancelling;Succeeded;Failed;Cancelled;MaxRetriesExceeded
 	Phase string `json:"phase"`
 	// StartTime is when the job started
 	StartTime *metav1.Time `json:"startTime,omitempty"`
@@ -148,9 +148,11 @@ type ScenarioReference struct {
 	// Name is the scenario tag/name to resolve.
 	Name string `json:"name"`
 	// Private selects a saved private registry when true, or krknctl's public
-	// Quay provider when false. A pointer makes the field mandatory on input.
+	// Quay provider when false. A pointer makes omission distinguishable from an
+	// explicit false value.
 	Private *bool `json:"private"`
 	// RegistryName identifies the saved private registry when Private is true.
+	// +optional
 	RegistryName string `json:"registryName,omitempty"`
 }
 
@@ -183,10 +185,34 @@ func (r ScenarioReference) Validate() error {
 	return nil
 }
 
+// ResolveScenarioReference returns the validated scenario identity for this
+// specification. Legacy persisted resources are translated only from their
+// scenario name and managed registry name; legacy executable image and
+// credential fields are never trusted.
+func (s KrknScenarioRunSpec) ResolveScenarioReference() (ScenarioReference, bool, error) {
+	if s.Scenario.Name != "" || s.Scenario.Private != nil || s.Scenario.RegistryName != "" {
+		return s.Scenario, false, s.Scenario.Validate()
+	}
+	if s.ScenarioName == "" {
+		return ScenarioReference{}, false, fmt.Errorf("scenario.name is required")
+	}
+	private := s.RegistryName != ""
+	reference := ScenarioReference{
+		Name:         s.ScenarioName,
+		Private:      &private,
+		RegistryName: s.RegistryName,
+	}
+	return reference, true, reference.Validate()
+}
+
 // KrknScenarioRunSpec defines the desired state of KrknScenarioRun
 type KrknScenarioRunSpec struct {
 	// TargetRequestID is the reference to the KrknTargetRequest CR
 	TargetRequestID string `json:"targetRequestId"`
+
+	// CancelRequested stops active execution without deleting its status or results.
+	// +optional
+	CancelRequested bool `json:"cancelRequested,omitempty"`
 
 	// OwnerUserID is the email address of the user who created this scenario run
 	// +optional
@@ -201,21 +227,28 @@ type KrknScenarioRunSpec struct {
 	// +kubebuilder:validation:MinProperties=1
 	TargetClusters map[string][]string `json:"targetClusters"`
 
-	// Scenario identifies the scenario and registry to resolve. It is the only
-	// source of image identity; complete image references are not accepted.
-	Scenario ScenarioReference `json:"scenario"`
+	// Scenario identifies the scenario and registry to resolve. New resources
+	// must set this field. It remains optional in storage while legacy resources
+	// are migrated from ScenarioName and RegistryName.
+	// +optional
+	Scenario ScenarioReference `json:"scenario,omitempty"`
 
-	// Legacy fields remain only as Go compatibility shims for code that builds
-	// old in-memory test objects. They are not serialized into the CRD and are
-	// never used to select a pod image.
-	ScenarioName       string `json:"-"`
+	// ScenarioName is the legacy persisted scenario identity. It is retained
+	// temporarily for safe upgrade migration and is never treated as an image.
+	// +optional
+	ScenarioName string `json:"scenarioName,omitempty"`
+	// RegistryName is the legacy persisted managed-registry identity.
+	// +optional
+	RegistryName string `json:"registryName,omitempty"`
+
+	// Legacy executable image and credential fields remain only as in-memory
+	// compatibility shims. They are neither serialized nor trusted.
 	ScenarioImage      string `json:"-"`
 	RegistryURL        string `json:"-"`
 	ScenarioRepository string `json:"-"`
 	Token              string `json:"-"`
 	Username           string `json:"-"`
 	Password           string `json:"-"`
-	RegistryName       string `json:"-"`
 
 	// KubeconfigPath is the path where kubeconfig will be mounted in the pod
 	// +optional
@@ -306,7 +339,7 @@ type ReportStatus struct {
 // KrknScenarioRunStatus defines the observed state of KrknScenarioRun
 type KrknScenarioRunStatus struct {
 	// Phase is the overall phase of the scenario run
-	// +kubebuilder:validation:Enum=Pending;Running;Succeeded;PartiallyFailed;Failed
+	// +kubebuilder:validation:Enum=Pending;Running;Cancelling;Succeeded;PartiallyFailed;Failed;Cancelled
 	Phase string `json:"phase,omitempty"`
 
 	// Message contains human-readable context for the current phase.
@@ -321,6 +354,9 @@ type KrknScenarioRunStatus struct {
 
 	// FailedJobs is the number of failed jobs
 	FailedJobs int `json:"failedJobs,omitempty"`
+
+	// CancelledJobs is the number of jobs stopped by cancellation rather than failure.
+	CancelledJobs int `json:"cancelledJobs,omitempty"`
 
 	// RunningJobs is the number of currently running jobs
 	RunningJobs int `json:"runningJobs,omitempty"`
@@ -355,6 +391,7 @@ type KrknScenarioRunStatus struct {
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 // +kubebuilder:resource:shortName=ksr
 // +kubebuilder:metadata:labels=app.kubernetes.io/name=krkn-operator
+// +kubebuilder:validation:XValidation:rule="!has(oldSelf.spec) || !has(oldSelf.spec.cancelRequested) || !oldSelf.spec.cancelRequested || (has(self.spec) && has(self.spec.cancelRequested) && self.spec.cancelRequested)",message="spec.cancelRequested cannot be cleared once cancellation is requested"
 
 // KrknScenarioRun is the Schema for the krknscenarioruns API.
 type KrknScenarioRun struct {
