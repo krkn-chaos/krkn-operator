@@ -4112,6 +4112,10 @@ paths:
         }
         ```
 
+        Jobs subscriptions may include `page`, `limit`, `categories`, `sortBy`, `sortOrder`, and optional `filters`.
+        `filters` supports exact `owner`, inclusive RFC3339 `createdAtFrom` / `createdAtTo`, and case-insensitive substring `runName`.
+        Example: `{"action":"subscribe","resource":"jobs","filters":{"owner":"alice@example.com","runName":"chaos"}}`
+
         **Resource types:** `run`, `graphrun`, `dashboard`
 
         **Server → Client Messages (updates):**
@@ -4168,6 +4172,10 @@ paths:
         "ids": ["run-abc123", "run-xyz789"]
         }
         ```
+
+        Jobs subscriptions may include `page`, `limit`, `categories`, `sortBy`, `sortOrder`, and optional `filters`.
+        `filters` supports exact `owner`, inclusive RFC3339 `createdAtFrom` / `createdAtTo`, and case-insensitive substring `runName`.
+        Example: `{"action":"subscribe","resource":"jobs","filters":{"owner":"alice@example.com","runName":"chaos"}}`
 
         **Resource types:** `run`, `graphrun`, `dashboard`
 
@@ -4226,6 +4234,10 @@ paths:
         }
         ```
 
+        Jobs subscriptions may include `page`, `limit`, `categories`, `sortBy`, `sortOrder`, and optional `filters`.
+        `filters` supports exact `owner`, inclusive RFC3339 `createdAtFrom` / `createdAtTo`, and case-insensitive substring `runName`.
+        Example: `{"action":"subscribe","resource":"jobs","filters":{"owner":"alice@example.com","runName":"chaos"}}`
+
         **Resource types:** `run`, `graphrun`, `dashboard`
 
         **Server → Client Messages (updates):**
@@ -4282,6 +4294,10 @@ paths:
         "ids": ["run-abc123", "run-xyz789"]
         }
         ```
+
+        Jobs subscriptions may include `page`, `limit`, `categories`, `sortBy`, `sortOrder`, and optional `filters`.
+        `filters` supports exact `owner`, inclusive RFC3339 `createdAtFrom` / `createdAtTo`, and case-insensitive substring `runName`.
+        Example: `{"action":"subscribe","resource":"jobs","filters":{"owner":"alice@example.com","runName":"chaos"}}`
 
         **Resource types:** `run`, `graphrun`, `dashboard`
 

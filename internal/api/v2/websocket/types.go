@@ -138,16 +138,25 @@ type ServerMessage struct {
 
 // ClientMessage is sent from client to server
 type ClientMessage struct {
-	Action         string   `json:"action"`                   // "subscribe", "unsubscribe"
-	Resource       string   `json:"resource"`                 // "run", "graphrun", "dashboard", "jobs"
-	IDs            []string `json:"ids,omitempty"`            // specific resource IDs (empty = wildcard)
-	Page           *int     `json:"page,omitempty"`           // page number for paginated subscriptions (1-based)
-	Limit          *int     `json:"limit,omitempty"`          // items per page for paginated subscriptions
-	Categories     []string `json:"categories,omitempty"`     // any matching category for jobs subscriptions
-	GroupRollbacks bool     `json:"groupRollbacks,omitempty"` // nest rollback runs under their visible source run
-	SortBy         string   `json:"sortBy,omitempty"`         // jobs sort field: createdAt, status, name, or owner
-	SortOrder      string   `json:"sortOrder,omitempty"`      // jobs sort direction: asc or desc
-	SubscriptionID string   `json:"subscriptionId,omitempty"` // request correlation for jobs snapshots
+	Action         string                   `json:"action"`                   // "subscribe", "unsubscribe"
+	Resource       string                   `json:"resource"`                 // "run", "graphrun", "dashboard", "jobs"
+	IDs            []string                 `json:"ids,omitempty"`            // specific resource IDs (empty = wildcard)
+	Page           *int                     `json:"page,omitempty"`           // page number for paginated subscriptions (1-based)
+	Limit          *int                     `json:"limit,omitempty"`          // items per page for paginated subscriptions
+	Categories     []string                 `json:"categories,omitempty"`     // any matching category for jobs subscriptions
+	GroupRollbacks bool                     `json:"groupRollbacks,omitempty"` // nest rollback runs under their visible source run
+	Filters        *JobsSubscriptionFilters `json:"filters,omitempty"`        // owner, creation time, and run-name filters for jobs
+	SortBy         string                   `json:"sortBy,omitempty"`         // jobs sort field: createdAt, status, name, or owner
+	SortOrder      string                   `json:"sortOrder,omitempty"`      // jobs sort direction: asc or desc
+	SubscriptionID string                   `json:"subscriptionId,omitempty"` // request correlation for jobs snapshots
+}
+
+// JobsSubscriptionFilters narrows the full jobs list before sorting and pagination.
+type JobsSubscriptionFilters struct {
+	Owner         string `json:"owner,omitempty"`
+	CreatedAtFrom string `json:"createdAtFrom,omitempty"`
+	CreatedAtTo   string `json:"createdAtTo,omitempty"`
+	RunName       string `json:"runName,omitempty"`
 }
 
 // ErrorMessage is sent when an error occurs

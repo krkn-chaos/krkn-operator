@@ -249,6 +249,80 @@ func filterJobsByCategories(jobs []WSUnifiedJobItem, categories []string) []WSUn
 	return filtered
 }
 
+func validateJobsSubscriptionFilters(filters *JobsSubscriptionFilters) error {
+	if filters == nil {
+		return nil
+	}
+	for _, bound := range []struct {
+		name  string
+		value string
+	}{
+		{name: "createdAtFrom", value: filters.CreatedAtFrom},
+		{name: "createdAtTo", value: filters.CreatedAtTo},
+	} {
+		if bound.value == "" {
+			continue
+		}
+		if _, err := time.Parse(time.RFC3339, bound.value); err != nil {
+			return fmt.Errorf("filters.%s must be an RFC3339 timestamp", bound.name)
+		}
+	}
+	return nil
+}
+
+// filterJobsBySubscriptionFilters narrows jobs before the server sorts and paginates them.
+func filterJobsBySubscriptionFilters(jobs []WSUnifiedJobItem, filters JobsSubscriptionFilters) []WSUnifiedJobItem {
+	if filters.Owner == "" && filters.CreatedAtFrom == "" && filters.CreatedAtTo == "" && filters.RunName == "" {
+		return jobs
+	}
+
+	var from, to time.Time
+	var err error
+	hasFrom := filters.CreatedAtFrom != ""
+	hasTo := filters.CreatedAtTo != ""
+	if hasFrom {
+		from, err = time.Parse(time.RFC3339, filters.CreatedAtFrom)
+		if err != nil {
+			return nil
+		}
+	}
+	if hasTo {
+		to, err = time.Parse(time.RFC3339, filters.CreatedAtTo)
+		if err != nil {
+			return nil
+		}
+	}
+	nameNeedle := strings.ToLower(filters.RunName)
+	filtered := jobs[:0]
+	for _, job := range jobs {
+		if filters.Owner != "" && jobSortOwner(job) != filters.Owner {
+			continue
+		}
+		if hasFrom || hasTo {
+			createdAt, parseErr := time.Parse(time.RFC3339, job.CreatedAt)
+			if parseErr != nil || (hasFrom && createdAt.Before(from)) || (hasTo && createdAt.After(to)) {
+				continue
+			}
+		}
+		if nameNeedle != "" {
+			runNameMatches := false
+			if job.GraphRun != nil || job.Type == "graphRun" {
+				runNameMatches = strings.Contains(strings.ToLower(job.Name), nameNeedle)
+			} else if job.ScenarioRun != nil {
+				runNameMatches = strings.Contains(strings.ToLower(job.ScenarioRun.ScenarioRunName), nameNeedle) ||
+					strings.Contains(strings.ToLower(job.ScenarioRun.CustomRunName), nameNeedle)
+			} else {
+				runNameMatches = strings.Contains(strings.ToLower(job.Name), nameNeedle)
+			}
+			if !runNameMatches {
+				continue
+			}
+		}
+		filtered = append(filtered, job)
+	}
+	return filtered
+}
+
 // sortUnifiedJobItems sorts the full filtered jobs slice before pagination. An
 // omitted or unsupported sort keeps buildUnifiedJobList's createdAt-descending
 // order, preserving behavior for older WebSocket clients.
