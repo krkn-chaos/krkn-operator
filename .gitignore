@@ -50,3 +50,4 @@ graphify-out/cost.json
 PROMPT
 
 **/__pycache__/**
+dist/

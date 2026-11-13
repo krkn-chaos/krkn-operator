@@ -24,6 +24,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -57,7 +58,7 @@ func setupTestReconciler(objs ...client.Object) *KrknTargetRequestReconciler {
 	fakeClient := fake.NewClientBuilder().
 		WithScheme(scheme).
 		WithObjects(objs...).
-		WithStatusSubresource(&krknv1alpha1.KrknTargetRequest{}, &krknv1alpha1.KrknOperatorTargetProvider{}).
+		WithStatusSubresource(&krknv1alpha1.KrknTargetRequest{}, &krknv1alpha1.KrknOperatorTargetProvider{}, &krknv1alpha1.KrknAIRun{}).
 		Build()
 
 	return &KrknTargetRequestReconciler{
@@ -476,6 +477,55 @@ func TestReconcile_SkipsCompletedRequests(t *testing.T) {
 
 	if updated.Status.Status != "Completed" {
 		t.Errorf("Expected status to remain 'Completed', got %s", updated.Status.Status)
+	}
+}
+
+func TestCleanupOldTargetRequestsPreservesActiveRunDependencies(t *testing.T) {
+	tests := []struct {
+		name        string
+		phase       string
+		wantDeleted bool
+	}{
+		{name: "active run retains target", phase: aiRunPhaseRunning},
+		{name: "terminal run releases target", phase: aiRunPhaseSucceeded, wantDeleted: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			target := &krknv1alpha1.KrknTargetRequest{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:              "old-target",
+					Namespace:         testOperatorNamespace,
+					CreationTimestamp: metav1.NewTime(time.Now().Add(-2 * time.Hour)),
+				},
+				Status: krknv1alpha1.KrknTargetRequestStatus{Status: "Completed"},
+			}
+			run := &krknv1alpha1.KrknAIRun{
+				ObjectMeta: metav1.ObjectMeta{Name: "run", Namespace: testOperatorNamespace},
+				Spec:       krknv1alpha1.KrknAIRunSpec{TargetRequestID: target.Name},
+				Status:     krknv1alpha1.KrknAIRunStatus{Phase: test.phase},
+			}
+			reconciler := setupTestReconciler(target, run)
+			deleted, err := reconciler.cleanupOldTargetRequests(context.Background())
+			if err != nil {
+				t.Fatalf("cleanup failed: %v", err)
+			}
+			if test.wantDeleted && deleted != 1 {
+				t.Fatalf("deleted = %d, want 1", deleted)
+			}
+			if !test.wantDeleted && deleted != 0 {
+				t.Fatalf("deleted = %d, want 0 while run is active", deleted)
+			}
+			var remaining krknv1alpha1.KrknTargetRequest
+			err = reconciler.Get(context.Background(), types.NamespacedName{
+				Name: target.Name, Namespace: target.Namespace,
+			}, &remaining)
+			if test.wantDeleted && err == nil {
+				t.Fatal("terminal run target was not cleaned up")
+			}
+			if !test.wantDeleted && err != nil {
+				t.Fatalf("active run target was deleted: %v", err)
+			}
+		})
 	}
 }
 

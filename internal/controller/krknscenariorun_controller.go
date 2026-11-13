@@ -23,7 +23,6 @@ package controller
 import (
 	"context"
 	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -35,6 +34,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	meta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -111,6 +111,8 @@ type clusterTarget struct {
 	clusterName      string
 	clusterAPIURL    string
 	existingJobIndex int // -1 for new jobs, ≥ 0 for retry jobs
+	jobID            string
+	statusIndex      int
 }
 
 // jobOutcome captures the result of a parallel job-creation attempt.
@@ -120,6 +122,72 @@ type jobOutcome struct {
 	podName string
 	image   string
 	err     error
+}
+
+const (
+	scenarioCancellationAnnotation = "krkn.dev/cancel-requested"
+	scenarioCancellationPath       = "/var/run/krkn-cancellation/requested"
+)
+
+func (r *KrknScenarioRunReconciler) ownerCancellationRequested(
+	ctx context.Context,
+	scenarioRun *krknv1alpha1.KrknScenarioRun,
+) (bool, error) {
+	for _, owner := range scenarioRun.OwnerReferences {
+		if owner.APIVersion != krknv1alpha1.GroupVersion.String() || owner.Kind != "KrknAIRun" {
+			continue
+		}
+		var parent krknv1alpha1.KrknAIRun
+		if err := r.Get(ctx, types.NamespacedName{Name: owner.Name, Namespace: scenarioRun.Namespace}, &parent); err != nil {
+			if apierrors.IsNotFound(err) {
+				return false, nil
+			}
+			return false, fmt.Errorf("read parent KrknAIRun %q cancellation intent: %w", owner.Name, err)
+		}
+		if parent.UID != owner.UID {
+			return false, nil
+		}
+		return parent.Spec.CancelRequested ||
+			parent.Status.Phase == aiRunPhaseCancelling ||
+			parent.Status.Phase == aiRunPhaseCancelled, nil
+	}
+	return false, nil
+}
+
+var errScenarioRunCancelled = errors.New("scenario cancellation requested")
+
+func (r *KrknScenarioRunReconciler) cancellationRequested(
+	ctx context.Context,
+	scenarioRun *krknv1alpha1.KrknScenarioRun,
+	clusterName string,
+) (bool, error) {
+	current := scenarioRun
+	var latest krknv1alpha1.KrknScenarioRun
+	err := r.Get(ctx, types.NamespacedName{Name: scenarioRun.Name, Namespace: scenarioRun.Namespace}, &latest)
+	if err == nil {
+		if scenarioRun.UID != "" && latest.UID != scenarioRun.UID {
+			return true, nil
+		}
+		current = &latest
+	} else if apierrors.IsNotFound(err) {
+		if scenarioRun.UID != "" {
+			return true, nil
+		}
+	} else {
+		return false, err
+	}
+	if !current.DeletionTimestamp.IsZero() ||
+		current.Spec.CancelRequested || current.Status.Phase == "Cancelling" || current.Status.Phase == "Cancelled" {
+		return true, nil
+	}
+	if clusterName != "" {
+		for _, job := range current.Status.ClusterJobs {
+			if job.ClusterName == clusterName && job.CancelRequested {
+				return true, nil
+			}
+		}
+	}
+	return r.ownerCancellationRequested(ctx, current)
 }
 
 // getOwnerLabel returns the sanitized owner label value for a scenario run.
@@ -190,6 +258,36 @@ func (r *KrknScenarioRunReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		logger.Error(err, "unable to fetch KrknScenarioRun")
 		return ctrl.Result{}, err
 	}
+	if !scenarioRun.DeletionTimestamp.IsZero() {
+		return ctrl.Result{}, nil
+	}
+	if !scenarioRun.Spec.CancelRequested &&
+		(scenarioRun.Status.Phase == "Cancelling" || scenarioRun.Status.Phase == "Cancelled") {
+		scenarioRun.Spec.CancelRequested = true
+		if err := r.Update(ctx, &scenarioRun); err != nil {
+			if apierrors.IsConflict(err) {
+				return ctrl.Result{RequeueAfter: 100 * time.Millisecond}, nil
+			}
+			return ctrl.Result{}, fmt.Errorf("persist scenario cancellation phase: %w", err)
+		}
+		return ctrl.Result{RequeueAfter: 100 * time.Millisecond}, nil
+	}
+	if !scenarioRun.Spec.CancelRequested {
+		parentCancelled, err := r.ownerCancellationRequested(ctx, &scenarioRun)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+		if parentCancelled {
+			scenarioRun.Spec.CancelRequested = true
+			if err := r.Update(ctx, &scenarioRun); err != nil {
+				if apierrors.IsConflict(err) {
+					return ctrl.Result{RequeueAfter: 100 * time.Millisecond}, nil
+				}
+				return ctrl.Result{}, fmt.Errorf("persist parent cancellation intent: %w", err)
+			}
+			return ctrl.Result{RequeueAfter: 100 * time.Millisecond}, nil
+		}
+	}
 	pendingMigration, err := migrationPending(ctx, r.Client, scenarioRun.Namespace, scenarioRun.Annotations)
 	if err != nil {
 		return ctrl.Result{}, err
@@ -197,6 +295,16 @@ func (r *KrknScenarioRunReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	if pendingMigration {
 		logger.Info("skipping ScenarioRun while the CRD migration is pending", "scenarioRun", scenarioRun.Name)
 		return ctrl.Result{RequeueAfter: migrationGuardRequeue}, nil
+	}
+	reference, legacy, referenceErr := scenarioRun.Spec.ResolveScenarioReference()
+	if referenceErr == nil && legacy {
+		scenarioRun.Spec.Scenario = reference
+		if err := r.Update(ctx, &scenarioRun); err != nil {
+			if apierrors.IsConflict(err) {
+				return ctrl.Result{RequeueAfter: 100 * time.Millisecond}, nil
+			}
+			return ctrl.Result{}, fmt.Errorf("migrate legacy scenario identity: %w", err)
+		}
 	}
 
 	// Initialize status if first reconcile
@@ -241,7 +349,20 @@ func (r *KrknScenarioRunReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	// reuse the result without a second API round-trip to KrknTargetRequest.
 	var targets []clusterTarget
 	for providerName, clusterNames := range scenarioRun.Spec.TargetClusters {
+		if scenarioRun.Spec.CancelRequested {
+			continue
+		}
 		for _, clusterName := range clusterNames {
+			jobCancelled := false
+			for _, job := range scenarioRun.Status.ClusterJobs {
+				if job.ClusterName == clusterName && job.CancelRequested {
+					jobCancelled = true
+					break
+				}
+			}
+			if jobCancelled {
+				continue
+			}
 			if r.jobExistsForCluster(&scenarioRun, clusterName) {
 				logger.V(1).Info("job already exists for cluster, skipping",
 					"provider", providerName,
@@ -265,11 +386,57 @@ func (r *KrknScenarioRunReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 				clusterName:      clusterName,
 				clusterAPIURL:    clusterAPIURL,
 				existingJobIndex: existingJobIndex,
+				statusIndex:      -1,
 			})
 			logger.Info("creating job for cluster",
 				"provider", providerName,
 				"cluster", clusterName,
 				"scenarioRun", scenarioRun.Name)
+		}
+	}
+
+	// Reserve each target in status before creating any Kubernetes resources. Pod and
+	// ConfigMap watches can enqueue another reconcile before resource creation returns;
+	// the reservation makes that reconcile observe the target as already claimed.
+	if len(targets) > 0 {
+		now := metav1.Now()
+		for i := range targets {
+			targets[i].jobID = uuid.New().String()
+			reserved := krknv1alpha1.ClusterJobStatus{
+				ProviderName:         targets[i].providerName,
+				ClusterName:          targets[i].clusterName,
+				ClusterAPIURL:        targets[i].clusterAPIURL,
+				JobID:                targets[i].jobID,
+				Phase:                "Creating",
+				StartTime:            &now,
+				MaxRetries:           effectiveScenarioMaxRetries(&scenarioRun),
+				MaxRetriesConfigured: true,
+			}
+			if targets[i].existingJobIndex >= 0 {
+				targets[i].statusIndex = targets[i].existingJobIndex
+				previous := scenarioRun.Status.ClusterJobs[targets[i].statusIndex]
+				reserved.AttemptHistory = previous.AttemptHistory
+				reserved.RetryCount = previous.RetryCount
+				reserved.MaxRetries = previous.MaxRetries
+				reserved.MaxRetriesConfigured = previous.MaxRetriesConfigured
+				reserved.LastRetryTime = previous.LastRetryTime
+				if scenarioRun.Spec.RollbackEnabled {
+					reserved.MaxRetries = 0
+					reserved.MaxRetriesConfigured = true
+				}
+				scenarioRun.Status.ClusterJobs[targets[i].statusIndex] = reserved
+			} else {
+				scenarioRun.Status.ClusterJobs = append(scenarioRun.Status.ClusterJobs, reserved)
+				targets[i].statusIndex = len(scenarioRun.Status.ClusterJobs) - 1
+			}
+		}
+		if err := r.Status().Update(ctx, &scenarioRun); err != nil {
+			if apierrors.IsConflict(err) {
+				logger.Info("conflict reserving cluster jobs, will retry on next reconcile")
+				return ctrl.Result{RequeueAfter: 100 * time.Millisecond}, nil
+			}
+			logger.Error(err, "failed to reserve cluster jobs")
+			return ctrl.Result{}, err
 		}
 	}
 
@@ -281,7 +448,7 @@ func (r *KrknScenarioRunReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	for i, target := range targets {
 		i, target := i, target
 		g.Go(func() error {
-			resources, err := r.prepareJobResources(gCtx, &scenarioRun, target.providerName, target.clusterName, target.clusterAPIURL)
+			resources, err := r.prepareJobResources(gCtx, &scenarioRun, target.providerName, target.clusterName, target.clusterAPIURL, target.jobID)
 			if err != nil {
 				outcomes[i] = jobOutcome{target: target, err: err}
 				return nil
@@ -317,6 +484,17 @@ func (r *KrknScenarioRunReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	var signatureFailure error
 	for _, outcome := range outcomes {
 		if outcome.err != nil {
+			if errors.Is(outcome.err, errScenarioRunCancelled) {
+				scenarioRun.Spec.CancelRequested = true
+				job := &scenarioRun.Status.ClusterJobs[outcome.target.statusIndex]
+				job.JobID = ""
+				job.PodName = ""
+				job.CancelRequested = true
+				job.Phase = "Cancelled"
+				setCancellationCleanupOutcome(job, "not-required", "")
+				r.setCompletionTime(job)
+				continue
+			}
 			message := "Job creation failed"
 			failureReason := "JobCreationFailed"
 			var invalidSignatureErr *InvalidImageSignatureError
@@ -348,47 +526,30 @@ func (r *KrknScenarioRunReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 				StartTime:      &now,
 				CompletionTime: &now,
 			}
-			if outcome.target.existingJobIndex >= 0 {
-				failedJob.AttemptHistory = scenarioRun.Status.ClusterJobs[outcome.target.existingJobIndex].AttemptHistory
-				scenarioRun.Status.ClusterJobs[outcome.target.existingJobIndex] = failedJob
-			} else {
-				scenarioRun.Status.ClusterJobs = append(scenarioRun.Status.ClusterJobs, failedJob)
-			}
+			job := &scenarioRun.Status.ClusterJobs[outcome.target.statusIndex]
+			failedJob.AttemptHistory = job.AttemptHistory
+			failedJob.RetryCount = job.RetryCount
+			failedJob.MaxRetries = job.MaxRetries
+			failedJob.MaxRetriesConfigured = job.MaxRetriesConfigured
+			failedJob.LastRetryTime = job.LastRetryTime
+			scenarioRun.Status.ClusterJobs[outcome.target.statusIndex] = failedJob
 		} else {
 			now := metav1.Now()
-			if outcome.target.existingJobIndex >= 0 {
-				idx := outcome.target.existingJobIndex
-				scenarioRun.Status.ClusterJobs[idx].JobID = outcome.jobID
-				scenarioRun.Status.ClusterJobs[idx].PodName = outcome.podName
-				scenarioRun.Status.ClusterJobs[idx].ScenarioImage = outcome.image
-				scenarioRun.Status.ClusterJobs[idx].Phase = "Pending"
-				scenarioRun.Status.ClusterJobs[idx].StartTime = &now
-				scenarioRun.Status.ClusterJobs[idx].CompletionTime = nil
-				scenarioRun.Status.ClusterJobs[idx].Message = ""
-				logger.Info("updated retry job in status",
-					"cluster", outcome.target.clusterName,
-					"newJobId", outcome.jobID,
-					"retryAttempt", scenarioRun.Status.ClusterJobs[idx].RetryCount)
-			} else {
-				scenarioRun.Status.ClusterJobs = append(scenarioRun.Status.ClusterJobs, krknv1alpha1.ClusterJobStatus{
-					ProviderName:         outcome.target.providerName,
-					ClusterName:          outcome.target.clusterName,
-					ClusterAPIURL:        outcome.target.clusterAPIURL,
-					JobID:                outcome.jobID,
-					PodName:              outcome.podName,
-					ScenarioImage:        outcome.image,
-					Phase:                "Pending",
-					StartTime:            &now,
-					RetryCount:           0,
-					MaxRetries:           effectiveScenarioMaxRetries(&scenarioRun),
-					MaxRetriesConfigured: true,
-				})
-				logger.Info("created new cluster job",
-					"cluster", outcome.target.clusterName,
-					"jobID", outcome.jobID,
-					"pod", outcome.podName,
-					"clusterAPIURL", outcome.target.clusterAPIURL)
-			}
+			idx := outcome.target.statusIndex
+			job := &scenarioRun.Status.ClusterJobs[idx]
+			job.JobID = outcome.jobID
+			job.PodName = outcome.podName
+			job.ScenarioImage = outcome.image
+			job.ClusterAPIURL = outcome.target.clusterAPIURL
+			job.Phase = "Pending"
+			job.StartTime = &now
+			job.CompletionTime = nil
+			job.Message = ""
+			job.FailureReason = ""
+			logger.Info("updated cluster job in status",
+				"cluster", outcome.target.clusterName,
+				"newJobId", outcome.jobID,
+				"retryAttempt", job.RetryCount)
 			jobsCreated++
 		}
 	}
@@ -411,6 +572,9 @@ func (r *KrknScenarioRunReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 
 	// Calculate overall status
 	r.calculateOverallStatus(&scenarioRun)
+	if r.hasCancellationRequests(&scenarioRun) {
+		r.setCancellationConditions(&scenarioRun)
+	}
 	if signatureFailure != nil {
 		scenarioRun.Status.Phase = "Failed"
 		scenarioRun.Status.Message = signatureFailure.Error()
@@ -488,6 +652,10 @@ func (r *KrknScenarioRunReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 			"runningJobs", scenarioRun.Status.RunningJobs)
 		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 	}
+	if scenarioRun.Status.Phase == "Cancelling" ||
+		(r.hasCancellationRequests(&scenarioRun) && r.cancellationCleanupPending(&scenarioRun)) {
+		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+	}
 
 	// Requeue to retry resiliency score collection after status has been persisted.
 	if resiliencyRequeue {
@@ -516,11 +684,19 @@ func (r *KrknScenarioRunReconciler) prepareJobResources(
 	providerName string,
 	clusterName string,
 	clusterAPIURL string,
+	jobID string,
 ) (*preparedJobResources, error) {
 	logger := log.FromContext(ctx)
+	if cancelled, err := r.cancellationRequested(ctx, scenarioRun, clusterName); err != nil {
+		return nil, err
+	} else if cancelled {
+		return nil, errScenarioRunCancelled
+	}
+	if err := r.validateAIChildRegistry(ctx, scenarioRun); err != nil {
+		return nil, err
+	}
 
-	// Generate unique job ID
-	jobID := uuid.New().String()
+	// jobID is reserved in KrknScenarioRun status before resource creation.
 	if scenarioRun.Spec.RollbackEnabled && scenarioRun.Spec.Workspace == nil {
 		return nil, fmt.Errorf("rollback requires a workspace")
 	}
@@ -575,7 +751,7 @@ func (r *KrknScenarioRunReconciler) prepareJobResources(
 		}
 	}
 
-	// Load krknctl config for defaults
+	// Load the embedded krknctl defaults for the scenario pod.
 	krknctlCfg, err := krknctlconfig.LoadConfig()
 	if err != nil {
 		return nil, fmt.Errorf("failed to load krknctl config: %w", err)
@@ -654,6 +830,11 @@ func (r *KrknScenarioRunReconciler) prepareJobResources(
 		return nil, fmt.Errorf("failed to set owner reference on kubeconfig ConfigMap: %w", err)
 	}
 
+	if cancelled, err := r.cancellationRequested(ctx, scenarioRun, clusterName); err != nil {
+		return nil, err
+	} else if cancelled {
+		return nil, errScenarioRunCancelled
+	}
 	if err := r.Create(ctx, kubeconfigConfigMap); err != nil {
 		return nil, fmt.Errorf("failed to create kubeconfig ConfigMap: %w", err)
 	}
@@ -723,6 +904,13 @@ func (r *KrknScenarioRunReconciler) prepareJobResources(
 			return nil, fmt.Errorf("failed to set owner reference on file ConfigMap: %w", err)
 		}
 
+		if cancelled, err := r.cancellationRequested(ctx, scenarioRun, clusterName); err != nil {
+			cleanup()
+			return nil, err
+		} else if cancelled {
+			cleanup()
+			return nil, errScenarioRunCancelled
+		}
 		if err := r.Create(ctx, fileConfigMap); err != nil {
 			cleanup()
 			return nil, fmt.Errorf("failed to create file ConfigMap: %w", err)
@@ -995,6 +1183,13 @@ func (r *KrknScenarioRunReconciler) submitScenarioPod(
 	scenarioRun *krknv1alpha1.KrknScenarioRun,
 	resources *preparedJobResources,
 ) (string, error) {
+	if cancelled, err := r.cancellationRequested(ctx, scenarioRun, resources.clusterName); err != nil {
+		r.cleanupPreparedResources(ctx, resources)
+		return "", err
+	} else if cancelled {
+		r.cleanupPreparedResources(ctx, resources)
+		return "", errScenarioRunCancelled
+	}
 	var runAsUser int64 = 1001
 	var runAsGroup int64 = 1001
 	var fsGroup int64 = 1001
@@ -1011,8 +1206,28 @@ func (r *KrknScenarioRunReconciler) submitScenarioPod(
 	if ownerLabel := getOwnerLabel(scenarioRun); ownerLabel != "" {
 		podLabels["krkn.krkn-chaos.dev/owner-user"] = ownerLabel
 	}
+	for _, key := range []string{
+		"krkn.dev/ai-run",
+		"krkn.dev/orchestrator-pod",
+		"krkn.dev/scenario-id",
+		"krkn.dev/generation-id",
+		"krkn.dev/scenario-name",
+	} {
+		if value := scenarioRun.Labels[key]; value != "" {
+			podLabels[key] = value
+		}
+	}
+	podLabels["krkn.dev/component"] = "scenario"
 	scenarioCommand := "if [ -x /home/krkn/kraken/containers/setup-ssh.sh ]; then /home/krkn/kraken/containers/setup-ssh.sh || exit $?; fi; " +
-		"/home/krkn/run.sh; krkn_exit=$?; " +
+		"set -m; " +
+		"/home/krkn/run.sh & scenario_pid=$!; " +
+		"( while kill -0 -- \"-$scenario_pid\" 2>/dev/null; do " +
+		"if [ \"$(cat " + scenarioCancellationPath + " 2>/dev/null)\" = \"true\" ]; then " +
+		"kill -TERM -- \"-$scenario_pid\" 2>/dev/null || kill -TERM \"$scenario_pid\" 2>/dev/null; " +
+		"grace=120; while [ \"$grace\" -gt 0 ] && kill -0 -- \"-$scenario_pid\" 2>/dev/null; do sleep 1; grace=$((grace - 1)); done; " +
+		"if kill -0 -- \"-$scenario_pid\" 2>/dev/null; then echo 'CANCELLATION_FORCE_STOPPED grace_seconds=120'; kill -KILL -- \"-$scenario_pid\" 2>/dev/null; fi; exit 0; fi; sleep 1; done ) & " +
+		"watcher_pid=$!; wait \"$scenario_pid\"; krkn_exit=$?; " +
+		"wait \"$watcher_pid\" 2>/dev/null; " +
 		"if [ -f /home/krkn/kraken/kraken.report.html ]; then echo '===KRKN_REPORT_HTML_START==='; base64 /home/krkn/kraken/kraken.report.html; echo '===KRKN_REPORT_HTML_END==='; fi; " +
 		"if [ -f /home/krkn/kraken/kraken.report.pdf ]; then echo '===KRKN_REPORT_PDF_START==='; base64 /home/krkn/kraken/kraken.report.pdf; echo '===KRKN_REPORT_PDF_END==='; fi; " +
 		"exit $krkn_exit"
@@ -1028,6 +1243,9 @@ func (r *KrknScenarioRunReconciler) submitScenarioPod(
 			Name:      podName,
 			Namespace: r.Namespace,
 			Labels:    podLabels,
+			Annotations: map[string]string{
+				scenarioCancellationAnnotation: "false",
+			},
 		},
 		Spec: corev1.PodSpec{
 			ServiceAccountName: "krkn-operator-krkn-scenario-runner",
@@ -1040,16 +1258,29 @@ func (r *KrknScenarioRunReconciler) submitScenarioPod(
 			},
 			Containers: []corev1.Container{
 				{
-					Name:            "scenario",
-					Image:           resources.containerImage,
-					Command:         []string{"/bin/bash", "-c"},
-					Args:            []string{scenarioCommand},
-					Env:             resources.envVars,
-					VolumeMounts:    resources.volumeMounts,
+					Name:    "scenario",
+					Image:   resources.containerImage,
+					Command: []string{"/bin/bash", "-c"},
+					Args:    []string{scenarioCommand},
+					Env:     resources.envVars,
+					VolumeMounts: append(append([]corev1.VolumeMount(nil), resources.volumeMounts...), corev1.VolumeMount{
+						Name: "cancellation", MountPath: "/var/run/krkn-cancellation", ReadOnly: true,
+					}),
 					ImagePullPolicy: corev1.PullAlways,
 				},
 			},
-			Volumes: resources.volumes,
+			Volumes: append(append([]corev1.Volume(nil), resources.volumes...), corev1.Volume{
+				Name: "cancellation",
+				VolumeSource: corev1.VolumeSource{DownwardAPI: &corev1.DownwardAPIVolumeSource{
+					Items: []corev1.DownwardAPIVolumeFile{{
+						Path: "requested",
+						FieldRef: &corev1.ObjectFieldSelector{
+							APIVersion: "v1",
+							FieldPath:  "metadata.annotations['" + scenarioCancellationAnnotation + "']",
+						},
+					}},
+				}},
+			}),
 		},
 	}
 	if err := controllerutil.SetControllerReference(scenarioRun, pod, r.Scheme); err != nil {
@@ -1063,6 +1294,13 @@ func (r *KrknScenarioRunReconciler) submitScenarioPod(
 		}
 	}
 
+	if cancelled, err := r.cancellationRequested(ctx, scenarioRun, resources.clusterName); err != nil {
+		r.cleanupPreparedResources(ctx, resources)
+		return "", err
+	} else if cancelled {
+		r.cleanupPreparedResources(ctx, resources)
+		return "", errScenarioRunCancelled
+	}
 	if err := r.Create(ctx, pod); err != nil {
 		r.cleanupPreparedResources(ctx, resources)
 		return "", fmt.Errorf("failed to create pod: %w", err)
@@ -1079,6 +1317,11 @@ func (r *KrknScenarioRunReconciler) createClusterJob(
 	providerName string,
 	clusterName string,
 ) error {
+	if cancelled, err := r.cancellationRequested(ctx, scenarioRun, clusterName); err != nil {
+		return err
+	} else if cancelled {
+		return errScenarioRunCancelled
+	}
 	// Check if this is a retry case
 	existingJobIndex := -1
 	for i, job := range scenarioRun.Status.ClusterJobs {
@@ -1088,9 +1331,39 @@ func (r *KrknScenarioRunReconciler) createClusterJob(
 		}
 	}
 
+	// Reserve the retry before creating resources so a second reconcile cannot
+	// submit another pod for the same cluster.
+	jobID := uuid.New().String()
+	now := metav1.Now()
+	if existingJobIndex < 0 {
+		scenarioRun.Status.ClusterJobs = append(scenarioRun.Status.ClusterJobs, krknv1alpha1.ClusterJobStatus{
+			ProviderName:         providerName,
+			ClusterName:          clusterName,
+			ClusterAPIURL:        r.getClusterAPIURL(ctx, scenarioRun, providerName, clusterName),
+			JobID:                jobID,
+			Phase:                "Creating",
+			StartTime:            &now,
+			MaxRetries:           scenarioRun.Spec.MaxRetries,
+			MaxRetriesConfigured: true,
+		})
+		existingJobIndex = len(scenarioRun.Status.ClusterJobs) - 1
+	} else {
+		job := &scenarioRun.Status.ClusterJobs[existingJobIndex]
+		job.JobID = jobID
+		job.PodName = ""
+		job.Phase = "Creating"
+		job.StartTime = &now
+		job.CompletionTime = nil
+		job.Message = ""
+		job.FailureReason = ""
+	}
+	if err := r.Status().Update(ctx, scenarioRun); err != nil {
+		return err
+	}
+
 	// Step 1: Prepare all resources (ConfigMaps, Secrets, Volumes, EnvVars, container image)
 	clusterAPIURL := r.getClusterAPIURL(ctx, scenarioRun, providerName, clusterName)
-	resources, err := r.prepareJobResources(ctx, scenarioRun, providerName, clusterName, clusterAPIURL)
+	resources, err := r.prepareJobResources(ctx, scenarioRun, providerName, clusterName, clusterAPIURL, jobID)
 	if err != nil {
 		return err
 	}
@@ -1102,39 +1375,189 @@ func (r *KrknScenarioRunReconciler) createClusterJob(
 		return err
 	}
 
-	// Step 3: Update status - either update existing entry (retry) or add new entry
-	now := metav1.Now()
-	if existingJobIndex >= 0 {
-		scenarioRun.Status.ClusterJobs[existingJobIndex].JobID = resources.jobID
-		scenarioRun.Status.ClusterJobs[existingJobIndex].PodName = podName
-		scenarioRun.Status.ClusterJobs[existingJobIndex].ScenarioImage = resources.containerImage
-		scenarioRun.Status.ClusterJobs[existingJobIndex].Phase = "Pending"
-		scenarioRun.Status.ClusterJobs[existingJobIndex].StartTime = &now
-		scenarioRun.Status.ClusterJobs[existingJobIndex].CompletionTime = nil
-		scenarioRun.Status.ClusterJobs[existingJobIndex].Message = ""
-		logger.Info("updated retry job in status",
-			"cluster", resources.clusterName,
-			"newJobId", resources.jobID,
-			"retryAttempt", scenarioRun.Status.ClusterJobs[existingJobIndex].RetryCount)
+	// Step 3: Complete the reserved status entry.
+	job := &scenarioRun.Status.ClusterJobs[existingJobIndex]
+	job.JobID = resources.jobID
+	job.PodName = podName
+	job.ScenarioImage = resources.containerImage
+	job.Phase = "Pending"
+	job.StartTime = &now
+	job.CompletionTime = nil
+	job.Message = ""
+	logger.Info("updated retry job in status",
+		"cluster", resources.clusterName,
+		"newJobId", resources.jobID,
+		"retryAttempt", job.RetryCount)
+	return nil
+}
+
+func (r *KrknScenarioRunReconciler) requestPodCancellation(ctx context.Context, pod *corev1.Pod) error {
+	if pod.Annotations[scenarioCancellationAnnotation] == "true" {
+		return nil
+	}
+	before := pod.DeepCopy()
+	if pod.Annotations == nil {
+		pod.Annotations = make(map[string]string)
+	}
+	pod.Annotations[scenarioCancellationAnnotation] = "true"
+	return r.Patch(ctx, pod, client.MergeFrom(before))
+}
+
+func cancellationCleanupReceipt(logs []byte) (outcome, detail string, found bool) {
+	lines := strings.Split(string(logs), "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "CANCELLATION_FORCE_STOPPED ") {
+			return "unknown", line, true
+		}
+	}
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "CANCELLATION_CLEANUP ") {
+			continue
+		}
+		fields := strings.Fields(strings.TrimPrefix(line, "CANCELLATION_CLEANUP "))
+		for _, field := range fields {
+			if !strings.HasPrefix(field, "outcome=") {
+				continue
+			}
+			outcome = strings.TrimPrefix(field, "outcome=")
+			if outcome != "complete" && outcome != "failed" && outcome != "unknown" {
+				return "unknown", "", true
+			}
+			for j, detailField := range fields {
+				if strings.HasPrefix(detailField, "detail=") {
+					detail = strings.TrimSpace(strings.TrimPrefix(strings.Join(fields[j:], " "), "detail="))
+					break
+				}
+			}
+			return outcome, detail, true
+		}
+		return "unknown", "", true
+	}
+	return "", "", false
+}
+
+func setCancellationCleanupOutcome(job *krknv1alpha1.ClusterJobStatus, outcome, detail string) {
+	switch outcome {
+	case "complete":
+		job.FailureReason = "CancellationCleanupComplete"
+		if detail == "" {
+			detail = "Scenario cleanup completed after cancellation."
+		}
+	case "failed":
+		job.FailureReason = "CancellationCleanupFailed"
+		if detail == "" {
+			detail = "Scenario cleanup reported failure after cancellation."
+		}
+	case "not-required":
+		job.FailureReason = "CancellationCleanupNotRequired"
+		if detail == "" {
+			detail = "Scenario execution had not started."
+		}
+	default:
+		job.FailureReason = "CancellationCleanupUnknown"
+		if detail == "" {
+			detail = "No definitive scenario cleanup receipt was observed."
+		}
+	}
+	job.Message = detail
+}
+
+func (r *KrknScenarioRunReconciler) reconcileCancelledJob(
+	ctx context.Context,
+	scenarioRun *krknv1alpha1.KrknScenarioRun,
+	job *krknv1alpha1.ClusterJobStatus,
+) error {
+	if job.Phase == "Succeeded" || job.Phase == "MaxRetriesExceeded" {
+		return nil
+	}
+	if job.PodName == "" && job.JobID != "" {
+		var pods corev1.PodList
+		if err := r.List(ctx, &pods,
+			client.InNamespace(r.Namespace),
+			client.MatchingLabels{"krkn-job-id": job.JobID},
+		); err != nil {
+			return fmt.Errorf("find scenario Pod for cancelled job %q: %w", job.JobID, err)
+		}
+		ownedUIDs := map[types.UID]struct{}{scenarioRun.UID: {}}
+		for i := range pods.Items {
+			pod := &pods.Items[i]
+			if hasScenarioRunOwner(pod.OwnerReferences, ownedUIDs) {
+				job.PodName = pod.Name
+				break
+			}
+		}
+	}
+	if job.PodName == "" {
+		job.Phase = "Cancelled"
+		if job.JobID == "" {
+			setCancellationCleanupOutcome(job, "not-required", "No scenario job or Pod was reserved.")
+		} else {
+			setCancellationCleanupOutcome(job, "unknown", "No owned scenario Pod was found for the reserved job; container startup cannot be ruled out.")
+		}
+		r.setCompletionTime(job)
+		return nil
+	}
+	var pod corev1.Pod
+	err := r.Get(ctx, types.NamespacedName{Name: job.PodName, Namespace: r.Namespace}, &pod)
+	if err != nil {
+		if !apierrors.IsNotFound(err) {
+			return err
+		}
+		job.Phase = "Cancelled"
+		setCancellationCleanupOutcome(job, "unknown", "Scenario Pod disappeared before its cleanup receipt could be observed.")
+		r.setCompletionTime(job)
+		return nil
+	}
+	ownedUIDs := map[types.UID]struct{}{scenarioRun.UID: {}}
+	if !hasScenarioRunOwner(pod.OwnerReferences, ownedUIDs) {
+		job.Phase = "Cancelling"
+		setCancellationCleanupOutcome(job, "unknown", "Refusing to observe or delete a same-name Pod with a different scenario-run owner UID.")
+		return nil
+	}
+	if pod.Status.Phase == corev1.PodPending && !podHasStartedContainer(&pod) {
+		if pod.UID == "" {
+			job.Phase = "Cancelling"
+			job.Message = "Cannot safely delete the never-started scenario Pod because its UID is unavailable."
+			return nil
+		}
+		uid := pod.UID
+		if err := r.Delete(ctx, &pod, client.Preconditions{UID: &uid}); err != nil && !apierrors.IsNotFound(err) {
+			return fmt.Errorf("delete never-started scenario Pod %q: %w", pod.Name, err)
+		}
+		job.Phase = "Cancelled"
+		setCancellationCleanupOutcome(job, "not-required", "The scenario container never started; target cleanup was not required.")
+		r.setCompletionTime(job)
+		return nil
+	}
+	if pod.Status.Phase != corev1.PodFailed && pod.Status.Phase != corev1.PodSucceeded {
+		if err := r.requestPodCancellation(ctx, &pod); err != nil {
+			return fmt.Errorf("request graceful cancellation of scenario Pod %q: %w", pod.Name, err)
+		}
+		job.Phase = "Cancelling"
+		job.Message = "Cancellation requested; waiting for the scenario process and cleanup receipt."
+		return nil
+	}
+
+	job.Phase = "Cancelled"
+	r.setCompletionTime(job)
+	outcome, detail, receiptFound := "", "", false
+	if r.Clientset != nil {
+		logs, logErr := r.fetchScenarioPodLogs(ctx, job.PodName)
+		if logErr == nil {
+			outcome, detail, receiptFound = cancellationCleanupReceipt(logs)
+		}
+	}
+	if !receiptFound {
+		setCancellationCleanupOutcome(job, "unknown", detail)
 	} else {
-		scenarioRun.Status.ClusterJobs = append(scenarioRun.Status.ClusterJobs, krknv1alpha1.ClusterJobStatus{
-			ProviderName:         providerName,
-			ClusterName:          resources.clusterName,
-			ClusterAPIURL:        resources.clusterAPIURL,
-			JobID:                resources.jobID,
-			PodName:              podName,
-			ScenarioImage:        resources.containerImage,
-			Phase:                "Pending",
-			StartTime:            &now,
-			RetryCount:           0,
-			MaxRetries:           effectiveScenarioMaxRetries(scenarioRun),
-			MaxRetriesConfigured: true,
-		})
-		logger.Info("created new cluster job",
-			"cluster", resources.clusterName,
-			"jobID", resources.jobID,
-			"pod", podName,
-			"clusterAPIURL", resources.clusterAPIURL)
+		setCancellationCleanupOutcome(job, outcome, detail)
+	}
+	if scenarioRun.Status.ReportStatus == nil && r.Clientset != nil {
+		if err := r.extractAndStoreReports(ctx, scenarioRun, job); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -1151,8 +1574,39 @@ func (r *KrknScenarioRunReconciler) updateClusterJobStatuses(
 		if scenarioRun.Spec.RollbackEnabled {
 			job.MaxRetries = 0
 			job.MaxRetriesConfigured = true
+		} else if scenarioRun.Labels["krkn.dev/ai-run"] != "" && !job.MaxRetriesConfigured {
+			job.MaxRetries = scenarioRun.Spec.MaxRetries
+			job.MaxRetriesConfigured = true
 		} else {
 			backfillLegacyMaxRetries(job, scenarioRun.Spec.MaxRetries)
+		}
+		if scenarioRun.Spec.CancelRequested {
+			job.CancelRequested = true
+		}
+		if job.CancelRequested {
+			if job.Phase == "Succeeded" || job.Phase == "MaxRetriesExceeded" ||
+				(job.Phase == "Cancelled" && job.FailureReason != "CancellationCleanupUnknown") {
+				continue
+			}
+			if err := r.reconcileCancelledJob(ctx, scenarioRun, job); err != nil {
+				return err
+			}
+			continue
+		}
+
+		// A Creating entry is a durable reservation written before resource
+		// creation. It has no pod yet, so leave it untouched until the creator
+		// completes or the reservation timeout below expires.
+		if job.Phase == "Creating" {
+			if job.StartTime == nil || time.Since(job.StartTime.Time) < 30*time.Second {
+				continue
+			}
+			job.Phase = "Failed"
+			job.Message = "Job creation timed out"
+			job.FailureReason = "JobCreationTimeout"
+			now := metav1.Now()
+			job.CompletionTime = &now
+			continue
 		}
 
 		logger.V(1).Info("checking job status",
@@ -1318,6 +1772,19 @@ func (r *KrknScenarioRunReconciler) updateClusterJobStatuses(
 				"failureReason", job.FailureReason)
 
 			maxRetries := job.MaxRetries
+			if maxRetries == 0 && job.MaxRetriesConfigured {
+				job.Phase = "MaxRetriesExceeded"
+				if scenarioRun.Labels["krkn.dev/ai-run"] != "" {
+					logger.Info("Krkn-AI scenario retries disabled",
+						"cluster", job.ClusterName,
+						"jobID", job.JobID)
+				} else {
+					logger.Info("job retries disabled",
+						"cluster", job.ClusterName,
+						"jobID", job.JobID)
+				}
+				continue
+			}
 
 			if r.shouldRetryJob(job, maxRetries) {
 				// Calculate backoff delay
@@ -1378,6 +1845,14 @@ func (r *KrknScenarioRunReconciler) updateClusterJobStatuses(
 
 				// Create new pod (will get new jobID)
 				if err := r.createClusterJob(ctx, scenarioRun, job.ProviderName, job.ClusterName); err != nil {
+					if errors.Is(err, errScenarioRunCancelled) {
+						scenarioRun.Spec.CancelRequested = true
+						job.CancelRequested = true
+						job.Phase = "Cancelled"
+						setCancellationCleanupOutcome(job, "not-required", "")
+						r.setCompletionTime(job)
+						continue
+					}
 					logger.Error(err, "failed to create retry job",
 						"cluster", job.ClusterName,
 						"retryAttempt", job.RetryCount)
@@ -1527,7 +2002,11 @@ func (r *KrknScenarioRunReconciler) shouldRetryJob(job *krknv1alpha1.ClusterJobS
 		return false
 	}
 
-	// Check retry count against max
+	// Check retry count against max. A zero on an unconfigured legacy value
+	// retains the historic default; configured zero explicitly disables retries.
+	if maxRetries == 0 && !job.MaxRetriesConfigured {
+		maxRetries = 3
+	}
 	return job.RetryCount < maxRetries
 }
 
@@ -1581,9 +2060,9 @@ func (r *KrknScenarioRunReconciler) getClusterAPIURL(
 		return ""
 	}
 	if providerTargets, exists := targetRequest.Status.TargetData[providerName]; exists {
-		for _, cluster := range providerTargets {
-			if cluster.ClusterName == clusterName {
-				return cluster.ClusterAPIURL
+		for _, target := range providerTargets {
+			if target.ClusterName == clusterName {
+				return target.ClusterAPIURL
 			}
 		}
 	}
@@ -1592,82 +2071,126 @@ func (r *KrknScenarioRunReconciler) getClusterAPIURL(
 
 // calculateOverallStatus computes the overall phase and counters
 func (r *KrknScenarioRunReconciler) calculateOverallStatus(scenarioRun *krknv1alpha1.KrknScenarioRun) {
-	var successfulJobs, failedJobs, runningJobs, pendingJobs int
-
+	var successfulJobs, failedJobs, cancelledJobs, runningJobs, pendingJobs int
 	for _, job := range scenarioRun.Status.ClusterJobs {
 		switch job.Phase {
 		case "Succeeded":
 			successfulJobs++
-		case "Failed", "Cancelled", "MaxRetriesExceeded":
+		case "Failed", "MaxRetriesExceeded":
 			failedJobs++
-		case "Running", "Retrying":
+		case "Cancelled":
+			cancelledJobs++
+		case "Running", "Retrying", "Cancelling":
 			runningJobs++
-		case "Pending":
+		case "Pending", "Creating":
 			pendingJobs++
 		}
 	}
-
 	scenarioRun.Status.SuccessfulJobs = successfulJobs
 	scenarioRun.Status.FailedJobs = failedJobs
+	scenarioRun.Status.CancelledJobs = cancelledJobs
 	scenarioRun.Status.RunningJobs = runningJobs
 
-	// Calculate overall phase
 	totalJobs := len(scenarioRun.Status.ClusterJobs)
+	if scenarioRun.Spec.CancelRequested {
+		if runningJobs > 0 || pendingJobs > 0 {
+			scenarioRun.Status.Phase = "Cancelling"
+		} else if cancelledJobs > 0 || totalJobs == 0 {
+			scenarioRun.Status.Phase = "Cancelled"
+		} else if successfulJobs == totalJobs {
+			scenarioRun.Status.Phase = "Succeeded"
+		} else if failedJobs == totalJobs {
+			scenarioRun.Status.Phase = "Failed"
+		} else {
+			scenarioRun.Status.Phase = "PartiallyFailed"
+		}
+		return
+	}
 	if totalJobs == 0 {
 		scenarioRun.Status.Phase = "Pending"
 	} else if runningJobs > 0 || pendingJobs > 0 {
 		scenarioRun.Status.Phase = "Running"
+	} else if cancelledJobs == totalJobs {
+		scenarioRun.Status.Phase = "Cancelled"
 	} else if failedJobs == totalJobs {
 		scenarioRun.Status.Phase = "Failed"
 	} else if successfulJobs == totalJobs {
 		scenarioRun.Status.Phase = "Succeeded"
 	} else {
-		// Some succeeded, some failed
 		scenarioRun.Status.Phase = "PartiallyFailed"
 	}
 }
 
-// getKubeconfigFromProvider retrieves kubeconfig from a provider-specific Secret
+func (r *KrknScenarioRunReconciler) hasCancellationRequests(scenarioRun *krknv1alpha1.KrknScenarioRun) bool {
+	if scenarioRun.Spec.CancelRequested {
+		return true
+	}
+	for _, job := range scenarioRun.Status.ClusterJobs {
+		if job.CancelRequested || job.Phase == "Cancelled" || job.Phase == "Cancelling" {
+			return true
+		}
+	}
+	return false
+}
+
+func (r *KrknScenarioRunReconciler) setCancellationConditions(scenarioRun *krknv1alpha1.KrknScenarioRun) {
+	executionStopped := true
+	for _, job := range scenarioRun.Status.ClusterJobs {
+		switch job.Phase {
+		case "Creating", "Pending", "Running", "Retrying", "Cancelling":
+			executionStopped = false
+		}
+	}
+	executionStatus, executionReason, executionMessage := metav1.ConditionTrue, "ExecutionStopped", "All active scenario jobs have stopped."
+	if !executionStopped {
+		executionStatus, executionReason, executionMessage = metav1.ConditionFalse, "CancellationPending", "Waiting for active scenario jobs to stop."
+	}
+	meta.SetStatusCondition(&scenarioRun.Status.Conditions, metav1.Condition{
+		Type: "ExecutionStopped", Status: executionStatus, Reason: executionReason,
+		Message: executionMessage, ObservedGeneration: scenarioRun.Generation,
+	})
+	cleanupUnknown, cleanupFailed := false, false
+	cleanupMessage := "No cancelled scenario job has unresolved cleanup."
+	for _, job := range scenarioRun.Status.ClusterJobs {
+		if job.Phase == "Cancelling" ||
+			(job.CancelRequested && job.Phase != "Succeeded" && job.Phase != "Failed" && job.Phase != "MaxRetriesExceeded" && job.Phase != "Cancelled") {
+			cleanupUnknown = true
+			cleanupMessage = "Waiting for active scenario cleanup to finish."
+			continue
+		}
+		if job.Phase != "Cancelled" {
+			continue
+		}
+		switch job.FailureReason {
+		case "CancellationCleanupComplete", "CancellationCleanupNotRequired":
+		case "CancellationCleanupFailed":
+			cleanupFailed = true
+			cleanupMessage = job.Message
+		default:
+			cleanupUnknown = true
+			cleanupMessage = job.Message
+		}
+	}
+	cleanupStatus, cleanupReason := metav1.ConditionTrue, "CleanupComplete"
+	if cleanupUnknown {
+		cleanupStatus, cleanupReason = metav1.ConditionUnknown, "CleanupPending"
+	} else if cleanupFailed {
+		cleanupStatus, cleanupReason = metav1.ConditionFalse, "CleanupFailed"
+	}
+	meta.SetStatusCondition(&scenarioRun.Status.Conditions, metav1.Condition{
+		Type: "CleanupComplete", Status: cleanupStatus, Reason: cleanupReason,
+		Message: cleanupMessage, ObservedGeneration: scenarioRun.Generation,
+	})
+}
+
+func (r *KrknScenarioRunReconciler) cancellationCleanupPending(scenarioRun *krknv1alpha1.KrknScenarioRun) bool {
+	condition := meta.FindStatusCondition(scenarioRun.Status.Conditions, "CleanupComplete")
+	return condition == nil || condition.Status == metav1.ConditionUnknown
+}
+
+// getKubeconfigFromProvider retrieves kubeconfig from a provider-specific Secret.
 func (r *KrknScenarioRunReconciler) getKubeconfigFromProvider(ctx context.Context, targetID string, providerName string, clusterName string) (string, error) {
-	// Fetch the secret with the same name as the KrknTargetRequest ID
-	var secret corev1.Secret
-	err := r.Get(ctx, types.NamespacedName{
-		Name:      targetID,
-		Namespace: r.Namespace,
-	}, &secret)
-
-	if err != nil {
-		return "", fmt.Errorf("failed to fetch secret: %w", err)
-	}
-
-	// Retrieve the managed-clusters JSON from the secret data
-	managedClustersBytes, exists := secret.Data["managed-clusters"]
-	if !exists {
-		return "", fmt.Errorf("managed-clusters not found in secret")
-	}
-
-	// Parse the JSON to extract cluster configurations
-	var managedClusters map[string]map[string]struct {
-		Kubeconfig string `json:"kubeconfig"`
-	}
-	if err := json.Unmarshal(managedClustersBytes, &managedClusters); err != nil {
-		return "", fmt.Errorf("failed to parse managed-clusters JSON: %w", err)
-	}
-
-	// Get the provider's clusters
-	providerClusters, exists := managedClusters[providerName]
-	if !exists {
-		return "", fmt.Errorf("provider '%s' not found in managed-clusters", providerName)
-	}
-
-	// Check if the requested cluster exists
-	clusterConfig, exists := providerClusters[clusterName]
-	if !exists {
-		return "", fmt.Errorf("cluster '%s' not found in %s", clusterName, providerName)
-	}
-
-	// Return the base64-encoded kubeconfig
-	return clusterConfig.Kubeconfig, nil
+	return resolveManagedClusterKubeconfig(ctx, r.Client, r.Namespace, targetID, providerName, clusterName)
 }
 
 // hasIncompleteResiliencyScores returns true when resiliency score calculation

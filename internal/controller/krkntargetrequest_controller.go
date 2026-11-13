@@ -176,9 +176,30 @@ func (r *KrknTargetRequestReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		return ctrl.Result{}, err
 	}
 
-	// 11. Clean up old completed KrknTargetRequest resources
-	// This runs on every reconcile but is idempotent and logs only deletions/conflicts
-	_, _ = provider.CleanupOldResources(
+	// Clean up old completed requests unless an active KrknAIRun still needs their kubeconfig.
+	if _, err := r.cleanupOldTargetRequests(ctx); err != nil {
+		logger.Error(err, "Failed to clean old completed KrknTargetRequest resources")
+	}
+	return ctrl.Result{}, nil
+}
+
+func (r *KrknTargetRequestReconciler) cleanupOldTargetRequests(ctx context.Context) (int, error) {
+	var runs krknv1alpha1.KrknAIRunList
+	if err := r.List(ctx, &runs, client.InNamespace(r.OperatorNamespace)); err != nil {
+		return 0, fmt.Errorf("failed to list KrknAIRuns before target cleanup: %w", err)
+	}
+	activeTargetRequests := make(map[string]struct{})
+	for i := range runs.Items {
+		run := &runs.Items[i]
+		switch run.Status.Phase {
+		case aiRunPhaseSucceeded, aiRunPhaseFailed, aiRunPhaseCancelled:
+			continue
+		}
+		if run.Spec.TargetRequestID != "" {
+			activeTargetRequests[run.Spec.TargetRequestID] = struct{}{}
+		}
+	}
+	return provider.CleanupOldResources(
 		ctx,
 		r.Client,
 		&krknv1alpha1.KrknTargetRequestList{},
@@ -186,15 +207,15 @@ func (r *KrknTargetRequestReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		CleanupThresholdSeconds,
 		func(obj client.Object) *metav1.Time {
 			request := obj.(*krknv1alpha1.KrknTargetRequest)
-			// Only delete if Completed to avoid deleting pending requests
-			if request.Status.Status == "Completed" {
-				return &request.ObjectMeta.CreationTimestamp
+			if request.Status.Status != "Completed" {
+				return nil
 			}
-			return nil
+			if _, inUse := activeTargetRequests[request.Name]; inUse {
+				return nil
+			}
+			return &request.ObjectMeta.CreationTimestamp
 		},
 	)
-
-	return ctrl.Result{}, nil
 }
 
 // ensureUUIDLabel ensures the UUID label is set on the KrknTargetRequest

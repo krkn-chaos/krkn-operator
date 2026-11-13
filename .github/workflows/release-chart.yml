@@ -20,6 +20,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
       - name: Install Helm
         uses: azure/setup-helm@v4
 
@@ -52,12 +55,22 @@ jobs:
           echo "console=${CONSOLE_VERSION}" >> $GITHUB_OUTPUT
           echo "Compatible console version: ${CONSOLE_VERSION}"
 
+          AI_SELECTION=$(bash hack/olm/select-ai-release.sh)
+          AI_RELEASE=$(jq -er '.release' <<< "$AI_SELECTION")
+          echo "ai=${AI_RELEASE#v}" >> "$GITHUB_OUTPUT"
+          echo "ai_orchestrator_image=$(jq -er '.orchestratorImage' <<< "$AI_SELECTION")" >> "$GITHUB_OUTPUT"
+          echo "ai_service_image=$(jq -er '.serviceImage' <<< "$AI_SELECTION")" >> "$GITHUB_OUTPUT"
+          echo "Selected compatible Krkn-AI release: ${AI_RELEASE}"
+
       - name: Update Chart metadata and images
         run: |
           VERSION=${GITHUB_REF#refs/tags/v}
           OPERATOR_VERSION=${{ steps.versions.outputs.operator }}
           ACM_VERSION=${{ steps.versions.outputs.acm }}
           CONSOLE_VERSION=${{ steps.versions.outputs.console }}
+          AI_VERSION=${{ steps.versions.outputs.ai }}
+          export AI_ORCHESTRATOR_IMAGE="${{ steps.versions.outputs.ai_orchestrator_image }}"
+          export AI_SERVICE_IMAGE="${{ steps.versions.outputs.ai_service_image }}"
           IMAGE_REGISTRY="${{ env.IMAGE_REGISTRY }}"
 
           OPERATOR_IMAGE="${IMAGE_REGISTRY}/krkn-operator:${OPERATOR_VERSION}"
@@ -90,13 +103,25 @@ jobs:
           yq eval -i ".images.console.image = \"${IMAGE_REGISTRY}/krkn-operator-console:${CONSOLE_VERSION}\"" charts/krkn-operator/values.yaml
           yq eval -i ".images.console.pullPolicy = \"IfNotPresent\"" charts/krkn-operator/values.yaml
 
+          yq eval -i '.images.aiOrchestrator.image = strenv(AI_ORCHESTRATOR_IMAGE)' charts/krkn-operator/values.yaml
+          yq eval -i ".images.aiOrchestrator.pullPolicy = \"IfNotPresent\"" charts/krkn-operator/values.yaml
+          yq eval -i '.images.aiService.image = strenv(AI_SERVICE_IMAGE)' charts/krkn-operator/values.yaml
+          yq eval -i ".images.aiService.pullPolicy = \"IfNotPresent\"" charts/krkn-operator/values.yaml
+
           echo "Chart version: ${VERSION}"
           echo "Operator version: ${OPERATOR_VERSION}"
           echo "ACM version: ${ACM_VERSION}"
           echo "Console version: ${CONSOLE_VERSION}"
+          echo "Krkn-AI version: ${AI_VERSION}"
 
       - name: Sync generated CRDs into the chart
-        run: cp config/crd/bases/*.yaml charts/krkn-operator/crds/
+        run: |
+          while IFS= read -r crd_file; do
+            [[ "$(basename "$crd_file")" == "krkn.krkn-chaos.dev_krknairuns.yaml" ]] && continue
+            cp "$crd_file" charts/krkn-operator/crds/
+          done < <(find config/crd/bases -maxdepth 1 -type f -name '*.yaml' -print)
+          cp config/crd/bases/krkn.krkn-chaos.dev_krknairuns.yaml \
+            charts/krkn-operator/files/krknairun-crd.yaml
 
       - name: Package and Push Helm Chart
         run: |
