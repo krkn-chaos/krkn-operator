@@ -218,6 +218,80 @@ func TestSendJobsSnapshot(t *testing.T) {
 	}
 }
 
+func TestSendJobsSnapshotFiltersBeforeSortingAndPagination(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = krknv1alpha1.AddToScheme(scheme)
+
+	matchTime := time.Date(2026, time.October, 2, 12, 0, 0, 0, time.UTC)
+	newestTime := time.Date(2026, time.October, 3, 12, 0, 0, 0, time.UTC)
+	matchingRun := &krknv1alpha1.KrknScenarioRun{
+		ObjectMeta: metav1.ObjectMeta{Name: "scenario-match", Namespace: "default", CreationTimestamp: metav1.NewTime(matchTime)},
+		Spec:       krknv1alpha1.KrknScenarioRunSpec{OwnerUserID: "alice@example.com", CustomRunName: "Needle custom label"},
+		Status:     krknv1alpha1.KrknScenarioRunStatus{Phase: "Succeeded"},
+	}
+	newestRun := &krknv1alpha1.KrknScenarioRun{
+		ObjectMeta: metav1.ObjectMeta{Name: "newest-nonmatch", Namespace: "default", CreationTimestamp: metav1.NewTime(newestTime)},
+		Spec:       krknv1alpha1.KrknScenarioRunSpec{OwnerUserID: "bob@example.com", CustomRunName: "another run"},
+		Status:     krknv1alpha1.KrknScenarioRunStatus{Phase: "Succeeded"},
+	}
+	wrongOwnerRun := &krknv1alpha1.KrknScenarioRun{
+		ObjectMeta: metav1.ObjectMeta{Name: "wrong-owner", Namespace: "default", CreationTimestamp: metav1.NewTime(matchTime)},
+		Spec:       krknv1alpha1.KrknScenarioRunSpec{OwnerUserID: "bob@example.com", CustomRunName: "Needle custom label"},
+		Status:     krknv1alpha1.KrknScenarioRunStatus{Phase: "Succeeded"},
+	}
+	wrongNameRun := &krknv1alpha1.KrknScenarioRun{
+		ObjectMeta: metav1.ObjectMeta{Name: "wrong-name", Namespace: "default", CreationTimestamp: metav1.NewTime(matchTime)},
+		Spec:       krknv1alpha1.KrknScenarioRunSpec{OwnerUserID: "alice@example.com", CustomRunName: "another label"},
+		Status:     krknv1alpha1.KrknScenarioRunStatus{Phase: "Succeeded"},
+	}
+	wrongDateRun := &krknv1alpha1.KrknScenarioRun{
+		ObjectMeta: metav1.ObjectMeta{Name: "wrong-date", Namespace: "default", CreationTimestamp: metav1.NewTime(matchTime.Add(-24 * time.Hour))},
+		Spec:       krknv1alpha1.KrknScenarioRunSpec{OwnerUserID: "alice@example.com", CustomRunName: "Needle custom label"},
+		Status:     krknv1alpha1.KrknScenarioRunStatus{Phase: "Succeeded"},
+	}
+	fakeClient := fakeclient.NewClientBuilder().WithScheme(scheme).WithObjects(matchingRun, newestRun, wrongOwnerRun, wrongNameRun, wrongDateRun).Build()
+	handler := NewHandler(NewHub(), fakeClient, "default", &mockAuthzChecker{}, nil)
+	client := &Client{
+		userID: "test-user", isAdmin: true, send: make(chan []byte, 16),
+		subscriptions:   make(map[string]map[string]bool),
+		paginationState: make(map[string]*PaginationClientState),
+	}
+
+	var request ClientMessage
+	err := json.Unmarshal([]byte(`{"action":"subscribe","resource":"jobs","page":1,"limit":1,"sortBy":"createdAt","sortOrder":"desc","subscriptionId":"filtered-sub","filters":{"owner":"alice@example.com","createdAtFrom":"2026-10-02T12:00:00Z","createdAtTo":"2026-10-02T12:00:00Z","runName":"needle"}}`), &request)
+	if err != nil {
+		t.Fatalf("decode jobs subscription: %v", err)
+	}
+	handler.handleClientMessage(client, &request)
+
+	select {
+	case data := <-client.send:
+		var message ServerMessage
+		if err := json.Unmarshal(data, &message); err != nil {
+			t.Fatalf("decode jobs snapshot: %v", err)
+		}
+		if message.Pagination == nil {
+			t.Fatal("expected pagination metadata")
+		}
+		if message.Pagination.Total != 1 || message.Pagination.TotalPages != 1 {
+			t.Fatalf("expected one filtered result and page, got %#v", message.Pagination)
+		}
+		var snapshot WSUnifiedJobsSnapshot
+		payload, err := json.Marshal(message.Data)
+		if err != nil {
+			t.Fatalf("encode snapshot payload: %v", err)
+		}
+		if err := json.Unmarshal(payload, &snapshot); err != nil {
+			t.Fatalf("decode snapshot payload: %v", err)
+		}
+		if len(snapshot.Jobs) != 1 || snapshot.Jobs[0].Name != "scenario-match" {
+			t.Fatalf("expected matching run from outside unfiltered top page, got %#v", snapshot.Jobs)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for filtered jobs snapshot")
+	}
+}
+
 func TestBroadcastJobsPageUpdate(t *testing.T) {
 	scheme := runtime.NewScheme()
 	_ = krknv1alpha1.AddToScheme(scheme)
@@ -518,6 +592,29 @@ func TestFilterJobsByCategoriesMatchesAnySelectedCategory(t *testing.T) {
 	}
 }
 
+func TestFilterJobsBySubscriptionFiltersMatchesRunNamesCaseInsensitively(t *testing.T) {
+	jobs := []WSUnifiedJobItem{
+		{
+			Type: "scenarioRun", Name: "scenario-id",
+			ScenarioRun: &ScenarioRunStatusResponse{ScenarioRunName: "scenario-id", CustomRunName: "Custom Chaos Label"},
+		},
+		{Type: "graphRun", Name: "Graph-Experiment-9"},
+	}
+	for _, testCase := range []struct {
+		needle string
+		want   string
+	}{
+		{needle: "SCENARIO-ID", want: "scenario-id"},
+		{needle: "custom chaos", want: "scenario-id"},
+		{needle: "graph-experiment", want: "Graph-Experiment-9"},
+	} {
+		filtered := filterJobsBySubscriptionFilters(append([]WSUnifiedJobItem(nil), jobs...), JobsSubscriptionFilters{RunName: testCase.needle})
+		if len(filtered) != 1 || filtered[0].Name != testCase.want {
+			t.Errorf("run-name filter %q returned %#v, want %q", testCase.needle, filtered, testCase.want)
+		}
+	}
+}
+
 type categoryVisibilityMock struct {
 	mockAuthzChecker
 	visible map[string]struct{}
@@ -527,7 +624,7 @@ func (m *categoryVisibilityMock) VisibleCategoryNames(context.Context) (map[stri
 	return m.visible, nil
 }
 
-func TestBroadcastJobsPageUpdateEchoesSubscriptionAndAppliesCategories(t *testing.T) {
+func TestBroadcastJobsPageUpdateEchoesSubscriptionAndAppliesCategoriesAndFilters(t *testing.T) {
 	scheme := runtime.NewScheme()
 	_ = krknv1alpha1.AddToScheme(scheme)
 	scenarioRuns := []krknv1alpha1.KrknScenarioRun{
@@ -547,6 +644,14 @@ func TestBroadcastJobsPageUpdateEchoesSubscriptionAndAppliesCategories(t *testin
 			},
 			Status: krknv1alpha1.KrknScenarioRunStatus{Phase: "Succeeded"},
 		},
+		{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "resilience-other", Namespace: "default",
+				CreationTimestamp: metav1.NewTime(time.Now().Add(time.Minute)),
+				Labels:            map[string]string{krknv1alpha1.CategoryEntityLabelPrefix + "resilience": "true"},
+			},
+			Status: krknv1alpha1.KrknScenarioRunStatus{Phase: "Succeeded"},
+		},
 	}
 	fakeClient := fakeclient.NewClientBuilder().WithScheme(scheme).WithObjects(&scenarioRuns[0], &scenarioRuns[1]).Build()
 	hub := NewHub()
@@ -555,7 +660,7 @@ func TestBroadcastJobsPageUpdateEchoesSubscriptionAndAppliesCategories(t *testin
 		userID: "test-user", isAdmin: true, send: make(chan []byte, 16),
 		subscriptions: map[string]map[string]bool{"jobs": {"*": true}},
 		paginationState: map[string]*PaginationClientState{
-			"jobs": {Page: 1, Limit: 10, Categories: []string{"resilience"}, SubscriptionID: "jobs-sub-current"},
+			"jobs": {Page: 1, Limit: 1, Categories: []string{"resilience"}, Filters: JobsSubscriptionFilters{RunName: "resilience-run"}, SubscriptionID: "jobs-sub-current"},
 		},
 	}
 	hub.register <- client

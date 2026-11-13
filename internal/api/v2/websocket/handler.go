@@ -101,6 +101,10 @@ func NewHandler(hub *Hub, k8sClient k8sclient.Client, namespace string, authz Au
 // @Description }
 // @Description ```
 // @Description
+// @Description Jobs subscriptions may include `page`, `limit`, `categories`, `sortBy`, `sortOrder`, and optional `filters`.
+// @Description `filters` supports exact `owner`, inclusive RFC3339 `createdAtFrom` / `createdAtTo`, and case-insensitive substring `runName`.
+// @Description Example: `{"action":"subscribe","resource":"jobs","filters":{"owner":"alice@example.com","runName":"chaos"}}`
+// @Description
 // @Description **Resource types:** `run`, `graphrun`, `dashboard`
 // @Description
 // @Description **Server → Client Messages (updates):**
@@ -300,6 +304,12 @@ func (h *Handler) handleClientMessage(client *Client, msg *ClientMessage) {
 			h.sendError(client, "invalid_resource", "Invalid resource type. Valid: run, run-detail, graphrun, dashboard, jobs")
 			return
 		}
+		if msg.Resource == "jobs" {
+			if err := validateJobsSubscriptionFilters(msg.Filters); err != nil {
+				h.sendError(client, "invalid_request", err.Error())
+				return
+			}
+		}
 
 		// Subscribe client
 		client.Subscribe(msg.Resource, msg.IDs)
@@ -314,12 +324,19 @@ func (h *Handler) handleClientMessage(client *Client, msg *ClientMessage) {
 			if msg.Limit != nil && *msg.Limit > 0 {
 				limit = *msg.Limit
 			}
+			var filters JobsSubscriptionFilters
+			if msg.Filters != nil {
+				filters = *msg.Filters
+			}
 			client.mu.Lock()
 			client.paginationState["jobs"] = &PaginationClientState{
 				Page:           page,
 				Limit:          limit,
 				Categories:     append([]string(nil), msg.Categories...),
 				GroupRollbacks: msg.GroupRollbacks,
+				Filters:        filters,
+				SortBy:         msg.SortBy,
+				SortOrder:      msg.SortOrder,
 				SubscriptionID: msg.SubscriptionID,
 			}
 			client.mu.Unlock()
@@ -650,9 +667,9 @@ func (h *Handler) sendJobsSnapshot(ctx context.Context, client *Client, logger l
 		limit = state.Limit
 	}
 	allJobs = filterJobsByCategories(allJobs, state.Categories)
-
-	// Compute stats from the full list before pagination
 	stats := computeWSJobStats(allJobs)
+	allJobs = filterJobsBySubscriptionFilters(allJobs, state.Filters)
+	sortUnifiedJobItems(allJobs, state.SortBy, state.SortOrder)
 
 	// Paginate
 	pageItems, meta := paginateJobItems(allJobs, page, limit)

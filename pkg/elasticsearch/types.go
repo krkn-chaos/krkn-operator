@@ -190,6 +190,13 @@ type QueryTelemetryRequest struct {
 	// category are OR-ed together; different categories are AND-ed. Unknown
 	// category keys are rejected by ValidateQueryRequest.
 	Filters map[string][]string `json:"filters,omitempty"`
+	// SortBy selects scenario_type, start_timestamp, end_timestamp, or status.
+	// These values are derived from the same representative scenario and status
+	// surfaced in each row. It must be provided with SortOrder; omitted values
+	// retain the default timestamp-descending sort.
+	SortBy string `json:"sortBy,omitempty"`
+	// SortOrder is "asc" or "desc" and must be provided together with SortBy.
+	SortOrder string `json:"sortOrder,omitempty"`
 }
 
 // ClusterMetadata holds the run-level cluster and infrastructure details
@@ -307,19 +314,19 @@ type ScenarioDetail struct {
 
 // TelemetryDocument is the set of telemetry fields surfaced to the UI. Each
 // document corresponds to one telemetry run. The scalar table columns (type,
-// start/end, namespace) are taken from the run's first scenario for backward
-// compatibility with the table view, while Metadata and Scenarios carry the
-// full run detail used to render an expanded row.
+// start/end, namespace) are taken from the first scenario, or the first scenario
+// matching an active scenario_type filter. Metadata and Scenarios carry the full
+// run detail used to render an expanded row.
 type TelemetryDocument struct {
 	// RunUUID uniquely identifies the telemetry run this document represents.
 	RunUUID string `json:"run_uuid"`
-	// ScenarioType is the chaos scenario type from the run's first scenario.
+	// ScenarioType is the chaos scenario type from the representative scenario.
 	ScenarioType string `json:"scenario_type"`
 	// StartTimestamp is the scenario start time. Unit: Unix seconds (UTC), with fractional precision.
 	StartTimestamp float64 `json:"start_timestamp"`
 	// EndTimestamp is the scenario end time. Unit: Unix seconds (UTC), with fractional precision.
 	EndTimestamp float64 `json:"end_timestamp"`
-	// Namespace is the target namespace from the run's first scenario.
+	// Namespace is the target namespace from the representative scenario.
 	Namespace string `json:"namespace"`
 	// Status is the run outcome: true = pass, false = fail. It applies the
 	// per-scenario exit_status downgrade, so it may differ from the run-level
@@ -395,6 +402,23 @@ type QueryAlertsRequest struct {
 	StartDate string `json:"startDate,omitempty"`
 	// EndDate is the inclusive calendar-date upper bound in yyyy-MM-dd format.
 	EndDate string `json:"endDate,omitempty"`
+	// Filters are applied before sorting and the size limit. Each filter is
+	// case-insensitive substring matching; filters are AND-ed. An empty value
+	// matches documents where the selected field exists. Unknown keys are rejected.
+	Filters []AlertFieldFilter `json:"filters,omitempty"`
+	// SortBy selects an allowlisted alert source field. It must be provided
+	// together with SortOrder; omitted values retain created_at descending.
+	SortBy string `json:"sortBy,omitempty"`
+	// SortOrder is "asc" or "desc" and must be provided together with SortBy.
+	SortOrder string `json:"sortOrder,omitempty"`
+}
+
+// AlertFieldFilter selects an allowlisted alert source field and search value.
+type AlertFieldFilter struct {
+	// Key is one of run_uuid, severity, phase, or alertname.
+	Key   string `json:"key"`
+	// Value is a case-insensitive substring; an empty value requires field presence.
+	Value string `json:"value"`
 }
 
 // AlertDocument is an alert index document. Source is returned as raw JSON
@@ -412,6 +436,10 @@ type QueryAlertsResponse struct {
 	Documents []AlertDocument `json:"documents"`
 	// Total is the number of documents returned in Documents.
 	Total int `json:"total"`
+	// SortBy echoes the requested sort only after the operator has validated and applied it.
+	SortBy string `json:"sortBy,omitempty"`
+	// SortOrder echoes the requested sort direction only after the operator has applied it.
+	SortOrder string `json:"sortOrder,omitempty"`
 }
 
 // ValidateAlertsQueryRequest validates and normalizes an alerts query.
@@ -422,7 +450,22 @@ func ValidateAlertsQueryRequest(req *QueryAlertsRequest) error {
 	if req.ConfigName == "" {
 		return fmt.Errorf("configName is required")
 	}
-	return validateQueryOptions(&req.Size, req.StartDate, req.EndDate)
+	if err := validateQueryOptions(&req.Size, req.StartDate, req.EndDate); err != nil {
+		return err
+	}
+	if err := validateAlertFilters(req.Filters); err != nil {
+		return err
+	}
+	return validateSortOptions(req.SortBy, req.SortOrder, alertSortFields)
+}
+
+func validateAlertFilters(filters []AlertFieldFilter) error {
+	for _, filter := range filters {
+		if _, ok := alertFilterFields[filter.Key]; !ok {
+			return fmt.Errorf("unsupported alert filter field %q", filter.Key)
+		}
+	}
+	return nil
 }
 
 func validateQueryOptions(size *int, startDate, endDate string) error {
@@ -513,7 +556,7 @@ func ValidateQueryRequest(req *QueryTelemetryRequest) error {
 	if err := validateFilters(req.Filters); err != nil {
 		return err
 	}
-	return nil
+	return validateSortOptions(req.SortBy, req.SortOrder, telemetrySortFields)
 }
 
 // validateFilters rejects filter categories that are not known facet fields and

@@ -1244,9 +1244,13 @@ func newEsAlertsTestSecretWithHost(name, namespace, host, alertsIndex string) *c
 }
 
 func TestQueryElasticsearchAlerts_Success(t *testing.T) {
+	var searchBody map[string]any
 	esServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !strings.HasSuffix(r.URL.Path, "/krkn-alerts/_search") {
 			t.Errorf("query path = %q, want configured alerts index", r.URL.Path)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&searchBody); err != nil {
+			t.Errorf("decode search body: %v", err)
 		}
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"hits":{"hits":[{"_id":"alert-1","_source":{"run_uuid":"run-1","phase":"Running","created_at":"2026-09-25T14:32:18Z","severity":"critical","alertname":"APIDown"}}]}}`))
@@ -1256,7 +1260,17 @@ func TestQueryElasticsearchAlerts_Success(t *testing.T) {
 	secret := newEsAlertsTestSecretWithHost("prod-es", "default", esServer.URL, "krkn-alerts")
 	fakeClient := fakeclient.NewClientBuilder().WithScheme(newEsScheme()).WithObjects(secret).Build()
 	handler := NewTestHandler(fakeClient, fake.NewSimpleClientset(), "default", "localhost:50051")
-	body, _ := json.Marshal(elasticsearch.QueryAlertsRequest{ConfigName: "prod-es"})
+	body, _ := json.Marshal(map[string]any{
+		"configName": "prod-es",
+		"size":       25,
+		"sortBy":     "uuid",
+		"sortOrder":  "asc",
+		"filters": []map[string]string{
+			{"key": "phase", "value": "during"},
+			{"key": "alertname", "value": "api*"},
+			{"key": "severity", "value": ""},
+		},
+	})
 	req := httptest.NewRequest(http.MethodPost, ElasticsearchAlertsQueryPath, bytes.NewReader(body)).WithContext(createUserContext("user@example.com"))
 	w := httptest.NewRecorder()
 
@@ -1272,6 +1286,29 @@ func TestQueryElasticsearchAlerts_Success(t *testing.T) {
 	if response.Total != 1 || response.Documents[0].ID != "alert-1" {
 		t.Fatalf("unexpected response: %+v", response)
 	}
+	sort := searchBody["sort"].([]any)
+	if got := sort[0].(map[string]any)["run_uuid.keyword"].(map[string]any)["order"]; got != "asc" {
+		t.Errorf("alerts sort order = %v, want asc", got)
+	}
+	if got := searchBody["size"]; got != float64(25) {
+		t.Errorf("alerts result size = %v, want 25", got)
+	}
+	queryFilters := searchBody["query"].(map[string]any)["bool"].(map[string]any)["filter"].([]any)
+	if len(queryFilters) != 4 {
+		t.Fatalf("query filter count = %d, want date range and 3 alert filters: %v", len(queryFilters), queryFilters)
+	}
+	phaseFilter := queryFilters[1].(map[string]any)["wildcard"].(map[string]any)["phase.keyword"].(map[string]any)
+	if phaseFilter["value"] != "*during*" || phaseFilter["case_insensitive"] != true {
+		t.Errorf("phase filter = %v, want case-insensitive substring", phaseFilter)
+	}
+	alertnameFilter := queryFilters[2].(map[string]any)["wildcard"].(map[string]any)["alertname.keyword"].(map[string]any)
+	if alertnameFilter["value"] != "*api\\**" || alertnameFilter["case_insensitive"] != true {
+		t.Errorf("alertname filter = %v, want escaped case-insensitive substring", alertnameFilter)
+	}
+	existsFilter := queryFilters[3].(map[string]any)["exists"].(map[string]any)
+	if existsFilter["field"] != "severity" {
+		t.Errorf("empty severity filter = %v, want exists query", existsFilter)
+	}
 }
 
 func TestQueryElasticsearchAlerts_ValidationAndLookup(t *testing.T) {
@@ -1285,6 +1322,10 @@ func TestQueryElasticsearchAlerts_ValidationAndLookup(t *testing.T) {
 	}{
 		{name: "method not allowed", method: http.MethodGet, want: http.StatusMethodNotAllowed},
 		{name: "missing config name", method: http.MethodPost, body: elasticsearch.QueryAlertsRequest{}, want: http.StatusBadRequest},
+		{name: "unknown alert filter", method: http.MethodPost, body: map[string]any{
+			"configName": "missing",
+			"filters":    []map[string]string{{"key": "labels.component", "value": "api"}},
+		}, want: http.StatusBadRequest},
 		{name: "config not found", method: http.MethodPost, body: elasticsearch.QueryAlertsRequest{ConfigName: "missing"}, want: http.StatusNotFound},
 	}
 	for _, tc := range cases {
@@ -1348,7 +1389,11 @@ func TestQueryElasticsearchAlerts_RejectsMissingAlertsIndex(t *testing.T) {
 }
 
 func TestQueryElasticsearchTelemetry_Success(t *testing.T) {
+	var searchBody map[string]any
 	esServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&searchBody); err != nil {
+			t.Errorf("decode search body: %v", err)
+		}
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"hits":{"total":{"value":1},"hits":[{"_source":{"run_uuid":"abc","job_status":true,"scenarios":[{"scenario_type":"pod","start_timestamp":100,"end_timestamp":200,"exit_status":0,"parameters":[{"config":{"namespace":"ns1"}}]}]}}]},"aggregations":{"stats_job_status":{"doc_count":1,"values":{"buckets":[{"key":1,"key_as_string":"true","doc_count":1}]}},"job_status":{"doc_count":1,"values":{"buckets":[{"key":1,"key_as_string":"true","doc_count":1}]}},"scenario_type":{"doc_count":1,"values":{"buckets":[{"key":"pod","doc_count":1}]}}}}`))
 	}))
@@ -1358,7 +1403,7 @@ func TestQueryElasticsearchTelemetry_Success(t *testing.T) {
 	fakeClient := fakeclient.NewClientBuilder().WithScheme(newEsScheme()).WithObjects(secret).Build()
 	handler := NewTestHandler(fakeClient, fake.NewSimpleClientset(), "default", "localhost:50051")
 
-	body, _ := json.Marshal(elasticsearch.QueryTelemetryRequest{ConfigName: "prod-es"})
+	body, _ := json.Marshal(elasticsearch.QueryTelemetryRequest{ConfigName: "prod-es", SortBy: "status", SortOrder: "desc"})
 	req := httptest.NewRequest(http.MethodPost, ElasticsearchQueryPath, bytes.NewReader(body))
 	req = req.WithContext(createUserContext("user@example.com"))
 	w := httptest.NewRecorder()
@@ -1389,6 +1434,11 @@ func TestQueryElasticsearchTelemetry_Success(t *testing.T) {
 	}
 	if jobStatusFacet := resp.Facets["job_status"]; len(jobStatusFacet) != 1 || jobStatusFacet[0].Value != "true" {
 		t.Errorf("got job_status facet %+v, want [{true 1}]", jobStatusFacet)
+	}
+	sort := searchBody["sort"].([]any)
+	statusSort := sort[0].(map[string]any)["job_status"].(map[string]any)
+	if statusSort["order"] != "desc" {
+		t.Errorf("telemetry status sort order = %v, want desc", statusSort["order"])
 	}
 }
 

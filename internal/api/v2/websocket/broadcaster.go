@@ -379,9 +379,9 @@ func (b *Broadcaster) BroadcastJobsPageUpdate(ctx context.Context) {
 			return
 		}
 		allJobs = filterJobsByCategories(allJobs, state.Categories)
-
-		// Compute stats from the full list before pagination
 		stats := computeWSJobStats(allJobs)
+		allJobs = filterJobsBySubscriptionFilters(allJobs, state.Filters)
+		sortUnifiedJobItems(allJobs, state.SortBy, state.SortOrder)
 
 		// Paginate
 		pageItems, meta := paginateJobItems(allJobs, state.Page, state.Limit)
