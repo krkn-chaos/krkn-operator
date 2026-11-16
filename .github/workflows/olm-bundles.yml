@@ -8,6 +8,8 @@ on:
     - 'hack/olm/**'
     - '.github/workflows/olm-bundles.yml'
     - '.github/workflows/release.yml'
+    - '.github/workflows/release-chart.yml'
+    - '.github/workflows/olm-integration.yml'
   workflow_dispatch:
     inputs:
       version:
@@ -78,6 +80,145 @@ jobs:
         component_crd="$output_dir/manifests/krkn.krkn-chaos.dev_krkncomponents.yaml"
         test -f "$component_crd"
         test "$(yq -r '.spec.customresourcedefinitions.owned[] | select(.name == "krkncomponents.krkn.krkn-chaos.dev") | .displayName' "$csv_file")" = "Krkn Component"
+        ai_crd="$output_dir/manifests/krkn.krkn-chaos.dev_krknairuns.yaml"
+        test -f "$ai_crd"
+        test "$(yq -r '.spec.customresourcedefinitions.owned[] | select(.name == "krknairuns.krkn.krkn-chaos.dev") | .displayName' "$csv_file")" = "Krkn AI Run"
+        test "$(yq -r '.metadata.annotations."alm-examples" | from_json | .[] | select(.kind == "KrknAIRun") | .metadata.name' "$ai_crd")" = "example-krkn-ai-run"
+        if yq -e 'select(
+          (.kind == "Deployment" and .metadata.name == "krkn-operator-ai-service") or
+          (.kind == "Service" and .metadata.name == "krkn-operator-ai-service") or
+          (.kind == "PersistentVolumeClaim" and .metadata.name == "krkn-operator-ai-service") or
+          (.kind == "Secret" and .metadata.name == "krkn-operator-ai-service-token") or
+          (.kind == "ServiceAccount" and (.metadata.name == "krkn-operator-ai-service" or .metadata.name == "krkn-operator-krkn-ai-orchestrator")) or
+          (.kind == "Role" and .metadata.name == "krkn-operator-krkn-ai-orchestrator") or
+          (.kind == "RoleBinding" and .metadata.name == "krkn-operator-krkn-ai-orchestrator") or
+          (.kind == "ClusterRoleBinding" and (.metadata.name | test("krkn-operator-ai-orchestrator-anyuid"))) or
+          (.kind == "NetworkPolicy" and .metadata.name == "krkn-operator-ai-service"))' \
+          "$output_dir"/manifests/*.yaml >/dev/null; then
+          echo "Runtime-managed Krkn-AI resources must not be bundled" >&2
+          exit 1
+        fi
+        if yq -e 'select(.kind == "ClusterServiceVersion") |
+          .spec.install.spec.deployments[] |
+          select(.name == "krkn-operator-ai-service")' "$csv_file" >/dev/null; then
+          echo "CSV must not install an AI service Deployment" >&2
+          exit 1
+        fi
+        if yq -e 'select(.kind == "ClusterServiceVersion") |
+          .spec.install.spec.deployments[] | .spec.template.spec.containers[] |
+          select(.name == "manager") | .args[] | select(test("^--enable-krkn-ai="))' \
+          "$csv_file" >/dev/null; then
+          echo "OLM manager must take Krkn-AI enablement from startup environment" >&2
+          exit 1
+        fi
+        olm_open_shift=false
+        if test "${{ matrix.profile }}" = "ocp"; then olm_open_shift=true; fi
+        manager_env_value() {
+          local env_name=$1
+          ENV_NAME="$env_name" yq -r '.spec.install.spec.deployments[] | select(.name == "krkn-operator-operator") |
+            .spec.template.spec.containers[] | select(.name == "manager") | .env[] |
+            select(.name == strenv(ENV_NAME)) | .value' "$csv_file"
+        }
+        test "$(manager_env_value KRKN_OLM_ENABLED)" = true
+        test "$(manager_env_value KRKN_OLM_OPENSHIFT)" = "$olm_open_shift"
+        test "$(manager_env_value KRKNAI_ENABLED)" = false
+        test "$(manager_env_value KRKNAI_ORCHESTRATOR_IMAGE)" = \
+          "$(yq -r '.spec.relatedImages[] | select(.name == "krkn-ai-orchestrator") | .image' "$csv_file")"
+        test "$(manager_env_value KRKNAI_SERVICE_IMAGE)" = \
+          "$(yq -r '.spec.relatedImages[] | select(.name == "krkn-ai-service") | .image' "$csv_file")"
+        for env_name in \
+          KRKNAI_ORCHESTRATOR_IMAGE_PULL_POLICY \
+          KRKNAI_SERVICE_IMAGE_PULL_POLICY \
+          KRKNAI_IMAGE_PULL_SECRETS \
+          KRKNAI_STORAGE_EXISTING_CLAIM \
+          KRKNAI_STORAGE_CLASS_NAME \
+          KRKNAI_STORAGE_SIZE \
+          KRKNAI_SERVICE_RESOURCES \
+          KRKNAI_ORCHESTRATOR_RESOURCES \
+          KRKNAI_RESULT_UPLOADER_RESOURCES \
+          KRKNAI_OUTPUT_SIZE_LIMIT \
+          KRKNAI_TMP_SIZE_LIMIT \
+          KRKNAI_UPLOAD_STATE_SIZE_LIMIT \
+          KRKNAI_NETWORK_POLICY_ENABLED; do
+          ENV_NAME="$env_name" yq -e '.spec.install.spec.deployments[] | select(.name == "krkn-operator-operator") |
+            .spec.template.spec.containers[] | select(.name == "manager") | .env[] |
+            select(.name == strenv(ENV_NAME))' "$csv_file" >/dev/null || {
+              echo "Missing OLM manager environment contract: $env_name" >&2
+              exit 1
+            }
+        done
+        yq -e '.spec.install.spec.deployments[] | select(.name == "krkn-operator-operator") |
+          .spec.template.spec.containers[] | select(.name == "manager") | .env[] |
+          select(.name == "POD_NAMESPACE") | .valueFrom.fieldRef.fieldPath == "metadata.namespace"' \
+          "$csv_file" >/dev/null
+        permission_rules="$output_dir/operator-permission-rules.txt"
+        yq -r '.spec.install.spec.permissions[] | select(.serviceAccountName == "krkn-operator") |
+          .rules[] | [(.apiGroups // [] | join(",")), (.resources // [] | join(",")),
+          (.resourceNames // [] | join(",")), (.verbs // [] | join(","))] | join("|")' \
+          "$csv_file" > "$permission_rules"
+        require_permission() {
+          local permission_file=$1 group=$2 resource=$3
+          shift 3
+          local api resources resource_names verbs required_verb found
+          while IFS='|' read -r api resources resource_names verbs; do
+            if [[ -n "$group" ]]; then
+              [[ ",$api," == *",$group,"* ]] || continue
+            else
+              [[ "$api" == "" ]] || continue
+            fi
+            [[ ",$resources," == *",$resource,"* ]] || continue
+            found=true
+            for required_verb in "$@"; do
+              [[ ",$verbs," == *",$required_verb,"* ]] || { found=false; break; }
+            done
+            [[ "$found" == true ]] && return 0
+          done < "$permission_file"
+          echo "Missing $group/$resource permission with verbs: $*" >&2
+          return 1
+        }
+        require_named_permission() {
+          local permission_file=$1 group=$2 resource=$3 resource_name=$4
+          shift 4
+          local api resources resource_names verbs required_verb found
+          while IFS='|' read -r api resources resource_names verbs; do
+            [[ ",$api," == *",$group,"* && ",$resources," == *",$resource,"* &&
+              ",$resource_names," == *",$resource_name,"* ]] || continue
+            found=true
+            for required_verb in "$@"; do
+              [[ ",$verbs," == *",$required_verb,"* ]] || { found=false; break; }
+            done
+            [[ "$found" == true ]] && return 0
+          done < "$permission_file"
+          echo "Missing name-scoped $group/$resource permission for $resource_name with verbs: $*" >&2
+          return 1
+        }
+        require_permission "$permission_rules" apps deployments create get list watch patch update
+        require_permission "$permission_rules" "" persistentvolumeclaims create get list watch patch update
+        require_permission "$permission_rules" "" services create get list watch patch update
+        require_permission "$permission_rules" "" serviceaccounts create get list watch patch update
+        require_permission "$permission_rules" networking.k8s.io networkpolicies create get list watch patch update
+        require_named_permission "$permission_rules" networking.k8s.io networkpolicies krkn-operator-ai-service delete
+        require_permission "$permission_rules" rbac.authorization.k8s.io roles create get update
+        require_permission "$permission_rules" rbac.authorization.k8s.io rolebindings create get update
+        require_permission "$permission_rules" krkn.krkn-chaos.dev krknairuns create get update delete
+        require_permission "$permission_rules" krkn.krkn-chaos.dev krknairuns/status get patch update
+        require_permission "$permission_rules" krkn.krkn-chaos.dev krknairuns/finalizers update
+        require_named_permission "$permission_rules" rbac.authorization.k8s.io roles krkn-operator-krkn-ai-orchestrator bind escalate
+        if test "${{ matrix.profile }}" = "ocp"; then
+          cluster_permission_rules="$output_dir/operator-cluster-permission-rules.txt"
+          yq -r '.spec.install.spec.clusterPermissions[] | select(.serviceAccountName == "krkn-operator") |
+            .rules[] | [(.apiGroups // [] | join(",")), (.resources // [] | join(",")),
+            (.resourceNames // [] | join(",")), (.verbs // [] | join(","))] | join("|")' \
+            "$csv_file" > "$cluster_permission_rules"
+          require_permission "$cluster_permission_rules" rbac.authorization.k8s.io clusterrolebindings update
+          require_named_permission "$cluster_permission_rules" rbac.authorization.k8s.io clusterroles system:openshift:scc:anyuid bind
+        fi
+        if yq -e '.spec.install.spec.deployments[] | .spec.template.spec.containers[] | .env[] |
+          select(.name == "KRKNAI_SERVICE_TOKEN" or .name == "KRKNAI_SERVICE_URL")' \
+          "$csv_file" >/dev/null; then
+          echo "OLM manager must not depend on a runtime token Secret or URL env" >&2
+          exit 1
+        fi
         test "$(yq -r '.metadata.annotations."alm-examples" | from_json | length' "$component_crd")" -gt 0
         workspace_crd="$output_dir/manifests/krkn.krkn-chaos.dev_krknworkspaces.yaml"
         test -f "$workspace_crd"

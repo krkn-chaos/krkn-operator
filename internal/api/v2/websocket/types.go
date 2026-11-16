@@ -17,6 +17,7 @@ type ScenarioRunStatusResponse struct {
 	TotalTargets           int                              `json:"totalTargets"`
 	SuccessfulJobs         int                              `json:"successfulJobs"`
 	FailedJobs             int                              `json:"failedJobs"`
+	CancelledJobs          int                              `json:"cancelledJobs"`
 	RunningJobs            int                              `json:"runningJobs"`
 	ClusterJobs            interface{}                      `json:"clusterJobs,omitempty"`
 	OwnerUserID            string                           `json:"ownerUserId,omitempty"`

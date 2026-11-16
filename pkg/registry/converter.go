@@ -188,5 +188,12 @@ func ValidateRegistrySecret(secret *corev1.Secret) error {
 		return fmt.Errorf("auth must be in format base64(username:password)")
 	}
 
+	metadata, err := AIRegistryTagMetadata(secret)
+	if err != nil {
+		return err
+	}
+	if err := ValidateAITagMetadata(metadata); err != nil {
+		return err
+	}
 	return nil
 }

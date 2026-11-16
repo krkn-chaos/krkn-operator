@@ -24,6 +24,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	_ "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
 )
@@ -175,4 +176,32 @@ func TestWorkflowsAvailableMethodGuard(t *testing.T) {
 	t.Log("Method guard for /workflows/available is in server.go:183-186")
 	t.Log("Only GET requests are allowed on this endpoint")
 	t.Log("POST/PUT/DELETE/PATCH should return 405 Method Not Allowed")
+}
+
+func TestDiscoveryResponseDeadlineIsRouteSpecific(t *testing.T) {
+	handler := discoveryResponseDeadlineMiddleware(time.Second, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		time.Sleep(60 * time.Millisecond)
+		_, _ = w.Write([]byte("discovery complete"))
+	}))
+	server := httptest.NewUnstartedServer(handler)
+	server.Config.WriteTimeout = 15 * time.Millisecond
+	server.Start()
+	defer server.Close()
+	client := &http.Client{Timeout: 2 * time.Second}
+
+	response, err := client.Post(server.URL+KrknAIPath+"/discoveries", "application/json", nil)
+	if err != nil {
+		t.Fatalf("discovery response could not outlive the ordinary write deadline: %v", err)
+	}
+	body, err := io.ReadAll(response.Body)
+	response.Body.Close()
+	if err != nil || string(body) != "discovery complete" {
+		t.Fatalf("discovery response = %q, error = %v", body, err)
+	}
+
+	response, err = client.Get(server.URL + KrknAIPath + "/runs/run/results")
+	if err == nil {
+		response.Body.Close()
+		t.Fatal("ordinary artifact response unexpectedly outlived its write deadline")
+	}
 }

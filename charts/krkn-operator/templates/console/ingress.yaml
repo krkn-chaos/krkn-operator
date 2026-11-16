@@ -7,10 +7,9 @@ metadata:
   labels:
     {{- include "krkn-operator.labels" . | nindent 4 }}
     app.kubernetes.io/component: console
-  {{- with .Values.console.ingress.annotations }}
+  {{- $ingressAnnotations := mergeOverwrite (dict "nginx.ingress.kubernetes.io/proxy-read-timeout" "360") .Values.console.ingress.annotations }}
   annotations:
-    {{- toYaml . | nindent 4 }}
-  {{- end }}
+    {{- toYaml $ingressAnnotations | nindent 4 }}
 spec:
   {{- if .Values.console.ingress.className }}
   ingressClassName: {{ .Values.console.ingress.className }}

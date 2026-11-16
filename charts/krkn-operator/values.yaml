@@ -17,6 +17,12 @@ images:
   operator:
     image: krkn-chaos.docker.scarf.sh/krkn-chaos/krkn-operator:latest
     pullPolicy: Always
+  aiOrchestrator:
+    image: quay.io/krkn-chaos/krkn-ai-operator:latest
+    pullPolicy: Always
+  aiService:
+    image: quay.io/krkn-chaos/krkn-ai-service:latest
+    pullPolicy: Always
   dataProvider:
     image: krkn-chaos.docker.scarf.sh/krkn-chaos/krkn-operator-data-provider:latest
     pullPolicy: Always
@@ -26,8 +32,64 @@ images:
   console:
     image: krkn-chaos.docker.scarf.sh/krkn-chaos/krkn-operator-console:latest
     pullPolicy: Always
+  pullPolicy: Always
   pullSecrets: []
   # - name: my-registry-secret
+
+
+## Krkn-AI (optional)
+krknAI:
+  # Enables KrknAIRun reconciliation and its artifact service.
+  enabled: false
+  orchestrator:
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+        ephemeral-storage: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+        ephemeral-storage: 1Gi
+  resultUploader:
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+        ephemeral-storage: 64Mi
+      limits:
+        cpu: 250m
+        memory: 512Mi
+        ephemeral-storage: 256Mi
+  volumes:
+    output:
+      sizeLimit: 512Mi
+    tmp:
+      sizeLimit: 128Mi
+    uploadState:
+      sizeLimit: 16Mi
+## Standalone AI artifact service (single pod)
+aiService:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 250m
+      memory: 256Mi
+  # Empty generates and retains a dedicated RWO claim. An existing claim is never
+  # created, modified, or deleted by this chart.
+  storage:
+    existingClaim: ""
+    storageClassName: ""
+    size: 1Gi
+  # Initial-install-only internal service token; empty generates a random token.
+  # Existing Secrets are retained on upgrade. Rotate manually during maintenance.
+  serviceToken: ""
+  networkPolicy:
+    enabled: true
+
+
 
 ## Authentication & Security
 auth:

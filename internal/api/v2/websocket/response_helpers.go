@@ -290,19 +290,21 @@ func computeWSJobStats(jobs []WSUnifiedJobItem) WSJobStatsSummary {
 // buildScenarioRunResponse builds the response with sanitized clusterJobs (no ClusterAPIURL).
 // Used for both lightweight "run" broadcasts and "run" snapshots.
 func buildScenarioRunResponse(run *krknv1alpha1.KrknScenarioRun) ScenarioRunStatusResponse {
+	scenario, _, _ := run.Spec.ResolveScenarioReference()
 	return ScenarioRunStatusResponse{
 		ScenarioRunName:        run.Name,
 		RollbackEnabled:        run.Spec.RollbackEnabled,
 		IsRollback:             run.Spec.RollbackSource != nil,
-		ScenarioName:           run.Spec.Scenario.Name,
+		ScenarioName:           scenario.Name,
 		Phase:                  run.Status.Phase,
 		TotalTargets:           run.Status.TotalTargets,
 		SuccessfulJobs:         run.Status.SuccessfulJobs,
 		FailedJobs:             run.Status.FailedJobs,
+		CancelledJobs:          run.Status.CancelledJobs,
 		RunningJobs:            run.Status.RunningJobs,
 		ClusterJobs:            sanitizedClusterJobs(run.Status.ClusterJobs),
 		OwnerUserID:            run.Spec.OwnerUserID,
-		RegistryName:           run.Spec.Scenario.RegistryName,
+		RegistryName:           scenario.RegistryName,
 		GraphRunName:           run.Labels["krkn.dev/graph-run"],
 		GraphNodeID:            run.Labels["krkn.dev/graph-node"],
 		CustomRunName:          run.Spec.CustomRunName,
@@ -315,19 +317,21 @@ func buildScenarioRunResponse(run *krknv1alpha1.KrknScenarioRun) ScenarioRunStat
 
 // buildScenarioRunDetailResponse builds FULL response with sanitized clusterJobs for detail view.
 func buildScenarioRunDetailResponse(run *krknv1alpha1.KrknScenarioRun) ScenarioRunStatusResponse {
+	scenario, _, _ := run.Spec.ResolveScenarioReference()
 	return ScenarioRunStatusResponse{
 		ScenarioRunName:        run.Name,
 		RollbackEnabled:        run.Spec.RollbackEnabled,
 		IsRollback:             run.Spec.RollbackSource != nil,
-		ScenarioName:           run.Spec.Scenario.Name,
+		ScenarioName:           scenario.Name,
 		Phase:                  run.Status.Phase,
 		TotalTargets:           run.Status.TotalTargets,
 		SuccessfulJobs:         run.Status.SuccessfulJobs,
 		FailedJobs:             run.Status.FailedJobs,
+		CancelledJobs:          run.Status.CancelledJobs,
 		RunningJobs:            run.Status.RunningJobs,
 		ClusterJobs:            sanitizedClusterJobs(run.Status.ClusterJobs),
 		OwnerUserID:            run.Spec.OwnerUserID,
-		RegistryName:           run.Spec.Scenario.RegistryName,
+		RegistryName:           scenario.RegistryName,
 		GraphRunName:           run.Labels["krkn.dev/graph-run"],
 		GraphNodeID:            run.Labels["krkn.dev/graph-node"],
 		CustomRunName:          run.Spec.CustomRunName,

@@ -33,4 +33,7 @@ spec:
     - name: {{ include "krkn-operator.console.fullname" . }}
       port: {{ .Values.console.service.port }}
       weight: 1
+    timeouts:
+      request: 6m
+      backendRequest: 6m
 {{- end }}

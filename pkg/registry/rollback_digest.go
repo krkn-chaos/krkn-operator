@@ -2,7 +2,6 @@ package registry
 
 import (
 	"context"
-	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,7 +11,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/go-containerregistry/pkg/name"
+	"github.com/google/go-containerregistry/pkg/v1/remote"
+	"github.com/google/go-containerregistry/pkg/v1/remote/transport"
 	"github.com/krkn-chaos/krknctl/pkg/provider/models"
+	"github.com/krkn-chaos/krknctl/pkg/verify"
 )
 
 // ErrTagNotFound means the requested image tag is absent from a registry.
@@ -69,47 +72,45 @@ func ResolvePrivateTagDigest(ctx context.Context, tag string, registry *models.R
 	if registry == nil {
 		return "", errors.New("private registry configuration is required")
 	}
-	manifestURI, err := registry.GetV2ScenarioDetailAPIURI(tag)
-	if err != nil {
-		return "", fmt.Errorf("build private image manifest URI: %w", err)
+
+	options := verify.OptionsForRegistry(registry)
+	parseOptions := []name.Option{name.StrictValidation}
+	if options.Insecure {
+		parseOptions = append(parseOptions, name.Insecure)
 	}
-	transport := &http.Transport{TLSClientConfig: &tls.Config{
-		InsecureSkipVerify: registry.SkipTLS, // #nosec G402 -- administrator-controlled registry setting.
-	}}
-	client := &http.Client{Transport: transport, Timeout: 30 * time.Second}
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, manifestURI, nil)
+	ref, err := name.NewTag(registry.GetPrivateRegistryURI()+":"+tag, parseOptions...)
 	if err != nil {
-		return "", fmt.Errorf("create private image manifest request: %w", err)
+		return "", errors.New("private image reference is invalid")
 	}
-	request.Header.Set("Accept", strings.Join([]string{
-		"application/vnd.docker.distribution.manifest.v2+json",
-		"application/vnd.docker.distribution.manifest.list.v2+json",
-		"application/vnd.oci.image.manifest.v1+json",
-		"application/vnd.oci.image.index.v1+json",
-	}, ", "))
-	if registry.Token != nil && *registry.Token != "" {
-		request.Header.Set("Authorization", "Bearer "+*registry.Token)
-	} else if registry.Username != nil {
-		password := ""
-		if registry.Password != nil {
-			password = *registry.Password
+
+	remoteOptions := make([]remote.Option, 0, len(options.RemoteOptions)+2)
+	if options.Keychain != nil {
+		remoteOptions = append(remoteOptions, remote.WithAuthFromKeychain(options.Keychain))
+	}
+	remoteOptions = append(remoteOptions, options.RemoteOptions...)
+
+	resolveContext, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	remoteOptions = append(remoteOptions, remote.WithContext(resolveContext))
+
+	descriptor, err := remote.Get(ref, remoteOptions...)
+	if err != nil {
+		if resolveContext.Err() != nil {
+			return "", fmt.Errorf("resolve private image manifest: %w", resolveContext.Err())
 		}
-		request.SetBasicAuth(*registry.Username, password)
+		var registryError *transport.Error
+		if errors.As(err, &registryError) {
+			switch registryError.StatusCode {
+			case http.StatusNotFound:
+				manifestPath := "/v2/" + ref.Context().RepositoryStr() + "/manifests/" + ref.Identifier()
+				if registryError.Request != nil && registryError.Request.URL.Path == manifestPath {
+					return "", fmt.Errorf("private image tag: %w", ErrTagNotFound)
+				}
+			case http.StatusUnauthorized, http.StatusForbidden:
+				return "", errors.New("private registry denied image access")
+			}
+		}
+		return "", errors.New("resolve private image manifest")
 	}
-	response, err := client.Do(request)
-	if err != nil {
-		return "", fmt.Errorf("load private image manifest: %w", err)
-	}
-	defer response.Body.Close()
-	if response.StatusCode == http.StatusNotFound {
-		return "", fmt.Errorf("private image tag %q: %w", tag, ErrTagNotFound)
-	}
-	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
-		return "", fmt.Errorf("private image manifest request returned HTTP %d", response.StatusCode)
-	}
-	digest := response.Header.Get("Docker-Content-Digest")
-	if digest == "" {
-		return "", errors.New("private image manifest response has no Docker-Content-Digest")
-	}
-	return digest, nil
+	return descriptor.Digest.String(), nil
 }
