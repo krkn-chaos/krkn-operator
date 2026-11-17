@@ -68,6 +68,30 @@ func (c *Client) do(httpClient *http.Client, ctx context.Context, method, path s
 	return httpClient.Do(req)
 }
 
+// Version returns the installed krkn_ai package version reported by the service.
+// It returns an empty string and an error on request failures, non-200 responses
+// (including 404 from older services), invalid JSON, or a missing/blank version.
+func (c *Client) Version(ctx context.Context) (string, error) {
+	response, err := c.Do(ctx, http.MethodGet, "/v1/version", nil)
+	if err != nil {
+		return "", fmt.Errorf("request Krkn-AI version: %w", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("Krkn-AI version service returned HTTP %d", response.StatusCode)
+	}
+	var result struct {
+		Version string `json:"version"`
+	}
+	if err := json.NewDecoder(io.LimitReader(response.Body, 1<<20)).Decode(&result); err != nil {
+		return "", fmt.Errorf("decode Krkn-AI version: %w", err)
+	}
+	if strings.TrimSpace(result.Version) == "" {
+		return "", errors.New("Krkn-AI service returned an empty version")
+	}
+	return result.Version, nil
+}
+
 // ImageRequirements describes the canonical Krkn-AI image catalog.
 type ImageRequirements struct {
 	ScenarioTags      []string          `json:"scenarioTags"`
