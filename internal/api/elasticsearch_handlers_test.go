@@ -1435,8 +1435,18 @@ func TestQueryElasticsearchTelemetry_Success(t *testing.T) {
 	if jobStatusFacet := resp.Facets["job_status"]; len(jobStatusFacet) != 1 || jobStatusFacet[0].Value != "true" {
 		t.Errorf("got job_status facet %+v, want [{true 1}]", jobStatusFacet)
 	}
-	sort := searchBody["sort"].([]any)
-	statusSort := sort[0].(map[string]any)["job_status"].(map[string]any)
+	sortClauses, ok := searchBody["sort"].([]any)
+	if !ok || len(sortClauses) == 0 {
+		t.Fatalf("telemetry query sort = %v, want at least one sort clause", searchBody["sort"])
+	}
+	statusSortClause, ok := sortClauses[0].(map[string]any)
+	if !ok {
+		t.Fatalf("first telemetry sort clause = %T, want object", sortClauses[0])
+	}
+	statusSort, ok := statusSortClause["krkn_console_sort_value"].(map[string]any)
+	if !ok {
+		t.Fatalf("telemetry status sort = %v, want krkn_console_sort_value clause", statusSortClause)
+	}
 	if statusSort["order"] != "desc" {
 		t.Errorf("telemetry status sort order = %v, want desc", statusSort["order"])
 	}
