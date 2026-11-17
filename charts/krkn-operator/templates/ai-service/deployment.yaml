@@ -1,4 +1,5 @@
 {{- if and .Values.krknAI.enabled (not .Values.operator.olmBootstrap) }}
+{{- include "krkn-operator.validateAIServiceSupplementalGroups" .Values.aiService.podSecurityContext.supplementalGroups }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -28,6 +29,10 @@ spec:
       serviceAccountName: {{ include "krkn-operator.fullname" . }}-ai-service
       securityContext:
         runAsNonRoot: true
+        {{- with .Values.aiService.podSecurityContext.supplementalGroups }}
+        supplementalGroups:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
         seccompProfile:
           type: RuntimeDefault
       containers:

@@ -102,9 +102,15 @@ Choose storage settings in the same `env` list **before first enabling**:
 | `KRKNAI_STORAGE_CLASS_NAME` | StorageClass; empty uses the cluster default. |
 | `KRKNAI_STORAGE_SIZE` | Managed claim size; default `1Gi` total for retained runs and staging. |
 | `KRKNAI_STORAGE_EXISTING_CLAIM` | Existing claim in `$NS`; never created, modified, or deleted by the operator. |
+| `KRKNAI_SERVICE_SUPPLEMENTAL_GROUPS` | JSON list of non-root storage GIDs; default `[1001]`. Set `[]` to opt out or override for your claim. |
 
 Claims must be writable by the service's SCC-admitted UID/groups. Changing a claim
 or StorageClass does not migrate artifacts; back up and migrate explicitly.
+Helm uses `aiService.podSecurityContext.supplementalGroups`, default `[1001]`;
+set `[]` to opt out or override for your claim. The SCC must permit the groups,
+and storage permissions/ACLs must grant them access. UID and fsGroup stay
+SCC-assigned; no volume ownership changes are made.
+
 For private AI images, set `KRKNAI_IMAGE_PULL_SECRETS` to a JSON list such as
 `[{"name":"registry-pull-secret"}]`.
 
