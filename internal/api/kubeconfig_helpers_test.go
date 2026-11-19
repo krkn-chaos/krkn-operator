@@ -20,6 +20,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -70,10 +73,10 @@ func TestLegacyTargetKubeconfigUsesRequestedProvider(t *testing.T) {
 	handler := newKubeconfigHelperHandler(t, targetID,
 		map[string]map[string]map[string]string{
 			"krkn-operator": {
-				clusterName: {"kubeconfig": "operator-kubeconfig"},
+				clusterName: {"cluster-api": "https://operator.cluster", "kubeconfig": "operator-kubeconfig"},
 			},
 			"krkn-operator-acm": {
-				clusterName: {"kubeconfig": "acm-kubeconfig"},
+				clusterName: {"cluster-api": "https://acm.cluster", "kubeconfig": "acm-kubeconfig"},
 			},
 		},
 		map[string][]krknv1alpha1.ClusterTarget{
@@ -109,7 +112,7 @@ func TestLegacyTargetKubeconfigSupportsUniqueLegacyProvider(t *testing.T) {
 	handler := newKubeconfigHelperHandler(t, targetID,
 		map[string]map[string]map[string]string{
 			"krkn-operator-acm": {
-				clusterName: {"kubeconfig": "legacy-kubeconfig"},
+				clusterName: {"cluster-api": "https://prod.cluster", "kubeconfig": "legacy-kubeconfig"},
 			},
 		},
 		map[string][]krknv1alpha1.ClusterTarget{
@@ -125,6 +128,76 @@ func TestLegacyTargetKubeconfigSupportsUniqueLegacyProvider(t *testing.T) {
 	}
 	if got != "legacy-kubeconfig" {
 		t.Fatalf("kubeconfig = %q, want %q", got, "legacy-kubeconfig")
+	}
+}
+
+func TestLegacyTargetKubeconfigHandlesIdenticalDuplicateEntries(t *testing.T) {
+	const targetID = "target-request"
+	const clusterName = "shared-cluster"
+	const clusterAPIURL = "https://shared.cluster"
+	entry := func(kubeconfig string) map[string]string {
+		return map[string]string{
+			"cluster-name": clusterName,
+			"cluster-api":  clusterAPIURL,
+			"kubeconfig":   kubeconfig,
+		}
+	}
+
+	tests := []struct {
+		name           string
+		acmKubeconfig  string
+		wantKubeconfig string
+		wantConflict   bool
+	}{
+		{
+			name:           "identical kubeconfigs",
+			acmKubeconfig:  "shared-kubeconfig",
+			wantKubeconfig: "shared-kubeconfig",
+		},
+		{
+			name:          "conflicting kubeconfigs",
+			acmKubeconfig: "different-kubeconfig",
+			wantConflict:  true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			handler := newKubeconfigHelperHandler(t, targetID,
+				map[string]map[string]map[string]string{
+					"krkn-operator": {
+						clusterName: entry("shared-kubeconfig"),
+					},
+					"krkn-operator-acm": {
+						clusterName: entry(tt.acmKubeconfig),
+					},
+				},
+				map[string][]krknv1alpha1.ClusterTarget{
+					"krkn-operator": {
+						{ClusterName: clusterName, ClusterAPIURL: clusterAPIURL},
+					},
+					"krkn-operator-acm": {
+						{ClusterName: clusterName, ClusterAPIURL: clusterAPIURL},
+					},
+				},
+			)
+
+			apiURL, err := handler.getClusterAPIURL(context.Background(), "", targetID, "", clusterName)
+			if err != nil || apiURL != clusterAPIURL {
+				t.Fatalf("authorized API URL = %q, error = %v; want %q", apiURL, err, clusterAPIURL)
+			}
+
+			got, err := handler.getKubeconfig(context.Background(), "", targetID, "", clusterName)
+			if tt.wantConflict {
+				if err == nil || !strings.Contains(err.Error(), "conflicting kubeconfigs") {
+					t.Fatalf("kubeconfig = %q, error = %v; want conflicting kubeconfigs error", got, err)
+				}
+				return
+			}
+			if err != nil || got != tt.wantKubeconfig {
+				t.Fatalf("kubeconfig = %q, error = %v; want %q", got, err, tt.wantKubeconfig)
+			}
+		})
 	}
 }
 
@@ -153,5 +226,147 @@ func TestLegacyTargetKubeconfigRejectsAmbiguousProvider(t *testing.T) {
 	_, err := handler.getKubeconfig(context.Background(), "", targetID, "", clusterName)
 	if !errors.Is(err, errAmbiguousClusterProvider) {
 		t.Fatalf("error = %v, want ambiguous provider error", err)
+	}
+}
+
+func TestLegacyKubeconfigRejectsStaleManagedClusterEntries(t *testing.T) {
+	const targetID = "target-request"
+	const clusterName = "shared-cluster"
+	const authorizedProvider = "krkn-operator"
+	const authorizedURL = "https://authorized.cluster"
+
+	tests := []struct {
+		name          string
+		operatorName  string
+		targetURL     string
+		managedValues map[string]map[string]map[string]string
+	}{
+		{
+			name:      "same name under stale provider",
+			targetURL: authorizedURL,
+			managedValues: map[string]map[string]map[string]string{
+				"krkn-operator-acm": {
+					clusterName: {"cluster-api": "https://stale.cluster", "kubeconfig": "stale-kubeconfig"},
+				},
+			},
+		},
+		{
+			name:         "same provider with stale API URL",
+			operatorName: authorizedProvider,
+			targetURL:    authorizedURL,
+			managedValues: map[string]map[string]map[string]string{
+				authorizedProvider: {
+					clusterName: {"cluster-api": "https://stale.cluster", "kubeconfig": "stale-kubeconfig"},
+				},
+			},
+		},
+		{
+			name:         "missing API URL",
+			operatorName: authorizedProvider,
+			managedValues: map[string]map[string]map[string]string{
+				authorizedProvider: {
+					clusterName: {"kubeconfig": "stale-kubeconfig"},
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			handler := newKubeconfigHelperHandler(t, targetID, tt.managedValues,
+				map[string][]krknv1alpha1.ClusterTarget{
+					authorizedProvider: {
+						{ClusterName: clusterName, ClusterAPIURL: tt.targetURL},
+					},
+				},
+			)
+
+			gotURL, err := handler.getClusterAPIURL(context.Background(), "", targetID, tt.operatorName, clusterName)
+			if err != nil {
+				t.Fatalf("resolve authorized cluster URL: %v", err)
+			}
+			if gotURL != tt.targetURL {
+				t.Fatalf("authorized URL = %q, want %q", gotURL, tt.targetURL)
+			}
+
+			got, err := handler.getKubeconfig(context.Background(), "", targetID, tt.operatorName, clusterName)
+			if err == nil || got != "" {
+				t.Fatalf("kubeconfig = %q, error = %v; want stale entry rejected", got, err)
+			}
+		})
+	}
+}
+
+func TestLegacyTargetClusterAPIURLRejectsAmbiguousProvider(t *testing.T) {
+	const targetID = "target-request"
+	const clusterName = "shared-cluster"
+	handler := newKubeconfigHelperHandler(t, targetID, nil,
+		map[string][]krknv1alpha1.ClusterTarget{
+			"krkn-operator": {
+				{ClusterName: clusterName, ClusterAPIURL: "https://operator.cluster"},
+			},
+			"krkn-operator-acm": {
+				{ClusterName: clusterName, ClusterAPIURL: "https://acm.cluster"},
+			},
+		},
+	)
+
+	_, err := handler.getClusterAPIURL(context.Background(), "", targetID, "", clusterName)
+	if !errors.Is(err, errAmbiguousClusterProvider) {
+		t.Fatalf("error = %v, want ambiguous provider error", err)
+	}
+}
+
+func TestLegacyTargetClusterAPIURLPreservesEmptyURL(t *testing.T) {
+	const targetID = "target-request"
+	const clusterName = "legacy-cluster"
+	handler := newKubeconfigHelperHandler(t, targetID, nil,
+		map[string][]krknv1alpha1.ClusterTarget{
+			"krkn-operator-acm": {{ClusterName: clusterName}},
+		},
+	)
+
+	apiURL, err := handler.getClusterAPIURL(context.Background(), "", targetID, "", clusterName)
+	if err != nil || apiURL != "" {
+		t.Fatalf("API URL = %q, error = %v; want empty URL without error", apiURL, err)
+	}
+}
+
+func TestLegacyEndpointsForwardOperatorName(t *testing.T) {
+	const targetID = "target-request"
+	const clusterName = "shared-cluster"
+	handler := newKubeconfigHelperHandler(t, targetID,
+		map[string]map[string]map[string]string{
+			"krkn-operator": {
+				clusterName: {"kubeconfig": "operator-kubeconfig"},
+			},
+		},
+		nil,
+	)
+
+	tests := []struct {
+		name    string
+		request *http.Request
+		serve   func(http.ResponseWriter, *http.Request)
+	}{
+		{
+			name:    "nodes",
+			request: httptest.NewRequest(http.MethodGet, "/nodes?id=target-request&cluster-name=shared-cluster&operator-name=missing", nil),
+			serve:   handler.GetNodes,
+		},
+		{
+			name:    "terminal",
+			request: httptest.NewRequest(http.MethodPost, "/terminal", strings.NewReader(`{"uuid":"target-request","cluster_id":"shared-cluster","operator_name":"missing","command":"kubectl get pods"}`)),
+			serve:   handler.ExecuteTerminal,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			response := httptest.NewRecorder()
+			tt.serve(response, tt.request)
+			if response.Code != http.StatusNotFound || !strings.Contains(response.Body.String(), "provider 'missing'") {
+				t.Fatalf("status = %d, body = %s; want provider-specific 404", response.Code, response.Body.String())
+			}
+		})
 	}
 }
