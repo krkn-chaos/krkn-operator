@@ -103,8 +103,8 @@ func TestScenarioPodMountsOnlyAssignedWorkspaceDirectory(t *testing.T) {
 	r := &KrknScenarioRunReconciler{
 		Client: fakeclient.NewClientBuilder().WithScheme(scheme).WithObjects(pvc, secret, run, entry).Build(),
 		Scheme: scheme, Namespace: "default",
-		imageResolver: func(context.Context, *krknctlconfig.Config, krknv1alpha1.ScenarioReference, *krknctlmodels.RegistryV2) (string, error) {
-			return "quay.io/example/scenario@sha256:abc", nil
+		imageResolver: func(context.Context, *krknctlconfig.Config, krknv1alpha1.ScenarioReference, *krknctlmodels.RegistryV2) (resolvedImage, error) {
+			return resolvedImage{image: "quay.io/example/scenario@sha256:abc"}, nil
 		},
 		signatureVerifier: func(context.Context, *krknctlconfig.Config, krknv1alpha1.ScenarioReference, *krknctlmodels.RegistryV2, string) (verify.SignatureStatus, error) {
 			return verify.SignatureSigned, nil

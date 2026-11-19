@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/google/go-containerregistry/pkg/name"
+	v1 "github.com/google/go-containerregistry/pkg/v1"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
 	"github.com/google/go-containerregistry/pkg/v1/remote/transport"
 	"github.com/krkn-chaos/krknctl/pkg/provider/models"
@@ -69,8 +70,36 @@ func ResolvePublicTagDigest(ctx context.Context, repositoryAPIURI, tag string) (
 // ResolvePrivateTagDigest reads a Docker Registry v2 manifest digest without
 // requiring the image to be labeled as a selectable scenario.
 func ResolvePrivateTagDigest(ctx context.Context, tag string, registry *models.RegistryV2) (string, error) {
+	descriptor, cancel, err := getPrivateTagDescriptor(ctx, tag, registry)
+	if err != nil {
+		return "", err
+	}
+	defer cancel()
+	return descriptor.Digest.String(), nil
+}
+
+// ResolvePrivateTagImage reads a private image's manifest digest and the
+// labels of its image config, such as krknctl's scenario labels, over the same
+// authenticated connection as ResolvePrivateTagDigest.
+func ResolvePrivateTagImage(ctx context.Context, tag string, registry *models.RegistryV2) (string, map[string]string, error) {
+	descriptor, cancel, err := getPrivateTagDescriptor(ctx, tag, registry)
+	if err != nil {
+		return "", nil, err
+	}
+	defer cancel()
+	labels, err := imageConfigLabels(descriptor)
+	if err != nil {
+		return "", nil, err
+	}
+	return descriptor.Digest.String(), labels, nil
+}
+
+// getPrivateTagDescriptor fetches the manifest descriptor of a private tag. The
+// returned cancel function bounds every later request made through the
+// descriptor, so callers must call it when done.
+func getPrivateTagDescriptor(ctx context.Context, tag string, registry *models.RegistryV2) (*remote.Descriptor, context.CancelFunc, error) {
 	if registry == nil {
-		return "", errors.New("private registry configuration is required")
+		return nil, nil, errors.New("private registry configuration is required")
 	}
 
 	options := verify.OptionsForRegistry(registry)
@@ -80,7 +109,7 @@ func ResolvePrivateTagDigest(ctx context.Context, tag string, registry *models.R
 	}
 	ref, err := name.NewTag(registry.GetPrivateRegistryURI()+":"+tag, parseOptions...)
 	if err != nil {
-		return "", errors.New("private image reference is invalid")
+		return nil, nil, errors.New("private image reference is invalid")
 	}
 
 	remoteOptions := make([]remote.Option, 0, len(options.RemoteOptions)+2)
@@ -90,13 +119,13 @@ func ResolvePrivateTagDigest(ctx context.Context, tag string, registry *models.R
 	remoteOptions = append(remoteOptions, options.RemoteOptions...)
 
 	resolveContext, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
 	remoteOptions = append(remoteOptions, remote.WithContext(resolveContext))
 
 	descriptor, err := remote.Get(ref, remoteOptions...)
 	if err != nil {
+		defer cancel()
 		if resolveContext.Err() != nil {
-			return "", fmt.Errorf("resolve private image manifest: %w", resolveContext.Err())
+			return nil, nil, fmt.Errorf("resolve private image manifest: %w", resolveContext.Err())
 		}
 		var registryError *transport.Error
 		if errors.As(err, &registryError) {
@@ -104,13 +133,54 @@ func ResolvePrivateTagDigest(ctx context.Context, tag string, registry *models.R
 			case http.StatusNotFound:
 				manifestPath := "/v2/" + ref.Context().RepositoryStr() + "/manifests/" + ref.Identifier()
 				if registryError.Request != nil && registryError.Request.URL.Path == manifestPath {
-					return "", fmt.Errorf("private image tag: %w", ErrTagNotFound)
+					return nil, nil, fmt.Errorf("private image tag: %w", ErrTagNotFound)
 				}
 			case http.StatusUnauthorized, http.StatusForbidden:
-				return "", errors.New("private registry denied image access")
+				return nil, nil, errors.New("private registry denied image access")
 			}
 		}
-		return "", errors.New("resolve private image manifest")
+		return nil, nil, errors.New("resolve private image manifest")
 	}
-	return descriptor.Digest.String(), nil
+	return descriptor, cancel, nil
+}
+
+// imageConfigLabels returns the labels of the image a descriptor points to.
+// For an index it reads the first platform image: the images of one tag are
+// built from the same Dockerfile, so they carry the same labels.
+func imageConfigLabels(descriptor *remote.Descriptor) (map[string]string, error) {
+	var image v1.Image
+	if descriptor.MediaType.IsIndex() {
+		index, err := descriptor.ImageIndex()
+		if err != nil {
+			return nil, errors.New("read private image index")
+		}
+		manifest, err := index.IndexManifest()
+		if err != nil {
+			return nil, errors.New("read private image index")
+		}
+		for _, child := range manifest.Manifests {
+			// Build attestations sit in the index as images for platform
+			// unknown/unknown; they have no scenario labels.
+			if !child.MediaType.IsImage() || (child.Platform != nil && child.Platform.OS == "unknown") {
+				continue
+			}
+			if image, err = index.Image(child.Digest); err != nil {
+				return nil, errors.New("read private image manifest")
+			}
+			break
+		}
+		if image == nil {
+			return nil, errors.New("private image index has no platform image")
+		}
+	} else {
+		var err error
+		if image, err = descriptor.Image(); err != nil {
+			return nil, errors.New("read private image manifest")
+		}
+	}
+	config, err := image.ConfigFile()
+	if err != nil {
+		return nil, errors.New("read private image config")
+	}
+	return config.Config.Labels, nil
 }

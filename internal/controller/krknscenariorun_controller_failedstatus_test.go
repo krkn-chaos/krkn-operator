@@ -291,8 +291,8 @@ func TestReconcile_ImageResolutionFailureHasSafeDiagnostic(t *testing.T) {
 		WithObjects(run, target, secret).Build()
 	reconciler := &KrknScenarioRunReconciler{
 		Client: k8sClient, Scheme: scheme, Namespace: namespace,
-		imageResolver: func(context.Context, *krknctlconfig.Config, krknv1alpha1.ScenarioReference, *krknctlmodels.RegistryV2) (string, error) {
-			return "", errors.New("registry denied access: token=must-not-be-persisted")
+		imageResolver: func(context.Context, *krknctlconfig.Config, krknv1alpha1.ScenarioReference, *krknctlmodels.RegistryV2) (resolvedImage, error) {
+			return resolvedImage{}, errors.New("registry denied access: token=must-not-be-persisted")
 		},
 	}
 	key := types.NamespacedName{Name: run.Name, Namespace: namespace}
