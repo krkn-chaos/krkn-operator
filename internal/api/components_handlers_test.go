@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
 	"github.com/krkn-chaos/krkn-operator/pkg/auth"
+	"github.com/krkn-chaos/krkn-operator/pkg/krknaiserver"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -50,6 +52,89 @@ func TestListComponents(t *testing.T) {
 	handler.ListComponents(w, httptest.NewRequest(http.MethodPost, ComponentsPath, nil))
 	if w.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("POST status = %d, want 405", w.Code)
+	}
+}
+
+func TestListComponentsKrknAIVersion(t *testing.T) {
+	for _, tt := range []struct {
+		name    string
+		enabled bool
+		status  int
+		version string
+	}{
+		{"enabled", true, http.StatusOK, "1.2.3"},
+		{"disabled", false, http.StatusOK, ""},
+		{"unavailable", true, http.StatusServiceUnavailable, ""},
+		{"older service", true, http.StatusNotFound, ""},
+		{"unresponsive", true, 0, ""},
+		{"no client", true, 0, ""},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			var calls atomic.Int32
+			service := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls.Add(1)
+				if tt.status == 0 {
+					<-r.Context().Done()
+					return
+				}
+				w.WriteHeader(tt.status)
+				_ = json.NewEncoder(w).Encode(map[string]string{"version": "1.2.3"})
+			}))
+			defer service.Close()
+			scheme := runtime.NewScheme()
+			if err := krknv1alpha1.AddToScheme(scheme); err != nil {
+				t.Fatal(err)
+			}
+			k8sClient := fakeclient.NewClientBuilder().WithScheme(scheme).
+				WithObjects(&krknv1alpha1.KrknComponent{
+					ObjectMeta: metav1.ObjectMeta{Namespace: "operator-system", Name: "krkn-operator"},
+					Status: krknv1alpha1.KrknComponentStatus{Components: map[string]krknv1alpha1.ComponentManifest{
+						"krkn-operator": {Version: "v1.0.0", Components: []krknv1alpha1.ComponentDescription{{Component: "api", Description: "API"}}},
+					}},
+				}).Build()
+			handler := &Handler{
+				client: k8sClient, namespace: "operator-system", krknAIEnabled: tt.enabled,
+			}
+			if tt.name != "no client" {
+				handler.artifactClient = krknaiserver.New(service.URL, "token")
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			w := httptest.NewRecorder()
+			handler.ListComponents(w, httptest.NewRequest(http.MethodGet, ComponentsPath, nil).WithContext(ctx))
+			if w.Code != http.StatusOK || ctx.Err() != nil {
+				t.Fatalf("components response = %d, context error = %v", w.Code, ctx.Err())
+			}
+			var response ListComponentsResponse
+			if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+				t.Fatal(err)
+			}
+			operator := response.Components["krkn-operator"]
+			if operator.Version != "v1.0.0" {
+				t.Fatal("AI availability affected the operator version")
+			}
+			wantOperatorComponents := 1
+			if tt.enabled {
+				wantOperatorComponents++
+			}
+			if len(operator.Components) != wantOperatorComponents || operator.Components[0].Component != "api" ||
+				(tt.enabled && operator.Components[1].Component != "krkn-ai-operator") {
+				t.Fatalf("operator components = %+v", operator.Components)
+			}
+			ai, present := response.Components["krkn-ai-service"]
+			if present != (tt.version != "") || ai.Version != tt.version {
+				t.Fatalf("AI manifest = %+v, present = %t", ai, present)
+			}
+			if present && (len(ai.Components) != 1 || ai.Components[0].Component != "rest-api") {
+				t.Fatalf("AI components = %+v", ai.Components)
+			}
+			if _, present := response.Components["krkn-ai"]; present {
+				t.Fatal("unexpected standalone krkn-ai entry")
+			}
+			if !tt.enabled && calls.Load() != 0 {
+				t.Fatal("disabled AI was contacted")
+			}
+		})
 	}
 }
 

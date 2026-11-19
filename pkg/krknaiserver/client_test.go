@@ -97,3 +97,34 @@ func TestValidateConfigImagesSendsInventoryAndReturnsTypedValidationError(t *tes
 		t.Fatalf("unexpected validation error message: %v", err)
 	}
 }
+
+func TestVersion(t *testing.T) {
+	for _, tt := range []struct {
+		name    string
+		status  int
+		body    string
+		version string
+	}{
+		{"package version", http.StatusOK, `{"version":"1.2.3rc1"}`, "1.2.3rc1"},
+		{"old service", http.StatusNotFound, `{}`, ""},
+		{"unauthorized", http.StatusUnauthorized, `{}`, ""},
+		{"invalid JSON", http.StatusOK, `{`, ""},
+		{"missing version", http.StatusOK, `{}`, ""},
+		{"blank version", http.StatusOK, `{"version":" "}`, ""},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			service := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodGet || r.URL.Path != "/v1/version" || r.Header.Get("Authorization") != "Bearer token" {
+					t.Errorf("unexpected version request: %s %s", r.Method, r.URL.Path)
+				}
+				w.WriteHeader(tt.status)
+				_, _ = w.Write([]byte(tt.body))
+			}))
+			defer service.Close()
+			version, err := New(service.URL, "token").Version(context.Background())
+			if version != tt.version || (err != nil) != (tt.version == "") {
+				t.Fatalf("Version() = %q, %v; want %q", version, err, tt.version)
+			}
+		})
+	}
+}
