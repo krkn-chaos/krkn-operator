@@ -22,6 +22,7 @@ import (
 	"sync"
 
 	"github.com/gorilla/websocket"
+	"github.com/krkn-chaos/krkn-operator/pkg/auth"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
@@ -42,6 +43,9 @@ type Client struct {
 
 	// User ID (from JWT claims)
 	userID string
+
+	// claims retain provider group values for authorization and revocation.
+	claims *auth.Claims
 
 	// Is admin flag
 	isAdmin bool

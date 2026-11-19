@@ -69,8 +69,23 @@ spec:
             description: |-
               KrknUserSpec defines the desired state of KrknUser.
               KrknUser serves as an authentication entity for the REST APIs.
-              Each KrknUser instance has an associated Secret containing the hashed password.
+              Local users have a password Secret; external OIDC users have an issuer and subject instead.
             properties:
+              authProvider:
+                description: AuthProvider is empty for local users or the configured
+                  OIDC provider alias.
+                type: string
+              externalEmail:
+                type: string
+              externalIssuer:
+                description: ExternalIssuer and ExternalSubject bind an OIDC user
+                  to the verified ID token.
+                type: string
+              externalSubject:
+                type: string
+              externalUsername:
+                description: ExternalUsername and ExternalEmail are display-only snapshots.
+                type: string
               name:
                 description: Name is the first name of the user
                 type: string
@@ -79,8 +94,8 @@ spec:
                 type: string
               passwordSecretRef:
                 description: |-
-                  PasswordSecretRef references the Secret containing the hashed password
-                  The Secret must contain a 'passwordHash' key with the bcrypt hash
+                  PasswordSecretRef references the local user's bcrypt hash Secret.
+                  It must be empty for OIDC users.
                 type: string
               role:
                 default: user
@@ -93,13 +108,10 @@ spec:
                 description: Surname is the last name of the user
                 type: string
               userId:
-                description: UserID is the email address of the user, used as the
-                  unique identifier
-                pattern: ^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$
+                description: UserID is the local email or a stable oidc-<hash> identifier.
                 type: string
             required:
             - name
-            - passwordSecretRef
             - role
             - surname
             - userId

@@ -724,7 +724,7 @@ type LoginResponse struct {
 
 // UserResponse represents a user in API responses (no password)
 type UserResponse struct {
-	// UserID is the email address of the user
+	// UserID is a local email or stable OIDC identifier.
 	UserID string `json:"userId"`
 	// Name is the first name of the user
 	Name string `json:"name"`
@@ -732,6 +732,11 @@ type UserResponse struct {
 	Surname string `json:"surname"`
 	// Organization is the user's organization (optional)
 	Organization string `json:"organization,omitempty"`
+	// AuthProvider is empty for local accounts.
+	AuthProvider string `json:"authProvider,omitempty"`
+	// ExternalUsername and ExternalEmail are display-only OIDC snapshots.
+	ExternalUsername string `json:"externalUsername,omitempty"`
+	ExternalEmail    string `json:"externalEmail,omitempty"`
 	// Role is either "user" or "admin"
 	Role string `json:"role"`
 	// Active indicates if the user account is active
@@ -839,6 +844,8 @@ type UserGroupResponse struct {
 	Name string `json:"name"`
 	// Description is the group description (optional)
 	Description string `json:"description,omitempty"`
+	// ExternalGroups are provider group claims mapped to this local group.
+	ExternalGroups []krknv1alpha1.ExternalGroupMapping `json:"externalGroups,omitempty"`
 	// ClusterPermissions is a map of clusterAPIURL to permitted actions
 	ClusterPermissions map[string]ClusterPermissionSet `json:"clusterPermissions"`
 	// MemberCount is the number of users in this group (calculated dynamically)
@@ -861,6 +868,8 @@ type CreateUserGroupRequest struct {
 	Name string `json:"name"`
 	// Description is the group description (optional)
 	Description string `json:"description,omitempty"`
+	// ExternalGroups are provider group claims mapped to this local group.
+	ExternalGroups []krknv1alpha1.ExternalGroupMapping `json:"externalGroups,omitempty"`
 	// ClusterPermissions is a map of clusterAPIURL to permitted actions (required, min 1)
 	ClusterPermissions map[string]ClusterPermissionSet `json:"clusterPermissions"`
 	// DiscoveryUUID is the optional UUID of a KrknTargetRequest to delete after group creation
@@ -879,6 +888,8 @@ type CreateUserGroupResponse struct {
 type UpdateUserGroupRequest struct {
 	// Description is the group description (optional)
 	Description *string `json:"description,omitempty"`
+	// ExternalGroups replaces mappings when supplied; an empty array clears them.
+	ExternalGroups *[]krknv1alpha1.ExternalGroupMapping `json:"externalGroups,omitempty"`
 	// ClusterPermissions is a map of clusterAPIURL to permitted actions (optional)
 	ClusterPermissions map[string]ClusterPermissionSet `json:"clusterPermissions,omitempty"`
 	// DiscoveryUUID is the optional UUID of a KrknTargetRequest to delete after group update

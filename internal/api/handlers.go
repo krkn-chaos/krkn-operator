@@ -63,6 +63,7 @@ import (
 	"github.com/krkn-chaos/krkn-operator/pkg/elasticsearch"
 	"github.com/krkn-chaos/krkn-operator/pkg/files"
 	"github.com/krkn-chaos/krkn-operator/pkg/groupauth"
+	"github.com/krkn-chaos/krkn-operator/pkg/identity"
 	"github.com/krkn-chaos/krkn-operator/pkg/krknaiserver"
 	"github.com/krkn-chaos/krkn-operator/pkg/registry"
 	"github.com/krkn-chaos/krkn-operator/pkg/workspace"
@@ -316,14 +317,17 @@ func (e *scenarioCatalogError) Unwrap() error {
 
 // Handler contains the dependencies for API handlers
 type Handler struct {
-	client             client.Client
-	clientset          kubernetes.Interface
-	namespace          string
-	componentNamespace string
-	grpcServerAddr     string
-	secretManager      *auth.SecretManager
-	artifactClient     *krknaiserver.Client
-	krknAIEnabled      bool
+	client                  client.Client
+	identityReader          client.Reader
+	clientset               kubernetes.Interface
+	namespace               string
+	componentNamespace      string
+	grpcServerAddr          string
+	secretManager           *auth.SecretManager
+	groupDirectories        map[string]identity.GroupDirectory
+	externalIdentityChecker auth.ExternalIdentityChecker
+	artifactClient          *krknaiserver.Client
+	krknAIEnabled           bool
 	// scenarioProviderFactory is injectable for API tests; production handlers
 	// use the krknctl-backed factory assigned by NewHandler.
 	scenarioProviderFactory      func(provider.Mode) (provider.ScenarioDataProvider, error)
@@ -358,10 +362,12 @@ func NewHandler(k8sClient client.Client, clientset kubernetes.Interface, namespa
 	bgCtx, bgCancel := context.WithCancel(context.Background())
 	return &Handler{
 		client:                       k8sClient,
+		identityReader:               k8sClient,
 		clientset:                    clientset,
 		namespace:                    namespace,
 		grpcServerAddr:               grpcServerAddr,
 		secretManager:                secretManager,
+		groupDirectories:             make(map[string]identity.GroupDirectory),
 		artifactClient:               krknaiserver.New(krknAI.URL, krknAI.Token),
 		krknAIEnabled:                krknAI.Enabled,
 		scenarioProviderFactory:      createScenarioProvider,
@@ -2479,89 +2485,9 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 		"client_ip", r.RemoteAddr,
 		"user_agent", r.Header.Get("User-Agent"))
 
-	// Extract JWT token from WebSocket subprotocol header BEFORE upgrade
-	// Frontend sends: new WebSocket(url, `access_token.${jwt_token}`)
-	// Format: "access_token.<jwt_token>"
-	protocols := r.Header.Get("Sec-WebSocket-Protocol")
-	logger.V(1).Info("Received WebSocket headers",
-		"Sec-WebSocket-Protocol", maskToken(protocols),
-		"Sec-WebSocket-Version", r.Header.Get("Sec-WebSocket-Version"),
-		"Sec-WebSocket-Key", r.Header.Get("Sec-WebSocket-Key"))
-
-	if protocols == "" {
-		logger.Error(errors.New("missing Sec-WebSocket-Protocol header"), "WebSocket authentication failed",
-			"path", r.URL.Path,
-			"client_ip", r.RemoteAddr,
-			"headers", sanitizeHeaders(r.Header))
-		http.Error(w, "Unauthorized: Missing Sec-WebSocket-Protocol header", http.StatusUnauthorized)
-		return
-	}
-
-	// Parse protocol: split on first '.' to separate prefix from token
-	// Example: "access_token.eyJhbGc..." → ["access_token", "eyJhbGc..."]
-	logger.V(1).Info("Parsing Sec-WebSocket-Protocol",
-		"raw_protocol", maskToken(protocols),
-		"protocol_length", len(protocols))
-
-	protocolParts := strings.SplitN(protocols, ".", 2)
-	logger.V(1).Info("Protocol parts after split",
-		"parts_count", len(protocolParts),
-		"part_0", func() string {
-			if len(protocolParts) > 0 {
-				return protocolParts[0]
-			}
-			return "<none>"
-		}(),
-		"part_1_length", func() int {
-			if len(protocolParts) > 1 {
-				return len(protocolParts[1])
-			}
-			return 0
-		}())
-
-	if len(protocolParts) != 2 || protocolParts[0] != "access_token" {
-		logger.Error(errors.New("invalid Sec-WebSocket-Protocol format"), "WebSocket authentication failed",
-			"path", r.URL.Path,
-			"protocol", maskToken(protocols),
-			"parts_count", len(protocolParts),
-			"expected_format", "access_token.<jwt>",
-			"client_ip", r.RemoteAddr)
-		http.Error(w, "Unauthorized: Invalid Sec-WebSocket-Protocol format. Expected: access_token.<jwt>", http.StatusUnauthorized)
-		return
-	}
-
-	token := protocolParts[1]
-	if token == "" {
-		logger.Error(errors.New("empty token in subprotocol"), "WebSocket authentication failed",
-			"path", r.URL.Path,
-			"client_ip", r.RemoteAddr)
-		http.Error(w, "Unauthorized: Missing authentication token", http.StatusUnauthorized)
-		return
-	}
-
-	maskedToken := maskToken(token)
-
-	logger.Info("JWT token extracted from subprotocol",
-		"token_length", len(token),
-		"token_preview", maskedToken)
-
-	// Get TokenGenerator and validate token
-	logger.V(1).Info("Getting TokenGenerator for validation")
-	tokenGen, err := h.getTokenGenerator()
+	claims, protocols, err := h.websocketPrincipal(r)
 	if err != nil {
-		logger.Error(err, "Failed to get TokenGenerator for WebSocket auth")
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-		return
-	}
-
-	logger.Info("Validating JWT token")
-	claims, err := tokenGen.ValidateToken(token)
-	if err != nil {
-		logger.Error(err, "WebSocket authentication failed: invalid token",
-			"path", r.URL.Path,
-			"token_preview", maskedToken,
-			"client_ip", r.RemoteAddr)
-		http.Error(w, "Unauthorized: Invalid or expired token", http.StatusUnauthorized)
+		http.Error(w, "Unauthorized: "+err.Error(), http.StatusUnauthorized)
 		return
 	}
 
@@ -2578,9 +2504,7 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 	logger.Info("Upgrading connection to WebSocket",
 		"response_protocol", maskToken(protocols))
 
-	conn, err := upgrader.Upgrade(w, r, http.Header{
-		"Sec-WebSocket-Protocol": []string{protocols}, // Echo back the full protocol
-	})
+	conn, err := upgrader.Upgrade(w, r, websocketResponseHeader(protocols))
 	if err != nil {
 		logger.Error(err, "WebSocket upgrade failed",
 			"url", r.URL.String(),
@@ -2589,6 +2513,8 @@ func (h *Handler) GetScenarioRunLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer conn.Close()
+	stopIdentityWatch := h.watchExternalSocket(conn, claims)
+	defer stopIdentityWatch()
 
 	logger.Info("WebSocket connection established",
 		"userId", claims.UserID,
@@ -2985,22 +2911,12 @@ func (h *Handler) GetKrknAIRunLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	protocol := r.Header.Get("Sec-WebSocket-Protocol")
-	parts := strings.SplitN(protocol, ".", 2)
-	if len(parts) != 2 || parts[0] != "access_token" || parts[1] == "" {
-		http.Error(w, "Unauthorized: expected access_token.<jwt> WebSocket subprotocol", http.StatusUnauthorized)
-		return
-	}
-	tokenGen, err := h.getTokenGenerator()
+	claims, protocol, err := h.websocketPrincipal(r)
 	if err != nil {
-		http.Error(w, "Authentication service unavailable", http.StatusServiceUnavailable)
+		http.Error(w, "Unauthorized: "+err.Error(), http.StatusUnauthorized)
 		return
 	}
-	claims, err := tokenGen.ValidateToken(parts[1])
-	if err != nil {
-		http.Error(w, "Unauthorized: invalid or expired token", http.StatusUnauthorized)
-		return
-	}
+
 	r = r.WithContext(context.WithValue(r.Context(), auth.UserClaimsKey, claims))
 
 	run, ok := h.authorizeKrknAIRun(w, r, runName, groupauth.ActionView)
@@ -3008,11 +2924,13 @@ func (h *Handler) GetKrknAIRunLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	waiting := func() {
-		conn, err := upgrader.Upgrade(w, r, http.Header{"Sec-WebSocket-Protocol": []string{protocol}})
+		conn, err := upgrader.Upgrade(w, r, websocketResponseHeader(protocol))
 		if err != nil {
 			return
 		}
 		defer conn.Close()
+		stopIdentityWatch := h.watchExternalSocket(conn, claims)
+		defer stopIdentityWatch()
 		writeWSError(conn, log.Log.WithName("websocket-krkn-ai-logs"), "WAITING: Krkn-AI orchestrator Pod is not available yet")
 	}
 
@@ -3048,11 +2966,13 @@ func (h *Handler) GetKrknAIRunLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	conn, err := upgrader.Upgrade(w, r, http.Header{"Sec-WebSocket-Protocol": []string{protocol}})
+	conn, err := upgrader.Upgrade(w, r, websocketResponseHeader(protocol))
 	if err != nil {
 		return
 	}
 	defer conn.Close()
+	stopIdentityWatch := h.watchExternalSocket(conn, claims)
+	defer stopIdentityWatch()
 	logger := log.Log.WithName("websocket-krkn-ai-logs")
 	stopPings := startLogWebSocketPings(conn, logger, run.Name, "")
 	defer stopPings()

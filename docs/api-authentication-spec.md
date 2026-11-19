@@ -2,7 +2,7 @@
 
 ## Overview
 
-The krkn-operator REST API implements JWT-based authentication with role-based authorization (admin/user).
+The krkn-operator REST API supports local JWT authentication and optional Keycloak OIDC browser sessions. See [Optional Keycloak OIDC authentication](oidc-keycloak-poc.md) for the POC endpoints, configuration, group mapping, and per-user blacklist.
 
 **Base URL**: `http://<operator-host>:<port>/api/v1`
 

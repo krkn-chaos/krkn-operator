@@ -22,6 +22,8 @@ Assisted-by: Claude Sonnet 4.5 (claude-sonnet-4-5@20250929)
 package auth
 
 import (
+	"crypto/rand"
+	"encoding/base64"
 	"fmt"
 	"time"
 
@@ -36,6 +38,19 @@ type Claims struct {
 	Name         string `json:"name"`         // User's first name
 	Surname      string `json:"surname"`      // User's last name
 	Organization string `json:"organization"` // User's organization
+	// TokenUse is "session" for browser cookies. Empty denotes a legacy API token.
+	TokenUse string `json:"tokenUse,omitempty"`
+	// Provider is the identity provider alias; empty means a local user.
+	Provider string `json:"provider,omitempty"`
+	// Groups are exact values from the provider's OIDC groups claim.
+	Groups []string `json:"groups,omitempty"`
+	// ExternalIssuer and ExternalSubject identify the OIDC principal.
+	ExternalIssuer  string `json:"externalIssuer,omitempty"`
+	ExternalSubject string `json:"externalSubject,omitempty"`
+	// AccountUID binds a session to one Kubernetes user record incarnation.
+	AccountUID string `json:"accountUid,omitempty"`
+	// CSRFToken is bound to a browser session and required on unsafe requests.
+	CSRFToken string `json:"csrfToken,omitempty"`
 	jwt.RegisteredClaims
 }
 
@@ -98,6 +113,27 @@ func (tg *TokenGenerator) GenerateToken(userID, role, name, surname, organizatio
 	}
 
 	return signedToken, nil
+}
+
+// GenerateSessionToken issues a browser-only credential with a shorter lifetime.
+// It is intentionally distinct from legacy Bearer tokens. The caller sets
+// identity and groups after verifying local credentials or an OIDC ID token.
+func (tg *TokenGenerator) GenerateSessionToken(identity Claims) (string, error) {
+	now := time.Now()
+	identity.TokenUse = "session"
+	csrf := make([]byte, 32)
+	if _, err := rand.Read(csrf); err != nil {
+		return "", fmt.Errorf("generate CSRF token: %w", err)
+	}
+	identity.CSRFToken = base64.RawURLEncoding.EncodeToString(csrf)
+	identity.RegisteredClaims = jwt.RegisteredClaims{
+		ExpiresAt: jwt.NewNumericDate(now.Add(8 * time.Hour)),
+		IssuedAt:  jwt.NewNumericDate(now),
+		NotBefore: jwt.NewNumericDate(now),
+		Issuer:    tg.issuer,
+		Subject:   identity.UserID,
+	}
+	return jwt.NewWithClaims(jwt.SigningMethodHS256, &identity).SignedString(tg.secretKey)
 }
 
 // ValidateToken validates a JWT token and returns the claims.

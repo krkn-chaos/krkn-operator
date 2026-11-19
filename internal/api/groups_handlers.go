@@ -293,6 +293,11 @@ func (h *Handler) CreateUserGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := validateExternalGroups(req.ExternalGroups); err != nil {
+		writeJSONError(w, http.StatusBadRequest, ErrorResponse{Error: "bad_request", Message: err.Error()})
+		return
+	}
+
 	// Convert to CRD ClusterPermissions format
 	clusterPerms := make(map[string]krknv1alpha1.ClusterPermissionSet)
 	for apiURL, permSet := range req.ClusterPermissions {
@@ -311,6 +316,7 @@ func (h *Handler) CreateUserGroup(w http.ResponseWriter, r *http.Request) {
 		Spec: krknv1alpha1.KrknUserGroupSpec{
 			Name:               req.Name, // Keep original name in spec for display purposes
 			Description:        req.Description,
+			ExternalGroups:     req.ExternalGroups,
 			ClusterPermissions: clusterPerms,
 		},
 	}
@@ -408,11 +414,23 @@ func (h *Handler) UpdateUserGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if req.ExternalGroups != nil {
+		if err := validateExternalGroups(*req.ExternalGroups); err != nil {
+			writeJSONError(w, http.StatusBadRequest, ErrorResponse{Error: "bad_request", Message: err.Error()})
+			return
+		}
+	}
+
 	// Apply updates
 	updated := false
 
 	if req.Description != nil {
 		group.Spec.Description = *req.Description
+		updated = true
+	}
+
+	if req.ExternalGroups != nil {
+		group.Spec.ExternalGroups = *req.ExternalGroups
 		updated = true
 	}
 
@@ -922,10 +940,26 @@ func buildUserGroupResponse(ctx context.Context, k8sClient client.Client, group 
 		ID:                 group.Name,
 		Name:               group.Spec.Name,
 		Description:        group.Spec.Description,
+		ExternalGroups:     group.Spec.ExternalGroups,
 		ClusterPermissions: clusterPerms,
 		MemberCount:        memberCount,
 		CreatedAt:          createdAt,
 	}
+}
+
+// validateExternalGroups rejects empty or duplicate provider claim values.
+func validateExternalGroups(mappings []krknv1alpha1.ExternalGroupMapping) error {
+	seen := make(map[krknv1alpha1.ExternalGroupMapping]struct{}, len(mappings))
+	for _, mapping := range mappings {
+		if strings.TrimSpace(mapping.Provider) == "" || strings.TrimSpace(mapping.Group) == "" {
+			return fmt.Errorf("external group provider and group must be non-empty")
+		}
+		if _, duplicate := seen[mapping]; duplicate {
+			return fmt.Errorf("duplicate external group mapping for provider %q and group %q", mapping.Provider, mapping.Group)
+		}
+		seen[mapping] = struct{}{}
+	}
+	return nil
 }
 
 // validateClusterPermissions validates that all actions are valid

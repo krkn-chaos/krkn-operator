@@ -36,6 +36,9 @@ const (
 	AuthLogin        = AuthBasePath + "/login"
 	AuthRefresh      = AuthBasePath + "/refresh"
 	AuthLogout       = AuthBasePath + "/logout"
+	AuthSession      = AuthBasePath + "/session"
+	KeycloakStart    = AuthBasePath + "/oidc/keycloak/login"
+	KeycloakCallback = AuthBasePath + "/oidc/keycloak/callback"
 )
 
 // Core resource endpoints
@@ -70,8 +73,10 @@ const (
 
 // User management endpoints
 const (
-	UsersPath  = APIBasePath + "/users"
-	GroupsPath = APIBasePath + "/groups"
+	UsersPath             = APIBasePath + "/users"
+	GroupsPath            = APIBasePath + "/groups"
+	IdentityProvidersPath = APIBasePath + "/identity-providers"
+	IdentityBlocksPath    = APIBasePath + "/identity-blocks"
 )
 
 // Registry management endpoints

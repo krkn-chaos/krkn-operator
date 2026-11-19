@@ -93,6 +93,28 @@ spec:
                 description: Description is a human-readable description of the group's
                   purpose
                 type: string
+              externalGroups:
+                description: |-
+                  ExternalGroups maps exact OIDC group claim values to this local group.
+                  Unmapped claims grant no permissions.
+                items:
+                  description: |-
+                    ExternalGroupMapping associates a group claim from an identity provider with
+                    this local KrknUserGroup. Multiple entries may grant the same local permissions.
+                    Provider is the configured provider name (for example, "keycloak"). Group is
+                    the exact value emitted in the provider's OIDC groups claim.
+                  properties:
+                    group:
+                      minLength: 1
+                      type: string
+                    provider:
+                      minLength: 1
+                      type: string
+                  required:
+                  - group
+                  - provider
+                  type: object
+                type: array
               name:
                 description: Name is the group name (duplicates metadata.name for
                   API convenience)
