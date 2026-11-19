@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/google/go-containerregistry/pkg/authn"
+	"github.com/google/go-containerregistry/pkg/name"
+	"github.com/google/go-containerregistry/pkg/v1/remote"
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
 	registryutil "github.com/krkn-chaos/krkn-operator/pkg/registry"
 	"github.com/krkn-chaos/krkn-operator/pkg/signatureverification"
@@ -100,6 +103,25 @@ func resolveImmutableImage(ctx context.Context, config *krknctlconfig.Config, re
 		return "", fmt.Errorf("scenario %q did not resolve to an image digest", reference.Name)
 	}
 	return krknctlprovider.ImageReference(base, detail.ScenarioTag), nil
+}
+
+// resolveImmutableContainerImage resolves any public container image reference
+// to the registry digest observed during this request. The returned reference
+// is safe to use for both signature verification and pod execution.
+func resolveImmutableContainerImage(ctx context.Context, image string) (string, error) {
+	reference, err := name.ParseReference(image)
+	if err != nil {
+		return "", fmt.Errorf("invalid container image reference %q: %w", image, err)
+	}
+	descriptor, err := remote.Head(
+		reference,
+		remote.WithContext(ctx),
+		remote.WithAuthFromKeychain(authn.DefaultKeychain),
+	)
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve image digest for %q: %w", image, err)
+	}
+	return reference.Context().Digest(descriptor.Digest.String()).Name(), nil
 }
 
 func resolvePrivateImageDigest(ctx context.Context, scenario string, registry *krknctlmodels.RegistryV2) (string, error) {

@@ -4740,6 +4740,10 @@ const docTemplate = `{
                     "description": "Name is the legacy scenario identity field. When Scenario is absent, the\nAPI translates it into a public ScenarioReference.\n+optional",
                     "type": "string"
                 },
+                "nodeType": {
+                    "description": "NodeType selects a built-in non-scenario graph node implementation.\n+optional\n+kubebuilder:validation:Enum=scenario;trigger",
+                    "type": "string"
+                },
                 "registryName": {
                     "description": "RegistryName is the legacy private registry identity field. Image remains\nignored even when this field is present.\n+optional",
                     "type": "string"
@@ -6355,6 +6359,7 @@ const docTemplate = `{
                     "type": "boolean"
                 },
                 "requires": {
+                    "description": "Requires is retained for compatibility with older scenario metadata.\nNew trigger fields use TriggerType instead.\nDeprecated: This field is not used to configure trigger node fields.",
                     "type": "string"
                 },
                 "secret": {
@@ -6364,6 +6369,9 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "short_description": {
+                    "type": "string"
+                },
+                "trigger_type": {
                     "type": "string"
                 },
                 "type": {

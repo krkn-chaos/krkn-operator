@@ -115,10 +115,15 @@ type ScenariosResponse struct {
 // InputFieldResponse represents a scenario input field with Type as string
 // This is a wrapper around krknctl typing.InputField to ensure Type is serialized as string
 type InputFieldResponse struct {
-	Name              *string `json:"name"`
-	ShortDescription  *string `json:"short_description,omitempty"`
-	Description       *string `json:"description,omitempty"`
-	Variable          *string `json:"variable"`
+	Name             *string `json:"name"`
+	ShortDescription *string `json:"short_description,omitempty"`
+	Description      *string `json:"description,omitempty"`
+	Variable         *string `json:"variable"`
+	TriggerType      *string `json:"trigger_type,omitempty"`
+	// Requires is retained for compatibility with older scenario metadata.
+	// New trigger fields use TriggerType instead.
+	// Deprecated: This field is not used to configure trigger node fields.
+	Requires          *string `json:"requires,omitempty"`
 	Type              string  `json:"type"` // String representation instead of int64 enum
 	Default           *string `json:"default,omitempty"`
 	Validator         *string `json:"validator,omitempty"`
@@ -128,7 +133,6 @@ type InputFieldResponse struct {
 	Required          bool    `json:"required,omitempty"`
 	// MountPath is the absolute container path for file-type scenario parameters.
 	MountPath        *string `json:"mount_path,omitempty"`
-	Requires         *string `json:"requires,omitempty"`
 	MutuallyExcludes *string `json:"mutually_excludes,omitempty"`
 	Secret           bool    `json:"secret,omitempty"`
 	Group            *string `json:"group,omitempty"`

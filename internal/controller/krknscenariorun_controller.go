@@ -696,12 +696,7 @@ func (r *KrknScenarioRunReconciler) prepareJobResources(
 	jobID string,
 ) (*preparedJobResources, error) {
 	logger := log.FromContext(ctx)
-	if cancelled, err := r.cancellationRequested(ctx, scenarioRun, clusterName); err != nil {
-		return nil, err
-	} else if cancelled {
-		return nil, errScenarioRunCancelled
-	}
-	if err := r.validateAIChildRegistry(ctx, scenarioRun); err != nil {
+	if err := krknv1alpha1.ValidateNodeType(scenarioRun.Spec.NodeType, scenarioRun.Spec.Scenario, scenarioRun.Name); err != nil {
 		return nil, err
 	}
 
@@ -931,29 +926,52 @@ func (r *KrknScenarioRunReconciler) prepareJobResources(
 	// Resolve the image exclusively from the scenario reference. Graph runs use
 	// this same path; no caller-provided image is trusted.
 	var privateRegistry *krknctlmodels.RegistryV2
-	if scenarioRun.Spec.Scenario.Private == nil {
-		cleanup()
-		return nil, fmt.Errorf("scenario.private is required")
-	}
-	privateRegistry, err = resolvePrivateRegistry(ctx, r.Client, scenarioRun.Namespace, scenarioRun.Spec.Scenario)
-	if err != nil {
-		cleanup()
-		return nil, err
-	}
-	resolver := r.imageResolver
-	if resolver == nil {
-		resolver = resolveImmutableImage
-	}
-	containerImage, err := resolver(ctx, &krknctlCfg, scenarioRun.Spec.Scenario, privateRegistry)
-	if err != nil {
-		cleanup()
-		return nil, &scenarioImageResolutionError{fmt.Errorf("failed to resolve scenario image: %w", err)}
+	var containerImage string
+	isTrigger := scenarioRun.Spec.NodeType == krknv1alpha1.GraphNodeTypeTrigger
+	if isTrigger {
+		containerImage, err = resolveImmutableContainerImage(ctx, TriggerNodeImage)
+		if err != nil {
+			cleanup()
+			return nil, fmt.Errorf("failed to resolve trigger image: %w", err)
+		}
+	} else {
+		if scenarioRun.Spec.Scenario.Private == nil {
+			cleanup()
+			return nil, fmt.Errorf("scenario.private is required")
+		}
+		privateRegistry, err = resolvePrivateRegistry(ctx, r.Client, scenarioRun.Namespace, scenarioRun.Spec.Scenario)
+		if err != nil {
+			cleanup()
+			return nil, err
+		}
+		resolver := r.imageResolver
+		if resolver == nil {
+			resolver = resolveImmutableImage
+		}
+		containerImage, err = resolver(ctx, &krknctlCfg, scenarioRun.Spec.Scenario, privateRegistry)
+		if err != nil {
+			cleanup()
+			// Wrap in scenarioImageResolutionError so the outcome loop
+			// classifies this as ImageResolutionFailed with a safe
+			// diagnostic; the raw resolver error may contain registry
+			// credentials and must only reach the logger.
+			return nil, fmt.Errorf("failed to resolve scenario image: %w", &scenarioImageResolutionError{err})
+		}
 	}
 	verifier := r.signatureVerifier
 	if verifier == nil {
 		verifier = resolveImageSignature
 	}
-	signatureStatus, signatureErr := verifier(ctx, &krknctlCfg, scenarioRun.Spec.Scenario, privateRegistry, containerImage)
+	var signatureStatus verify.SignatureStatus
+	var signatureErr error
+	if isTrigger {
+		signatureStatus = verify.StatusFor(ctx, containerImage, verify.Options{})
+		if signatureStatus == verify.SignatureUnknown {
+			signatureErr = fmt.Errorf("could not determine signature status for trigger image %q", containerImage)
+		}
+	} else {
+		signatureStatus, signatureErr = verifier(ctx, &krknctlCfg, scenarioRun.Spec.Scenario, privateRegistry, containerImage)
+	}
 	if !verifySignatures {
 		if signatureErr != nil || signatureStatus != verify.SignatureSigned {
 			logger.Info("WARNING: image signature verification result skipped; executing unverified image",
