@@ -951,7 +951,11 @@ func (r *KrknScenarioRunReconciler) prepareJobResources(
 		containerImage, err = resolver(ctx, &krknctlCfg, scenarioRun.Spec.Scenario, privateRegistry)
 		if err != nil {
 			cleanup()
-			return nil, fmt.Errorf("failed to resolve scenario image: %w", err)
+			// Wrap in scenarioImageResolutionError so the outcome loop
+			// classifies this as ImageResolutionFailed with a safe
+			// diagnostic; the raw resolver error may contain registry
+			// credentials and must only reach the logger.
+			return nil, fmt.Errorf("failed to resolve scenario image: %w", &scenarioImageResolutionError{err})
 		}
 	}
 	verifier := r.signatureVerifier
