@@ -73,6 +73,7 @@ type AIConfig struct {
 	StorageClassName            string
 	StorageSize                 resource.Quantity
 	ServiceResources            corev1.ResourceRequirements
+	ServiceSupplementalGroups   []int64
 	NetworkPolicyEnabled        bool
 }
 
@@ -142,6 +143,21 @@ func AIConfigFromEnv(namespace string, getenv func(string) string) (AIConfig, er
 		if cfg.ServiceResources, err = parseServiceResources(value); err != nil {
 			return AIConfig{}, err
 		}
+	}
+	if value := getenv("KRKNAI_SERVICE_SUPPLEMENTAL_GROUPS"); value != "" {
+		if err := decodeStrictJSON("KRKNAI_SERVICE_SUPPLEMENTAL_GROUPS", value, &cfg.ServiceSupplementalGroups); err != nil {
+			return AIConfig{}, err
+		}
+		if cfg.ServiceSupplementalGroups == nil {
+			return AIConfig{}, errors.New("parse KRKNAI_SERVICE_SUPPLEMENTAL_GROUPS: expected a JSON list, not null")
+		}
+		for _, group := range cfg.ServiceSupplementalGroups {
+			if group == 0 || len(utilvalidation.IsValidGroupID(group)) != 0 {
+				return AIConfig{}, fmt.Errorf("KRKNAI_SERVICE_SUPPLEMENTAL_GROUPS contains invalid non-root Unix GID %d", group)
+			}
+		}
+	} else {
+		cfg.ServiceSupplementalGroups = []int64{1001}
 	}
 	if cfg.Enabled {
 		if err := validateImages(cfg); err != nil {
@@ -718,7 +734,7 @@ func reconcileAIDeployment(current, desired *appsv1.Deployment) (bool, error) {
 	pod.SecurityContext.RunAsGroup = nil
 	pod.SecurityContext.FSGroup = desiredPod.SecurityContext.FSGroup
 	pod.SecurityContext.FSGroupChangePolicy = nil
-	pod.SecurityContext.SupplementalGroups = nil
+	pod.SecurityContext.SupplementalGroups = desiredPod.SecurityContext.SupplementalGroups
 	pod.SecurityContext.SeccompProfile = desiredPod.SecurityContext.SeccompProfile
 	pod.Volumes = upsertAIVolume(pod.Volumes, desiredPod.Volumes[0])
 	pod.Containers = upsertAIContainer(pod.Containers, &desiredPod.Containers[0])
@@ -748,7 +764,8 @@ func aiDeploymentFieldsMatch(current, desired *appsv1.Deployment) bool {
 func podSecurityContextMatches(current, desired *corev1.PodSecurityContext) bool {
 	if current == nil || current.RunAsNonRoot == nil || !*current.RunAsNonRoot ||
 		current.RunAsUser != nil || current.RunAsGroup != nil ||
-		current.FSGroupChangePolicy != nil || len(current.SupplementalGroups) != 0 ||
+		current.FSGroupChangePolicy != nil ||
+		!equality.Semantic.DeepEqual(current.SupplementalGroups, desired.SupplementalGroups) ||
 		!equality.Semantic.DeepEqual(current.FSGroup, desired.FSGroup) ||
 		!equality.Semantic.DeepEqual(current.SeccompProfile, desired.SeccompProfile) {
 		return false
@@ -932,8 +949,9 @@ func upsertAIValue[T any](values []T, desired T, matches func(T) bool) []T {
 func aiDeployment(cfg AIConfig, claimName string) *appsv1.Deployment {
 	podLabels := aiPodLabels(aiComponentService)
 	podSecurityContext := &corev1.PodSecurityContext{
-		RunAsNonRoot:   ptr.To(true),
-		SeccompProfile: &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault},
+		RunAsNonRoot:       ptr.To(true),
+		SupplementalGroups: cfg.ServiceSupplementalGroups,
+		SeccompProfile:     &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault},
 	}
 	if !cfg.OpenShift {
 		podSecurityContext.FSGroup = ptr.To[int64](1001)

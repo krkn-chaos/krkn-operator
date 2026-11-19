@@ -95,6 +95,30 @@ if ! grep -Fq -- '--enable-krkn-ai=true' "$work_dir/krkn-ai.yaml"; then
   exit 1
 fi
 
+for olm_bootstrap in false true; do
+  ai_flags=(--set "operator.olmBootstrap=$olm_bootstrap")
+  if [[ "$olm_bootstrap" == false ]]; then ai_flags+=(--set krknAI.enabled=true); fi
+  for groups in null 1001 '{}' '"1001"' '[0]' '[-1]' '[null]' '["1001"]' '[1001.5]' '[2147483648]'; do
+    if helm template krkn-operator "$chart_dir" "${ai_flags[@]}" \
+      --set-json "aiService.podSecurityContext.supplementalGroups=$groups" \
+      > "$work_dir/invalid-groups.yaml" 2> "$work_dir/invalid-groups.err"; then
+      echo "Invalid storage groups $groups accepted with OLM bootstrap=$olm_bootstrap" >&2
+      exit 1
+    fi
+    grep -Fq 'aiService.podSecurityContext.supplementalGroups must' "$work_dir/invalid-groups.err"
+  done
+  helm template krkn-operator "$chart_dir" "${ai_flags[@]}" \
+    --set-json 'aiService.podSecurityContext.supplementalGroups=[]' > "$work_dir/empty-groups.yaml"
+  if [[ "$olm_bootstrap" == true ]]; then
+    yq -e 'select(.kind == "Deployment" and .metadata.name == "krkn-operator-operator") |
+      .spec.template.spec.containers[] | select(.name == "manager") | .env[] |
+      select(.name == "KRKNAI_SERVICE_SUPPLEMENTAL_GROUPS") | .value == "[]"' "$work_dir/empty-groups.yaml" >/dev/null
+  else
+    yq -e 'select(.kind == "Deployment" and .metadata.name == "krkn-operator-ai-service") |
+      .spec.template.spec.securityContext | has("supplementalGroups") | not' "$work_dir/empty-groups.yaml" >/dev/null
+  fi
+done
+
 helm template krkn-operator "$chart_dir" \
   --values "$chart_dir/values-olm-ocp.yaml" \
   --api-versions security.openshift.io/v1/SecurityContextConstraints \
@@ -139,7 +163,7 @@ fi
 manager_env="$work_dir/olm-manager-env.yaml"
 yq -r 'select(.kind == "Deployment" and .metadata.name == "krkn-operator-operator") |
   .spec.template.spec.containers[] | select(.name == "manager") | .env[] |
-  select(.name | test("^(KRKN_OLM_ENABLED|KRKN_OLM_OPENSHIFT|KRKNAI_ENABLED|KRKNAI_ORCHESTRATOR_IMAGE|KRKNAI_ORCHESTRATOR_IMAGE_PULL_POLICY|KRKNAI_SERVICE_IMAGE|KRKNAI_SERVICE_IMAGE_PULL_POLICY|KRKNAI_IMAGE_PULL_SECRETS|KRKNAI_STORAGE_EXISTING_CLAIM|KRKNAI_STORAGE_CLASS_NAME|KRKNAI_STORAGE_SIZE|KRKNAI_SERVICE_RESOURCES|KRKNAI_NETWORK_POLICY_ENABLED)$")) |
+  select(.name | test("^(KRKN_OLM_ENABLED|KRKN_OLM_OPENSHIFT|KRKNAI_ENABLED|KRKNAI_ORCHESTRATOR_IMAGE|KRKNAI_ORCHESTRATOR_IMAGE_PULL_POLICY|KRKNAI_SERVICE_IMAGE|KRKNAI_SERVICE_IMAGE_PULL_POLICY|KRKNAI_IMAGE_PULL_SECRETS|KRKNAI_STORAGE_EXISTING_CLAIM|KRKNAI_STORAGE_CLASS_NAME|KRKNAI_STORAGE_SIZE|KRKNAI_SERVICE_RESOURCES|KRKNAI_SERVICE_SUPPLEMENTAL_GROUPS|KRKNAI_NETWORK_POLICY_ENABLED)$")) |
   [.name, .value] | @tsv' "$work_dir/olm-ocp.yaml" > "$manager_env"
 grep -Fq $'KRKN_OLM_ENABLED\ttrue' "$manager_env"
 grep -Fq $'KRKN_OLM_OPENSHIFT\ttrue' "$manager_env"
@@ -154,6 +178,7 @@ for env_name in \
   KRKNAI_STORAGE_CLASS_NAME \
   KRKNAI_STORAGE_SIZE \
   KRKNAI_SERVICE_RESOURCES \
+  KRKNAI_SERVICE_SUPPLEMENTAL_GROUPS \
   KRKNAI_NETWORK_POLICY_ENABLED; do
   grep -Fq "$env_name"$'\t' "$manager_env"
 done

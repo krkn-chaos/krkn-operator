@@ -84,6 +84,7 @@ spec:
             fieldRef:
               fieldPath: metadata.namespace
         {{- if .Values.operator.olmBootstrap }}
+        {{- include "krkn-operator.validateAIServiceSupplementalGroups" .Values.aiService.podSecurityContext.supplementalGroups }}
         - name: KRKN_OLM_ENABLED
           value: "true"
         - name: KRKN_OLM_OPENSHIFT
@@ -108,6 +109,8 @@ spec:
           value: {{ .Values.aiService.storage.size | quote }}
         - name: KRKNAI_SERVICE_RESOURCES
           value: {{ .Values.aiService.resources | toJson | quote }}
+        - name: KRKNAI_SERVICE_SUPPLEMENTAL_GROUPS
+          value: {{ .Values.aiService.podSecurityContext.supplementalGroups | toJson | quote }}
         - name: KRKNAI_NETWORK_POLICY_ENABLED
           value: {{ .Values.aiService.networkPolicy.enabled | quote }}
         {{- else if .Values.krknAI.enabled }}
