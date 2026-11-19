@@ -19,11 +19,18 @@ package files
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"sort"
 	"strings"
 	"time"
 
+	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
 	"github.com/krkn-chaos/krkn-operator/pkg/groupauth"
 )
+
+// CategoryLabelPrefix is the label prefix that associates a file with a category.
+// It is shared with KrknScenarioRun and KrknGraphRun associations so the same
+// category identifier selects every entity type.
+const CategoryLabelPrefix = krknv1alpha1.CategoryEntityLabelPrefix
 
 // Label and annotation keys for file ConfigMaps
 const (
@@ -140,6 +147,40 @@ func BuildFileLabels(fileID string, groups []string, availableToAll bool, filePu
 // ExtractFileIDFromLabels extracts the file ID from file ConfigMap labels
 func ExtractFileIDFromLabels(labels map[string]string) string {
 	return labels[FileIDLabel]
+}
+
+// ExtractCategoriesFromLabels returns the category names associated with a file
+// ConfigMap, sorted so responses are stable.
+func ExtractCategoriesFromLabels(labels map[string]string) []string {
+	categories := make([]string, 0, len(labels))
+	for key, value := range labels {
+		if value != "true" || !strings.HasPrefix(key, CategoryLabelPrefix) {
+			continue
+		}
+		name := strings.TrimPrefix(key, CategoryLabelPrefix)
+		if name != "" {
+			categories = append(categories, name)
+		}
+	}
+	sort.Strings(categories)
+	return categories
+}
+
+// ApplyCategories replaces every category label on labels with the supplied
+// categories. Passing nil or an empty slice removes all associations, which is
+// what an explicit empty selection means.
+func ApplyCategories(labels map[string]string, categories []string) {
+	for key := range labels {
+		if strings.HasPrefix(key, CategoryLabelPrefix) {
+			delete(labels, key)
+		}
+	}
+	for _, name := range categories {
+		if name == "" {
+			continue
+		}
+		labels[CategoryLabelPrefix+name] = "true"
+	}
 }
 
 // BuildFileAnnotations creates the annotations map for a file ConfigMap.

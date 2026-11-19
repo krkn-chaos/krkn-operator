@@ -100,3 +100,113 @@ func TestUpdateFileAnnotations_PointerSemantics(t *testing.T) {
 func stringPtr(s string) *string {
 	return &s
 }
+
+func TestExtractCategoriesFromLabels(t *testing.T) {
+	tests := []struct {
+		name   string
+		labels map[string]string
+		want   []string
+	}{
+		{
+			name:   "no labels",
+			labels: nil,
+			want:   []string{},
+		},
+		{
+			name: "ignores unrelated labels",
+			labels: map[string]string{
+				AppNameLabel:                   AppName,
+				FilePurposeLabel:               FilePurposeFile,
+				CategoryLabelPrefix + "alerts": "true",
+			},
+			want: []string{"alerts"},
+		},
+		{
+			name: "returns sorted names",
+			labels: map[string]string{
+				CategoryLabelPrefix + "network-chaos":       "true",
+				CategoryLabelPrefix + "cluster-reliability": "true",
+			},
+			want: []string{"cluster-reliability", "network-chaos"},
+		},
+		{
+			name: "ignores labels whose value is not true",
+			labels: map[string]string{
+				CategoryLabelPrefix + "alerts": "false",
+			},
+			want: []string{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ExtractCategoriesFromLabels(tt.labels)
+			if len(got) != len(tt.want) {
+				t.Fatalf("expected %v, got %v", tt.want, got)
+			}
+			for i := range tt.want {
+				if got[i] != tt.want[i] {
+					t.Fatalf("expected %v, got %v", tt.want, got)
+				}
+			}
+		})
+	}
+}
+
+func TestApplyCategories(t *testing.T) {
+	tests := []struct {
+		name       string
+		labels     map[string]string
+		categories []string
+		want       map[string]string
+	}{
+		{
+			name: "adds category labels and preserves other labels",
+			labels: map[string]string{
+				AppNameLabel: AppName,
+			},
+			categories: []string{"alerts", "network-chaos"},
+			want: map[string]string{
+				AppNameLabel:                          AppName,
+				CategoryLabelPrefix + "alerts":        "true",
+				CategoryLabelPrefix + "network-chaos": "true",
+			},
+		},
+		{
+			name: "replaces existing category labels",
+			labels: map[string]string{
+				CategoryLabelPrefix + "alerts":        "true",
+				CategoryLabelPrefix + "network-chaos": "true",
+			},
+			categories: []string{"cluster-reliability"},
+			want: map[string]string{
+				CategoryLabelPrefix + "cluster-reliability": "true",
+			},
+		},
+		{
+			name: "empty selection clears every category label",
+			labels: map[string]string{
+				CategoryLabelPrefix + "alerts": "true",
+				AppNameLabel:                   AppName,
+			},
+			categories: []string{},
+			want: map[string]string{
+				AppNameLabel: AppName,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ApplyCategories(tt.labels, tt.categories)
+			if len(tt.labels) != len(tt.want) {
+				t.Fatalf("expected labels %v, got %v", tt.want, tt.labels)
+			}
+			for key, value := range tt.want {
+				if tt.labels[key] != value {
+					t.Fatalf("expected label %q=%q, got labels %v", key, value, tt.labels)
+				}
+			}
+		})
+	}
+}
