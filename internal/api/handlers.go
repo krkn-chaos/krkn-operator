@@ -43,6 +43,7 @@ import (
 	"github.com/krkn-chaos/krknctl/pkg/provider/models"
 	"github.com/krkn-chaos/krknctl/pkg/typing"
 	"github.com/krkn-chaos/krknctl/pkg/verify"
+	routeclient "github.com/openshift/client-go/route/clientset/versioned/typed/route/v1"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/singleflight"
 	"google.golang.org/grpc"
@@ -332,6 +333,11 @@ type Handler struct {
 	publicScenarioFlights        singleflight.Group
 	rollbackDigestResolver       func(context.Context, bool, *models.RegistryV2) (string, error)
 	rollbackImages               rollbackImageCache
+	visualizeRouteURL            func(context.Context, string, string, string) (string, error)
+	visualizeTargetClientFactory func(context.Context, string) (client.Client, error)
+	// visualizeRouteClientFactory is injectable for API tests; production
+	// handlers build an OpenShift route client from the rest config.
+	visualizeRouteClientFactory  func() (routeclient.RouteV1Interface, error)
 	rollbackInspectorImage       string
 	rollbackInspectorPullSecrets string
 	// esClient is a long-lived, connection-pooling client shared across all
