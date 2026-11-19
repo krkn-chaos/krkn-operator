@@ -92,10 +92,12 @@ func rollbackConfigTemplateCheck(templatePath string) string {
 
 // preparedJobResources holds all resources prepared for creating a scenario pod
 type preparedJobResources struct {
-	jobID             string
-	clusterName       string
-	clusterAPIURL     string
-	containerImage    string
+	jobID          string
+	clusterName    string
+	clusterAPIURL  string
+	containerImage string
+	// privileged is set when the scenario image declares krknctl.privileged=true.
+	privileged        bool
 	kubeconfigPath    string
 	volumes           []corev1.Volume
 	volumeMounts      []corev1.VolumeMount
@@ -944,11 +946,12 @@ func (r *KrknScenarioRunReconciler) prepareJobResources(
 	if resolver == nil {
 		resolver = resolveImmutableImage
 	}
-	containerImage, err := resolver(ctx, &krknctlCfg, scenarioRun.Spec.Scenario, privateRegistry)
+	resolved, err := resolver(ctx, &krknctlCfg, scenarioRun.Spec.Scenario, privateRegistry)
 	if err != nil {
 		cleanup()
 		return nil, &scenarioImageResolutionError{fmt.Errorf("failed to resolve scenario image: %w", err)}
 	}
+	containerImage := resolved.image
 	verifier := r.signatureVerifier
 	if verifier == nil {
 		verifier = resolveImageSignature
@@ -1107,6 +1110,7 @@ func (r *KrknScenarioRunReconciler) prepareJobResources(
 		clusterName:       clusterName,
 		clusterAPIURL:     clusterAPIURL,
 		containerImage:    containerImage,
+		privileged:        resolved.privileged,
 		kubeconfigPath:    kubeconfigPath,
 		volumes:           volumes,
 		volumeMounts:      volumeMounts,
@@ -1187,6 +1191,16 @@ func (r *KrknScenarioRunReconciler) cleanupPreparedResources(ctx context.Context
 // submitScenarioPod builds and creates the scenario Pod from prepared resources.
 // On failure it cleans up all prepared ConfigMaps and Secrets and returns an error.
 // Status updates are the caller's responsibility.
+// scenarioContainerSecurityContext makes the scenario container privileged
+// only when the scenario image declares krknctl.privileged=true; every other
+// scenario keeps an unprivileged container.
+func scenarioContainerSecurityContext(privileged bool) *corev1.SecurityContext {
+	if !privileged {
+		return nil
+	}
+	return &corev1.SecurityContext{Privileged: &privileged}
+}
+
 func (r *KrknScenarioRunReconciler) submitScenarioPod(
 	ctx context.Context,
 	scenarioRun *krknv1alpha1.KrknScenarioRun,
@@ -1276,6 +1290,7 @@ func (r *KrknScenarioRunReconciler) submitScenarioPod(
 						Name: "cancellation", MountPath: "/var/run/krkn-cancellation", ReadOnly: true,
 					}),
 					ImagePullPolicy: corev1.PullAlways,
+					SecurityContext: scenarioContainerSecurityContext(resources.privileged),
 				},
 			},
 			Volumes: append(append([]corev1.Volume(nil), resources.volumes...), corev1.Volume{
@@ -1312,6 +1327,10 @@ func (r *KrknScenarioRunReconciler) submitScenarioPod(
 	}
 	if err := r.Create(ctx, pod); err != nil {
 		r.cleanupPreparedResources(ctx, resources)
+		if resources.privileged && apierrors.IsForbidden(err) {
+			return "", fmt.Errorf("scenario %q needs a privileged container and the cluster rejected it; allow privileged Pods for ServiceAccount %q (on OpenShift, the privileged SCC): %w",
+				scenarioRun.Spec.Scenario.Name, pod.Spec.ServiceAccountName, err)
+		}
 		return "", fmt.Errorf("failed to create pod: %w", err)
 	}
 

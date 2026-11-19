@@ -535,10 +535,13 @@ func (r *KrknGraphRunReconciler) createScenarioRun(
 	if resolver == nil {
 		resolver = resolveImmutableImage
 	}
-	image, err := resolver(ctx, &krknctlCfg, node.Scenario, privateRegistry)
+	resolved, err := resolver(ctx, &krknctlCfg, node.Scenario, privateRegistry)
 	if err != nil {
 		return false, fmt.Errorf("failed to resolve scenario image: %w", err)
 	}
+	// Only the image is checked here; the scenario run resolves it again,
+	// with its privileged flag, when it creates the Pod.
+	image := resolved.image
 	verifier := r.signatureVerifier
 	if verifier == nil {
 		verifier = resolveImageSignature
