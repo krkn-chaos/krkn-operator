@@ -88,14 +88,16 @@ func TestKeycloakCallbackProvisionsUserAndRejectsBadNonce(t *testing.T) {
 	}))
 	defer server.Close()
 	issuer = server.URL + "/realms/main"
-	t.Setenv("KEYCLOAK_ISSUER_URL", issuer)
-	t.Setenv("KEYCLOAK_OIDC_CLIENT_ID", "operator-client")
-	t.Setenv("KEYCLOAK_OIDC_CLIENT_SECRET", "test-secret")
-	t.Setenv("KEYCLOAK_OIDC_REDIRECT_URL", "https://operator.example"+KeycloakCallback)
+	providerID := "corp"
+	callbackPath := AuthBasePath + "/oidc/" + providerID + "/callback"
+	loginPath := AuthBasePath + "/oidc/" + providerID + "/login"
+	provider := identityProviderConfig{ID: providerID, Type: "keycloak", DisplayName: "Corporate Keycloak",
+		Issuer: issuer, ClientID: "operator-client", ClientSecret: "test-secret",
+		RedirectURL: "https://operator.example" + callbackPath, Enabled: true, SessionEpoch: "epoch-1"}
 	scheme := runtime.NewScheme()
 	_ = corev1.AddToScheme(scheme)
 	_ = krknv1alpha1.AddToScheme(scheme)
-	k8s := fakeclient.NewClientBuilder().WithScheme(scheme).WithObjects(TestJWTSecret("default")).WithStatusSubresource(&krknv1alpha1.KrknUser{}).Build()
+	k8s := fakeclient.NewClientBuilder().WithScheme(scheme).WithObjects(TestJWTSecret("default"), provider.secret("default")).WithStatusSubresource(&krknv1alpha1.KrknUser{}).Build()
 	manager, err := auth.NewTestSecretManager(k8s, "default")
 	if err != nil {
 		t.Fatal(err)
@@ -104,7 +106,7 @@ func TestKeycloakCallbackProvisionsUserAndRejectsBadNonce(t *testing.T) {
 	defer h.Shutdown()
 	login := func() (*http.Cookie, string) {
 		w := httptest.NewRecorder()
-		h.StartKeycloakLogin(w, httptest.NewRequest(http.MethodGet, KeycloakStart, nil))
+		h.OIDCRouter(w, httptest.NewRequest(http.MethodGet, loginPath, nil))
 		if w.Code != http.StatusFound {
 			t.Fatalf("start status=%d body=%s", w.Code, w.Body.String())
 		}
@@ -128,10 +130,18 @@ func TestKeycloakCallbackProvisionsUserAndRejectsBadNonce(t *testing.T) {
 		return nil, ""
 	}
 	stateCookie, state := login()
-	req := httptest.NewRequest(http.MethodGet, KeycloakCallback+"?state="+url.QueryEscape(state)+"&code=code", nil)
+	wrongProvider := httptest.NewRequest(http.MethodGet,
+		AuthBasePath+"/oidc/partner/callback?state="+url.QueryEscape(state)+"&code=code", nil)
+	wrongProvider.AddCookie(stateCookie)
+	wrongResponse := httptest.NewRecorder()
+	h.OIDCRouter(wrongResponse, wrongProvider)
+	if wrongResponse.Code != http.StatusUnauthorized {
+		t.Fatalf("cross-provider callback status=%d", wrongResponse.Code)
+	}
+	req := httptest.NewRequest(http.MethodGet, callbackPath+"?state="+url.QueryEscape(state)+"&code=code", nil)
 	req.AddCookie(stateCookie)
 	w := httptest.NewRecorder()
-	h.CompleteKeycloakLogin(w, req)
+	h.OIDCRouter(w, req)
 	if w.Code != http.StatusFound {
 		t.Fatalf("callback status=%d body=%s", w.Code, w.Body.String())
 	}
@@ -152,7 +162,7 @@ func TestKeycloakCallbackProvisionsUserAndRejectsBadNonce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	key := identity.ExternalIdentity{Provider: "keycloak", Issuer: issuer, Subject: "keycloak-user-1"}
+	key := identity.ExternalIdentity{Provider: providerID, Issuer: issuer, Subject: "keycloak-user-1"}
 	userID, _ := key.UserID()
 	if claims.UserID != userID || claims.AccountUID != "created-uid" || len(claims.Groups) != 1 || claims.Groups[0] != "/Ops" {
 		t.Fatalf("session claims=%+v", claims)
@@ -164,13 +174,16 @@ func TestKeycloakCallbackProvisionsUserAndRejectsBadNonce(t *testing.T) {
 	if user.Spec.ExternalUsername != "tullio" || user.Spec.PasswordSecretRef != "" {
 		t.Fatalf("user spec=%+v", user.Spec)
 	}
+	if user.Status.LastLogin.IsZero() {
+		t.Fatal("OIDC lastLogin was not recorded")
+	}
 
 	badNonce = true
 	stateCookie, state = login()
-	req = httptest.NewRequest(http.MethodGet, KeycloakCallback+"?state="+url.QueryEscape(state)+"&code="+strconv.Itoa(2), nil)
+	req = httptest.NewRequest(http.MethodGet, callbackPath+"?state="+url.QueryEscape(state)+"&code="+strconv.Itoa(2), nil)
 	req.AddCookie(stateCookie)
 	w = httptest.NewRecorder()
-	h.CompleteKeycloakLogin(w, req)
+	h.OIDCRouter(w, req)
 	if w.Code != http.StatusUnauthorized || !strings.Contains(w.Body.String(), "Invalid ID token") {
 		t.Fatalf("bad nonce status=%d body=%s", w.Code, w.Body.String())
 	}

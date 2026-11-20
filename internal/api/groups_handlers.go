@@ -297,6 +297,10 @@ func (h *Handler) CreateUserGroup(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{Error: "bad_request", Message: err.Error()})
 		return
 	}
+	if err := h.validateExternalGroupProviders(ctx, req.ExternalGroups); err != nil {
+		writeJSONError(w, http.StatusBadRequest, ErrorResponse{Error: "bad_request", Message: err.Error()})
+		return
+	}
 
 	// Convert to CRD ClusterPermissions format
 	clusterPerms := make(map[string]krknv1alpha1.ClusterPermissionSet)
@@ -416,6 +420,10 @@ func (h *Handler) UpdateUserGroup(w http.ResponseWriter, r *http.Request) {
 
 	if req.ExternalGroups != nil {
 		if err := validateExternalGroups(*req.ExternalGroups); err != nil {
+			writeJSONError(w, http.StatusBadRequest, ErrorResponse{Error: "bad_request", Message: err.Error()})
+			return
+		}
+		if err := h.validateExternalGroupProviders(ctx, *req.ExternalGroups); err != nil {
 			writeJSONError(w, http.StatusBadRequest, ErrorResponse{Error: "bad_request", Message: err.Error()})
 			return
 		}
@@ -949,15 +957,30 @@ func buildUserGroupResponse(ctx context.Context, k8sClient client.Client, group 
 
 // validateExternalGroups rejects empty or duplicate provider claim values.
 func validateExternalGroups(mappings []krknv1alpha1.ExternalGroupMapping) error {
-	seen := make(map[krknv1alpha1.ExternalGroupMapping]struct{}, len(mappings))
+	seen := make(map[string]struct{}, len(mappings))
 	for _, mapping := range mappings {
 		if strings.TrimSpace(mapping.Provider) == "" || strings.TrimSpace(mapping.Group) == "" {
 			return fmt.Errorf("external group provider and group must be non-empty")
 		}
-		if _, duplicate := seen[mapping]; duplicate {
+		key := mapping.Provider + "\x00" + mapping.Group
+		if _, duplicate := seen[key]; duplicate {
 			return fmt.Errorf("duplicate external group mapping for provider %q and group %q", mapping.Provider, mapping.Group)
 		}
-		seen[mapping] = struct{}{}
+		seen[key] = struct{}{}
+	}
+	return nil
+}
+
+func (h *Handler) validateExternalGroupProviders(ctx context.Context, mappings []krknv1alpha1.ExternalGroupMapping) error {
+	checked := make(map[string]struct{}, len(mappings))
+	for _, mapping := range mappings {
+		if _, ok := checked[mapping.Provider]; ok {
+			continue
+		}
+		if _, err := h.providerStore.get(ctx, mapping.Provider); err != nil {
+			return fmt.Errorf("identity provider %q is unavailable: %w", mapping.Provider, err)
+		}
+		checked[mapping.Provider] = struct{}{}
 	}
 	return nil
 }

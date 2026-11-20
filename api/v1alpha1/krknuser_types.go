@@ -50,7 +50,7 @@ type KrknUserSpec struct {
 	// +optional
 	PasswordSecretRef string `json:"passwordSecretRef,omitempty"`
 
-	// AuthProvider is empty for local users or the configured OIDC provider alias.
+	// AuthProvider is empty for local users or the immutable OIDC provider ID.
 	// +optional
 	AuthProvider string `json:"authProvider,omitempty"`
 	// ExternalIssuer and ExternalSubject bind an OIDC user to the verified ID token.

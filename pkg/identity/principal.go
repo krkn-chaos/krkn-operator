@@ -6,7 +6,9 @@ import (
 	"fmt"
 )
 
-// ExternalIdentity is the immutable OIDC identity key. Display names and email
+// ExternalIdentity is the immutable OIDC identity key. Provider is the stable
+// configuration ID, which separates realms even when group paths are equal.
+// Display names and email
 // addresses are deliberately excluded because they may change or be reassigned.
 type ExternalIdentity struct {
 	Provider string `json:"provider"`

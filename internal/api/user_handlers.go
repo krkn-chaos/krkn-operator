@@ -84,10 +84,13 @@ func buildUserResponse(user *krknv1alpha1.KrknUser) UserResponse {
 }
 
 // filterUsers filters users by role, active status, and search term
-func filterUsers(users []krknv1alpha1.KrknUser, role, activeParam, search string) []krknv1alpha1.KrknUser {
+func filterUsers(users []krknv1alpha1.KrknUser, role, activeParam, search, authProvider string) []krknv1alpha1.KrknUser {
 	filtered := make([]krknv1alpha1.KrknUser, 0)
 
 	for _, user := range users {
+		if authProvider != "" && user.Spec.AuthProvider != authProvider {
+			continue
+		}
 		// Filter by role
 		if role != "" && user.Spec.Role != role {
 			continue
@@ -152,6 +155,7 @@ func (h *Handler) ListUsers(w http.ResponseWriter, r *http.Request) {
 	role := r.URL.Query().Get("role")
 	activeParam := r.URL.Query().Get("active")
 	search := r.URL.Query().Get("search")
+	authProvider := r.URL.Query().Get("authProvider")
 
 	// List all KrknUser CRDs
 	var users krknv1alpha1.KrknUserList
@@ -170,7 +174,7 @@ func (h *Handler) ListUsers(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Filter users
-	filtered := filterUsers(users.Items, role, activeParam, search)
+	filtered := filterUsers(users.Items, role, activeParam, search, authProvider)
 
 	// Paginate (users always paginate with default limit=50)
 	page, limit := ParsePaginationParams(r, 50)

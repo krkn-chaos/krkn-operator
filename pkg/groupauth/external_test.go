@@ -41,3 +41,25 @@ func TestExternalGroupsMapManyClaimsToOneLocalGroup(t *testing.T) {
 		t.Fatal("identity mismatch accepted")
 	}
 }
+
+func TestExternalGroupPathIsScopedByProviderInstance(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := krknv1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	mapped := &krknv1alpha1.KrknUserGroup{ObjectMeta: metav1.ObjectMeta{Name: "team", Namespace: "default"},
+		Spec: krknv1alpha1.KrknUserGroupSpec{ExternalGroups: []krknv1alpha1.ExternalGroupMapping{
+			{Provider: "corp", Group: "/Ops", GroupID: "remote-1"}}}}
+	k8s := fakeclient.NewClientBuilder().WithScheme(scheme).WithObjects(mapped).Build()
+	for _, test := range []struct {
+		provider string
+		want     int
+	}{{"corp", 1}, {"partner", 0}} {
+		claims := &auth.Claims{UserID: "oidc-user", Provider: test.provider, Groups: []string{"/Ops"}}
+		ctx := context.WithValue(context.Background(), auth.UserClaimsKey, claims)
+		groups, err := GetUserGroups(ctx, k8s, claims.UserID, "default")
+		if err != nil || len(groups) != test.want {
+			t.Fatalf("provider=%s groups=%v err=%v", test.provider, groups, err)
+		}
+	}
+}

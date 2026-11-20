@@ -37,8 +37,10 @@ const (
 	AuthRefresh      = AuthBasePath + "/refresh"
 	AuthLogout       = AuthBasePath + "/logout"
 	AuthSession      = AuthBasePath + "/session"
-	KeycloakStart    = AuthBasePath + "/oidc/keycloak/login"
-	KeycloakCallback = AuthBasePath + "/oidc/keycloak/callback"
+	AuthProviders    = AuthBasePath + "/providers"
+	OIDCBasePath     = AuthBasePath + "/oidc"
+	KeycloakStart    = OIDCBasePath + "/keycloak/login"
+	KeycloakCallback = OIDCBasePath + "/keycloak/callback"
 )
 
 // Core resource endpoints

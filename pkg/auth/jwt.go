@@ -42,6 +42,8 @@ type Claims struct {
 	TokenUse string `json:"tokenUse,omitempty"`
 	// Provider is the identity provider alias; empty means a local user.
 	Provider string `json:"provider,omitempty"`
+	// ProviderEpoch invalidates all sessions when a provider is toggled.
+	ProviderEpoch string `json:"providerEpoch,omitempty"`
 	// Groups are exact values from the provider's OIDC groups claim.
 	Groups []string `json:"groups,omitempty"`
 	// ExternalIssuer and ExternalSubject identify the OIDC principal.

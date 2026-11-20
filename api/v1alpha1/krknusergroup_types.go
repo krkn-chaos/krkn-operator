@@ -36,13 +36,17 @@ type ClusterPermissionSet struct {
 
 // ExternalGroupMapping associates a group claim from an identity provider with
 // this local KrknUserGroup. Multiple entries may grant the same local permissions.
-// Provider is the configured provider name (for example, "keycloak"). Group is
-// the exact value emitted in the provider's OIDC groups claim.
+// Provider is the immutable configuration ID (for example, "corp-keycloak"),
+// not the product type. Group is the exact value in that provider's OIDC claim.
 type ExternalGroupMapping struct {
 	// +kubebuilder:validation:MinLength=1
 	Provider string `json:"provider"`
 	// +kubebuilder:validation:MinLength=1
 	Group string `json:"group"`
+	// GroupID is the remote provider ID for display and rename diagnostics. The
+	// Group claim value, scoped by Provider, is used for authorization.
+	// +optional
+	GroupID string `json:"groupId,omitempty"`
 }
 
 // KrknUserGroupSpec defines the desired state of KrknUserGroup.

@@ -88,7 +88,11 @@ func (h *Handler) IdentityBlocks(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		blocks := make([]OIDCBlock, 0, len(secrets.Items))
+		providerFilter := r.URL.Query().Get("authProvider")
 		for _, secret := range secrets.Items {
+			if providerFilter != "" && string(secret.Data["provider"]) != providerFilter {
+				continue
+			}
 			blocks = append(blocks, OIDCBlock{ID: secret.Name,
 				Provider: string(secret.Data["provider"]), Issuer: string(secret.Data["issuer"]),
 				Subject: string(secret.Data["subject"]), Username: string(secret.Data["username"]),

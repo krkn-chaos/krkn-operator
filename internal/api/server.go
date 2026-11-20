@@ -72,7 +72,6 @@ import (
 	_ "github.com/krkn-chaos/krkn-operator/internal/api/docs" // Import generated docs
 	v2 "github.com/krkn-chaos/krkn-operator/internal/api/v2"
 	"github.com/krkn-chaos/krkn-operator/pkg/auth"
-	"github.com/krkn-chaos/krkn-operator/pkg/identity"
 	"github.com/krkn-chaos/krkn-operator/pkg/krknaiserver"
 	"github.com/krkn-chaos/krkn-operator/pkg/wsorigin"
 )
@@ -131,16 +130,6 @@ func NewServer(port int, k8sClient client.Client, clientset kubernetes.Interface
 func NewServerWithComponentNamespace(port int, k8sClient client.Client, clientset kubernetes.Interface, namespace, componentNamespace, grpcServerAddr string, secretManager *auth.SecretManager, krknAI KrknAIServiceConfig) *Server {
 	handler := NewHandler(k8sClient, clientset, namespace, grpcServerAddr, secretManager, krknAI)
 	handler.componentNamespace = componentNamespace
-	// The service client secret is supplied through a Kubernetes Secret as an
-	// environment variable. An incomplete configuration leaves discovery off.
-	if issuer, clientID, clientSecret := os.Getenv("KEYCLOAK_ISSUER_URL"), os.Getenv("KEYCLOAK_ADMIN_CLIENT_ID"), os.Getenv("KEYCLOAK_ADMIN_CLIENT_SECRET"); issuer != "" && clientID != "" && clientSecret != "" {
-		directory, err := identity.NewKeycloakDirectory("keycloak", issuer, clientID, clientSecret, nil)
-		if err != nil {
-			log.Log.Error(err, "Keycloak group directory configuration is invalid")
-		} else {
-			handler.RegisterGroupDirectory(directory)
-		}
-	}
 
 	// Create auth middleware using SecretManager
 	// The SecretManager is started as a Runnable before the API server starts
@@ -161,6 +150,7 @@ func NewServerWithComponentNamespace(port int, k8sClient client.Client, clientse
 	// is still active by looking up the KrknUser CR. Uses a 1-minute TTL cache to
 	// avoid hitting the API server on every request.
 	userChecker := newK8sUserStatusChecker(k8sClient, namespace)
+	userChecker.providerStore = handler.providerStore
 	cachedChecker := auth.NewCachedUserStatusChecker(userChecker, 1*time.Minute)
 	authMw.SetUserStatusChecker(cachedChecker)
 	authMw.SetExternalIdentityChecker(userChecker)
@@ -240,8 +230,8 @@ func NewServerWithComponentNamespace(port int, k8sClient client.Client, clientse
 	mux.Handle(AuthLogin, loginRateLimit(http.HandlerFunc(handler.Login)))
 	mux.Handle(AuthSession, authMw.RequireAuth(http.HandlerFunc(handler.GetSession)))
 	mux.Handle(AuthLogout, authMw.RequireAuth(http.HandlerFunc(handler.LogoutSession)))
-	mux.Handle(KeycloakStart, publicAuthRateLimit(http.HandlerFunc(handler.StartKeycloakLogin)))
-	mux.Handle(KeycloakCallback, publicAuthRateLimit(http.HandlerFunc(handler.CompleteKeycloakLogin)))
+	mux.Handle(AuthProviders, publicAuthRateLimit(http.HandlerFunc(handler.PublicIdentityProviders)))
+	mux.Handle(OIDCBasePath+"/", publicAuthRateLimit(http.HandlerFunc(handler.OIDCRouter)))
 
 	// Authenticated endpoints - user and admin access
 	mux.Handle(HealthPath, authMw.RequireAuth(http.HandlerFunc(handler.HealthCheck)))
@@ -283,7 +273,8 @@ func NewServerWithComponentNamespace(port int, k8sClient client.Client, clientse
 
 	// User group management endpoints - admin only
 	mux.Handle(GroupsPath, authMw.RequireAuth(http.HandlerFunc(handler.GroupsRouter)))
-	mux.Handle(IdentityProvidersPath+"/", authMw.RequireAuth(http.HandlerFunc(handler.ListExternalGroups)))
+	mux.Handle(IdentityProvidersPath, authMw.RequireAuth(http.HandlerFunc(handler.IdentityProviders)))
+	mux.Handle(IdentityProvidersPath+"/", authMw.RequireAuth(http.HandlerFunc(handler.IdentityProvidersRouter)))
 	mux.Handle(IdentityBlocksPath, authMw.RequireAuth(http.HandlerFunc(handler.IdentityBlocks)))
 	mux.Handle(IdentityBlocksPath+"/", authMw.RequireAuth(http.HandlerFunc(handler.IdentityBlocks)))
 	mux.Handle(GroupsPath+"/", authMw.RequireAuth(http.HandlerFunc(handler.GroupsRouter)))
@@ -440,6 +431,7 @@ func (s *Server) SetIdentityAPIReader(reader client.Reader) {
 	}
 	s.identityChecker.identityReader = reader
 	s.handler.identityReader = reader
+	s.handler.providerStore.reader = reader
 }
 
 // Start starts the API server

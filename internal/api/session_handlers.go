@@ -2,8 +2,10 @@ package api
 
 import (
 	"net/http"
+	"sort"
 
 	"github.com/krkn-chaos/krkn-operator/pkg/auth"
+	"github.com/krkn-chaos/krkn-operator/pkg/groupauth"
 )
 
 // GetSession returns the current principal and a CSRF token for cookie sessions.
@@ -19,10 +21,21 @@ func (h *Handler) GetSession(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusUnauthorized, ErrorResponse{Error: "unauthorized", Message: "Login required"})
 		return
 	}
+	groups, err := groupauth.GetUserGroups(r.Context(), h.client, claims.UserID, h.namespace)
+	if err != nil {
+		writeJSONError(w, http.StatusServiceUnavailable, ErrorResponse{Error: "groups_unavailable", Message: "Cannot resolve current group mappings"})
+		return
+	}
+	mappedGroups := make([]string, 0, len(groups))
+	for _, group := range groups {
+		mappedGroups = append(mappedGroups, group.Name)
+	}
+	sort.Strings(mappedGroups)
 	writeJSON(w, http.StatusOK, struct {
-		UserID    string `json:"userId"`
-		Role      string `json:"role"`
-		Provider  string `json:"provider,omitempty"`
-		CSRFToken string `json:"csrfToken,omitempty"`
-	}{claims.UserID, claims.Role, claims.Provider, claims.CSRFToken})
+		UserID       string   `json:"userId"`
+		Role         string   `json:"role"`
+		Provider     string   `json:"provider,omitempty"`
+		MappedGroups []string `json:"mappedGroups"`
+		CSRFToken    string   `json:"csrfToken,omitempty"`
+	}{claims.UserID, claims.Role, claims.Provider, mappedGroups, claims.CSRFToken})
 }

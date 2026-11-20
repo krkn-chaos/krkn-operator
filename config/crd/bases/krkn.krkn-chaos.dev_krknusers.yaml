@@ -72,8 +72,8 @@ spec:
               Local users have a password Secret; external OIDC users have an issuer and subject instead.
             properties:
               authProvider:
-                description: AuthProvider is empty for local users or the configured
-                  OIDC provider alias.
+                description: AuthProvider is empty for local users or the immutable
+                  OIDC provider ID.
                 type: string
               externalEmail:
                 type: string

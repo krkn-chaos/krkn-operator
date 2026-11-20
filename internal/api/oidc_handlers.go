@@ -6,7 +6,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"net/http"
-	"os"
+	"strings"
 	"time"
 
 	"golang.org/x/oauth2"
@@ -16,20 +16,40 @@ import (
 	"github.com/krkn-chaos/krkn-operator/pkg/identity"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 const oidcStateCookie = "krkn_oidc_state"
 
-// keycloakLoginConfig is intentionally distinct from the Admin API service
-// client. Only the public OIDC login client receives user authentication codes.
-func keycloakLoginConfig() (identity.OIDCAuthenticator, error) {
-	if os.Getenv("KEYCLOAK_OIDC_CLIENT_SECRET") == "" {
-		return nil, fmt.Errorf("Keycloak OIDC client secret is required")
+// oidcLoginConfig reads the current provider Secret on each login. This keeps
+// enable/disable and credential rotation consistent across operator replicas.
+func (h *Handler) oidcLoginConfig(ctx context.Context, id string) (identity.OIDCAuthenticator, error) {
+	config, err := h.providerStore.get(ctx, id)
+	if err != nil {
+		return nil, err
 	}
-	return identity.NewOIDCClient("keycloak", os.Getenv("KEYCLOAK_ISSUER_URL"),
-		os.Getenv("KEYCLOAK_OIDC_CLIENT_ID"), os.Getenv("KEYCLOAK_OIDC_CLIENT_SECRET"),
-		os.Getenv("KEYCLOAK_OIDC_REDIRECT_URL"), nil)
+	if !config.Enabled {
+		return nil, fmt.Errorf("identity provider is disabled")
+	}
+	return identity.NewOIDCClient(config.ID, config.Issuer, config.ClientID, config.ClientSecret, config.RedirectURL, nil)
+}
+
+// OIDCRouter handles /api/v1/auth/oidc/{providerID}/{login|callback}.
+func (h *Handler) OIDCRouter(w http.ResponseWriter, r *http.Request) {
+	parts := strings.Split(strings.TrimPrefix(r.URL.Path, OIDCBasePath+"/"), "/")
+	if len(parts) != 2 || !validProviderID(parts[0]) {
+		http.NotFound(w, r)
+		return
+	}
+	switch parts[1] {
+	case "login":
+		h.startOIDCLogin(w, r, parts[0])
+	case "callback":
+		h.completeOIDCLogin(w, r, parts[0])
+	default:
+		http.NotFound(w, r)
+	}
 }
 
 func randomURLValue() (string, error) {
@@ -42,11 +62,15 @@ func randomURLValue() (string, error) {
 
 // StartKeycloakLogin starts Authorization Code + PKCE with state and nonce.
 func (h *Handler) StartKeycloakLogin(w http.ResponseWriter, r *http.Request) {
+	h.startOIDCLogin(w, r, "keycloak")
+}
+
+func (h *Handler) startOIDCLogin(w http.ResponseWriter, r *http.Request, id string) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	provider, err := keycloakLoginConfig()
+	provider, err := h.oidcLoginConfig(r.Context(), id)
 	if err != nil {
 		http.Error(w, "Keycloak login unavailable", http.StatusServiceUnavailable)
 		return
@@ -67,12 +91,13 @@ func (h *Handler) StartKeycloakLogin(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Login unavailable", http.StatusInternalServerError)
 		return
 	}
-	signed, err := tokenGen.SignOIDCState(state, nonce, verifier)
+	signed, err := tokenGen.SignOIDCProviderState(id, state, nonce, verifier)
 	if err != nil {
 		http.Error(w, "Login unavailable", http.StatusInternalServerError)
 		return
 	}
-	http.SetCookie(w, &http.Cookie{Name: oidcStateCookie, Value: signed, Path: KeycloakCallback,
+	callbackPath := OIDCBasePath + "/" + id + "/callback"
+	http.SetCookie(w, &http.Cookie{Name: oidcStateCookie, Value: signed, Path: callbackPath,
 		HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode, MaxAge: 300})
 	authURL, err := provider.AuthCodeURL(r.Context(), state, nonce, verifier)
 	if err != nil {
@@ -85,6 +110,10 @@ func (h *Handler) StartKeycloakLogin(w http.ResponseWriter, r *http.Request) {
 // CompleteKeycloakLogin verifies Keycloak's ID token and issues only an
 // operator browser session. No Keycloak token is sent to the console.
 func (h *Handler) CompleteKeycloakLogin(w http.ResponseWriter, r *http.Request) {
+	h.completeOIDCLogin(w, r, "keycloak")
+}
+
+func (h *Handler) completeOIDCLogin(w http.ResponseWriter, r *http.Request, id string) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -94,7 +123,7 @@ func (h *Handler) CompleteKeycloakLogin(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "Missing login state", http.StatusUnauthorized)
 		return
 	}
-	http.SetCookie(w, &http.Cookie{Name: oidcStateCookie, Path: KeycloakCallback, MaxAge: -1,
+	http.SetCookie(w, &http.Cookie{Name: oidcStateCookie, Path: OIDCBasePath + "/" + id + "/callback", MaxAge: -1,
 		HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})
 	tokenGen, err := h.getTokenGenerator()
 	if err != nil {
@@ -102,11 +131,11 @@ func (h *Handler) CompleteKeycloakLogin(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	state, err := tokenGen.VerifyOIDCState(cookie.Value)
-	if err != nil || r.URL.Query().Get("state") != state.State || r.URL.Query().Get("code") == "" {
+	if err != nil || state.Provider != id || r.URL.Query().Get("state") != state.State || r.URL.Query().Get("code") == "" {
 		http.Error(w, "Invalid login response", http.StatusUnauthorized)
 		return
 	}
-	provider, err := keycloakLoginConfig()
+	provider, err := h.oidcLoginConfig(r.Context(), id)
 	if err != nil {
 		http.Error(w, "Keycloak login unavailable", http.StatusServiceUnavailable)
 		return
@@ -119,16 +148,25 @@ func (h *Handler) CompleteKeycloakLogin(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	key := principal.Identity
+	config, err := h.providerStore.get(ctx, id)
+	if err != nil || !config.Enabled || config.Issuer != key.Issuer {
+		http.Error(w, "Identity provider unavailable", http.StatusServiceUnavailable)
+		return
+	}
 
 	user, err := h.ensureExternalUser(ctx, key, principal)
 	if err != nil {
 		http.Error(w, "External account blocked or unavailable", http.StatusForbidden)
 		return
 	}
+	if err := h.recordExternalLastLogin(ctx, user); err != nil {
+		http.Error(w, "External account unavailable", http.StatusServiceUnavailable)
+		return
+	}
 	userID := user.Spec.UserID
 	session, err := tokenGen.GenerateSessionToken(auth.Claims{UserID: userID, Role: "user",
 		Name: principal.GivenName, Surname: principal.FamilyName,
-		Provider: key.Provider, Groups: principal.Groups,
+		Provider: key.Provider, ProviderEpoch: config.SessionEpoch, Groups: principal.Groups,
 		ExternalIssuer: key.Issuer, ExternalSubject: key.Subject, AccountUID: string(user.UID)})
 	if err != nil {
 		http.Error(w, "Session unavailable", http.StatusInternalServerError)
@@ -137,6 +175,20 @@ func (h *Handler) CompleteKeycloakLogin(w http.ResponseWriter, r *http.Request) 
 	http.SetCookie(w, &http.Cookie{Name: auth.SessionCookieName, Value: session, Path: "/",
 		HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode, MaxAge: int((8 * time.Hour).Seconds())})
 	http.Redirect(w, r, "/", http.StatusFound)
+}
+
+func (h *Handler) recordExternalLastLogin(ctx context.Context, user *krknv1alpha1.KrknUser) error {
+	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		var current krknv1alpha1.KrknUser
+		if err := h.identityReader.Get(ctx, client.ObjectKeyFromObject(user), &current); err != nil {
+			return err
+		}
+		if current.UID != user.UID || !current.Status.Active {
+			return fmt.Errorf("OIDC account changed during login")
+		}
+		current.Status.LastLogin = metav1.Now()
+		return h.client.Status().Update(ctx, &current)
+	})
 }
 
 // ensureExternalUser creates a user account on first OIDC login. Blocks are

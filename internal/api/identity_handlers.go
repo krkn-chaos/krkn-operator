@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -13,6 +14,16 @@ import (
 // Provider names are unique; replacing an existing name is intentional.
 func (h *Handler) RegisterGroupDirectory(directory identity.GroupDirectory) {
 	h.groupDirectories[directory.Provider()] = directory
+}
+
+// IdentityProvidersRouter sends group discovery to its adapter and all other
+// provider paths to the admin configuration API.
+func (h *Handler) IdentityProvidersRouter(w http.ResponseWriter, r *http.Request) {
+	if strings.HasSuffix(r.URL.Path, "/groups") {
+		h.ListExternalGroups(w, r)
+		return
+	}
+	h.IdentityProviders(w, r)
 }
 
 // ListExternalGroups handles GET /api/v1/identity-providers/{provider}/groups.
@@ -35,8 +46,25 @@ func (h *Handler) ListExternalGroups(w http.ResponseWriter, r *http.Request) {
 	}
 	directory, exists := h.groupDirectories[parts[0]]
 	if !exists {
-		http.NotFound(w, r)
-		return
+		config, err := h.providerStore.get(r.Context(), parts[0])
+		if err != nil {
+			if errors.Is(err, errIdentityProviderNotFound) {
+				http.NotFound(w, r)
+			} else {
+				writeJSONError(w, http.StatusBadGateway, ErrorResponse{Error: "provider_unavailable", Message: "Cannot read identity provider"})
+			}
+			return
+		}
+		if config.AdminClientID == "" || config.AdminClientSecret == "" {
+			writeJSONError(w, http.StatusServiceUnavailable, ErrorResponse{Error: "provider_unavailable", Message: "Group discovery credentials are not configured"})
+			return
+		}
+		directory, err = identity.NewKeycloakDirectory(config.ID, config.Issuer,
+			config.AdminClientID, config.AdminClientSecret, nil)
+		if err != nil {
+			writeJSONError(w, http.StatusBadGateway, ErrorResponse{Error: "provider_unavailable", Message: "Invalid group discovery configuration"})
+			return
+		}
 	}
 	first, err := strconv.Atoi(r.URL.Query().Get("first"))
 	if r.URL.Query().Get("first") == "" {

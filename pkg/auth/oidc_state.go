@@ -10,6 +10,7 @@ import (
 // OIDCState records the login transaction in a short-lived, signed cookie.
 // It is not a user session and cannot be used as an API credential.
 type OIDCState struct {
+	Provider string `json:"provider,omitempty"`
 	State    string `json:"state"`
 	Nonce    string `json:"nonce"`
 	Verifier string `json:"verifier"`
@@ -18,11 +19,16 @@ type OIDCState struct {
 
 // SignOIDCState signs a five-minute login transaction without server storage.
 func (tg *TokenGenerator) SignOIDCState(state, nonce, verifier string) (string, error) {
+	return tg.SignOIDCProviderState("", state, nonce, verifier)
+}
+
+// SignOIDCProviderState also binds a login transaction to one provider ID.
+func (tg *TokenGenerator) SignOIDCProviderState(provider, state, nonce, verifier string) (string, error) {
 	if state == "" || nonce == "" || verifier == "" {
 		return "", fmt.Errorf("incomplete OIDC state")
 	}
 	now := time.Now()
-	claims := OIDCState{State: state, Nonce: nonce, Verifier: verifier,
+	claims := OIDCState{Provider: provider, State: state, Nonce: nonce, Verifier: verifier,
 		RegisteredClaims: jwt.RegisteredClaims{Issuer: tg.issuer, Subject: "oidc-state",
 			IssuedAt: jwt.NewNumericDate(now), ExpiresAt: jwt.NewNumericDate(now.Add(5 * time.Minute))}}
 	return jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString(tg.secretKey)

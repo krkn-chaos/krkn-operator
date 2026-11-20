@@ -18,6 +18,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -35,6 +36,7 @@ import (
 type k8sUserStatusChecker struct {
 	k8sClient      client.Client
 	identityReader client.Reader
+	providerStore  *identityProviderStore
 	namespace      string
 }
 
@@ -83,6 +85,21 @@ func (c *k8sUserStatusChecker) IsUserActive(ctx context.Context, userID string) 
 // session if an account is deleted and later auto-created again.
 func (c *k8sUserStatusChecker) IsExternalIdentityActive(ctx context.Context, claims *auth.Claims) (bool, error) {
 	key := identity.ExternalIdentity{Provider: claims.Provider, Issuer: claims.ExternalIssuer, Subject: claims.ExternalSubject}
+	if c.providerStore != nil {
+		provider, err := c.providerStore.get(ctx, key.Provider)
+		if apierrors.IsNotFound(err) {
+			return false, nil
+		}
+		if err != nil {
+			if errors.Is(err, errIdentityProviderNotFound) {
+				return false, nil
+			}
+			return false, fmt.Errorf("check OIDC provider: %w", err)
+		}
+		if !provider.Enabled || provider.Issuer != key.Issuer || provider.SessionEpoch != claims.ProviderEpoch {
+			return false, nil
+		}
+	}
 	userID, err := key.UserID()
 	if err != nil || claims.UserID != userID || claims.AccountUID == "" {
 		return false, nil

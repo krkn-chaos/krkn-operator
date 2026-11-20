@@ -319,6 +319,7 @@ func (e *scenarioCatalogError) Unwrap() error {
 type Handler struct {
 	client                  client.Client
 	identityReader          client.Reader
+	providerStore           *identityProviderStore
 	clientset               kubernetes.Interface
 	namespace               string
 	componentNamespace      string
@@ -363,6 +364,7 @@ func NewHandler(k8sClient client.Client, clientset kubernetes.Interface, namespa
 	return &Handler{
 		client:                       k8sClient,
 		identityReader:               k8sClient,
+		providerStore:                newIdentityProviderStore(k8sClient, namespace),
 		clientset:                    clientset,
 		namespace:                    namespace,
 		grpcServerAddr:               grpcServerAddr,

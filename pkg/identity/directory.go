@@ -15,7 +15,8 @@ type Group struct {
 	ClaimValue string `json:"claimValue"`
 }
 
-// GroupDirectory lists groups in one configured identity provider.
+// GroupDirectory lists groups in one configured identity provider. Provider()
+// returns its immutable configuration ID, never just the product type.
 // Implementations must propagate context cancellation and return only groups
 // visible to their service identity. A blank query may return the first page.
 type GroupDirectory interface {

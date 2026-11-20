@@ -77,6 +77,11 @@ func TestOIDCDeleteAndBlacklist(t *testing.T) {
 	if list.Code != http.StatusOK || !strings.Contains(list.Body.String(), "tullio") {
 		t.Fatalf("list status=%d body=%s", list.Code, list.Body.String())
 	}
+	filtered := httptest.NewRecorder()
+	h.IdentityBlocks(filtered, httptest.NewRequest(http.MethodGet, IdentityBlocksPath+"?authProvider=other", nil).WithContext(createAdminContext()))
+	if filtered.Code != http.StatusOK || strings.Contains(filtered.Body.String(), "tullio") {
+		t.Fatalf("filtered blocks status=%d body=%s", filtered.Code, filtered.Body.String())
+	}
 	remove := httptest.NewRecorder()
 	h.IdentityBlocks(remove, httptest.NewRequest(http.MethodDelete, IdentityBlocksPath+"/"+name, nil).WithContext(createAdminContext()))
 	if remove.Code != http.StatusNoContent {
