@@ -259,7 +259,7 @@ func (h *Handler) ListWorkflows(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		for i := range workflowList {
-			workflowList[i].Categories = filterVisibleWorkflowCategories(workflowList[i].Categories, visibleCategories)
+			workflowList[i].Categories = filterVisibleCategories(workflowList[i].Categories, visibleCategories)
 		}
 	}
 
@@ -325,7 +325,7 @@ func (h *Handler) ListAvailableWorkflows(w http.ResponseWriter, r *http.Request)
 			return
 		}
 		for i := range workflowList {
-			workflowList[i].Categories = filterVisibleWorkflowCategories(workflowList[i].Categories, visibleCategories)
+			workflowList[i].Categories = filterVisibleCategories(workflowList[i].Categories, visibleCategories)
 		}
 	}
 
@@ -390,7 +390,7 @@ func (h *Handler) GetWorkflow(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
-		workflowResp.Categories = filterVisibleWorkflowCategories(workflowResp.Categories, visibleCategories)
+		workflowResp.Categories = filterVisibleCategories(workflowResp.Categories, visibleCategories)
 	}
 
 	logger.Info("Retrieved workflow", "workflowID", workflowID)
@@ -578,7 +578,10 @@ func validateWorkflowCategories(categories []string) error {
 	return nil
 }
 
-func filterVisibleWorkflowCategories(categories []string, visible map[string]struct{}) []string {
+// filterVisibleCategories drops category names the caller cannot see. It is
+// shared by run, workflow and file responses so none of them disclose private
+// category names.
+func filterVisibleCategories(categories []string, visible map[string]struct{}) []string {
 	filtered := make([]string, 0, len(categories))
 	for _, name := range categories {
 		if _, ok := visible[name]; ok {
@@ -956,8 +959,14 @@ func (h *Handler) updateFileInternal(ctx context.Context, fileID string, req fil
 	// Get current user for audit trail
 	updatedBy := claims.UserID
 
-	// Update labels and annotations (preserve existing file ID)
+	// Update labels and annotations (preserve existing file ID).
+	// Workflow requests do not carry a file-category selection (their own
+	// categories live in an annotation), so associations assigned through the
+	// file API are carried over unchanged instead of being dropped by the label
+	// rebuild.
+	existingCategories := files.ExtractCategoriesFromLabels(configMap.Labels)
 	configMap.Labels = files.BuildFileLabels(fileID, req.Groups, req.AvailableToAll, req.FilePurpose, newLogicalName)
+	files.ApplyCategories(configMap.Labels, existingCategories)
 	configMap.Annotations = files.UpdateFileAnnotations(
 		configMap.Annotations,
 		req.Description,

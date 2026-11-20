@@ -23,6 +23,7 @@ import (
 	"strings"
 
 	"github.com/go-logr/logr"
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/util/validation"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -30,6 +31,7 @@ import (
 
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
 	"github.com/krkn-chaos/krkn-operator/pkg/auth"
+	"github.com/krkn-chaos/krkn-operator/pkg/files"
 	"github.com/krkn-chaos/krkn-operator/pkg/groupauth"
 )
 
@@ -71,6 +73,30 @@ func (h *Handler) removeCategoryAssociations(ctx context.Context, categoryName s
 		removeCategoryLabel(run, labelKey)
 		if err := h.client.Patch(ctx, run, client.MergeFrom(original)); err != nil && !apierrors.IsNotFound(err) {
 			return fmt.Errorf("remove category label from KrknGraphRun %q: %w", run.Name, err)
+		}
+	}
+
+	// Files are ConfigMaps, not CRs, and they share the namespace with unrelated
+	// ConfigMaps. The category label alone does not identify a file, so the file
+	// component label is required as well; otherwise deleting a category would
+	// strip the label from any object that happens to carry it.
+	fileListOptions := []client.ListOption{
+		client.InNamespace(h.namespace),
+		client.MatchingLabels{
+			labelKey:                "true",
+			files.AppComponentLabel: files.ComponentFile,
+		},
+	}
+	fileConfigMaps := &corev1.ConfigMapList{}
+	if err := h.client.List(ctx, fileConfigMaps, fileListOptions...); err != nil {
+		return fmt.Errorf("list file category associations: %w", err)
+	}
+	for i := range fileConfigMaps.Items {
+		configMap := &fileConfigMaps.Items[i]
+		original := configMap.DeepCopy()
+		removeCategoryLabel(configMap, labelKey)
+		if err := h.client.Patch(ctx, configMap, client.MergeFrom(original)); err != nil && !apierrors.IsNotFound(err) {
+			return fmt.Errorf("remove category label from file %q: %w", configMap.Name, err)
 		}
 	}
 

@@ -37,6 +37,9 @@ type CreateFileRequest struct {
 	AvailableToAll bool `json:"availableToAll,omitempty"`
 	// FilePurpose is an optional system-level classification (e.g., "workflow-template")
 	FilePurpose string `json:"filePurpose,omitempty"`
+	// Categories are the category names assigned to this file. They are stored as
+	// ConfigMap labels and use the same identifier as run category associations.
+	Categories []string `json:"categories,omitempty"`
 	// WorkflowCategories is internal workflow metadata; generic file APIs do not expose it.
 	WorkflowCategories []string `json:"-"`
 }
@@ -67,6 +70,9 @@ type UpdateFileRequest struct {
 	AvailableToAll bool `json:"availableToAll,omitempty"`
 	// FilePurpose is an optional system-level classification (e.g., "workflow-template")
 	FilePurpose string `json:"filePurpose,omitempty"`
+	// Categories replaces the file's category associations. Nil preserves the
+	// existing assignments; a non-nil empty list clears them.
+	Categories *[]string `json:"categories,omitempty"`
 	// WorkflowCategories is internal workflow metadata. Nil preserves assignments;
 	// a non-nil empty list clears them.
 	WorkflowCategories *[]string `json:"-"`
@@ -102,6 +108,11 @@ type FileResponse struct {
 	Description string `json:"description,omitempty"`
 	// FilePurpose is the system-level classification (e.g., "workflow-template")
 	FilePurpose string `json:"filePurpose,omitempty"`
+	// Categories are the category names assigned to this file, sorted and
+	// filtered to the categories the caller can see. The field is always
+	// present so clients can distinguish "no categories" from an operator that
+	// does not support file categories.
+	Categories []string `json:"categories"`
 	// Groups is a list of group names that can access this file
 	Groups []string `json:"groups,omitempty"`
 	// AvailableToAll makes the file accessible to all users
@@ -126,6 +137,11 @@ type FileInfo struct {
 	Description string `json:"description,omitempty"`
 	// FilePurpose is the system-level classification (e.g., "workflow-template")
 	FilePurpose string `json:"filePurpose,omitempty"`
+	// Categories are the category names assigned to this file, sorted and
+	// filtered to the categories the caller can see. The field is always
+	// present so clients can distinguish "no categories" from an operator that
+	// does not support file categories.
+	Categories []string `json:"categories"`
 	// Groups is a list of group names that can access this file.
 	Groups []string `json:"groups,omitempty"`
 	// AvailableToAll indicates whether the file is accessible to all users.

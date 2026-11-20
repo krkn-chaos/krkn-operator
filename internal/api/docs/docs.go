@@ -802,7 +802,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Create a new file ConfigMap. Users can create files for their own groups or public files. Admins can create files for any group. Cannot create workflow-template files (use POST /api/v1/workflows instead).",
+                "description": "Create a new file ConfigMap. Users can create files for their own groups or public files. Admins can create files for any group. Cannot create workflow-template files (use POST /api/v1/workflows instead). Optional ` + "`" + `categories` + "`" + ` associate the file with existing categories the caller can see.",
                 "consumes": [
                     "application/json"
                 ],
@@ -5531,6 +5531,13 @@ const docTemplate = `{
                     "description": "AvailableToAll makes the file accessible to all users",
                     "type": "boolean"
                 },
+                "categories": {
+                    "description": "Categories are the category names assigned to this file. They are stored as\nConfigMap labels and use the same identifier as run category associations.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "content": {
                     "description": "Content is the file content",
                     "type": "string"
@@ -5582,6 +5589,13 @@ const docTemplate = `{
                 "availableToAll": {
                     "description": "AvailableToAll indicates whether the file is accessible to all users.",
                     "type": "boolean"
+                },
+                "categories": {
+                    "description": "Categories are the category names assigned to this file, sorted and\nfiltered to the categories the caller can see. The field is always\npresent so clients can distinguish \"no categories\" from an operator that\ndoes not support file categories.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
                 },
                 "createdAt": {
                     "description": "CreatedAt is the timestamp when the file was created (ISO 8601)",
@@ -5635,6 +5649,13 @@ const docTemplate = `{
                 "availableToAll": {
                     "description": "AvailableToAll makes the file accessible to all users",
                     "type": "boolean"
+                },
+                "categories": {
+                    "description": "Categories are the category names assigned to this file, sorted and\nfiltered to the categories the caller can see. The field is always\npresent so clients can distinguish \"no categories\" from an operator that\ndoes not support file categories.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
                 },
                 "content": {
                     "description": "Content is the file content",

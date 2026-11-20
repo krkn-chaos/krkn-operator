@@ -600,7 +600,7 @@ func (h *Handler) CreateGraphRun(w http.ResponseWriter, r *http.Request) {
 	// Generate unique name for the graph run
 	graphRunName := fmt.Sprintf("graphrun-%s", uuid.New().String()[:8])
 	labels := make(map[string]string)
-	if !h.addRequestedRunCategoryLabels(w, r, req.Categories, labels) {
+	if !h.addRequestedCategoryLabels(w, r, req.Categories, labels) {
 		return
 	}
 
