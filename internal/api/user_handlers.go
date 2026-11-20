@@ -35,6 +35,7 @@ import (
 
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
 	"github.com/krkn-chaos/krkn-operator/pkg/auth"
+	"github.com/krkn-chaos/krkn-operator/pkg/identity"
 )
 
 // fetchUserByEmail retrieves a KrknUser by email address (UserID).
@@ -68,22 +69,28 @@ func buildUserResponse(user *krknv1alpha1.KrknUser) UserResponse {
 	}
 
 	return UserResponse{
-		UserID:       user.Spec.UserID,
-		Name:         user.Spec.Name,
-		Surname:      user.Spec.Surname,
-		Organization: user.Spec.Organization,
-		Role:         user.Spec.Role,
-		Active:       user.Status.Active,
-		Created:      created,
-		LastLogin:    lastLogin,
+		UserID:           user.Spec.UserID,
+		Name:             user.Spec.Name,
+		Surname:          user.Spec.Surname,
+		Organization:     user.Spec.Organization,
+		AuthProvider:     user.Spec.AuthProvider,
+		ExternalUsername: user.Spec.ExternalUsername,
+		ExternalEmail:    user.Spec.ExternalEmail,
+		Role:             user.Spec.Role,
+		Active:           user.Status.Active,
+		Created:          created,
+		LastLogin:        lastLogin,
 	}
 }
 
 // filterUsers filters users by role, active status, and search term
-func filterUsers(users []krknv1alpha1.KrknUser, role, activeParam, search string) []krknv1alpha1.KrknUser {
+func filterUsers(users []krknv1alpha1.KrknUser, role, activeParam, search, authProvider string) []krknv1alpha1.KrknUser {
 	filtered := make([]krknv1alpha1.KrknUser, 0)
 
 	for _, user := range users {
+		if authProvider != "" && user.Spec.AuthProvider != authProvider {
+			continue
+		}
 		// Filter by role
 		if role != "" && user.Spec.Role != role {
 			continue
@@ -97,12 +104,14 @@ func filterUsers(users []krknv1alpha1.KrknUser, role, activeParam, search string
 			}
 		}
 
-		// Filter by search term (email, name, or surname)
+		// Filter by local ID, display name, or OIDC username/email.
 		if search != "" {
 			searchLower := strings.ToLower(search)
 			if !strings.Contains(strings.ToLower(user.Spec.UserID), searchLower) &&
 				!strings.Contains(strings.ToLower(user.Spec.Name), searchLower) &&
-				!strings.Contains(strings.ToLower(user.Spec.Surname), searchLower) {
+				!strings.Contains(strings.ToLower(user.Spec.Surname), searchLower) &&
+				!strings.Contains(strings.ToLower(user.Spec.ExternalUsername), searchLower) &&
+				!strings.Contains(strings.ToLower(user.Spec.ExternalEmail), searchLower) {
 				continue
 			}
 		}
@@ -146,6 +155,7 @@ func (h *Handler) ListUsers(w http.ResponseWriter, r *http.Request) {
 	role := r.URL.Query().Get("role")
 	activeParam := r.URL.Query().Get("active")
 	search := r.URL.Query().Get("search")
+	authProvider := r.URL.Query().Get("authProvider")
 
 	// List all KrknUser CRDs
 	var users krknv1alpha1.KrknUserList
@@ -164,7 +174,7 @@ func (h *Handler) ListUsers(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Filter users
-	filtered := filterUsers(users.Items, role, activeParam, search)
+	filtered := filterUsers(users.Items, role, activeParam, search, authProvider)
 
 	// Paginate (users always paginate with default limit=50)
 	page, limit := ParsePaginationParams(r, 50)
@@ -534,6 +544,11 @@ func (h *Handler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if user.Spec.AuthProvider != "" && req.Role != nil && *req.Role != "user" {
+		writeJSONError(w, http.StatusBadRequest, ErrorResponse{Error: "validation_error", Message: "OIDC users cannot be local admins"})
+		return
+	}
+
 	// Validate role if provided
 	if req.Role != nil && *req.Role != "user" && *req.Role != "admin" {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
@@ -576,7 +591,9 @@ func (h *Handler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 		user.Status.Active = *req.Active
 		if err := h.client.Status().Update(ctx, user); err != nil {
 			logger.Error(err, "Failed to update user status", "userID", userID)
-			// Non-critical, continue
+			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+				Error: "internal_error", Message: "Failed to update account status"})
+			return
 		}
 	}
 
@@ -680,6 +697,26 @@ func (h *Handler) DeleteUser(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	rawBlacklist := r.URL.Query().Get("blacklist")
+	if rawBlacklist != "" && rawBlacklist != "true" && rawBlacklist != "false" {
+		writeJSONError(w, http.StatusBadRequest, ErrorResponse{Error: "bad_request", Message: "blacklist must be true or false"})
+		return
+	}
+	blacklist := rawBlacklist == "true"
+	if blacklist {
+		if user.Spec.AuthProvider == "" || user.Spec.ExternalIssuer == "" || user.Spec.ExternalSubject == "" {
+			writeJSONError(w, http.StatusBadRequest, ErrorResponse{Error: "bad_request", Message: "Only OIDC users can be blacklisted"})
+			return
+		}
+		key := identity.ExternalIdentity{Provider: user.Spec.AuthProvider, Issuer: user.Spec.ExternalIssuer,
+			Subject: user.Spec.ExternalSubject}
+		if err := h.createOIDCBlock(ctx, key, user.Spec.ExternalUsername, user.Spec.ExternalEmail); err != nil {
+			logger.Error(err, "Failed to block OIDC identity")
+			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{Error: "internal_error", Message: "Failed to block OIDC identity"})
+			return
+		}
+	}
+
 	// Delete password secret first
 	secret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
@@ -687,9 +724,10 @@ func (h *Handler) DeleteUser(w http.ResponseWriter, r *http.Request) {
 			Namespace: h.namespace,
 		},
 	}
-	if err := h.client.Delete(ctx, secret); err != nil && !apierrors.IsNotFound(err) {
-		logger.Error(err, "Failed to delete password secret", "secret", user.Spec.PasswordSecretRef)
-		// Continue anyway - delete user even if secret cleanup fails
+	if user.Spec.PasswordSecretRef != "" {
+		if err := h.client.Delete(ctx, secret); err != nil && !apierrors.IsNotFound(err) {
+			logger.Error(err, "Failed to delete password secret", "secret", user.Spec.PasswordSecretRef)
+		}
 	}
 
 	// Delete user
@@ -704,9 +742,11 @@ func (h *Handler) DeleteUser(w http.ResponseWriter, r *http.Request) {
 
 	logger.Info("User deleted successfully", "userID", userID)
 
-	writeJSON(w, http.StatusOK, DeleteUserResponse{
-		Message: "User deleted successfully",
-	})
+	message := "User deleted successfully"
+	if blacklist {
+		message = "User deleted and OIDC identity blocked"
+	}
+	writeJSON(w, http.StatusOK, DeleteUserResponse{Message: message})
 }
 
 // ChangePassword handles PATCH /api/v1/users/:userID/password
@@ -782,6 +822,11 @@ func (h *Handler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get password secret
+	if user.Spec.AuthProvider != "" || user.Spec.PasswordSecretRef == "" {
+		writeJSONError(w, http.StatusBadRequest, ErrorResponse{Error: "bad_request", Message: "OIDC accounts have no local password"})
+		return
+	}
+
 	secret := &corev1.Secret{}
 	secretKey := client.ObjectKey{
 		Namespace: h.namespace,

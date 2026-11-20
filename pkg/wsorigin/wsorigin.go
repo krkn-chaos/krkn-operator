@@ -18,8 +18,9 @@ limitations under the License.
 // It is shared by the v1 and v2 API WebSocket upgraders so the origin policy
 // stays consistent and is defined in a single place.
 //
-// Origin enforcement is OPT-IN. By default (no allow-list configured) all
-// origins are accepted, which restores the pre-hardening behavior and avoids
+// Origin enforcement for legacy JWT-subprotocol sockets is OPT-IN. Cookie
+// sockets always use IsAllowedCookieOrigin. By default, legacy JWT sockets
+// accept all origins, which preserves their previous behavior and avoids
 // breaking deployments where the browser origin legitimately differs from the
 // API Host (a console served on a separate origin, or one behind a proxy that
 // rewrites the Host header). This is safe because WebSocket authentication uses
@@ -196,4 +197,32 @@ func defaultPort(scheme string) string {
 	default:
 		return ""
 	}
+}
+
+// IsAllowedCookieOrigin enforces a strict Origin policy for ambient cookie
+// authentication. Unlike bearer-token WebSockets, missing and cross-origin
+// Origin values are rejected unless explicitly configured in the allow-list.
+func IsAllowedCookieOrigin(r *http.Request) bool {
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		return false
+	}
+	u, err := url.Parse(origin)
+	if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" || u.User != nil || u.Path != "" || u.RawQuery != "" || u.Fragment != "" {
+		return false
+	}
+	reqHost, reqPort := splitHostPort(r.Host)
+	originPort := u.Port()
+	if originPort == "" {
+		originPort = defaultPort(u.Scheme)
+	}
+	if reqHost == strings.ToLower(u.Hostname()) && portsMatch(reqPort, originPort, u.Scheme) {
+		return true
+	}
+	set := allowedOrigins.Load()
+	if set == nil {
+		return false
+	}
+	_, ok := (*set)[canonicalOrigin(u)]
+	return ok
 }

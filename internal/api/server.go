@@ -78,11 +78,12 @@ import (
 
 // Server represents the REST API server
 type Server struct {
-	server         *http.Server
-	handler        *Handler
-	v2Handler      *v2.Handler
-	authMiddleware *auth.Middleware
-	secretManager  *auth.SecretManager
+	server          *http.Server
+	handler         *Handler
+	v2Handler       *v2.Handler
+	authMiddleware  *auth.Middleware
+	identityChecker *k8sUserStatusChecker
+	secretManager   *auth.SecretManager
 	// cancelCleanup stops background goroutines (e.g., rate limiter cleanup).
 	// context.CancelFunc is idempotent, so Shutdown can be called multiple times
 	// safely without panicking.
@@ -149,14 +150,18 @@ func NewServerWithComponentNamespace(port int, k8sClient client.Client, clientse
 	// is still active by looking up the KrknUser CR. Uses a 1-minute TTL cache to
 	// avoid hitting the API server on every request.
 	userChecker := newK8sUserStatusChecker(k8sClient, namespace)
+	userChecker.providerStore = handler.providerStore
 	cachedChecker := auth.NewCachedUserStatusChecker(userChecker, 1*time.Minute)
 	authMw.SetUserStatusChecker(cachedChecker)
+	authMw.SetExternalIdentityChecker(userChecker)
 
 	// Create v2 handler (WebSocket support only, REST reuses v1 handlers)
 	getTokenGenCtx := func(ctx context.Context) (*auth.TokenGenerator, error) {
 		return secretManager.GetTokenGenerator()
 	}
-	v2Handler := v2.NewHandler(k8sClient, namespace, handler, getTokenGenCtx) // handler implements AuthorizationChecker
+	v2Handler := v2.NewHandler(k8sClient, namespace, handler, getTokenGenCtx)
+	v2Handler.WsHandler.SetExternalIdentityChecker(userChecker)
+	handler.externalIdentityChecker = userChecker // handler implements AuthorizationChecker
 
 	// Strict per-IP rate limiter for the login endpoint only: 5 requests per
 	// minute, burst of 10. Login is the password brute-force surface, so it is
@@ -182,10 +187,8 @@ func NewServerWithComponentNamespace(port int, k8sClient client.Client, clientse
 		}
 	}
 
-	// WebSocket Origin enforcement is opt-in. When configured, only same-origin
-	// requests and the listed origins may open WebSocket connections; when unset
-	// (default) all origins are accepted (auth is via a JWT subprotocol, not
-	// ambient cookies, so CSWSH does not apply).
+	// Cookie-authenticated WebSockets always require same-origin or an explicit
+	// allowed Origin. Legacy bearer-subprotocol sockets retain opt-in checks.
 	if raw := os.Getenv(WebSocketAllowedOriginsEnv); raw != "" {
 		origins := strings.Split(raw, ",")
 		invalid := wsorigin.SetAllowedOrigins(origins)
@@ -197,7 +200,7 @@ func NewServerWithComponentNamespace(port int, k8sClient client.Client, clientse
 		}
 	} else {
 		log.Log.WithName("websocket-origin").Info(
-			"WebSocket origin enforcement disabled; all origins allowed (auth is via JWT subprotocol)",
+			"WebSocket extra origins unset; cookie sockets require same-origin, legacy JWT sockets accept all origins",
 			"env", WebSocketAllowedOriginsEnv)
 	}
 
@@ -207,6 +210,17 @@ func NewServerWithComponentNamespace(port int, k8sClient client.Client, clientse
 	loginRateLimit := rateLimitMiddleware(loginRateLimiter)
 	publicAuthRateLimit := rateLimitMiddleware(publicAuthRateLimiter)
 
+	// Preserve legacy bearer-subprotocol WebSocket behavior. Cookie sockets
+	// pass through the full session/identity middleware before upgrade.
+	wsAuth := func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Header.Get("Sec-WebSocket-Protocol") != "" && r.Header.Get(auth.AuthorizationHeader) == "" {
+				next.ServeHTTP(w, r)
+				return
+			}
+			authMw.RequireAuth(next).ServeHTTP(w, r)
+		})
+	}
 	mux := http.NewServeMux()
 
 	// Public authentication endpoints (no auth required). Only login is strictly
@@ -214,6 +228,10 @@ func NewServerWithComponentNamespace(port int, k8sClient client.Client, clientse
 	mux.Handle(AuthIsRegistered, publicAuthRateLimit(http.HandlerFunc(handler.IsRegistered)))
 	mux.Handle(AuthRegister, publicAuthRateLimit(http.HandlerFunc(handler.Register)))
 	mux.Handle(AuthLogin, loginRateLimit(http.HandlerFunc(handler.Login)))
+	mux.Handle(AuthSession, authMw.RequireAuth(http.HandlerFunc(handler.GetSession)))
+	mux.Handle(AuthLogout, authMw.RequireAuth(http.HandlerFunc(handler.LogoutSession)))
+	mux.Handle(AuthProviders, publicAuthRateLimit(http.HandlerFunc(handler.PublicIdentityProviders)))
+	mux.Handle(OIDCBasePath+"/", publicAuthRateLimit(http.HandlerFunc(handler.OIDCRouter)))
 
 	// Authenticated endpoints - user and admin access
 	mux.Handle(HealthPath, authMw.RequireAuth(http.HandlerFunc(handler.HealthCheck)))
@@ -236,7 +254,7 @@ func NewServerWithComponentNamespace(port int, k8sClient client.Client, clientse
 		// Check if this is a WebSocket logs request
 		if strings.Contains(r.URL.Path, "/jobs/") && strings.HasSuffix(r.URL.Path, "/logs") {
 			// WebSocket endpoint - auth handled internally via subprotocol
-			handler.GetScenarioRunLogs(w, r)
+			wsAuth(http.HandlerFunc(handler.GetScenarioRunLogs)).ServeHTTP(w, r)
 			return
 		}
 		// All other ScenariosRunPath endpoints require HTTP JWT auth
@@ -255,6 +273,10 @@ func NewServerWithComponentNamespace(port int, k8sClient client.Client, clientse
 
 	// User group management endpoints - admin only
 	mux.Handle(GroupsPath, authMw.RequireAuth(http.HandlerFunc(handler.GroupsRouter)))
+	mux.Handle(IdentityProvidersPath, authMw.RequireAuth(http.HandlerFunc(handler.IdentityProviders)))
+	mux.Handle(IdentityProvidersPath+"/", authMw.RequireAuth(http.HandlerFunc(handler.IdentityProvidersRouter)))
+	mux.Handle(IdentityBlocksPath, authMw.RequireAuth(http.HandlerFunc(handler.IdentityBlocks)))
+	mux.Handle(IdentityBlocksPath+"/", authMw.RequireAuth(http.HandlerFunc(handler.IdentityBlocks)))
 	mux.Handle(GroupsPath+"/", authMw.RequireAuth(http.HandlerFunc(handler.GroupsRouter)))
 
 	// Registry management endpoints - CRUD: admin only, available: all users
@@ -308,7 +330,7 @@ func NewServerWithComponentNamespace(port int, k8sClient client.Client, clientse
 	mux.Handle(KrknAIPath, authMw.RequireAuth(http.HandlerFunc(handler.KrknAIRouter)))
 	mux.Handle(KrknAIPath+"/", authMw.RequireAuth(http.HandlerFunc(handler.KrknAIRouter)))
 	// Krkn-AI orchestrator logs authenticate with the JWT access_token subprotocol.
-	mux.HandleFunc("/api/v2/ws/krkn-ai/runs/", handler.GetKrknAIRunLogs)
+	mux.Handle("/api/v2/ws/krkn-ai/runs/", wsAuth(http.HandlerFunc(handler.GetKrknAIRunLogs)))
 
 	// Swagger UI - public endpoint for API documentation
 	mux.Handle("/api/swagger/", httpSwagger.WrapHandler)
@@ -338,7 +360,7 @@ func NewServerWithComponentNamespace(port int, k8sClient client.Client, clientse
 		// Check if this is a WebSocket logs request (same as v1)
 		if strings.Contains(r.URL.Path, "/jobs/") && strings.HasSuffix(r.URL.Path, "/logs") {
 			// WebSocket endpoint - auth handled internally via subprotocol
-			handler.GetScenarioRunLogs(w, r)
+			wsAuth(http.HandlerFunc(handler.GetScenarioRunLogs)).ServeHTTP(w, r)
 			return
 		}
 		// All other endpoints require HTTP JWT auth (reuse v1 router)
@@ -356,10 +378,10 @@ func NewServerWithComponentNamespace(port int, k8sClient client.Client, clientse
 
 	// v2 WebSocket endpoints (NEW - real-time multiplexed updates)
 	// WebSocket authentication is handled internally via Sec-WebSocket-Protocol header
-	mux.HandleFunc(v2.WebSocketRunsPath, v2Handler.WsHandler.HandleWebSocket)
-	mux.HandleFunc(v2.WebSocketGraphRunsPath, v2Handler.WsHandler.HandleWebSocket)
-	mux.HandleFunc(v2.WebSocketJobsPath, v2Handler.WsHandler.HandleWebSocket)
-	mux.HandleFunc(v2.WebSocketDashboardActiveRunsPath, v2Handler.WsHandler.HandleWebSocket)
+	mux.Handle(v2.WebSocketRunsPath, wsAuth(http.HandlerFunc(v2Handler.WsHandler.HandleWebSocket)))
+	mux.Handle(v2.WebSocketGraphRunsPath, wsAuth(http.HandlerFunc(v2Handler.WsHandler.HandleWebSocket)))
+	mux.Handle(v2.WebSocketJobsPath, wsAuth(http.HandlerFunc(v2Handler.WsHandler.HandleWebSocket)))
+	mux.Handle(v2.WebSocketDashboardActiveRunsPath, wsAuth(http.HandlerFunc(v2Handler.WsHandler.HandleWebSocket)))
 
 	// v2 WebSocket job logs streaming (reuse v1 handler, just different path)
 	// Path pattern: /api/v2/ws/scenarios/run/{scenarioRunName}/jobs/{jobID}/logs
@@ -367,7 +389,7 @@ func NewServerWithComponentNamespace(port int, k8sClient client.Client, clientse
 		// Check if this is a logs request (ends with /logs)
 		if strings.Contains(r.URL.Path, "/jobs/") && strings.HasSuffix(r.URL.Path, "/logs") {
 			// Reuse v1 handler (it handles path parsing for both v1 and v2)
-			handler.GetScenarioRunLogs(w, r)
+			wsAuth(http.HandlerFunc(handler.GetScenarioRunLogs)).ServeHTTP(w, r)
 			return
 		}
 		http.NotFound(w, r)
@@ -390,13 +412,26 @@ func NewServerWithComponentNamespace(port int, k8sClient client.Client, clientse
 	}
 
 	return &Server{
-		server:         server,
-		handler:        handler,
-		v2Handler:      v2Handler,
-		authMiddleware: authMw,
-		secretManager:  secretManager,
-		cancelCleanup:  cancelCleanup,
+		server:          server,
+		handler:         handler,
+		v2Handler:       v2Handler,
+		authMiddleware:  authMw,
+		secretManager:   secretManager,
+		identityChecker: userChecker,
+		cancelCleanup:   cancelCleanup,
 	}
+}
+
+// SetIdentityAPIReader installs an uncached reader for OIDC block and account
+// checks. Call this with manager.GetAPIReader() before starting the server so
+// a freshly written block is visible across operator replicas immediately.
+func (s *Server) SetIdentityAPIReader(reader client.Reader) {
+	if reader == nil {
+		return
+	}
+	s.identityChecker.identityReader = reader
+	s.handler.identityReader = reader
+	s.handler.providerStore.reader = reader
 }
 
 // Start starts the API server

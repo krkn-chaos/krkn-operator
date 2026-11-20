@@ -127,12 +127,10 @@ auth:
   # There IS an optional Origin-based access control for WebSocket upgrades
   # (cluster terminal, live log streaming), but it is OPT-IN and OFF by default:
   #
-  #   - Empty (default): all origins are accepted. This is safe because
-  #     WebSocket connections authenticate with a JWT sent in the
-  #     Sec-WebSocket-Protocol subprotocol (not browser cookies), so cross-site
-  #     WebSocket hijacking (CSWSH) is not exploitable — a malicious page cannot
-  #     read the origin-scoped token and therefore cannot connect.
-  #   - Non-empty: enables enforcement. Only same-origin requests and the listed
+  #   - Empty (default): legacy JWT-subprotocol sockets accept all origins.
+  #     Cookie-authenticated sockets still require a same-origin Origin.
+  #   - Non-empty: allows the listed origins for cookie sockets and enables
+  #     Origin enforcement for JWT-subprotocol sockets. Only same-origin and the listed
   #     origins may open WebSocket connections. Use this as optional
   #     defense-in-depth when you want to pin the allowed browser origins.
   #

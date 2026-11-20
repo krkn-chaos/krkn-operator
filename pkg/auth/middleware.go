@@ -20,11 +20,13 @@ package auth
 
 import (
 	"context"
+	"crypto/subtle"
 	"net/http"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/krkn-chaos/krkn-operator/pkg/wsorigin"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
@@ -32,6 +34,8 @@ import (
 type ContextKey string
 
 const (
+	// SessionCookieName is the operator session cookie name.
+	SessionCookieName = "krkn_session"
 	// UserClaimsKey is the context key for storing JWT claims
 	UserClaimsKey ContextKey = "user-claims"
 	// AuthorizationHeader is the HTTP header name for authorization
@@ -170,11 +174,19 @@ func (c *CachedUserStatusChecker) InvalidateUser(userID string) {
 	c.mu.Unlock()
 }
 
+// ExternalIdentityChecker verifies that an external user record still exists,
+// remains active, matches the session's Kubernetes UID, and is not blocked.
+// Implementations must fail closed on read errors and should not cache denials.
+type ExternalIdentityChecker interface {
+	IsExternalIdentityActive(ctx context.Context, claims *Claims) (bool, error)
+}
+
 // Middleware provides HTTP middleware for JWT authentication and authorization
 type Middleware struct {
-	tokenGen          *TokenGenerator
-	tokenGenLoader    func() *TokenGenerator
-	userStatusChecker UserStatusChecker
+	tokenGen                *TokenGenerator
+	tokenGenLoader          func() *TokenGenerator
+	userStatusChecker       UserStatusChecker
+	externalIdentityChecker ExternalIdentityChecker
 }
 
 // NewMiddleware creates a new authentication middleware
@@ -212,6 +224,11 @@ func (m *Middleware) SetUserStatusChecker(checker UserStatusChecker) {
 	m.userStatusChecker = checker
 }
 
+// SetExternalIdentityChecker installs the OIDC account and block checker.
+func (m *Middleware) SetExternalIdentityChecker(checker ExternalIdentityChecker) {
+	m.externalIdentityChecker = checker
+}
+
 // RequireAuth is a middleware that requires a valid JWT token
 // It validates the token and adds the claims to the request context
 func (m *Middleware) RequireAuth(next http.Handler) http.Handler {
@@ -232,8 +249,22 @@ func (m *Middleware) RequireAuth(next http.Handler) http.Handler {
 			return
 		}
 
-		// Extract token from Authorization header
+		// Explicit Authorization wins over ambient cookies, preserving API behavior.
+		// A cookie credential may only be a browser session, never a legacy JWT.
+		cookieAuth := false
 		authHeader := r.Header.Get(AuthorizationHeader)
+		if authHeader == "" && strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
+			if parts := strings.SplitN(r.Header.Get("Sec-WebSocket-Protocol"), ".", 2); len(parts) == 2 && parts[0] == "access_token" && parts[1] != "" {
+				authHeader = BearerPrefix + parts[1]
+			}
+		}
+		if authHeader == "" {
+			if cookie, err := r.Cookie(SessionCookieName); err == nil {
+				authHeader = BearerPrefix + cookie.Value
+				cookieAuth = true
+			}
+		}
+		// Extract token from Authorization header
 		if authHeader == "" {
 			logger.Info("Authentication failed: missing Authorization header",
 				"path", r.URL.Path,
@@ -269,8 +300,42 @@ func (m *Middleware) RequireAuth(next http.Handler) http.Handler {
 			return
 		}
 
+		if cookieAuth && claims.TokenUse != "session" || !cookieAuth && claims.TokenUse != "" {
+			http.Error(w, `{"error":"unauthorized","message":"Wrong credential type"}`, http.StatusUnauthorized)
+			return
+		}
+		if cookieAuth && strings.EqualFold(r.Header.Get("Upgrade"), "websocket") && !wsorigin.IsAllowedCookieOrigin(r) {
+			http.Error(w, `{"error":"forbidden","message":"Invalid WebSocket origin"}`, http.StatusForbidden)
+			return
+		}
+		if cookieAuth && r.Method != http.MethodGet && r.Method != http.MethodHead && r.Method != http.MethodOptions {
+			// Browsers cannot add this header from an unrelated origin without
+			// a successful CORS preflight. Applications must not allow wildcard
+			// credentialed CORS for this API.
+			if subtle.ConstantTimeCompare([]byte(r.Header.Get("X-CSRF-Token")), []byte(claims.CSRFToken)) != 1 || claims.CSRFToken == "" {
+				http.Error(w, `{"error":"forbidden","message":"Missing CSRF header"}`, http.StatusForbidden)
+				return
+			}
+		}
+
+		if claims.Provider != "" {
+			if m.externalIdentityChecker == nil {
+				http.Error(w, `{"error":"internal_error","message":"External identity checker unavailable"}`, http.StatusInternalServerError)
+				return
+			}
+			active, err := m.externalIdentityChecker.IsExternalIdentityActive(r.Context(), claims)
+			if err != nil {
+				logger.Error(err, "Failed to check external identity")
+				http.Error(w, `{"error":"internal_error","message":"Failed to verify external account"}`, http.StatusInternalServerError)
+				return
+			}
+			if !active {
+				http.Error(w, `{"error":"unauthorized","message":"External account is blocked or inactive"}`, http.StatusUnauthorized)
+				return
+			}
+		}
 		// Check if the user account is still active (if a checker is configured)
-		if m.userStatusChecker != nil {
+		if m.userStatusChecker != nil && claims.Provider == "" {
 			active, err := m.userStatusChecker.IsUserActive(r.Context(), claims.UserID)
 			if err != nil {
 				logger.Error(err, "Failed to check user active status",

@@ -122,3 +122,34 @@ func TestSetAllowedOrigins_EmptyDisablesEnforcement(t *testing.T) {
 		t.Error("expected all origins to be allowed after clearing the allow-list")
 	}
 }
+
+func TestIsAllowedCookieOriginRequiresTrustedOrigin(t *testing.T) {
+	SetAllowedOrigins(nil)
+	t.Cleanup(func() { SetAllowedOrigins(nil) })
+	for _, tt := range []struct {
+		origin string
+		want   bool
+	}{
+		{"", false},
+		{"https://api.example.com", true},
+		{"https://evil.example.com", false},
+		{"null", false},
+		{"https://api.example.com.evil.test", false},
+	} {
+		req := httptest.NewRequest("GET", "/ws", nil)
+		req.Host = "api.example.com"
+		if tt.origin != "" {
+			req.Header.Set("Origin", tt.origin)
+		}
+		if got := IsAllowedCookieOrigin(req); got != tt.want {
+			t.Errorf("origin %q: got %v, want %v", tt.origin, got, tt.want)
+		}
+	}
+	SetAllowedOrigins([]string{"https://console.example.com"})
+	req := httptest.NewRequest("GET", "/ws", nil)
+	req.Host = "api.example.com"
+	req.Header.Set("Origin", "https://console.example.com")
+	if !IsAllowedCookieOrigin(req) {
+		t.Fatal("configured console origin rejected")
+	}
+}

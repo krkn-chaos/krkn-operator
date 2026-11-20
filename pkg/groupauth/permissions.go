@@ -28,6 +28,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
+	"github.com/krkn-chaos/krkn-operator/pkg/auth"
 )
 
 const (
@@ -57,7 +58,8 @@ var (
 )
 
 // GetUserGroups fetches all KrknUserGroup CRs that the user belongs to.
-// Membership is determined by labels on the KrknUser CR.
+// Local membership is determined by KrknUser labels; external membership uses
+// exact OIDC group claim values mapped in KrknUserGroup resources.
 //
 // Parameters:
 //   - ctx: Context for the request
@@ -68,6 +70,35 @@ var (
 // Returns the list of groups the user belongs to, or an error.
 func GetUserGroups(ctx context.Context, k8sClient client.Client, userID, namespace string) ([]krknv1alpha1.KrknUserGroup, error) {
 	logger := log.FromContext(ctx).WithName("groupauth.GetUserGroups")
+
+	// Resolve external claim values against live KrknUserGroup mappings so a
+	// mapping removal takes effect on the next request.
+	if claims := auth.GetClaimsFromContext(ctx); claims != nil && claims.Provider != "" {
+		if claims.UserID != userID {
+			return nil, fmt.Errorf("external identity mismatch")
+		}
+		var all krknv1alpha1.KrknUserGroupList
+		if err := k8sClient.List(ctx, &all, client.InNamespace(namespace)); err != nil {
+			return nil, fmt.Errorf("list mapped groups: %w", err)
+		}
+		memberships := make(map[string]struct{}, len(claims.Groups))
+		for _, group := range claims.Groups {
+			memberships[group] = struct{}{}
+		}
+		matched := make([]krknv1alpha1.KrknUserGroup, 0)
+		for _, group := range all.Items {
+			for _, mapping := range group.Spec.ExternalGroups {
+				if mapping.Provider != claims.Provider {
+					continue
+				}
+				if _, ok := memberships[mapping.Group]; ok {
+					matched = append(matched, group)
+					break
+				}
+			}
+		}
+		return matched, nil
+	}
 
 	// Fetch KrknUser by email
 	userName, err := SanitizeUserIDForResourceName(userID)
