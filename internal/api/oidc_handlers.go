@@ -237,20 +237,26 @@ func (h *Handler) ensureExternalUser(ctx context.Context, key identity.ExternalI
 			if err := h.identityReader.Get(ctx, client.ObjectKey{Name: name, Namespace: h.namespace}, &user); err != nil {
 				return nil, fmt.Errorf("read concurrently created OIDC account: %w", err)
 			}
-		} else {
-			user.Status.Active = true
-			user.Status.Created = metav1.Now()
-			if err := h.client.Status().Update(ctx, &user); err != nil {
-				return nil, fmt.Errorf("activate OIDC account: %w", err)
-			}
 		}
 	} else if err != nil {
 		return nil, fmt.Errorf("read OIDC account: %w", err)
 	}
 	if user.Spec.UserID != userID || user.Spec.AuthProvider != key.Provider ||
-		user.Spec.ExternalIssuer != key.Issuer || user.Spec.ExternalSubject != key.Subject ||
-		!user.Status.Active || user.UID == "" {
-		return nil, fmt.Errorf("OIDC account is inactive or mismatched")
+		user.Spec.ExternalIssuer != key.Issuer || user.Spec.ExternalSubject != key.Subject || user.UID == "" {
+		return nil, fmt.Errorf("OIDC account is mismatched")
+	}
+	// A failed first status update leaves a matching account with no creation
+	// timestamp. Retrying that initial activation permits the next login to heal
+	// it; an admin-disabled account has a timestamp and stays disabled.
+	if !user.Status.Active && user.Status.Created.IsZero() {
+		user.Status.Active = true
+		user.Status.Created = metav1.Now()
+		if err := h.client.Status().Update(ctx, &user); err != nil {
+			return nil, fmt.Errorf("activate OIDC account: %w", err)
+		}
+	}
+	if !user.Status.Active {
+		return nil, fmt.Errorf("OIDC account is inactive")
 	}
 	// Recheck after account creation to close the block-versus-login race.
 	if block, err := h.getOIDCBlock(ctx, key); err != nil {

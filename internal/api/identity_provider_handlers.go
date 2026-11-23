@@ -80,7 +80,7 @@ func (h *Handler) PublicIdentityProviders(w http.ResponseWriter, r *http.Request
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
-	configs, err := h.providerStore.list(r.Context())
+	configs, _, err := h.providerStore.list(r.Context())
 	if err != nil {
 		writeJSONError(w, http.StatusServiceUnavailable, ErrorResponse{Error: "provider_unavailable", Message: "Cannot list identity providers"})
 		return
@@ -115,7 +115,7 @@ func (h *Handler) IdentityProviders(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path == IdentityProvidersPath {
 		switch r.Method {
 		case http.MethodGet:
-			configs, err := h.providerStore.list(r.Context())
+			configs, invalid, err := h.providerStore.list(r.Context())
 			if err != nil {
 				writeJSONError(w, http.StatusInternalServerError, ErrorResponse{Error: "internal_error", Message: "Cannot list identity providers"})
 				return
@@ -126,8 +126,9 @@ func (h *Handler) IdentityProviders(w http.ResponseWriter, r *http.Request) {
 			}
 			sort.Slice(providers, func(i, j int) bool { return providers[i].ID < providers[j].ID })
 			writeJSON(w, http.StatusOK, struct {
-				Providers []IdentityProviderResponse `json:"providers"`
-			}{providers})
+				Providers        []IdentityProviderResponse `json:"providers"`
+				InvalidProviders []invalidIdentityProvider  `json:"invalidProviders"`
+			}{providers, invalid})
 		case http.MethodPost:
 			var req createIdentityProviderRequest
 			if err := decodeProviderJSON(r, &req); err != nil {

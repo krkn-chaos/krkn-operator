@@ -37,6 +37,8 @@ Create body example:
 
 The public login-choice endpoint is `GET /api/v1/auth/providers`; it returns only enabled providers with `id`, `type`, `displayName`, and `loginUrl`. The console should render its "Login with …" buttons from this response.
 
+If a labelled provider Secret is malformed, the public list continues to return valid providers. The admin list includes its Secret name and validation reason in `invalidProviders` so the administrator can repair it without exposing credentials.
+
 ## Configuration
 
 The previous environment-variable setup remains available as a read-only provider with ID `keycloak` when no Secret-backed provider with that ID exists. Supply client secrets through Kubernetes Secret references, for example using Helm `operator.extraEnv`. A Secret-backed `keycloak` configuration with the same issuer overrides it. New installations should use the admin API above.
@@ -79,6 +81,8 @@ operator:
 The Keycloak login client must emit the user's groups in the ID token's `groups` claim as **full paths**, such as `/Engineering/Ops`. The Admin API must expose the same paths. The separate service client needs read access to realm groups. The operator does not need access to any LDAP server behind Keycloak.
 
 The authorization endpoint returned by OIDC discovery must use the same scheme, host, and port as the configured issuer. The operator rejects cross-origin login redirects before sending browser state or PKCE parameters.
+
+Operator Settings backups include identity-provider and OIDC-block Secrets. Restoring an archive preserves provider credentials and blocked identities; protect the archive as credential-bearing data.
 
 ## Containerized integration test
 

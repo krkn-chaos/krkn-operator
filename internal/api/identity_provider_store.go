@@ -14,6 +14,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 const identityProviderLabel = "krkn.krkn-chaos.dev/identity-provider"
@@ -45,6 +46,12 @@ type identityProviderStore struct {
 	client    client.Client
 	reader    client.Reader
 	namespace string
+}
+
+// invalidIdentityProvider identifies a malformed Secret without exposing its credentials.
+type invalidIdentityProvider struct {
+	SecretName string `json:"secretName"`
+	Reason     string `json:"reason"`
 }
 
 func newIdentityProviderStore(k8s client.Client, namespace string) *identityProviderStore {
@@ -116,20 +123,23 @@ func (s *identityProviderStore) get(ctx context.Context, id string) (identityPro
 	return identityProviderConfig{}, fmt.Errorf("%w: %s", errIdentityProviderNotFound, id)
 }
 
-func (s *identityProviderStore) list(ctx context.Context) ([]identityProviderConfig, error) {
+func (s *identityProviderStore) list(ctx context.Context) ([]identityProviderConfig, []invalidIdentityProvider, error) {
 	var secrets corev1.SecretList
 	if err := s.reader.List(ctx, &secrets, client.InNamespace(s.namespace), client.MatchingLabels{identityProviderLabel: "true"}); err != nil {
-		return nil, fmt.Errorf("list identity providers: %w", err)
+		return nil, nil, fmt.Errorf("list identity providers: %w", err)
 	}
 	configs := make([]identityProviderConfig, 0, len(secrets.Items)+1)
+	invalid := make([]invalidIdentityProvider, 0)
 	legacyFound := false
 	for i := range secrets.Items {
+		if secrets.Items[i].Name == identityProviderSecretName("keycloak") {
+			legacyFound = true
+		}
 		c, err := secretProvider(&secrets.Items[i])
 		if err != nil {
-			return nil, err
-		}
-		if c.ID == "keycloak" {
-			legacyFound = true
+			log.FromContext(ctx).Error(err, "Skipping invalid identity provider Secret", "secretName", secrets.Items[i].Name)
+			invalid = append(invalid, invalidIdentityProvider{SecretName: secrets.Items[i].Name, Reason: err.Error()})
+			continue
 		}
 		configs = append(configs, c)
 	}
@@ -138,7 +148,7 @@ func (s *identityProviderStore) list(ctx context.Context) ([]identityProviderCon
 			configs = append(configs, c)
 		}
 	}
-	return configs, nil
+	return configs, invalid, nil
 }
 
 func validIdentityURL(raw string) bool {
