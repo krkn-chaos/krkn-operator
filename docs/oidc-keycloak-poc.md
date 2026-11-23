@@ -118,7 +118,7 @@ Admin-only discovery endpoint:
 GET /api/v1/identity-providers/corp-keycloak/groups?search=ops&first=0&max=50
 ```
 
-It returns `groups[]` with provider ID, Keycloak group ID, path, and `claimValue` (the path to save as `group`). It uses separate service-account credentials and propagates provider failures as `502`. `pkg/identity.GroupDirectory` is the public provider adapter contract; `pkg/identity.OIDCAuthenticator` is the public login contract. A Dex implementation can use the generic OIDC client for login and provide its own group directory adapter.
+It returns `groups[]` with provider ID, Keycloak group ID, path, and `claimValue` (the path to save as `group`). `nextFirst` is the next Keycloak root-group offset, and `hasMore` indicates whether another root page may exist; clients must not use the flattened `groups[]` length as an offset because it includes subgroups. It uses separate service-account credentials and propagates provider failures as `502`. `pkg/identity.GroupDirectory` is the public provider adapter contract, with optional `pkg/identity.PagedGroupDirectory` for provider-native cursors; `pkg/identity.OIDCAuthenticator` is the public login contract. A Dex implementation can use the generic OIDC client for login and provide its own group directory adapter.
 
 ## Per-user controls and blacklist
 
