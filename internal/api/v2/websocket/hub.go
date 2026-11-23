@@ -239,12 +239,7 @@ func (h *Hub) clientSubscribedToMessage(client *Client, msg *BroadcastMessage) b
 	}
 
 	// Check for wildcard subscription (subscribed to ALL resources of this type)
-	subscribedToResource := resourceSubs["*"] || resourceSubs[msg.resourceID]
-	if !subscribedToResource {
-		return false
-	}
-
-	return true
+	return resourceSubs["*"] || resourceSubs[msg.resourceID]
 }
 
 // Subscribe adds a resource subscription for a client
