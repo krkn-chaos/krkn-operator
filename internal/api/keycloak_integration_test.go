@@ -20,6 +20,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-logr/logr"
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
 	"github.com/krkn-chaos/krkn-operator/pkg/auth"
 	"github.com/krkn-chaos/krkn-operator/pkg/groupauth"
@@ -29,6 +30,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	fakeclient "sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 const keycloakIntegrationImage = "quay.io/keycloak/keycloak:26.8.2"
@@ -37,6 +39,10 @@ const keycloakIntegrationImage = "quay.io/keycloak/keycloak:26.8.2"
 // operator session issuance, external group mapping, and Admin API discovery.
 // Run with: go test -tags=integration ./internal/api -run '^TestKeycloakOIDCIntegration$' -count=1
 func TestKeycloakOIDCIntegration(t *testing.T) {
+	// Initialize controller-runtime's deferred logger before the SecretManager
+	// uses it, so a passing integration test does not print a warning stack.
+	log.SetLogger(logr.Discard())
+
 	containerRuntime := os.Getenv("KRKN_KEYCLOAK_TEST_RUNTIME")
 	if containerRuntime == "" {
 		containerRuntime = "podman"
