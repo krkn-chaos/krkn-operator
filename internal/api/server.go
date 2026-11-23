@@ -553,8 +553,8 @@ func maxBodySizeMiddleware(maxBytes int64) func(http.Handler) http.Handler {
 
 // loggingMiddleware is a logging middleware for HTTP requests.
 //
-// PII notice: This middleware logs client IP addresses (RemoteAddr) and raw query
-// parameters, which may contain personally identifiable information. Operators
+// PII notice: This middleware logs client IP addresses (RemoteAddr) and query
+// parameters outside OIDC callbacks, which may contain personal information. Operators
 // should ensure log retention and access policies comply with applicable data
 // protection regulations (e.g. GDPR). Consider configuring log scrubbing in the
 // log aggregation pipeline if query parameters may carry sensitive values.
@@ -571,12 +571,20 @@ func loggingMiddleware(next http.Handler) http.Handler {
 		logger.Info("HTTP request",
 			"method", r.Method,
 			"path", r.URL.Path,
-			"query", r.URL.RawQuery,
+			"query", requestQueryForLog(r),
 			"status", rw.statusCode,
 			"duration", time.Since(start),
 			"client_ip", r.RemoteAddr,
 		)
 	})
+}
+
+// requestQueryForLog never records OIDC authorization codes or state values.
+func requestQueryForLog(r *http.Request) string {
+	if strings.HasPrefix(r.URL.Path, OIDCBasePath+"/") && strings.HasSuffix(r.URL.Path, "/callback") {
+		return "[redacted]"
+	}
+	return r.URL.RawQuery
 }
 
 // responseWriter wraps http.ResponseWriter to capture the status code

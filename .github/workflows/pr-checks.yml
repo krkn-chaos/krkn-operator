@@ -8,6 +8,27 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  keycloak-integration:
+    name: Keycloak OIDC integration
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Verify Docker
+        run: docker info
+
+      - name: Test login and group mapping against Keycloak
+        env:
+          KRKN_KEYCLOAK_TEST_RUNTIME: docker
+        run: go test -tags=integration ./internal/api -run '^TestKeycloakOIDCIntegration$' -count=1 -v
+
   security-and-quality:
     name: Security & Code Quality
     runs-on: ubuntu-24.04

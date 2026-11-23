@@ -86,7 +86,7 @@ With Podman running, execute this from the operator repository root:
 go test -tags=integration ./internal/api -run '^TestKeycloakOIDCIntegration$' -count=1 -v
 ```
 
-The test uses a disposable `quay.io/keycloak/keycloak:26.8.2` container on an automatically assigned loopback port. It creates its own realm, confidential login client, read-only group client, groups mapper, group and user. It then completes the real Authorization Code + PKCE flow against the operator OIDC handlers, checks the operator session and external group mapping, and queries the Keycloak Admin API for the group. The container is removed when the test ends. The normal `go test ./internal/api` suite does not start Keycloak. Set `KRKN_KEYCLOAK_TEST_IMAGE` to use another compatible image.
+The test uses a disposable `quay.io/keycloak/keycloak:26.8.2` container on an automatically assigned loopback port. It creates its own realm, confidential login client, read-only group client, groups mapper, group and user. It then completes the real Authorization Code + PKCE flow against the operator OIDC handlers, checks the operator session and external group mapping, and queries the Keycloak Admin API for the group. The container is removed when the test ends. The normal `go test ./internal/api` suite does not start Keycloak. The PR workflow runs this integration test with Docker; locally it defaults to Podman. Set `KRKN_KEYCLOAK_TEST_RUNTIME=docker` to use Docker locally or `KRKN_KEYCLOAK_TEST_IMAGE` to use another compatible image.
 
 ## Login and sessions
 

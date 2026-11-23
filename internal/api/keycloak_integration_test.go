@@ -37,10 +37,17 @@ const keycloakIntegrationImage = "quay.io/keycloak/keycloak:26.8.2"
 // operator session issuance, external group mapping, and Admin API discovery.
 // Run with: go test -tags=integration ./internal/api -run '^TestKeycloakOIDCIntegration$' -count=1
 func TestKeycloakOIDCIntegration(t *testing.T) {
-	if _, err := exec.LookPath("podman"); err != nil {
-		t.Fatal("Podman is required for the Keycloak integration test")
+	containerRuntime := os.Getenv("KRKN_KEYCLOAK_TEST_RUNTIME")
+	if containerRuntime == "" {
+		containerRuntime = "podman"
 	}
-	baseURL, adminPassword := startIntegrationKeycloak(t)
+	if containerRuntime != "podman" && containerRuntime != "docker" {
+		t.Fatalf("unsupported Keycloak test container runtime %q", containerRuntime)
+	}
+	if _, err := exec.LookPath(containerRuntime); err != nil {
+		t.Fatalf("%s is required for the Keycloak integration test: %v", containerRuntime, err)
+	}
+	baseURL, adminPassword := startIntegrationKeycloak(t, containerRuntime)
 	admin := newIntegrationKeycloakAdmin(t, baseURL, adminPassword)
 	const realm = "krkn-integration"
 	const providerID = "integration-keycloak"
@@ -204,7 +211,7 @@ func TestKeycloakOIDCIntegration(t *testing.T) {
 	}
 }
 
-func startIntegrationKeycloak(t *testing.T) (string, string) {
+func startIntegrationKeycloak(t *testing.T, containerRuntime string) (string, string) {
 	t.Helper()
 	random := make([]byte, 12)
 	if _, err := rand.Read(random); err != nil {
@@ -216,7 +223,7 @@ func startIntegrationKeycloak(t *testing.T) (string, string) {
 	if image == "" {
 		image = keycloakIntegrationImage
 	}
-	cmd := exec.Command("podman", "run", "--rm", "-d", "--name", name, "-p", "127.0.0.1::8080",
+	cmd := exec.Command(containerRuntime, "run", "--rm", "-d", "--name", name, "-p", "127.0.0.1::8080",
 		"-e", "KC_BOOTSTRAP_ADMIN_USERNAME=admin", "-e", "KC_BOOTSTRAP_ADMIN_PASSWORD="+password,
 		image, "start-dev")
 	if out, err := cmd.CombinedOutput(); err != nil {
@@ -225,11 +232,11 @@ func startIntegrationKeycloak(t *testing.T) (string, string) {
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		defer cancel()
-		if out, err := exec.CommandContext(ctx, "podman", "stop", "-t", "1", name).CombinedOutput(); err != nil {
+		if out, err := exec.CommandContext(ctx, containerRuntime, "stop", "-t", "1", name).CombinedOutput(); err != nil {
 			t.Errorf("stop isolated Keycloak: %v: %s", err, out)
 		}
 	})
-	out, err := exec.Command("podman", "port", name, "8080/tcp").Output()
+	out, err := exec.Command(containerRuntime, "port", name, "8080/tcp").Output()
 	if err != nil {
 		t.Fatal(err)
 	}
