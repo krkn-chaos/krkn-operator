@@ -78,6 +78,16 @@ operator:
 
 The Keycloak login client must emit the user's groups in the ID token's `groups` claim as **full paths**, such as `/Engineering/Ops`. The Admin API must expose the same paths. The separate service client needs read access to realm groups. The operator does not need access to any LDAP server behind Keycloak.
 
+## Containerized integration test
+
+With Podman running, execute this from the operator repository root:
+
+```sh
+go test -tags=integration ./internal/api -run '^TestKeycloakOIDCIntegration$' -count=1 -v
+```
+
+The test uses a disposable `quay.io/keycloak/keycloak:26.8.2` container on an automatically assigned loopback port. It creates its own realm, confidential login client, read-only group client, groups mapper, group and user. It then completes the real Authorization Code + PKCE flow against the operator OIDC handlers, checks the operator session and external group mapping, and queries the Keycloak Admin API for the group. The container is removed when the test ends. The normal `go test ./internal/api` suite does not start Keycloak. Set `KRKN_KEYCLOAK_TEST_IMAGE` to use another compatible image.
+
 ## Login and sessions
 
 - `GET /api/v1/auth/oidc/{id}/login` starts Authorization Code + PKCE, state, and nonce for the configured instance. The login state is bound to that provider ID.
