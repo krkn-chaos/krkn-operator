@@ -37,13 +37,16 @@ const keycloakIntegrationImage = "quay.io/keycloak/keycloak:26.8.2"
 
 // TestKeycloakOIDCIntegration exercises a real authorization-code/PKCE login,
 // operator session issuance, external group mapping, and Admin API discovery.
-// Run with: go test -tags=integration ./internal/api -run '^TestKeycloakOIDCIntegration$' -count=1
+// Run with: KRKN_AUTH_TEST_RUNTIME=podman go test -tags=integration ./internal/api -run '^TestKeycloakOIDCIntegration$' -count=1
 func TestKeycloakOIDCIntegration(t *testing.T) {
 	// Initialize controller-runtime's deferred logger before the SecretManager
 	// uses it, so a passing integration test does not print a warning stack.
 	log.SetLogger(logr.Discard())
 
-	containerRuntime := os.Getenv("KRKN_KEYCLOAK_TEST_RUNTIME")
+	containerRuntime := os.Getenv("KRKN_AUTH_TEST_RUNTIME")
+	if containerRuntime == "" {
+		containerRuntime = os.Getenv("KRKN_KEYCLOAK_TEST_RUNTIME")
+	}
 	if containerRuntime == "" {
 		containerRuntime = "podman"
 	}
