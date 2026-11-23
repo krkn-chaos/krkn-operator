@@ -40,7 +40,7 @@ import (
 
 const reportTestNamespace = "krkn-operator-system"
 
-func newReportTestHandler(t *testing.T, reportStatus *krknv1alpha1.ReportStatus, configMap *corev1.ConfigMap) *Handler {
+func newReportTestHandler(t *testing.T, reportStatus *krknv1alpha1.ReportStatus, configMap *corev1.ConfigMap, targetClusters ...map[string][]string) *Handler {
 	t.Helper()
 
 	scheme := runtime.NewScheme()
@@ -59,6 +59,9 @@ func newReportTestHandler(t *testing.T, reportStatus *krknv1alpha1.ReportStatus,
 		Status: krknv1alpha1.KrknScenarioRunStatus{
 			ReportStatus: reportStatus,
 		},
+	}
+	if len(targetClusters) > 0 {
+		run.Spec.TargetClusters = targetClusters[0]
 	}
 
 	objects := []interface{}{run}
@@ -258,6 +261,21 @@ func TestGetReportStatusReportsFailure(t *testing.T) {
 
 	if w.Code != http.StatusInternalServerError {
 		t.Fatalf("expected status 500, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestGetReportStatusMultiClusterUnsupported(t *testing.T) {
+	targets := map[string][]string{"provider": {"cluster-a", "cluster-b"}}
+	for _, reportStatus := range []*krknv1alpha1.ReportStatus{
+		nil,
+		{Message: "Report generation is not supported for multi-cluster scenario run"},
+	} {
+		handler := newReportTestHandler(t, reportStatus, nil, targets)
+		w := httptest.NewRecorder()
+		handler.GetReportStatus(w, reportRequest("/api/v1/scenarios/run/report-test-run/reports/status"))
+		if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"supported":false`) {
+			t.Fatalf("expected unsupported status without HTTP error, got %d: %s", w.Code, w.Body.String())
+		}
 	}
 }
 

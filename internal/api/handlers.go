@@ -3549,7 +3549,8 @@ func (h *Handler) GetSingleJob(w http.ResponseWriter, r *http.Request) {
 // It returns 200 while report generation is pending or successful, 400 for a
 // malformed path, 403 when the caller cannot view the run, 404 when the run is
 // absent, and 500 when report generation failed or the Kubernetes API is
-// unavailable.
+// unavailable. Multi-cluster runs return 200 with supported=false when no
+// report is available, since report generation is not supported for them.
 //
 // @Summary Get scenario run report status
 // @Description Get HTML/PDF report generation status for a scenario run.
@@ -3615,6 +3616,21 @@ func (h *Handler) GetReportStatus(w http.ResponseWriter, r *http.Request) {
 		"htmlAvailable": false,
 		"pdfAvailable":  false,
 		"fileSize":      int64(0),
+	}
+
+	// A multi-cluster run cannot generate a report. Return a normal status so
+	// clients can show the limitation without treating it as a server failure.
+	if scenarioRun.Status.ReportStatus == nil || !scenarioRun.Status.ReportStatus.Generated {
+		clusterCount := 0
+		for _, clusters := range scenarioRun.Spec.TargetClusters {
+			clusterCount += len(clusters)
+		}
+		if clusterCount > 1 {
+			response["supported"] = false
+			response["message"] = "Reports are not supported for multi-cluster scenario runs"
+			writeJSON(w, http.StatusOK, response)
+			return
+		}
 	}
 
 	if scenarioRun.Status.ReportStatus != nil {
