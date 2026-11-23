@@ -23,3 +23,18 @@ type GroupDirectory interface {
 	Provider() string
 	ListGroups(ctx context.Context, query string, first, max int) ([]Group, error)
 }
+
+// GroupPage carries pagination in the provider's native top-level units.
+// Nested groups may make len(Groups) larger than the requested page size.
+type GroupPage struct {
+	Groups    []Group
+	NextFirst int
+	HasMore   bool
+}
+
+// PagedGroupDirectory is an optional extension for directories whose result
+// count differs from their pagination units (for example Keycloak subgroups).
+type PagedGroupDirectory interface {
+	GroupDirectory
+	ListGroupsPage(ctx context.Context, query string, first, max int) (GroupPage, error)
+}

@@ -75,15 +75,22 @@ type keycloakGroup struct {
 // ListGroups searches the Keycloak Admin API and flattens returned subgroups.
 // first and max are the Keycloak pagination offset and size; max is capped at 100.
 func (d *KeycloakDirectory) ListGroups(ctx context.Context, query string, first, max int) ([]Group, error) {
+	page, err := d.ListGroupsPage(ctx, query, first, max)
+	return page.Groups, err
+}
+
+// ListGroupsPage keeps the Keycloak root-group offset separate from the
+// flattened result length so callers cannot skip roots with many subgroups.
+func (d *KeycloakDirectory) ListGroupsPage(ctx context.Context, query string, first, max int) (GroupPage, error) {
 	if first < 0 {
-		return nil, fmt.Errorf("first must be non-negative")
+		return GroupPage{}, fmt.Errorf("first must be non-negative")
 	}
 	if max <= 0 || max > 100 {
 		max = 100
 	}
 	u, err := url.Parse(d.groupsURL)
 	if err != nil {
-		return nil, err
+		return GroupPage{}, err
 	}
 	params := u.Query()
 	params.Set("first", strconv.Itoa(first))
@@ -97,19 +104,19 @@ func (d *KeycloakDirectory) ListGroups(ctx context.Context, query string, first,
 	httpClient := oauth2.NewClient(ctx, d.credentials.TokenSource(ctx))
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
 	if err != nil {
-		return nil, err
+		return GroupPage{}, err
 	}
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("keycloak group request failed: %w", err)
+		return GroupPage{}, fmt.Errorf("keycloak group request failed: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("keycloak group request returned HTTP %d", resp.StatusCode)
+		return GroupPage{}, fmt.Errorf("keycloak group request returned HTTP %d", resp.StatusCode)
 	}
 	var raw []keycloakGroup
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(&raw); err != nil {
-		return nil, fmt.Errorf("decode Keycloak groups: %w", err)
+		return GroupPage{}, fmt.Errorf("decode Keycloak groups: %w", err)
 	}
 	groups := make([]Group, 0, len(raw))
 	var add func(keycloakGroup)
@@ -124,5 +131,5 @@ func (d *KeycloakDirectory) ListGroups(ctx context.Context, query string, first,
 	for _, g := range raw {
 		add(g)
 	}
-	return groups, nil
+	return GroupPage{Groups: groups, NextFirst: first + len(raw), HasMore: len(raw) == max}, nil
 }

@@ -45,6 +45,41 @@ func TestKeycloakDirectoryListsGroupsWithClaimPaths(t *testing.T) {
 	}
 }
 
+func TestKeycloakDirectoryPagesByRootGroups(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/realms/main/protocol/openid-connect/token":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"access_token":"service-token","token_type":"Bearer","expires_in":3600}`))
+		case "/admin/realms/main/groups":
+			w.Header().Set("Content-Type", "application/json")
+			switch r.URL.Query().Get("first") {
+			case "0":
+				_, _ = w.Write([]byte(`[{"id":"root","path":"/Root","subGroups":[{"id":"child","path":"/Root/Child"}]}]`))
+			case "1":
+				_, _ = w.Write([]byte(`[{"id":"next","path":"/Next"}]`))
+			default:
+				_, _ = w.Write([]byte(`[]`))
+			}
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	directory, err := NewKeycloakDirectory("keycloak", server.URL+"/realms/main", "id", "secret", server.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := directory.ListGroupsPage(context.Background(), "", 0, 1)
+	if err != nil || len(first.Groups) != 2 || first.NextFirst != 1 || !first.HasMore {
+		t.Fatalf("first page=%+v error=%v", first, err)
+	}
+	second, err := directory.ListGroupsPage(context.Background(), "", first.NextFirst, 1)
+	if err != nil || len(second.Groups) != 1 || second.Groups[0].ID != "next" {
+		t.Fatalf("second page=%+v error=%v", second, err)
+	}
+}
+
 func TestExternalIdentityKeyUsesIssuerAndSubject(t *testing.T) {
 	key := ExternalIdentity{Provider: "keycloak", Issuer: "https://id.example/realms/main", Subject: "42"}
 	id, err := key.UserID()

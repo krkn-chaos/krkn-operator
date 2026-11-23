@@ -8,6 +8,7 @@ import (
 
 	"github.com/krkn-chaos/krkn-operator/pkg/auth"
 	"github.com/krkn-chaos/krkn-operator/pkg/identity"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 // RegisterGroupDirectory adds a provider directory before the server starts.
@@ -45,24 +46,28 @@ func (h *Handler) ListExternalGroups(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	directory, exists := h.groupDirectories[parts[0]]
+	logger := log.FromContext(r.Context()).WithName("api")
 	if !exists {
 		config, err := h.providerStore.get(r.Context(), parts[0])
 		if err != nil {
 			if errors.Is(err, errIdentityProviderNotFound) {
 				http.NotFound(w, r)
 			} else {
-				writeJSONError(w, http.StatusBadGateway, ErrorResponse{Error: "provider_unavailable", Message: "Cannot read identity provider"})
+				logger.Info("Cannot read identity provider for group discovery", "provider", parts[0], "cause", err.Error())
+				writeJSON(w, http.StatusBadGateway, ErrorResponse{Error: "provider_unavailable", Message: "Cannot read identity provider"})
 			}
 			return
 		}
 		if config.AdminClientID == "" || config.AdminClientSecret == "" {
-			writeJSONError(w, http.StatusServiceUnavailable, ErrorResponse{Error: "provider_unavailable", Message: "Group discovery credentials are not configured"})
+			logger.Info("Group discovery credentials are not configured", "provider", parts[0])
+			writeJSON(w, http.StatusServiceUnavailable, ErrorResponse{Error: "provider_unavailable", Message: "Group discovery credentials are not configured"})
 			return
 		}
 		directory, err = identity.NewKeycloakDirectory(config.ID, config.Issuer,
 			config.AdminClientID, config.AdminClientSecret, nil)
 		if err != nil {
-			writeJSONError(w, http.StatusBadGateway, ErrorResponse{Error: "provider_unavailable", Message: "Invalid group discovery configuration"})
+			logger.Info("Invalid group discovery configuration", "provider", parts[0], "cause", err.Error())
+			writeJSON(w, http.StatusBadGateway, ErrorResponse{Error: "provider_unavailable", Message: "Invalid group discovery configuration"})
 			return
 		}
 	}
@@ -82,12 +87,22 @@ func (h *Handler) ListExternalGroups(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusBadRequest, ErrorResponse{Error: "bad_request", Message: "max must be between 1 and 100"})
 		return
 	}
-	groups, err := directory.ListGroups(r.Context(), r.URL.Query().Get("search"), first, max)
+	var page identity.GroupPage
+	if paged, ok := directory.(identity.PagedGroupDirectory); ok {
+		page, err = paged.ListGroupsPage(r.Context(), r.URL.Query().Get("search"), first, max)
+	} else {
+		page.Groups, err = directory.ListGroups(r.Context(), r.URL.Query().Get("search"), first, max)
+		page.NextFirst = first + len(page.Groups)
+		page.HasMore = len(page.Groups) == max
+	}
 	if err != nil {
-		writeJSONError(w, http.StatusBadGateway, ErrorResponse{Error: "provider_unavailable", Message: "Failed to list external groups"})
+		logger.Info("Failed to list external groups", "provider", parts[0], "cause", err.Error())
+		writeJSON(w, http.StatusBadGateway, ErrorResponse{Error: "provider_unavailable", Message: "Failed to list external groups"})
 		return
 	}
 	writeJSON(w, http.StatusOK, struct {
-		Groups []identity.Group `json:"groups"`
-	}{Groups: groups})
+		Groups    []identity.Group `json:"groups"`
+		NextFirst int              `json:"nextFirst"`
+		HasMore   bool             `json:"hasMore"`
+	}{Groups: page.Groups, NextFirst: page.NextFirst, HasMore: page.HasMore})
 }

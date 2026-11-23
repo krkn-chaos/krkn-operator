@@ -231,7 +231,8 @@ func NewServerWithComponentNamespace(port int, k8sClient client.Client, clientse
 	mux.Handle(AuthRegister, publicAuthRateLimit(http.HandlerFunc(handler.Register)))
 	mux.Handle(AuthLogin, loginRateLimit(http.HandlerFunc(handler.Login)))
 	mux.Handle(AuthSession, authMw.RequireAuth(http.HandlerFunc(handler.GetSession)))
-	mux.Handle(AuthLogout, authMw.RequireAuth(http.HandlerFunc(handler.LogoutSession)))
+	// A stale or revoked cookie must still be removable by the browser.
+	mux.Handle(AuthLogout, publicAuthRateLimit(http.HandlerFunc(handler.LogoutSession)))
 	mux.Handle(AuthProviders, publicAuthRateLimit(http.HandlerFunc(handler.PublicIdentityProviders)))
 	mux.Handle(OIDCBasePath+"/", publicAuthRateLimit(http.HandlerFunc(handler.OIDCRouter)))
 

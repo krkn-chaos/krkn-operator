@@ -17,7 +17,9 @@ func TestLogoutSessionClearsSecureCookie(t *testing.T) {
 	}
 
 	post := httptest.NewRecorder()
-	h.LogoutSession(post, httptest.NewRequest(http.MethodPost, AuthBasePath+"/logout", nil))
+	postRequest := httptest.NewRequest(http.MethodPost, AuthBasePath+"/logout", nil)
+	postRequest.Header.Set("X-CSRF-Token", "csrf-value")
+	h.LogoutSession(post, postRequest)
 	if post.Code != http.StatusNoContent {
 		t.Fatalf("POST logout returned %d", post.Code)
 	}
@@ -26,5 +28,10 @@ func TestLogoutSessionClearsSecureCookie(t *testing.T) {
 		cookies[0].Value != "" || cookies[0].MaxAge >= 0 || cookies[0].Path != "/" ||
 		!cookies[0].HttpOnly || !cookies[0].Secure || cookies[0].SameSite != http.SameSiteLaxMode {
 		t.Fatalf("logout did not clear the secure session cookie: %+v", cookies)
+	}
+	withoutHeader := httptest.NewRecorder()
+	h.LogoutSession(withoutHeader, httptest.NewRequest(http.MethodPost, AuthBasePath+"/logout", nil))
+	if withoutHeader.Code != http.StatusForbidden {
+		t.Fatalf("logout without a session header returned %d", withoutHeader.Code)
 	}
 }

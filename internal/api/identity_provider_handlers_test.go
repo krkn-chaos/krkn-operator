@@ -8,10 +8,12 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/go-logr/logr"
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
 	"github.com/krkn-chaos/krkn-operator/pkg/auth"
 	"github.com/krkn-chaos/krkn-operator/pkg/identity"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 func TestIdentityProviderLifecycleAndSessionRevocation(t *testing.T) {
@@ -166,6 +168,46 @@ func TestGroupDiscoveryUsesSelectedKeycloakInstance(t *testing.T) {
 	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"provider":"corp"`) ||
 		!strings.Contains(w.Body.String(), `"id":"group-42"`) || !strings.Contains(w.Body.String(), `"claimValue":"/Ops"`) {
 		t.Fatalf("group discovery status=%d body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestGroupDiscoveryLogsUpstreamStatusWithoutStackTrace(t *testing.T) {
+	idp := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/realms/corp/protocol/openid-connect/token":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"access_token":"service-token","token_type":"Bearer","expires_in":60}`))
+		case "/admin/realms/corp/groups":
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer idp.Close()
+	config := identityProviderConfig{ID: "corp", Type: "keycloak", DisplayName: "Corporate Keycloak",
+		Issuer: idp.URL + "/realms/corp", ClientID: "login", ClientSecret: "login-secret",
+		RedirectURL:   "https://operator.example/api/v1/auth/oidc/corp/callback",
+		AdminClientID: "groups", AdminClientSecret: "groups-secret", Enabled: true,
+		SessionEpoch: "epoch", Source: "secret"}
+	h := setupUserTestHandler(config.secret("default"))
+	defer h.Shutdown()
+	var entries []capturedLogEntry
+	logger := logr.New(captureLogSink{entries: &entries})
+	request := httptest.NewRequest(http.MethodGet, IdentityProvidersPath+"/corp/groups", nil)
+	request = request.WithContext(log.IntoContext(createAdminContext(), logger))
+	w := httptest.NewRecorder()
+	h.IdentityProvidersRouter(w, request)
+	if w.Code != http.StatusBadGateway || strings.Contains(w.Body.String(), "401") {
+		t.Fatalf("group discovery status=%d body=%s", w.Code, w.Body.String())
+	}
+	if len(entries) != 1 || entries[0].isError || entries[0].msg != "Failed to list external groups" {
+		t.Fatalf("expected one stack-free diagnostic log, got %+v", entries)
+	}
+	if provider, ok := kvValue(entries[0].keysAndValues, "provider"); !ok || provider != "corp" {
+		t.Fatalf("missing provider in diagnostic log: %+v", entries[0])
+	}
+	if cause, ok := kvValue(entries[0].keysAndValues, "cause"); !ok || cause != "keycloak group request returned HTTP 401" {
+		t.Fatalf("missing upstream status in diagnostic log: %+v", entries[0])
 	}
 }
 
