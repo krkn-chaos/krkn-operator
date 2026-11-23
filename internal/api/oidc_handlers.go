@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -24,15 +25,16 @@ const oidcStateCookie = "krkn_oidc_state"
 
 // oidcLoginConfig reads the current provider Secret on each login. This keeps
 // enable/disable and credential rotation consistent across operator replicas.
-func (h *Handler) oidcLoginConfig(ctx context.Context, id string) (identity.OIDCAuthenticator, error) {
+func (h *Handler) oidcLoginConfig(ctx context.Context, id string) (identity.OIDCAuthenticator, identityProviderConfig, error) {
 	config, err := h.providerStore.get(ctx, id)
 	if err != nil {
-		return nil, err
+		return nil, identityProviderConfig{}, err
 	}
 	if !config.Enabled {
-		return nil, fmt.Errorf("identity provider is disabled")
+		return nil, identityProviderConfig{}, fmt.Errorf("identity provider is disabled")
 	}
-	return identity.NewOIDCClient(config.ID, config.Issuer, config.ClientID, config.ClientSecret, config.RedirectURL, nil)
+	provider, err := identity.NewOIDCClient(config.ID, config.Issuer, config.ClientID, config.ClientSecret, config.RedirectURL, nil)
+	return provider, config, err
 }
 
 // OIDCRouter handles /api/v1/auth/oidc/{providerID}/{login|callback}.
@@ -70,7 +72,7 @@ func (h *Handler) startOIDCLogin(w http.ResponseWriter, r *http.Request, id stri
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	provider, err := h.oidcLoginConfig(r.Context(), id)
+	provider, config, err := h.oidcLoginConfig(r.Context(), id)
 	if err != nil {
 		http.Error(w, "Keycloak login unavailable", http.StatusServiceUnavailable)
 		return
@@ -104,7 +106,22 @@ func (h *Handler) startOIDCLogin(w http.ResponseWriter, r *http.Request, id stri
 		http.Error(w, "Keycloak login unavailable", http.StatusServiceUnavailable)
 		return
 	}
-	http.Redirect(w, r, authURL, http.StatusFound)
+	if !sameOIDCOrigin(config.Issuer, authURL) {
+		http.Error(w, "Keycloak authorization endpoint unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	w.Header().Set("Location", authURL)
+	w.WriteHeader(http.StatusFound)
+}
+
+// sameOIDCOrigin prevents discovery metadata from sending browser state or
+// PKCE challenges to an authorization endpoint outside the configured issuer.
+func sameOIDCOrigin(issuer, authorizationURL string) bool {
+	issuerURL, issuerErr := url.Parse(issuer)
+	authURL, authErr := url.Parse(authorizationURL)
+	return issuerErr == nil && authErr == nil && issuerURL.Host != "" && authURL.Host != "" &&
+		authURL.User == nil && authURL.Fragment == "" && authURL.Scheme == issuerURL.Scheme &&
+		strings.EqualFold(authURL.Host, issuerURL.Host)
 }
 
 // CompleteKeycloakLogin verifies Keycloak's ID token and issues only an
@@ -135,7 +152,7 @@ func (h *Handler) completeOIDCLogin(w http.ResponseWriter, r *http.Request, id s
 		http.Error(w, "Invalid login response", http.StatusUnauthorized)
 		return
 	}
-	provider, err := h.oidcLoginConfig(r.Context(), id)
+	provider, _, err := h.oidcLoginConfig(r.Context(), id)
 	if err != nil {
 		http.Error(w, "Keycloak login unavailable", http.StatusServiceUnavailable)
 		return

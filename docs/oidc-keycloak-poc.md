@@ -78,6 +78,8 @@ operator:
 
 The Keycloak login client must emit the user's groups in the ID token's `groups` claim as **full paths**, such as `/Engineering/Ops`. The Admin API must expose the same paths. The separate service client needs read access to realm groups. The operator does not need access to any LDAP server behind Keycloak.
 
+The authorization endpoint returned by OIDC discovery must use the same scheme, host, and port as the configured issuer. The operator rejects cross-origin login redirects before sending browser state or PKCE parameters.
+
 ## Containerized integration test
 
 With Podman running, execute this from the operator repository root:
