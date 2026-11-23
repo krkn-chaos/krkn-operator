@@ -40,10 +40,10 @@ func websocketResponseHeader(protocol string) http.Header {
 	return http.Header{"Sec-WebSocket-Protocol": []string{protocol}}
 }
 
-// watchExternalSocket closes an OIDC socket after account deletion, block, or
-// session expiry. This also covers passive log streams without incoming messages.
+// watchExternalSocket closes a socket after account deletion, disablement,
+// block, or session expiry. This also covers passive log streams.
 func (h *Handler) watchExternalSocket(conn *websocket.Conn, claims *auth.Claims) func() {
-	if claims == nil || claims.Provider == "" {
+	if claims == nil {
 		return func() {}
 	}
 	stop := make(chan struct{})
@@ -55,18 +55,10 @@ func (h *Handler) watchExternalSocket(conn *websocket.Conn, claims *auth.Claims)
 			case <-stop:
 				return
 			case <-ticker.C:
-				if claims.ExpiresAt != nil && time.Now().After(claims.ExpiresAt.Time) {
-					_ = conn.Close()
-					return
-				}
-				if h.externalIdentityChecker == nil {
-					_ = conn.Close()
-					return
-				}
 				ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-				active, err := h.externalIdentityChecker.IsExternalIdentityActive(ctx, claims)
+				active := h.socketSessionActive(ctx, claims)
 				cancel()
-				if err != nil || !active {
+				if !active {
 					_ = conn.Close()
 					return
 				}
@@ -74,4 +66,22 @@ func (h *Handler) watchExternalSocket(conn *websocket.Conn, claims *auth.Claims)
 		}
 	}()
 	return func() { close(stop) }
+}
+
+func (h *Handler) socketSessionActive(ctx context.Context, claims *auth.Claims) bool {
+	if claims == nil || claims.ExpiresAt != nil && !time.Now().Before(claims.ExpiresAt.Time) {
+		return false
+	}
+	if claims.Provider != "" {
+		if h.externalIdentityChecker == nil {
+			return false
+		}
+		active, err := h.externalIdentityChecker.IsExternalIdentityActive(ctx, claims)
+		return err == nil && active
+	}
+	if h.userStatusChecker == nil {
+		return false
+	}
+	active, err := h.userStatusChecker.IsUserActive(ctx, claims.UserID)
+	return err == nil && active
 }

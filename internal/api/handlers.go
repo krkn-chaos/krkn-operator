@@ -327,6 +327,7 @@ type Handler struct {
 	secretManager           *auth.SecretManager
 	groupDirectories        map[string]identity.GroupDirectory
 	externalIdentityChecker auth.ExternalIdentityChecker
+	userStatusChecker       auth.UserStatusChecker
 	artifactClient          *krknaiserver.Client
 	krknAIEnabled           bool
 	// scenarioProviderFactory is injectable for API tests; production handlers
@@ -2341,6 +2342,7 @@ func (h *Handler) GetScenarioRunStatus(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+		scenarioRun = *scenarioRunWithVisibleJobs(&scenarioRun, filteredJobs)
 	}
 
 	// Convert filtered ClusterJobStatus to response type

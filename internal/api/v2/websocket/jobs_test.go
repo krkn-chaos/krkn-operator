@@ -23,10 +23,97 @@ import (
 	"time"
 
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
+	"github.com/krkn-chaos/krkn-operator/pkg/auth"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	fakeclient "sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
+
+type oidcGroupAuthzChecker struct{}
+
+func (oidcGroupAuthzChecker) FilterScenarioRunsByGroupPermission(runs []krknv1alpha1.KrknScenarioRun, ctx context.Context) []krknv1alpha1.KrknScenarioRun {
+	claims := auth.GetClaimsFromContext(ctx)
+	if claims != nil && claims.Provider == "local-keycloak" && len(claims.Groups) == 1 && claims.Groups[0] == "/krkn-ops" {
+		return runs
+	}
+	return nil
+}
+
+func (oidcGroupAuthzChecker) FilterGraphRunsByGroupPermission(runs []krknv1alpha1.KrknGraphRun, ctx context.Context) []krknv1alpha1.KrknGraphRun {
+	claims := auth.GetClaimsFromContext(ctx)
+	if claims != nil && claims.Provider == "local-keycloak" && len(claims.Groups) == 1 && claims.Groups[0] == "/krkn-ops" {
+		return runs
+	}
+	return nil
+}
+
+func TestBroadcastJobsPageUpdateUsesOIDCGroupClaims(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := krknv1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	run := &krknv1alpha1.KrknScenarioRun{ObjectMeta: metav1.ObjectMeta{
+		Name: "mapped-run", Namespace: "default", CreationTimestamp: metav1.Now(),
+	}}
+	k8sClient := fakeclient.NewClientBuilder().WithScheme(scheme).WithObjects(run).Build()
+	hub := NewHub()
+	go hub.Run()
+	broadcaster := NewBroadcaster(hub, oidcGroupAuthzChecker{}, k8sClient, "default")
+
+	makeClient := func(group string) *Client {
+		return &Client{
+			userID: "oidc-user", claims: &auth.Claims{UserID: "oidc-user", Role: "user", Provider: "local-keycloak", Groups: []string{group}},
+			send: make(chan []byte, 1), subscriptions: map[string]map[string]bool{"jobs": {"*": true}},
+			paginationState: map[string]*PaginationClientState{"jobs": {Page: 1, Limit: 10}},
+		}
+	}
+	mapped := makeClient("/krkn-ops")
+	unmapped := makeClient("/other")
+	hub.register <- mapped
+	hub.register <- unmapped
+	time.Sleep(10 * time.Millisecond)
+	broadcaster.BroadcastJobsPageUpdate(context.Background())
+
+	for _, tc := range []struct {
+		client *Client
+		want   int
+	}{{mapped, 1}, {unmapped, 0}} {
+		select {
+		case data := <-tc.client.send:
+			var message ServerMessage
+			if err := json.Unmarshal(data, &message); err != nil {
+				t.Fatal(err)
+			}
+			if message.Pagination == nil || message.Pagination.Total != tc.want {
+				t.Fatalf("OIDC group %v: total = %v, want %d", tc.client.claims.Groups, message.Pagination, tc.want)
+			}
+		case <-time.After(time.Second):
+			t.Fatal("timed out waiting for jobs update")
+		}
+	}
+}
+
+func TestRunBroadcastAuthorizationUsesOIDCGroupClaims(t *testing.T) {
+	broadcaster := NewBroadcaster(nil, oidcGroupAuthzChecker{}, nil, "default")
+	run := &krknv1alpha1.KrknScenarioRun{}
+	graphRun := &krknv1alpha1.KrknGraphRun{}
+	allowed := &Client{userID: "oidc-user", claims: &auth.Claims{
+		UserID: "oidc-user", Role: "user", Provider: "local-keycloak", Groups: []string{"/krkn-ops"},
+	}}
+	denied := &Client{userID: "oidc-user", claims: &auth.Claims{
+		UserID: "oidc-user", Role: "user", Provider: "local-keycloak", Groups: []string{"/other"},
+	}}
+	for _, check := range []AuthorizationCheckFunc{
+		broadcaster.makeScenarioRunAuthzCheck(run), broadcaster.makeGraphRunAuthzCheck(graphRun),
+	} {
+		if !check(allowed, "run", "test") {
+			t.Fatal("mapped OIDC client was denied")
+		}
+		if check(denied, "run", "test") {
+			t.Fatal("unmapped OIDC client was authorized")
+		}
+	}
+}
 
 func TestHandleClientMessage_JobsSubscribe(t *testing.T) {
 	hub := NewHub()

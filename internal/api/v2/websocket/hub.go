@@ -20,6 +20,7 @@ package websocket
 
 import (
 	"sync"
+	"time"
 
 	"github.com/gorilla/websocket"
 	"github.com/krkn-chaos/krkn-operator/pkg/auth"
@@ -62,6 +63,23 @@ type Client struct {
 
 	// Mutex for subscription updates
 	mu sync.RWMutex
+
+	// Successful identity checks are briefly reused across outbound messages.
+	statusMu         sync.Mutex
+	statusValidUntil time.Time
+}
+
+// authClaims preserves OIDC provider and group claims when filtering broadcasts.
+// Older in-package clients without claims retain the local-user fallback.
+func (c *Client) authClaims() *auth.Claims {
+	if c.claims != nil {
+		return c.claims
+	}
+	role := string(auth.RoleUser)
+	if c.isAdmin {
+		role = string(auth.RoleAdmin)
+	}
+	return &auth.Claims{UserID: c.userID, Role: role}
 }
 
 // Hub maintains active clients and broadcasts messages
@@ -84,7 +102,11 @@ type Hub struct {
 
 // AuthorizationCheckFunc is called to verify if a client can receive a broadcast message.
 // Returns true if client is authorized to receive the message.
-type AuthorizationCheckFunc func(userID string, isAdmin bool, resourceType string, resourceID string) bool
+type AuthorizationCheckFunc func(client *Client, resourceType string, resourceID string) bool
+
+// BroadcastViewFunc builds the authorized payload for one subscribed client.
+// Returning false suppresses the broadcast for that client.
+type BroadcastViewFunc func(client *Client) ([]byte, bool)
 
 // BroadcastMessage contains a message and targeting information
 
@@ -102,6 +124,9 @@ type BroadcastMessage struct {
 	// If nil, only subscription check is performed (e.g., for dashboard)
 	// If non-nil, called to verify user has permission to receive this message
 	authzCheck AuthorizationCheckFunc
+
+	// Optional per-client payload for resources with cluster-specific visibility.
+	view BroadcastViewFunc
 }
 
 // NewHub creates a new Hub instance
@@ -136,8 +161,16 @@ func (h *Hub) Run() {
 			for client := range h.clients {
 				// Check if client is subscribed to this resource
 				if h.shouldSendToClient(client, msg) {
+					payload := msg.message
+					if msg.view != nil {
+						var allowed bool
+						payload, allowed = msg.view(client)
+						if !allowed {
+							continue
+						}
+					}
 					select {
-					case client.send <- msg.message:
+					case client.send <- payload:
 					default:
 						// Client's send buffer is full, disconnect
 						close(client.send)
@@ -175,7 +208,7 @@ func (h *Hub) shouldSendToClient(client *Client, msg *BroadcastMessage) bool {
 	// AUTHORIZATION: If authz check is provided, verify user has permission
 	// Dashboard broadcasts don't have authz check (global to all authenticated users)
 	if msg.authzCheck != nil {
-		return msg.authzCheck(client.userID, client.isAdmin, msg.resourceType, msg.resourceID)
+		return msg.authzCheck(client, msg.resourceType, msg.resourceID)
 	}
 
 	return true
@@ -285,5 +318,15 @@ func (h *Hub) BroadcastWithAuthz(resourceType, resourceID string, message []byte
 		log.Log.V(1).Info("Broadcast channel full, dropping message",
 			"resource", resourceType,
 			"id", resourceID)
+	}
+}
+
+// BroadcastWithView sends a separate authorized payload to each subscriber.
+func (h *Hub) BroadcastWithView(resourceType, resourceID string, view BroadcastViewFunc) {
+	msg := &BroadcastMessage{resourceType: resourceType, resourceID: resourceID, view: view}
+	select {
+	case h.broadcast <- msg:
+	default:
+		log.Log.V(1).Info("Broadcast channel full, dropping personalized message", "resource", resourceType, "id", resourceID)
 	}
 }

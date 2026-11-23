@@ -57,6 +57,7 @@ type Handler struct {
 	authz           AuthorizationChecker // Group-based authorization
 	getTokenGen     func(context.Context) (*auth.TokenGenerator, error)
 	externalChecker auth.ExternalIdentityChecker
+	userChecker     auth.UserStatusChecker
 	upgrader        websocket.Upgrader
 	pingInterval    time.Duration
 	pongWait        time.Duration
@@ -89,6 +90,11 @@ func (h *Handler) SetExternalIdentityChecker(checker auth.ExternalIdentityChecke
 	h.externalChecker = checker
 }
 
+// SetUserStatusChecker enables local account revocation for open WebSockets.
+func (h *Handler) SetUserStatusChecker(checker auth.UserStatusChecker) {
+	h.userChecker = checker
+}
+
 func (h *Handler) clientActive(client *Client) bool {
 	if client.claims == nil {
 		return false
@@ -96,16 +102,31 @@ func (h *Handler) clientActive(client *Client) bool {
 	if client.claims.ExpiresAt != nil && time.Now().After(client.claims.ExpiresAt.Time) {
 		return false
 	}
-	if client.claims.Provider == "" {
+	client.statusMu.Lock()
+	defer client.statusMu.Unlock()
+	if time.Now().Before(client.statusValidUntil) {
 		return true
-	}
-	if h.externalChecker == nil {
-		return false
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	active, err := h.externalChecker.IsExternalIdentityActive(ctx, client.claims)
-	return err == nil && active
+	var active bool
+	var err error
+	if client.claims.Provider != "" {
+		if h.externalChecker == nil {
+			return false
+		}
+		active, err = h.externalChecker.IsExternalIdentityActive(ctx, client.claims)
+	} else {
+		if h.userChecker == nil {
+			return false
+		}
+		active, err = h.userChecker.IsUserActive(ctx, client.claims.UserID)
+	}
+	if err != nil || !active {
+		return false
+	}
+	client.statusValidUntil = time.Now().Add(5 * time.Second)
+	return true
 }
 
 // HandleWebSocket handles WebSocket connections
@@ -426,11 +447,7 @@ func (h *Handler) sendInitialSnapshot(client *Client, resourceType string, resou
 
 	// CRITICAL: Create context with user claims for authorization filtering
 	// Without claims, the filter functions cannot enforce group-based permissions
-	claims := client.claims
-	if claims == nil {
-		claims = &auth.Claims{UserID: client.userID, Role: roleFromAdmin(client.isAdmin)}
-	}
-	ctx := context.WithValue(context.Background(), auth.UserClaimsKey, claims)
+	ctx := context.WithValue(context.Background(), auth.UserClaimsKey, client.authClaims())
 
 	switch resourceType {
 	case "run":

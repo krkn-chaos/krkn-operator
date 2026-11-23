@@ -161,7 +161,9 @@ func NewServerWithComponentNamespace(port int, k8sClient client.Client, clientse
 	}
 	v2Handler := v2.NewHandler(k8sClient, namespace, handler, getTokenGenCtx)
 	v2Handler.WsHandler.SetExternalIdentityChecker(userChecker)
+	v2Handler.WsHandler.SetUserStatusChecker(cachedChecker)
 	handler.externalIdentityChecker = userChecker // handler implements AuthorizationChecker
+	handler.userStatusChecker = cachedChecker
 
 	// Strict per-IP rate limiter for the login endpoint only: 5 requests per
 	// minute, burst of 10. Login is the password brute-force surface, so it is

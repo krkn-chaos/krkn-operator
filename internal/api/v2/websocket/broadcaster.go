@@ -85,28 +85,8 @@ func (b *Broadcaster) BroadcastScenarioRunUpdate(scenarioRun *krknv1alpha1.KrknS
 		return
 	}
 
-	// Status changed - broadcast and update cache
-	response := buildScenarioRunResponse(scenarioRun)
-
-	msg := ServerMessage{
-		Resource: "run",
-		ID:       scenarioRun.Name,
-		Event:    "updated",
-		Data:     response,
-	}
-
-	data, err := json.Marshal(msg)
-	if err != nil {
-		logger.Error(err, "Failed to marshal scenario run update", "scenarioRunName", scenarioRun.Name)
-		return
-	}
-
 	logger.Info("Broadcasting scenario run update", "runName", scenarioRun.Name, "phase", scenarioRun.Status.Phase)
-
-	// Create authorization check function for this broadcast
-	// Admins see all updates, regular users only see runs they have 'view' permission for
-	authzCheck := b.makeScenarioRunAuthzCheck(scenarioRun)
-	b.hub.BroadcastWithAuthz("run", scenarioRun.Name, data, authzCheck)
+	b.hub.BroadcastWithView("run", scenarioRun.Name, b.scenarioRunView(scenarioRun, "run"))
 
 	// Update cache
 	b.cacheMu.Lock()
@@ -139,35 +119,43 @@ func (b *Broadcaster) BroadcastScenarioRunDetailUpdate(scenarioRun *krknv1alpha1
 		return
 	}
 
-	// Status changed - broadcast FULL response with clusterJobs
-	response := buildScenarioRunDetailResponse(scenarioRun)
-
-	msg := ServerMessage{
-		Resource: "run-detail",
-		ID:       scenarioRun.Name,
-		Event:    "updated",
-		Data:     response,
-	}
-
-	data, err := json.Marshal(msg)
-	if err != nil {
-		logger.Error(err, "Failed to marshal scenario run detail update", "scenarioRunName", scenarioRun.Name)
-		return
-	}
-
 	logger.Info("Broadcasting scenario run detail update",
 		"runName", scenarioRun.Name,
 		"phase", scenarioRun.Status.Phase,
 		"jobs", len(scenarioRun.Status.ClusterJobs))
 
-	// AUTHORIZATION: Apply same check as lightweight broadcast
-	authzCheck := b.makeScenarioRunAuthzCheck(scenarioRun)
-	b.hub.BroadcastWithAuthz("run-detail", scenarioRun.Name, data, authzCheck)
+	b.hub.BroadcastWithView("run-detail", scenarioRun.Name, b.scenarioRunView(scenarioRun, "run-detail"))
 
 	// Update cache
 	b.cacheMu.Lock()
 	b.lastSentCache[cacheKey] = fingerprint
 	b.cacheMu.Unlock()
+}
+
+// scenarioRunView filters cluster-specific details before serializing a run
+// update for one client. The original informer object is copied because the
+// hub processes queued broadcasts asynchronously.
+func (b *Broadcaster) scenarioRunView(scenarioRun *krknv1alpha1.KrknScenarioRun, resource string) BroadcastViewFunc {
+	run := scenarioRun.DeepCopy()
+	return func(client *Client) ([]byte, bool) {
+		ctx := context.WithValue(context.Background(), auth.UserClaimsKey, client.authClaims())
+		visible := b.authz.FilterScenarioRunsByGroupPermission([]krknv1alpha1.KrknScenarioRun{*run}, ctx)
+		if len(visible) == 0 {
+			return nil, false
+		}
+		var response ScenarioRunStatusResponse
+		if resource == "run-detail" {
+			response = buildScenarioRunDetailResponse(&visible[0])
+		} else {
+			response = buildScenarioRunResponse(&visible[0])
+		}
+		data, err := json.Marshal(ServerMessage{Resource: resource, ID: run.Name, Event: "updated", Data: response})
+		if err != nil {
+			log.Log.WithName("websocket-broadcast").Error(err, "Failed to marshal authorized scenario run update", "runName", run.Name)
+			return nil, false
+		}
+		return data, true
+	}
 }
 
 // BroadcastGraphRunUpdate broadcasts a graph run update to subscribed clients
@@ -345,11 +333,7 @@ func (b *Broadcaster) BroadcastJobsPageUpdate(ctx context.Context) {
 
 	b.hub.ForEachSubscriber("jobs", func(client *Client) {
 		// Create auth context for this client
-		claims := &auth.Claims{
-			UserID: client.userID,
-			Role:   roleFromAdmin(client.isAdmin),
-		}
-		ctx := context.WithValue(context.Background(), auth.UserClaimsKey, claims)
+		ctx := context.WithValue(context.Background(), auth.UserClaimsKey, client.authClaims())
 
 		// Apply per-user authorization filters
 		filteredScenarioRuns := b.authz.FilterScenarioRunsByGroupPermission(scenarioRuns.Items, ctx)
@@ -439,19 +423,13 @@ func hashBytes(data []byte) uint64 {
 // makeScenarioRunAuthzCheck creates an authorization check function for a scenario run broadcast.
 // The returned function checks if a user has 'view' permission on the scenario run.
 func (b *Broadcaster) makeScenarioRunAuthzCheck(scenarioRun *krknv1alpha1.KrknScenarioRun) AuthorizationCheckFunc {
-	return func(userID string, isAdmin bool, resourceType string, resourceID string) bool {
+	return func(client *Client, resourceType string, resourceID string) bool {
 		// Admins bypass all checks
-		if isAdmin {
+		if client.isAdmin {
 			return true
 		}
 
-		// Create a context with claims for the filter function
-		// The filter function needs claims in context to extract userID and role
-		claims := &auth.Claims{
-			UserID: userID,
-			Role:   string(auth.RoleUser), // non-admin
-		}
-		ctx := context.WithValue(context.Background(), auth.UserClaimsKey, claims)
+		ctx := context.WithValue(context.Background(), auth.UserClaimsKey, client.authClaims())
 
 		// Filter the run using authorization checker
 		// This simulates what the REST endpoint does
@@ -468,17 +446,13 @@ func (b *Broadcaster) makeScenarioRunAuthzCheck(scenarioRun *krknv1alpha1.KrknSc
 // makeGraphRunAuthzCheck creates an authorization check function for a graph run broadcast.
 // The returned function checks if a user has 'view' permission on the graph run.
 func (b *Broadcaster) makeGraphRunAuthzCheck(graphRun *krknv1alpha1.KrknGraphRun) AuthorizationCheckFunc {
-	return func(userID string, isAdmin bool, resourceType string, resourceID string) bool {
+	return func(client *Client, resourceType string, resourceID string) bool {
 		// Admins bypass all checks
-		if isAdmin {
+		if client.isAdmin {
 			return true
 		}
 
-		claims := &auth.Claims{
-			UserID: userID,
-			Role:   string(auth.RoleUser),
-		}
-		ctx := context.WithValue(context.Background(), auth.UserClaimsKey, claims)
+		ctx := context.WithValue(context.Background(), auth.UserClaimsKey, client.authClaims())
 
 		// Filter the run using authorization checker
 		filtered := b.authz.FilterGraphRunsByGroupPermission(
