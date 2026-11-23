@@ -37,6 +37,34 @@ func oidcTestAccount(t *testing.T, key identity.ExternalIdentity, uid string) (*
 	return user, claims
 }
 
+func TestOIDCAdminDisableSurvivesIncompleteProvisioning(t *testing.T) {
+	ctx := context.Background()
+	key := identity.ExternalIdentity{Provider: "keycloak", Issuer: "https://id.example/realms/main", Subject: "subject-disabled"}
+	user, _ := oidcTestAccount(t, key, "disabled-uid")
+	user.Status.Active = false
+	user.Status.Created = metav1.Time{}
+	h := setupUserTestHandler(user)
+	defer h.Shutdown()
+
+	req := httptest.NewRequest(http.MethodPatch, UsersPath+"/"+user.Spec.UserID, strings.NewReader(`{"active":false}`))
+	req = req.WithContext(createAdminContext())
+	w := httptest.NewRecorder()
+	h.UpdateUser(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("disable status=%d body=%s", w.Code, w.Body.String())
+	}
+	var saved krknv1alpha1.KrknUser
+	if err := h.client.Get(ctx, client.ObjectKeyFromObject(user), &saved); err != nil {
+		t.Fatal(err)
+	}
+	if saved.Status.Active || saved.Status.Created.IsZero() {
+		t.Fatalf("admin disable was not recorded: %+v", saved.Status)
+	}
+	if _, err := h.ensureExternalUser(ctx, key, &identity.OIDCPrincipal{Username: "tullio"}); err == nil {
+		t.Fatal("a later OIDC login reactivated an admin-disabled account")
+	}
+}
+
 func TestOIDCDeleteAndBlacklist(t *testing.T) {
 	ctx := context.Background()
 	key := identity.ExternalIdentity{Provider: "keycloak", Issuer: "https://id.example/realms/main", Subject: "subject-42"}

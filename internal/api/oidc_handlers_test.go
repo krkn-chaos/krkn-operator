@@ -15,12 +15,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-logr/logr"
 	"github.com/golang-jwt/jwt/v5"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	fakeclient "sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
 	"github.com/krkn-chaos/krkn-operator/pkg/auth"
@@ -28,6 +30,23 @@ import (
 )
 
 type assigningUIDClient struct{ client.Client }
+
+func TestStartOIDCLoginLogsUnavailableProvider(t *testing.T) {
+	h := setupUserTestHandler()
+	defer h.Shutdown()
+	var entries []capturedLogEntry
+	logger := logr.New(captureLogSink{entries: &entries})
+	request := httptest.NewRequest(http.MethodGet, OIDCBasePath+"/missing/login", nil)
+	request = request.WithContext(log.IntoContext(request.Context(), logger))
+	w := httptest.NewRecorder()
+	h.OIDCRouter(w, request)
+	if w.Code != http.StatusServiceUnavailable || len(entries) != 1 || entries[0].isError {
+		t.Fatalf("expected generic 503 and one stack-free diagnostic, got status=%d logs=%+v", w.Code, entries)
+	}
+	if provider, ok := kvValue(entries[0].keysAndValues, "provider"); !ok || provider != "missing" {
+		t.Fatalf("missing provider diagnostic: %+v", entries[0])
+	}
+}
 
 func TestOIDCCallbackMissingStateRequestsFreshLogin(t *testing.T) {
 	w := httptest.NewRecorder()

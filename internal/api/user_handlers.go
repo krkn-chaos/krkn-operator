@@ -589,6 +589,11 @@ func (h *Handler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 	// Update status separately if active field provided
 	if req.Active != nil {
 		user.Status.Active = *req.Active
+		// An explicit admin decision must never look like an interrupted first
+		// OIDC provisioning attempt, which has a zero Created timestamp.
+		if user.Spec.AuthProvider != "" && user.Status.Created.IsZero() {
+			user.Status.Created = metav1.Now()
+		}
 		if err := h.client.Status().Update(ctx, user); err != nil {
 			logger.Error(err, "Failed to update user status", "userID", userID)
 			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{

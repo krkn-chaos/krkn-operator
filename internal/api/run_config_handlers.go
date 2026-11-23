@@ -31,11 +31,12 @@ import (
 )
 
 // GetScenarioRunConfig handles GET /api/v1/scenarios/run/{scenarioRunName}/config
-// Returns the shared configuration payload; intent=replay additionally checks
-// authorization for replaying every original target via POST /scenarios/run.
+// Returns full configuration to admins and callers authorized for every target.
+// Partial viewers receive only shared scenario metadata and visible target names.
+// intent=replay additionally checks run permission on every original target.
 //
 // @Summary Get scenario run configuration
-// @Description Retrieve shared scenario configuration with view on one job; intent=replay requires run on every original target
+// @Description Retrieve full configuration with view on every target, or a redacted shared view with access to one job; intent=replay requires run on every original target
 // @Tags scenarios
 // @Produce json
 // @Param scenarioRunName path string true "KrknScenarioRun CR name"
@@ -95,7 +96,9 @@ func (h *Handler) GetScenarioRunConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !auth.IsAdmin(ctx) {
+	fullView := auth.IsAdmin(ctx)
+	var visibleTargets map[string][]string
+	if !fullView {
 		// Reading saved configuration always requires view on a cluster job.
 		hasAccess, err := h.checkScenarioRunGroupAccess(ctx, claims.UserID, scenarioRun, groupauth.ActionView)
 		if err != nil {
@@ -107,6 +110,14 @@ func (h *Handler) GetScenarioRunConfig(w http.ResponseWriter, r *http.Request) {
 			writeJSONError(w, http.StatusForbidden, ErrorResponse{Error: "forbidden", Message: "You do not have permission to view this scenario run"})
 			return
 		}
+		visible, visibleCount, total, err := h.visibleScenarioRunTargets(ctx, claims.UserID, scenarioRun)
+		if err != nil {
+			logger.Error(err, "Failed to resolve visible scenario targets", "scenarioRunName", scenarioRunName)
+			writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "internal_error", Message: "Failed to validate permissions"})
+			return
+		}
+		visibleTargets = visible
+		fullView = total > 0 && visibleCount == total
 		if r.URL.Query().Get("intent") == "replay" {
 			allowed, err := h.checkScenarioRunReplayAccess(ctx, claims.UserID, scenarioRun)
 			if err != nil {
@@ -118,7 +129,39 @@ func (h *Handler) GetScenarioRunConfig(w http.ResponseWriter, r *http.Request) {
 				writeJSONError(w, http.StatusForbidden, ErrorResponse{Error: "forbidden", Message: "Replay requires run permission on every cluster in the original run"})
 				return
 			}
+			// Run permission on every target authorizes the complete replay payload.
+			fullView = true
 		}
+	}
+
+	if !fullView {
+		// Build the partial view from explicitly safe fields. Do not reconstruct
+		// saved files, environment values, or credential references for a caller
+		// who cannot view every target.
+		scenario, _, err := scenarioRun.Spec.ResolveScenarioReference()
+		if err != nil {
+			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{Error: "internal_error", Message: "Failed to retrieve scenario run configuration"})
+			return
+		}
+		visibleJobs := make([]krknv1alpha1.ClusterJobStatus, 0)
+		for _, job := range scenarioRun.Status.ClusterJobs {
+			for _, cluster := range visibleTargets[job.ProviderName] {
+				if job.ClusterName == cluster {
+					visibleJobs = append(visibleJobs, job)
+					break
+				}
+			}
+		}
+		writeJSON(w, http.StatusOK, struct {
+			PartialView     bool                           `json:"partialView"`
+			TargetRequestID string                         `json:"targetRequestId"`
+			TargetClusters  map[string][]string            `json:"targetClusters"`
+			Scenario        krknv1alpha1.ScenarioReference `json:"scenario"`
+			ScenarioImage   string                         `json:"scenarioImage"`
+			KubeconfigPath  string                         `json:"kubeconfigPath"`
+			Environment     map[string]string              `json:"environment"`
+		}{true, "", visibleTargets, scenario, scenarioRunImage(visibleJobs), "", map[string]string{}})
+		return
 	}
 
 	// Reconstruct payload (same as replay)

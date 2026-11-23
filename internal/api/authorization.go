@@ -263,6 +263,31 @@ func (h *Handler) checkScenarioRunReplayAccess(ctx context.Context, userID strin
 	return checked > 0, nil
 }
 
+// visibleScenarioRunTargets returns only original targets backed by a saved job
+// that the caller may view. Missing job metadata never grants visibility.
+func (h *Handler) visibleScenarioRunTargets(ctx context.Context, userID string, run *krknv1alpha1.KrknScenarioRun) (map[string][]string, int, int, error) {
+	groups, err := groupauth.GetUserGroups(ctx, h.client, userID, h.namespace)
+	if err != nil {
+		return nil, 0, 0, err
+	}
+	visible := make(map[string][]string)
+	total, visibleCount := 0, 0
+	for provider, clusters := range run.Spec.TargetClusters {
+		for _, cluster := range clusters {
+			total++
+			for _, job := range run.Status.ClusterJobs {
+				if job.ProviderName == provider && job.ClusterName == cluster && job.ClusterAPIURL != "" &&
+					groupauth.CanPerformAction(groups, job.ClusterAPIURL, groupauth.ActionView) {
+					visible[provider] = append(visible[provider], cluster)
+					visibleCount++
+					break
+				}
+			}
+		}
+	}
+	return visible, visibleCount, total, nil
+}
+
 // checkScenarioRunCancelAccess checks if user can cancel the entire scenario run.
 // Admin users can cancel anything.
 // Regular users must have 'cancel' permission on ALL jobs in the run.

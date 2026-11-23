@@ -145,13 +145,14 @@ func TestGetScenarioRunConfig_MissingTargetRequestUsesVisibleJobs(t *testing.T) 
 		secondActions    []string
 		intent           string
 		wantStatus       int
+		wantPartial      bool
 	}{
 		{name: "mapped OIDC group", actions: []string{"view", "run"}, jobProvider: "krkn-operator", jobURL: clusterURL, wantStatus: http.StatusOK},
 		{name: "view only group", actions: []string{"view"}, jobProvider: "krkn-operator", jobURL: clusterURL, wantStatus: http.StatusOK},
 		{name: "run only group", actions: []string{"run"}, jobProvider: "krkn-operator", jobURL: clusterURL, wantStatus: http.StatusForbidden},
 		{name: "missing cluster URL", actions: []string{"view"}, jobProvider: "krkn-operator", wantStatus: http.StatusForbidden},
-		{name: "different provider with same API URL", actions: []string{"view"}, jobProvider: "other-provider", jobURL: clusterURL, wantStatus: http.StatusOK},
-		{name: "multi-cluster run with one visible cluster", actions: []string{"view"}, jobProvider: "krkn-operator", jobURL: clusterURL, secondTarget: true, wantStatus: http.StatusOK},
+		{name: "different provider with same API URL", actions: []string{"view"}, jobProvider: "other-provider", jobURL: clusterURL, wantStatus: http.StatusOK, wantPartial: true},
+		{name: "multi-cluster run with one visible cluster", actions: []string{"view"}, jobProvider: "krkn-operator", jobURL: clusterURL, secondTarget: true, wantStatus: http.StatusOK, wantPartial: true},
 		{name: "replay denied with view only", actions: []string{"view"}, jobProvider: "krkn-operator", jobURL: clusterURL, intent: "replay", wantStatus: http.StatusForbidden},
 		{name: "replay denied with partial run access", actions: []string{"view", "run"}, jobProvider: "krkn-operator", jobURL: clusterURL, secondTarget: true, intent: "replay", wantStatus: http.StatusForbidden},
 		{name: "replay allowed on every target", actions: []string{"view", "run"}, jobProvider: "krkn-operator", jobURL: clusterURL, secondTarget: true, secondActions: []string{"run"}, intent: "replay", wantStatus: http.StatusOK},
@@ -166,6 +167,7 @@ func TestGetScenarioRunConfig_MissingTargetRequestUsesVisibleJobs(t *testing.T) 
 					TargetRequestID: "removed-target",
 					TargetClusters:  map[string][]string{"krkn-operator": {"cluster1"}},
 					Scenario:        publicScenarioReference("dummy-scenario"),
+					Environment:     map[string]string{"SECRET_VALUE": "shared-sensitive-value"},
 				},
 				Status: krknv1alpha1.KrknScenarioRunStatus{ClusterJobs: []krknv1alpha1.ClusterJobStatus{{
 					ProviderName: tc.jobProvider, ClusterName: "cluster1", ClusterAPIURL: tc.jobURL,
@@ -208,8 +210,19 @@ func TestGetScenarioRunConfig_MissingTargetRequestUsesVisibleJobs(t *testing.T) 
 			if tc.wantStatus == http.StatusOK {
 				var payload ScenarioRunRequest
 				require.NoError(t, json.Unmarshal(w.Body.Bytes(), &payload))
-				assert.Equal(t, "removed-target", payload.TargetRequestID)
 				assert.Equal(t, "dummy-scenario", payload.Scenario.Name)
+				if tc.wantPartial {
+					assert.Empty(t, payload.TargetRequestID)
+					assert.Empty(t, payload.Environment)
+					assert.Empty(t, payload.Files)
+					assert.Empty(t, payload.FileReferences)
+					assert.NotContains(t, w.Body.String(), "shared-sensitive-value")
+					assert.NotContains(t, w.Body.String(), "cluster2")
+					assert.Contains(t, w.Body.String(), `"partialView":true`)
+				} else {
+					assert.Equal(t, "removed-target", payload.TargetRequestID)
+					assert.Equal(t, "shared-sensitive-value", payload.Environment["SECRET_VALUE"])
+				}
 			}
 		})
 	}

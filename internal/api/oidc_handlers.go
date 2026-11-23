@@ -19,6 +19,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 const oidcStateCookie = "krkn_oidc_state"
@@ -74,6 +75,7 @@ func (h *Handler) startOIDCLogin(w http.ResponseWriter, r *http.Request, id stri
 	}
 	provider, config, err := h.oidcLoginConfig(r.Context(), id)
 	if err != nil {
+		log.FromContext(r.Context()).Info("OIDC login configuration unavailable", "provider", id, "cause", err.Error())
 		http.Error(w, "Keycloak login unavailable", http.StatusServiceUnavailable)
 		return
 	}
@@ -154,6 +156,7 @@ func (h *Handler) completeOIDCLogin(w http.ResponseWriter, r *http.Request, id s
 	}
 	provider, _, err := h.oidcLoginConfig(r.Context(), id)
 	if err != nil {
+		log.FromContext(r.Context()).Info("OIDC callback configuration unavailable", "provider", id, "cause", err.Error())
 		http.Error(w, "Keycloak login unavailable", http.StatusServiceUnavailable)
 		return
 	}
