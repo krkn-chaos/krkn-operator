@@ -1,0 +1,16 @@
+services:
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.8.2
+    container_name: krkn-keycloak
+    command: start-dev
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+      KC_HOSTNAME: http://127.0.0.1:18080
+    ports:
+      - "127.0.0.1:18080:8080"
+    volumes:
+      - keycloak_data:/opt/keycloak/data
+
+volumes:
+  keycloak_data:

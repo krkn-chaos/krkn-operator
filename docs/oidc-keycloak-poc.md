@@ -110,6 +110,8 @@ An OIDC `KrknUser` has `spec.authProvider`, `spec.externalIssuer`, `spec.externa
 
 `KrknUserGroup.spec.externalGroups` accepts multiple `{provider, group, groupId}` entries. `provider` is the immutable configuration ID, not the product type; `group` is an exact groups-claim value (a full Keycloak path); `groupId` is optional remote metadata for display and rename diagnostics. Authorization compares provider ID and claim value together. For example, `/Ops` from `corp-keycloak` cannot satisfy a mapping for `partner-keycloak`. A matching external group grants that local group's cluster permissions. Unmapped groups grant nothing. Local users continue to obtain group memberships from their `KrknUser` labels. A mapping edit is evaluated on the next request; a Keycloak membership change requires a fresh login because group claims are in the session.
 
+For a multi-cluster scenario run, `view` on one cluster exposes the shared run configuration and only that cluster's job details. Replay is atomic across the original targets: `GET /api/v1/scenarios/run/{name}/config?intent=replay` returns the configuration only when the caller can view the run and has `run` on every original target. A missing target URL or permission returns `403`. The console checks this when opening the run actions menu and checks again before entering the replay wizard. `POST /api/v1/scenarios/run` independently validates `run` on every selected cluster.
+
 The group API's `memberCount` still counts local KrknUser label assignments only; remote membership is not persisted in the operator.
 
 Admin-only discovery endpoint:

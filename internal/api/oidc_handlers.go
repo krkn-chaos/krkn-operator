@@ -137,7 +137,7 @@ func (h *Handler) completeOIDCLogin(w http.ResponseWriter, r *http.Request, id s
 	}
 	cookie, err := r.Cookie(oidcStateCookie)
 	if err != nil {
-		http.Error(w, "Missing login state", http.StatusUnauthorized)
+		http.Error(w, "Login session expired or unavailable; start again from the login page", http.StatusUnauthorized)
 		return
 	}
 	http.SetCookie(w, &http.Cookie{Name: oidcStateCookie, Path: OIDCBasePath + "/" + id + "/callback", MaxAge: -1,

@@ -132,6 +132,89 @@ func TestGetScenarioRunConfig_Success(t *testing.T) {
 
 }
 
+func TestGetScenarioRunConfig_MissingTargetRequestUsesVisibleJobs(t *testing.T) {
+	const namespace = "krkn-operator-system"
+	const clusterURL = "https://cluster.example"
+	for _, tc := range []struct {
+		name             string
+		actions          []string
+		jobProvider      string
+		jobURL           string
+		secondTarget     bool
+		missingSecondJob bool
+		secondActions    []string
+		intent           string
+		wantStatus       int
+	}{
+		{name: "mapped OIDC group", actions: []string{"view", "run"}, jobProvider: "krkn-operator", jobURL: clusterURL, wantStatus: http.StatusOK},
+		{name: "view only group", actions: []string{"view"}, jobProvider: "krkn-operator", jobURL: clusterURL, wantStatus: http.StatusOK},
+		{name: "run only group", actions: []string{"run"}, jobProvider: "krkn-operator", jobURL: clusterURL, wantStatus: http.StatusForbidden},
+		{name: "missing cluster URL", actions: []string{"view"}, jobProvider: "krkn-operator", wantStatus: http.StatusForbidden},
+		{name: "different provider with same API URL", actions: []string{"view"}, jobProvider: "other-provider", jobURL: clusterURL, wantStatus: http.StatusOK},
+		{name: "multi-cluster run with one visible cluster", actions: []string{"view"}, jobProvider: "krkn-operator", jobURL: clusterURL, secondTarget: true, wantStatus: http.StatusOK},
+		{name: "replay denied with view only", actions: []string{"view"}, jobProvider: "krkn-operator", jobURL: clusterURL, intent: "replay", wantStatus: http.StatusForbidden},
+		{name: "replay denied with partial run access", actions: []string{"view", "run"}, jobProvider: "krkn-operator", jobURL: clusterURL, secondTarget: true, intent: "replay", wantStatus: http.StatusForbidden},
+		{name: "replay allowed on every target", actions: []string{"view", "run"}, jobProvider: "krkn-operator", jobURL: clusterURL, secondTarget: true, secondActions: []string{"run"}, intent: "replay", wantStatus: http.StatusOK},
+		{name: "replay denied for unresolved target", actions: []string{"view", "run"}, jobProvider: "krkn-operator", jobURL: clusterURL, secondTarget: true, missingSecondJob: true, secondActions: []string{"run"}, intent: "replay", wantStatus: http.StatusForbidden},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			scheme := runtime.NewScheme()
+			require.NoError(t, krknv1alpha1.AddToScheme(scheme))
+			run := &krknv1alpha1.KrknScenarioRun{
+				ObjectMeta: metav1.ObjectMeta{Name: "historical-run", Namespace: namespace},
+				Spec: krknv1alpha1.KrknScenarioRunSpec{
+					TargetRequestID: "removed-target",
+					TargetClusters:  map[string][]string{"krkn-operator": {"cluster1"}},
+					Scenario:        publicScenarioReference("dummy-scenario"),
+				},
+				Status: krknv1alpha1.KrknScenarioRunStatus{ClusterJobs: []krknv1alpha1.ClusterJobStatus{{
+					ProviderName: tc.jobProvider, ClusterName: "cluster1", ClusterAPIURL: tc.jobURL,
+				}}},
+			}
+			if tc.secondTarget {
+				run.Spec.TargetClusters["krkn-operator"] = append(run.Spec.TargetClusters["krkn-operator"], "cluster2")
+				if !tc.missingSecondJob {
+					run.Status.ClusterJobs = append(run.Status.ClusterJobs, krknv1alpha1.ClusterJobStatus{
+						ProviderName: "krkn-operator", ClusterName: "cluster2", ClusterAPIURL: "https://other-cluster.example",
+					})
+				}
+			}
+			permissions := map[string]krknv1alpha1.ClusterPermissionSet{clusterURL: {Actions: tc.actions}}
+			if tc.secondActions != nil {
+				permissions["https://other-cluster.example"] = krknv1alpha1.ClusterPermissionSet{Actions: tc.secondActions}
+			}
+			group := &krknv1alpha1.KrknUserGroup{
+				ObjectMeta: metav1.ObjectMeta{Name: "operators", Namespace: namespace},
+				Spec: krknv1alpha1.KrknUserGroupSpec{
+					ExternalGroups:     []krknv1alpha1.ExternalGroupMapping{{Provider: "local-keycloak", Group: "/krkn-ops"}},
+					ClusterPermissions: permissions,
+				},
+			}
+			handler := &Handler{
+				client:    fake.NewClientBuilder().WithScheme(scheme).WithObjects(run, group).Build(),
+				namespace: namespace,
+			}
+			url := "/api/v1/scenarios/run/historical-run/config"
+			if tc.intent != "" {
+				url += "?intent=" + tc.intent
+			}
+			req := httptest.NewRequest(http.MethodGet, url, nil)
+			req = req.WithContext(context.WithValue(req.Context(), auth.UserClaimsKey, &auth.Claims{
+				UserID: "oidc-user", Role: "user", Provider: "local-keycloak", Groups: []string{"/krkn-ops"},
+			}))
+			w := httptest.NewRecorder()
+			handler.GetScenarioRunConfig(w, req)
+			require.Equal(t, tc.wantStatus, w.Code, w.Body.String())
+			if tc.wantStatus == http.StatusOK {
+				var payload ScenarioRunRequest
+				require.NoError(t, json.Unmarshal(w.Body.Bytes(), &payload))
+				assert.Equal(t, "removed-target", payload.TargetRequestID)
+				assert.Equal(t, "dummy-scenario", payload.Scenario.Name)
+			}
+		})
+	}
+}
+
 func TestReconstructScenarioRunPayload_AlwaysSerializesScenarioImage(t *testing.T) {
 	scenarioRun := &krknv1alpha1.KrknScenarioRun{
 		Spec: krknv1alpha1.KrknScenarioRunSpec{

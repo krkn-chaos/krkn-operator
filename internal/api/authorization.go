@@ -235,6 +235,34 @@ func (h *Handler) checkScenarioRunGroupAccess(
 	return false, nil // No permission on any job
 }
 
+// checkScenarioRunReplayAccess requires run permission on every original target.
+// Saved job URLs are used because the TargetRequest may already have been removed.
+// An unresolved target fails closed; replay always operates on the complete run.
+func (h *Handler) checkScenarioRunReplayAccess(ctx context.Context, userID string, run *krknv1alpha1.KrknScenarioRun) (bool, error) {
+	groups, err := groupauth.GetUserGroups(ctx, h.client, userID, h.namespace)
+	if err != nil {
+		return false, err
+	}
+	checked := 0
+	for provider, clusters := range run.Spec.TargetClusters {
+		for _, cluster := range clusters {
+			checked++
+			found := false
+			for _, job := range run.Status.ClusterJobs {
+				if job.ProviderName == provider && job.ClusterName == cluster && job.ClusterAPIURL != "" &&
+					groupauth.CanPerformAction(groups, job.ClusterAPIURL, groupauth.ActionRun) {
+					found = true
+					break
+				}
+			}
+			if !found {
+				return false, nil
+			}
+		}
+	}
+	return checked > 0, nil
+}
+
 // checkScenarioRunCancelAccess checks if user can cancel the entire scenario run.
 // Admin users can cancel anything.
 // Regular users must have 'cancel' permission on ALL jobs in the run.

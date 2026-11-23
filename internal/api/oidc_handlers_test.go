@@ -29,6 +29,15 @@ import (
 
 type assigningUIDClient struct{ client.Client }
 
+func TestOIDCCallbackMissingStateRequestsFreshLogin(t *testing.T) {
+	w := httptest.NewRecorder()
+	(&Handler{}).OIDCRouter(w, httptest.NewRequest(http.MethodGet,
+		"/api/v1/auth/oidc/local-keycloak/callback?code=unused", nil))
+	if w.Code != http.StatusUnauthorized || !strings.Contains(w.Body.String(), "start again from the login page") {
+		t.Fatalf("missing state response: status=%d body=%q", w.Code, w.Body.String())
+	}
+}
+
 func (c assigningUIDClient) Create(ctx context.Context, obj client.Object, opts ...client.CreateOption) error {
 	if user, ok := obj.(*krknv1alpha1.KrknUser); ok {
 		user.UID = types.UID("created-uid")
