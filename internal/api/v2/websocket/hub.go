@@ -141,9 +141,16 @@ func NewHub() *Hub {
 
 // Run starts the hub's main loop
 func (h *Hub) Run() {
+	stopBroadcasts := make(chan struct{})
+	go h.runBroadcasts(stopBroadcasts)
+	defer close(stopBroadcasts)
+
 	for {
 		select {
-		case client := <-h.register:
+		case client, ok := <-h.register:
+			if !ok {
+				return
+			}
 			h.mu.Lock()
 			h.clients[client] = true
 			h.mu.Unlock()
@@ -155,36 +162,68 @@ func (h *Hub) Run() {
 				close(client.send)
 			}
 			h.mu.Unlock()
+		}
+	}
+}
 
+// runBroadcasts keeps delivery ordered without making slow authorization
+// checks block client registration and removal in Run.
+func (h *Hub) runBroadcasts(stop <-chan struct{}) {
+	for {
+		select {
+		case <-stop:
+			return
 		case msg := <-h.broadcast:
 			h.mu.RLock()
+			clients := make([]*Client, 0, len(h.clients))
 			for client := range h.clients {
-				// Check if client is subscribed to this resource
-				if h.shouldSendToClient(client, msg) {
-					payload := msg.message
-					if msg.view != nil {
-						var allowed bool
-						payload, allowed = msg.view(client)
-						if !allowed {
-							continue
-						}
+				clients = append(clients, client)
+			}
+			h.mu.RUnlock()
+
+			for _, client := range clients {
+				if !h.shouldSendToClient(client, msg) {
+					continue
+				}
+				payload := msg.message
+				if msg.view != nil {
+					var allowed bool
+					payload, allowed = msg.view(client)
+					if !allowed {
+						continue
 					}
+				}
+				h.mu.Lock()
+				if h.clients[client] && h.clientSubscribedToMessage(client, msg) {
 					select {
 					case client.send <- payload:
 					default:
-						// Client's send buffer is full, disconnect
+						// Client's send buffer is full, disconnect.
 						close(client.send)
 						delete(h.clients, client)
 					}
 				}
+				h.mu.Unlock()
 			}
-			h.mu.RUnlock()
 		}
 	}
 }
 
 // shouldSendToClient checks if a message should be sent to a client
 func (h *Hub) shouldSendToClient(client *Client, msg *BroadcastMessage) bool {
+	if !h.clientSubscribedToMessage(client, msg) {
+		return false
+	}
+
+	// Authorization can read Kubernetes; never hold either client or hub locks.
+	if msg.authzCheck != nil {
+		return msg.authzCheck(client, msg.resourceType, msg.resourceID)
+	}
+
+	return true
+}
+
+func (h *Hub) clientSubscribedToMessage(client *Client, msg *BroadcastMessage) bool {
 	client.mu.RLock()
 	defer client.mu.RUnlock()
 
@@ -203,12 +242,6 @@ func (h *Hub) shouldSendToClient(client *Client, msg *BroadcastMessage) bool {
 	subscribedToResource := resourceSubs["*"] || resourceSubs[msg.resourceID]
 	if !subscribedToResource {
 		return false
-	}
-
-	// AUTHORIZATION: If authz check is provided, verify user has permission
-	// Dashboard broadcasts don't have authz check (global to all authenticated users)
-	if msg.authzCheck != nil {
-		return msg.authzCheck(client, msg.resourceType, msg.resourceID)
 	}
 
 	return true

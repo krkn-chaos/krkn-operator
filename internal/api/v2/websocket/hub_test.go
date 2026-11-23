@@ -244,6 +244,92 @@ func TestHubBroadcast(t *testing.T) {
 	}
 }
 
+func TestSlowBroadcastViewDoesNotBlockClientLifecycle(t *testing.T) {
+	hub := NewHub()
+	go hub.Run()
+	defer close(hub.register)
+
+	client := func() *Client {
+		return &Client{send: make(chan []byte, 1), subscriptions: map[string]map[string]bool{
+			"run": {"run-1": true},
+		}}
+	}
+	first := client()
+	second := client()
+	hub.register <- first
+
+	// Registration is received before its map update completes.
+	deadline := time.After(time.Second)
+	for {
+		hub.mu.RLock()
+		registered := hub.clients[first]
+		hub.mu.RUnlock()
+		if registered {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatal("first client was not registered")
+		case <-time.After(time.Millisecond):
+		}
+	}
+
+	viewStarted := make(chan struct{})
+	releaseView := make(chan struct{})
+	defer func() {
+		select {
+		case <-releaseView:
+		default:
+			close(releaseView)
+		}
+	}()
+	hub.BroadcastWithView("run", "run-1", func(*Client) ([]byte, bool) {
+		close(viewStarted)
+		<-releaseView
+		return []byte("old"), true
+	})
+	select {
+	case <-viewStarted:
+	case <-time.After(time.Second):
+		t.Fatal("broadcast view did not start")
+	}
+
+	registered := make(chan struct{})
+	go func() { hub.register <- second; close(registered) }()
+	select {
+	case <-registered:
+	case <-time.After(time.Second):
+		t.Fatal("slow broadcast blocked registration")
+	}
+
+	unregistered := make(chan struct{})
+	go func() { hub.unregister <- first; close(unregistered) }()
+	select {
+	case <-unregistered:
+	case <-time.After(time.Second):
+		t.Fatal("slow broadcast blocked unregistration")
+	}
+	select {
+	case _, ok := <-first.send:
+		if ok {
+			t.Fatal("unregistered client received the pending broadcast")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("unregistered client's send channel stayed open")
+	}
+
+	close(releaseView)
+	hub.Broadcast("run", "run-1", []byte("next"))
+	select {
+	case message := <-second.send:
+		if string(message) != "next" {
+			t.Fatalf("second client received %q, want next", message)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("broadcast worker did not continue after slow view")
+	}
+}
+
 // TestClientSubscribeWildcard tests subscribing to all resources of a type (wildcard)
 func TestClientSubscribeWildcard(t *testing.T) {
 	client := &Client{

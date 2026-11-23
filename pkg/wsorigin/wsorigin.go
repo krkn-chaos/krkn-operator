@@ -202,6 +202,8 @@ func defaultPort(scheme string) string {
 // IsAllowedCookieOrigin enforces a strict Origin policy for ambient cookie
 // authentication. Unlike bearer-token WebSockets, missing and cross-origin
 // Origin values are rejected unless explicitly configured in the allow-list.
+// A same-host HTTP origin is accepted for plain HTTP development servers.
+// A request received over TLS cannot downgrade its Origin to HTTP.
 func IsAllowedCookieOrigin(r *http.Request) bool {
 	origin := r.Header.Get("Origin")
 	if origin == "" {
@@ -216,7 +218,7 @@ func IsAllowedCookieOrigin(r *http.Request) bool {
 	if originPort == "" {
 		originPort = defaultPort(u.Scheme)
 	}
-	if reqHost == strings.ToLower(u.Hostname()) && portsMatch(reqPort, originPort, u.Scheme) {
+	if (u.Scheme == "https" || r.TLS == nil) && reqHost == strings.ToLower(u.Hostname()) && portsMatch(reqPort, originPort, u.Scheme) {
 		return true
 	}
 	set := allowedOrigins.Load()
