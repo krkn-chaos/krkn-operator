@@ -31,7 +31,9 @@ func TestClientActiveChecksLocalAndExternalAccounts(t *testing.T) {
 			h := &Handler{userChecker: checker, externalChecker: checker}
 			client := &Client{claims: &auth.Claims{UserID: "alice", Provider: provider,
 				RegisteredClaims: jwt.RegisteredClaims{ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour))}}}
-			if !h.clientActive(client) || !h.clientActive(client) || checker.calls != 1 {
+			firstCheck := h.clientActive(client)
+			cachedCheck := h.clientActive(client)
+			if !firstCheck || !cachedCheck || checker.calls != 1 {
 				t.Fatalf("active status was not cached: calls=%d", checker.calls)
 			}
 			client.statusValidUntil = time.Now().Add(-time.Second)

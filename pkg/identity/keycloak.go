@@ -38,7 +38,7 @@ func NewKeycloakDirectory(provider, issuer, clientID, clientSecret string, clien
 	}
 	parts := strings.Split(strings.Trim(u.Path, "/"), "/")
 	if len(parts) < 2 || parts[len(parts)-2] != "realms" || parts[len(parts)-1] == "" {
-		return nil, fmt.Errorf("Keycloak issuer URL must end with /realms/{realm}")
+		return nil, fmt.Errorf("keycloak issuer URL must end with /realms/{realm}")
 	}
 	realm := parts[len(parts)-1]
 	basePath := "/" + strings.Join(parts[:len(parts)-2], "/")
@@ -101,11 +101,11 @@ func (d *KeycloakDirectory) ListGroups(ctx context.Context, query string, first,
 	}
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("Keycloak group request failed: %w", err)
+		return nil, fmt.Errorf("keycloak group request failed: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("Keycloak group request returned HTTP %d", resp.StatusCode)
+		return nil, fmt.Errorf("keycloak group request returned HTTP %d", resp.StatusCode)
 	}
 	var raw []keycloakGroup
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(&raw); err != nil {

@@ -418,14 +418,6 @@ func (h *Handler) sendError(client *Client, errCode, errMsg string) {
 	}
 }
 
-// roleFromAdmin converts isAdmin boolean to auth.Role string
-func roleFromAdmin(isAdmin bool) string {
-	if isAdmin {
-		return string(auth.RoleAdmin)
-	}
-	return string(auth.RoleUser)
-}
-
 // getDefaultPageSize reads the default page size from configstore.
 func (h *Handler) getDefaultPageSize() int {
 	if val, ok := kvstore.Get().GetValue("jobs.defaultPageSize"); ok {
