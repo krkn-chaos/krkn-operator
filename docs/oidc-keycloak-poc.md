@@ -137,4 +137,4 @@ Cookie WebSockets require a trusted `Origin` and use the same account/block chec
 
 ## Current POC limits
 
-The console has not yet been updated with the Keycloak button, group explorer, blacklist view, or the unmapped-groups empty state. The backend endpoints are ready for that integration. A live Keycloak deployment has not been exercised; the tests use a simulated OIDC issuer and Admin API.
+The Keycloak login buttons, group explorer, blacklist view, and unmapped-groups empty state are implemented in [console PR #200](https://github.com/krkn-chaos/krkn-operator-console/pull/200). Deploy that console change with this operator change before enabling an OIDC provider: an older password-only console cannot sign in external accounts. Local password login remains available during the transition. The integration test uses a disposable Keycloak container; a production Keycloak deployment has not been exercised.
