@@ -105,12 +105,18 @@ func ReservationName(logicalName string) string {
 	return "file-reservation-" + HashLogicalName(logicalName)
 }
 
-// BuildFileLabels creates the labels map for a file ConfigMap
-func BuildFileLabels(fileID string, groups []string, availableToAll bool, filePurpose, logicalName string) map[string]string {
+// BuildFileLabels creates the labels map for a file ConfigMap. fileType is the
+// user-defined type stored through ApplyFileType; pass an empty string for an
+// untyped file.
+func BuildFileLabels(fileID, fileType string, groups []string, availableToAll bool, filePurpose, logicalName string) map[string]string {
 	labels := map[string]string{
 		AppNameLabel:      AppName,
 		AppComponentLabel: ComponentFile,
 		FileIDLabel:       fileID,
+	}
+
+	if fileType != "" {
+		labels[FileTypeLabelPrefix+fileType] = "true"
 	}
 
 	// Add available-to-all label if specified

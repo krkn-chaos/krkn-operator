@@ -90,6 +90,14 @@ func (h *Handler) CreateFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := files.ValidateFileType(req.FileType); err != nil {
+		writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+			Error:   "bad_request",
+			Message: err.Error(),
+		})
+		return
+	}
+
 	// Default filePurpose to "file" if not specified
 	if req.FilePurpose == "" {
 		req.FilePurpose = files.FilePurposeFile
@@ -143,7 +151,7 @@ func (h *Handler) CreateFile(w http.ResponseWriter, r *http.Request) {
 	createdBy := claims.UserID
 
 	// Build labels and annotations
-	labels := files.BuildFileLabels(fileID, req.Groups, req.AvailableToAll, req.FilePurpose, logicalName)
+	labels := files.BuildFileLabels(fileID, req.FileType, req.Groups, req.AvailableToAll, req.FilePurpose, logicalName)
 	annotations := files.BuildFileAnnotations(
 		req.Description,
 		createdBy,
@@ -474,8 +482,22 @@ func (h *Handler) UpdateFile(w http.ResponseWriter, r *http.Request) {
 	// Get current user for audit trail
 	updatedBy := claims.UserID
 
+	// Resolve the file type before rebuilding labels: nil preserves the existing
+	// type, an empty string clears it.
+	nextFileType := files.ExtractFileTypeFromLabels(configMap.Labels)
+	if req.FileType != nil {
+		if err := files.ValidateFileType(*req.FileType); err != nil {
+			writeJSONError(w, http.StatusBadRequest, ErrorResponse{
+				Error:   "bad_request",
+				Message: err.Error(),
+			})
+			return
+		}
+		nextFileType = *req.FileType
+	}
+
 	// Update labels and annotations (preserve existing file ID)
-	configMap.Labels = files.BuildFileLabels(fileID, req.Groups, req.AvailableToAll, req.FilePurpose, newLogicalName)
+	configMap.Labels = files.BuildFileLabels(fileID, nextFileType, req.Groups, req.AvailableToAll, req.FilePurpose, newLogicalName)
 	configMap.Annotations = files.UpdateFileAnnotations(
 		configMap.Annotations,
 		req.Description,
@@ -959,6 +981,7 @@ func buildFileResponse(configMap *corev1.ConfigMap) files.FileResponse {
 		WorkflowName:           logicalName,
 		Description:            configMap.Annotations[files.DescriptionAnnotation],
 		FilePurpose:            files.ExtractFilePurposeFromLabels(configMap.Labels),
+		FileType:               files.ExtractFileTypeFromLabels(configMap.Labels),
 		Groups:                 files.ExtractGroupsFromLabels(configMap.Labels),
 		AvailableToAll:         configMap.Labels[files.AvailableToAllLabel] == "true",
 		CreatedAt:              configMap.Annotations[files.CreatedAtAnnotation],
@@ -975,6 +998,7 @@ func buildFileInfo(configMap *corev1.ConfigMap) files.FileInfo {
 		FileName:       configMap.Annotations[files.WorkflowNameAnnotation],
 		Description:    configMap.Annotations[files.DescriptionAnnotation],
 		FilePurpose:    files.ExtractFilePurposeFromLabels(configMap.Labels),
+		FileType:       files.ExtractFileTypeFromLabels(configMap.Labels),
 		Groups:         files.ExtractGroupsFromLabels(configMap.Labels),
 		AvailableToAll: configMap.Labels[files.AvailableToAllLabel] == "true",
 		CreatedAt:      configMap.Annotations[files.CreatedAtAnnotation],

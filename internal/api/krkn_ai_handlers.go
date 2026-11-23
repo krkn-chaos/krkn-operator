@@ -595,7 +595,7 @@ func (h *Handler) createKrknAIConfig(w http.ResponseWriter, r *http.Request) {
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        request.Name,
 			Namespace:   h.namespace,
-			Labels:      files.BuildFileLabels(fileID, request.Groups, request.AvailableToAll, files.FilePurposeKrknAIConfig, request.Name),
+			Labels:      files.BuildFileLabels(fileID, "", request.Groups, request.AvailableToAll, files.FilePurposeKrknAIConfig, request.Name),
 			Annotations: files.BuildFileAnnotations(request.Description, claims.UserID, request.Name),
 		},
 		Data: map[string]string{files.KrknAIConfigFileName: request.ConfigYAML},

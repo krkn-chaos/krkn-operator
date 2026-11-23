@@ -725,7 +725,7 @@ func (h *Handler) createFileInternal(ctx context.Context, req files.CreateFileRe
 	createdBy := claims.UserID
 
 	// Build labels and annotations
-	labels := files.BuildFileLabels(fileID, req.Groups, req.AvailableToAll, req.FilePurpose, logicalName)
+	labels := files.BuildFileLabels(fileID, "", req.Groups, req.AvailableToAll, req.FilePurpose, logicalName)
 	annotations := files.BuildFileAnnotations(req.Description, createdBy, req.WorkflowName)
 	if len(req.WorkflowCategories) > 0 {
 		categoriesJSON, err := json.Marshal(req.WorkflowCategories)
@@ -957,7 +957,16 @@ func (h *Handler) updateFileInternal(ctx context.Context, fileID string, req fil
 	updatedBy := claims.UserID
 
 	// Update labels and annotations (preserve existing file ID)
-	configMap.Labels = files.BuildFileLabels(fileID, req.Groups, req.AvailableToAll, req.FilePurpose, newLogicalName)
+	// Workflow edits keep the file's user-defined type; workflow requests do not
+	// carry one, and rebuilding labels would otherwise drop it.
+	nextFileType := files.ExtractFileTypeFromLabels(configMap.Labels)
+	if req.FileType != nil {
+		if err := files.ValidateFileType(*req.FileType); err != nil {
+			return err
+		}
+		nextFileType = *req.FileType
+	}
+	configMap.Labels = files.BuildFileLabels(fileID, nextFileType, req.Groups, req.AvailableToAll, req.FilePurpose, newLogicalName)
 	configMap.Annotations = files.UpdateFileAnnotations(
 		configMap.Annotations,
 		req.Description,
