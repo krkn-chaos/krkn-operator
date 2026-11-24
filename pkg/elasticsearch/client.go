@@ -29,6 +29,7 @@ import (
 	"math"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -62,6 +63,166 @@ const (
 	// booleanFacetBucketSize caps the job_status facet, which has only true/false.
 	booleanFacetBucketSize = 2
 )
+
+type sortField struct {
+	Field        string
+	UnmappedType string
+}
+
+const telemetrySortValueField = "krkn_console_sort_value"
+
+// telemetrySortFields is the allowlist and runtime type for sortable telemetry
+// columns. The query-time field reads the representative scenario from _source,
+// matching the values used by rawTelemetrySource.flatten.
+var telemetrySortFields = map[string]sortField{
+	"scenario_type":   {Field: telemetrySortValueField, UnmappedType: "keyword"},
+	"start_timestamp": {Field: telemetrySortValueField, UnmappedType: "double"},
+	"end_timestamp":   {Field: telemetrySortValueField, UnmappedType: "double"},
+	"status":          {Field: telemetrySortValueField, UnmappedType: "boolean"},
+}
+
+var alertSortFields = map[string]sortField{
+	"uuid":       {Field: "run_uuid.keyword", UnmappedType: "keyword"},
+	"phase":      {Field: "phase.keyword", UnmappedType: "keyword"},
+	"created_at": {Field: "created_at", UnmappedType: "date"},
+	// severity is mapped as a keyword field directly (no analyzed text parent), so
+	// sort on the bare field. Using a "severity.keyword" subfield resolves as
+	// unmapped and leaves every document with an equal (missing) sort key.
+	"severity": {Field: "severity", UnmappedType: "keyword"},
+}
+
+var alertFilterFields = map[string]string{
+	"run_uuid":  "run_uuid.keyword",
+	"severity":  "severity",
+	"phase":     "phase.keyword",
+	"alertname": "alertname.keyword",
+}
+
+func validateSortOptions(sortBy, sortOrder string, fields map[string]sortField) error {
+	if sortBy == "" && sortOrder == "" {
+		return nil
+	}
+	if sortBy == "" || sortOrder == "" {
+		return fmt.Errorf("sortBy and sortOrder must be provided together")
+	}
+	if _, ok := fields[sortBy]; !ok {
+		return fmt.Errorf("unsupported sortBy %q", sortBy)
+	}
+	if sortOrder != "asc" && sortOrder != "desc" {
+		return fmt.Errorf("sortOrder must be asc or desc")
+	}
+	return nil
+}
+
+func buildSortClause(sortBy, sortOrder string, fields map[string]sortField, defaultField, defaultOrder string) ([]any, error) {
+	field := sortField{Field: defaultField, UnmappedType: "date"}
+	order := defaultOrder
+	if sortBy != "" || sortOrder != "" {
+		if err := validateSortOptions(sortBy, sortOrder, fields); err != nil {
+			return nil, err
+		}
+		field = fields[sortBy]
+		order = sortOrder
+	}
+	fieldSort := map[string]any{"order": order}
+	if field.UnmappedType != "" {
+		fieldSort["unmapped_type"] = field.UnmappedType
+	}
+	// A multi-valued field has one sort value per element. Pick a deterministic
+	// element per document - lowest for ascending, highest for descending - so
+	// ordering is stable. Single-valued fields ignore mode, so it is safe to set
+	// for every explicit field sort; the default timestamp stays single-valued.
+	if sortBy != "" || sortOrder != "" {
+		if order == "asc" {
+			fieldSort["mode"] = "min"
+		} else {
+			fieldSort["mode"] = "max"
+		}
+	}
+	return []any{
+		map[string]any{field.Field: fieldSort},
+		map[string]any{"_doc": map[string]any{"order": "asc"}},
+	}, nil
+}
+
+// buildTelemetrySortClause sorts the query-time value that represents the same
+// scenario and status shown in each flattened row. When no sort is requested it
+// preserves timestamp-descending default. The _doc tie-breaker keeps equal keys
+// stable across pages.
+func buildTelemetrySortClause(sortBy, sortOrder string) ([]any, error) {
+	if sortBy == "" && sortOrder == "" {
+		return []any{
+			map[string]any{"timestamp": map[string]any{"order": "desc", "unmapped_type": "date"}},
+			map[string]any{"_doc": map[string]any{"order": "asc"}},
+		}, nil
+	}
+	if err := validateSortOptions(sortBy, sortOrder, telemetrySortFields); err != nil {
+		return nil, err
+	}
+	field := telemetrySortFields[sortBy]
+	return []any{
+		map[string]any{field.Field: map[string]any{
+			"order":         sortOrder,
+			"unmapped_type": field.UnmappedType,
+		}},
+		map[string]any{"_doc": map[string]any{"order": "asc"}},
+	}, nil
+}
+
+const telemetryRepresentativeScenarioScript = `
+def source = params['_source'];
+def scenarios = source['scenarios'];
+def scenario = null;
+if (scenarios != null && !scenarios.isEmpty()) {
+    scenario = scenarios.get(0);
+    if (!params['selected_scenario_types'].isEmpty()) {
+        for (def candidate : scenarios) {
+            if (params['selected_scenario_types'].contains(candidate['scenario_type'])) {
+                scenario = candidate;
+                break;
+            }
+        }
+    }
+}
+`
+
+func buildTelemetrySortRuntimeMapping(sortBy string, selectedScenarioTypes []string) map[string]any {
+	valueScripts := map[string]string{
+		"scenario_type": `if (scenario != null && scenario['scenario_type'] != null && scenario['scenario_type'] != '') emit(scenario['scenario_type']);`,
+		"start_timestamp": `if (scenario != null) {
+    def value = scenario['start_timestamp'];
+    if (value != null) {
+        double timestamp = ((Number) value).doubleValue();
+        if (timestamp != 0.0) emit(timestamp);
+    }
+}`,
+		"end_timestamp": `if (scenario != null) {
+    def value = scenario['end_timestamp'];
+    if (value != null) {
+        double timestamp = ((Number) value).doubleValue();
+        if (timestamp != 0.0) emit(timestamp);
+    }
+}`,
+		"status": `
+boolean status = source['job_status'] == true;
+if (scenario != null && scenario['exit_status'] != null && ((Number) scenario['exit_status']).intValue() != 0) {
+    status = false;
+}
+emit(status);`,
+	}
+	field := telemetrySortFields[sortBy]
+	return map[string]any{
+		telemetrySortValueField: map[string]any{
+			"type": field.UnmappedType,
+			"script": map[string]any{
+				"source": telemetryRepresentativeScenarioScript + valueScripts[sortBy],
+				"params": map[string]any{
+					"selected_scenario_types": selectedScenarioTypes,
+				},
+			},
+		},
+	}
+}
 
 // facetFields is the single source of truth for the filterable categories. It
 // drives the terms aggregations, the query filter clauses, and the facet buckets
@@ -327,7 +488,7 @@ type esAlertSearchResponse struct {
 
 // rawTelemetrySource mirrors the subset of a krkn telemetry document _source we
 // need to populate the table columns. Scenario-level fields (type, start/end,
-// namespace) live inside the scenarios array; we surface the run's first
+// namespace) live inside the scenarios array; we surface the representative
 // scenario for the flattened row.
 type rawTelemetrySource struct {
 	RunUUID   string `json:"run_uuid"`
@@ -570,6 +731,8 @@ func isSensitiveKey(key string) bool {
 // namespaceFromParameters extracts the target namespace from a scenario's raw
 // parameters JSON. The parameters shape varies by scenario type, so the value
 // tree is walked recursively for the first "namespace"/"namespace_pattern" key.
+// Map keys are traversed lexicographically so the displayed value stays stable
+// and matches the Elasticsearch runtime sort value.
 func namespaceFromParameters(raw json.RawMessage) string {
 	if len(raw) == 0 {
 		return ""
@@ -592,8 +755,13 @@ func findNamespace(v any) string {
 				return s
 			}
 		}
-		for _, val := range t {
-			if s := findNamespace(val); s != "" {
+		keys := make([]string, 0, len(t))
+		for key := range t {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		for _, key := range keys {
+			if s := findNamespace(t[key]); s != "" {
 				return s
 			}
 		}
@@ -708,6 +876,30 @@ func (c ConnectionParams) tlsConfig() (*tls.Config, error) {
 // bucket cap; for those the facet options are a prefix, so callers should offer a
 // way to fetch the rest rather than treat the list as complete.
 func (c *Client) QueryTelemetryPage(ctx context.Context, conn ConnectionParams, size, from int, startDate, endDate string, filters map[string][]string) (docs []TelemetryDocument, total int, stats TelemetryStats, facets map[string][]FacetOption, facetsTruncated map[string]bool, err error) {
+	return c.QueryTelemetryPageWithSort(ctx, conn, size, from, startDate, endDate, filters, "", "")
+}
+
+// QueryTelemetryPageWithSort is QueryTelemetryPage with an optional allowlisted
+// sort field and direction.
+//
+// sortBy and sortOrder must be supplied together: pass both or neither. When both
+// are empty the default ordering (timestamp descending) is preserved. When set,
+// sortBy must be an allowlisted telemetry column (scenario_type, start_timestamp,
+// end_timestamp, status) and sortOrder must be "asc" or "desc". Scenario columns
+// and status sort on the same representative values that flatten returns.
+// A missing field, an invalid direction, or only one of the two being set returns
+// an error before any request is made.
+//
+// It also returns an error when the telemetry index is not configured on conn,
+// when credentials would be sent over plaintext HTTP, when the destination policy
+// rejects an inline target, when the request cannot be executed, when
+// Elasticsearch returns a non-success status, when the response exceeds the
+// configured size limit, or when the response cannot be decoded. On any error the
+// returned docs/facets are nil and total/stats are their zero values.
+func (c *Client) QueryTelemetryPageWithSort(ctx context.Context, conn ConnectionParams, size, from int, startDate, endDate string, filters map[string][]string, sortBy, sortOrder string) (docs []TelemetryDocument, total int, stats TelemetryStats, facets map[string][]FacetOption, facetsTruncated map[string]bool, err error) {
+	if err := validateSortOptions(sortBy, sortOrder, telemetrySortFields); err != nil {
+		return nil, 0, TelemetryStats{}, nil, nil, err
+	}
 	if conn.Index == "" {
 		return nil, 0, TelemetryStats{}, nil, nil, fmt.Errorf("telemetry index is not configured for this Elasticsearch config")
 	}
@@ -734,7 +926,7 @@ func (c *Client) QueryTelemetryPage(ctx context.Context, conn ConnectionParams, 
 		return nil, 0, TelemetryStats{}, nil, nil, err
 	}
 
-	payload, err := buildSearchBody(size, from, startDate, endDate, filters)
+	payload, err := buildSearchBodyWithSort(size, from, startDate, endDate, filters, sortBy, sortOrder)
 	if err != nil {
 		return nil, 0, TelemetryStats{}, nil, nil, err
 	}
@@ -772,13 +964,44 @@ func (c *Client) QueryTelemetry(ctx context.Context, conn ConnectionParams, size
 // the response exceeds the configured size limit, or the response cannot be
 // decoded as an Elasticsearch search response.
 func (c *Client) QueryAlerts(ctx context.Context, conn ConnectionParams, size int, startDate, endDate string) ([]AlertDocument, error) {
+	return c.QueryAlertsWithSort(ctx, conn, size, startDate, endDate, "", "")
+}
+
+// QueryAlertsWithSort returns raw alerts sorted by an allowlisted source field.
+//
+// sortBy and sortOrder must be supplied together: pass both or neither. When both
+// are empty the default ordering (created_at descending) is preserved. When set,
+// sortBy must be an allowlisted alert field (uuid, phase, created_at, severity)
+// and sortOrder must be "asc" or "desc". A missing field, an invalid direction,
+// or only one of the two being set returns an error before any request is made.
+//
+// It also returns an error when the alerts index is not configured on conn, when
+// credentials would be sent over plaintext HTTP, when the destination policy
+// rejects an inline target, when the request cannot be executed, when
+// Elasticsearch returns a non-success status, when the response exceeds the
+// configured size limit, or when the response cannot be decoded.
+func (c *Client) QueryAlertsWithSort(ctx context.Context, conn ConnectionParams, size int, startDate, endDate, sortBy, sortOrder string) ([]AlertDocument, error) {
+	return c.QueryAlertsWithFiltersAndSort(ctx, conn, size, startDate, endDate, nil, sortBy, sortOrder)
+}
+
+// QueryAlertsWithFiltersAndSort applies allowlisted field filters before sorting
+// and the requested result limit.
+func (c *Client) QueryAlertsWithFiltersAndSort(ctx context.Context, conn ConnectionParams, size int, startDate, endDate string, filters []AlertFieldFilter, sortBy, sortOrder string) ([]AlertDocument, error) {
 	if conn.Index == "" {
 		return nil, fmt.Errorf("alerts index is not configured for this Elasticsearch config")
 	}
 	if err := validateQueryOptions(&size, startDate, endDate); err != nil {
 		return nil, err
 	}
-	respBody, err := c.executeQuery(ctx, conn, size, startDate, endDate, buildAlertsSearchBody)
+	if err := validateAlertFilters(filters); err != nil {
+		return nil, err
+	}
+	if err := validateSortOptions(sortBy, sortOrder, alertSortFields); err != nil {
+		return nil, err
+	}
+	respBody, err := c.executeQuery(ctx, conn, size, startDate, endDate, func(size int, startDate, endDate string) ([]byte, error) {
+		return buildAlertsSearchBodyWithSort(size, startDate, endDate, sortBy, sortOrder, filters)
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -857,6 +1080,14 @@ func (c *Client) resolveDoer(conn ConnectionParams) (Doer, error) {
 // offset. startDate/endDate are "yyyy-MM-dd"; empty values default to a trailing
 // 30-day window. filters adds one terms clause per selected facet category.
 func buildSearchBody(size, from int, startDate, endDate string, filters map[string][]string) ([]byte, error) {
+	return buildSearchBodyWithSort(size, from, startDate, endDate, filters, "", "")
+}
+
+func buildSearchBodyWithSort(size, from int, startDate, endDate string, filters map[string][]string, sortBy, sortOrder string) ([]byte, error) {
+	sort, err := buildTelemetrySortClause(sortBy, sortOrder)
+	if err != nil {
+		return nil, err
+	}
 	// Lower bound: default to the start of the day 30 days ago; an explicit
 	// startDate is parsed via the "yyyy-MM-dd" format below.
 	gte := "now-30d/d"
@@ -878,19 +1109,9 @@ func buildSearchBody(size, from int, startDate, endDate string, filters map[stri
 		// Count all matching documents (not just the first 10,000) so the client
 		// can compute an accurate page count for the returned window.
 		"track_total_hits": true,
-		// Sort newest-first by the same timestamp field the range filter uses so
-		// the size limit keeps the most recent documents. unmapped_type keeps the
-		// request from failing on indices where timestamp is not mapped, and the
-		// _doc tie-breaker makes ordering deterministic across equal timestamps.
-		"sort": []any{
-			map[string]any{
-				"timestamp": map[string]any{
-					"order":         "desc",
-					"unmapped_type": "date",
-				},
-			},
-			map[string]any{"_doc": map[string]any{"order": "asc"}},
-		},
+		// Sort before applying size/from; the default is newest-first, with a
+		// _doc tie-breaker for stable ordering when primary values are equal.
+		"sort": sort,
 		// The query carries only the date range so the facet aggregations can widen
 		// each category under the date window. The selected facet values are applied
 		// as a post_filter, which narrows the returned hits and hits.total but not
@@ -913,6 +1134,13 @@ func buildSearchBody(size, from int, startDate, endDate string, filters map[stri
 		// span the whole matched window (independent of the hits size limit).
 		"aggs": buildFacetAggs(filters),
 	}
+	if sortBy != "" {
+		selectedScenarioTypes := filters[scenarioTypeFacetKey]
+		if selectedScenarioTypes == nil {
+			selectedScenarioTypes = []string{}
+		}
+		body["runtime_mappings"] = buildTelemetrySortRuntimeMapping(sortBy, selectedScenarioTypes)
+	}
 
 	payload, err := json.Marshal(body)
 	if err != nil {
@@ -921,7 +1149,7 @@ func buildSearchBody(size, from int, startDate, endDate string, filters map[stri
 	return payload, nil
 }
 
-func buildAlertsSearchBody(size int, startDate, endDate string) ([]byte, error) {
+func buildAlertsSearchBodyWithSort(size int, startDate, endDate, sortBy, sortOrder string, filters []AlertFieldFilter) ([]byte, error) {
 	payload, err := buildSearchBody(size, 0, startDate, endDate, nil)
 	if err != nil {
 		return nil, err
@@ -939,15 +1167,36 @@ func buildAlertsSearchBody(size int, startDate, endDate string) ([]byte, error) 
 		}
 		return "now-30d/d"
 	}(), endDate)
-	body["sort"] = []any{
-		map[string]any{"created_at": map[string]any{"order": "desc", "unmapped_type": "date"}},
-		map[string]any{"_doc": map[string]any{"order": "asc"}},
+	sort, err := buildSortClause(sortBy, sortOrder, alertSortFields, "created_at", "desc")
+	if err != nil {
+		return nil, err
+	}
+	body["sort"] = sort
+	queryFilters := []any{
+		map[string]any{"range": map[string]any{"created_at": timestampRange}},
+	}
+	wildcardEscaper := strings.NewReplacer(`\`, `\\`, `*`, `\*`, `?`, `\?`)
+	for _, filter := range filters {
+		field := alertFilterFields[filter.Key]
+		value := strings.TrimSpace(filter.Value)
+		if value == "" {
+			queryFilters = append(queryFilters, map[string]any{
+				"exists": map[string]any{"field": field},
+			})
+			continue
+		}
+		queryFilters = append(queryFilters, map[string]any{
+			"wildcard": map[string]any{
+				field: map[string]any{
+					"value":            "*" + wildcardEscaper.Replace(value) + "*",
+					"case_insensitive": true,
+				},
+			},
+		})
 	}
 	body["query"] = map[string]any{
 		"bool": map[string]any{
-			"filter": []any{
-				map[string]any{"range": map[string]any{"created_at": timestampRange}},
-			},
+			"filter": queryFilters,
 		},
 	}
 	return json.Marshal(body)
