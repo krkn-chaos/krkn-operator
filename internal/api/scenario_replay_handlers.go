@@ -205,6 +205,12 @@ func (h *Handler) GetScenarioReplay(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusConflict, ErrorResponse{Error: "workspace_unavailable", Message: "Original workspace is no longer available for replay"})
 		return
 	}
+	if err := h.redactScenarioRunRequest(ctx, payload, scenarioRun.Annotations[secretInputFieldsAnnotation]); err != nil {
+		logger.Error(err, "Failed to redact scenario replay", "scenarioRunName", scenarioRunName)
+		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{Error: "internal_error", Message: "Failed to reconstruct scenario safely"})
+		return
+	}
+	payload.SourceScenarioRunName = scenarioRunName
 	logger.Info("Scenario replay payload reconstructed successfully",
 		"jobId", jobID,
 		"scenarioRunName", scenarioRunName,

@@ -19,6 +19,8 @@ package api
 import (
 	"bytes"
 	"encoding/json"
+	"github.com/krkn-chaos/krknctl/pkg/provider"
+	"github.com/krkn-chaos/krknctl/pkg/provider/models"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -278,6 +280,11 @@ func TestCloudCredentialContract_GraphRunStripsNodeEnv(t *testing.T) {
 		WithObjects(awsCred, targetRequest).
 		Build()
 	handler := NewTestHandler(fakeClient, fake.NewSimpleClientset(), namespace, "localhost:50051")
+	handler.scenarioProviderFactory = func(provider.Mode) (provider.ScenarioDataProvider, error) {
+		return &mockScenarioProvider{details: map[string]*models.ScenarioDetail{
+			"node-scenarios": {ScenarioTag: models.ScenarioTag{Name: "node-scenarios"}},
+		}}, nil
+	}
 
 	falseVal := false
 	reqBody := GraphRunCreateRequest{

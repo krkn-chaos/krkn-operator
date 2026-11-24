@@ -24,9 +24,11 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"reflect"
 	"strings"
 
 	"github.com/google/uuid"
+	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
 	"github.com/krkn-chaos/krkn-operator/pkg/auth"
 	"github.com/krkn-chaos/krkn-operator/pkg/files"
 	"github.com/krkn-chaos/krkn-operator/pkg/workflows"
@@ -102,6 +104,18 @@ func (h *Handler) CreateWorkflow(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	secretIndex, err := h.secretIndexForWorkflow(ctx, req.Graph, req.StudioLayout)
+	if err != nil {
+		logger.Error(err, "Failed to inspect workflow secret metadata")
+		writeJSONError(w, http.StatusServiceUnavailable, ErrorResponse{Error: "metadata_unavailable", Message: "Scenario input metadata is unavailable; workflow was not saved"})
+		return
+	}
+	redactStudioLayout(req.StudioLayout, secretIndex)
+	secretInputFieldsJSON, err := encodeSecretIndex(secretIndex)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{Error: "internal_error", Message: "Failed to serialize secret input metadata"})
+		return
+	}
 
 	// Convert graph to JSON string
 	content, err := workflows.ToFileContent(req.Graph)
@@ -127,15 +141,16 @@ func (h *Handler) CreateWorkflow(w http.ResponseWriter, r *http.Request) {
 
 	// Delegate to file creation (reuse ALL file logic)
 	fileReq := files.CreateFileRequest{
-		FileName:           files.WorkflowFileName, // Standard filename for workflows
-		Content:            content,                // Graph JSON
-		StudioLayout:       studioLayoutJSON,       // Studio visual layout (optional)
-		WorkflowName:       req.WorkflowName,       // User-defined workflow name
-		Description:        req.Description,
-		Groups:             req.Groups,                // RBAC groups
-		AvailableToAll:     req.AvailableToAll,        // Public flag
-		FilePurpose:        files.FilePurposeWorkflow, // System marker
-		WorkflowCategories: req.Categories,
+		FileName:              files.WorkflowFileName, // Standard filename for workflows
+		Content:               content,                // Graph JSON
+		StudioLayout:          studioLayoutJSON,       // Studio visual layout (optional)
+		WorkflowName:          req.WorkflowName,       // User-defined workflow name
+		Description:           req.Description,
+		Groups:                req.Groups,                // RBAC groups
+		AvailableToAll:        req.AvailableToAll,        // Public flag
+		FilePurpose:           files.FilePurposeWorkflow, // System marker
+		WorkflowCategories:    req.Categories,
+		SecretInputFieldsJSON: secretInputFieldsJSON,
 	}
 
 	// Call existing CreateFile handler logic
@@ -245,6 +260,11 @@ func (h *Handler) ListWorkflows(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			logger.Error(err, "Failed to convert file to workflow", "fileID", fileResp.FileID)
 			continue // Skip invalid workflows
+		}
+		if err := h.redactWorkflowResponse(ctx, &workflowResp); err != nil {
+			logger.Error(err, "Failed to redact workflow", "fileID", fileResp.FileID)
+			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{Error: "internal_error", Message: "Failed to list workflows safely"})
+			return
 		}
 		workflowList = append(workflowList, workflowResp)
 	}
@@ -380,6 +400,11 @@ func (h *Handler) GetWorkflow(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	if err := h.redactWorkflowResponse(ctx, &workflowResp); err != nil {
+		logger.Error(err, "Failed to redact workflow", "workflowID", workflowID)
+		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{Error: "internal_error", Message: "Failed to retrieve workflow safely"})
+		return
+	}
 	if len(workflowResp.Categories) > 0 {
 		visibleCategories, err := h.VisibleCategoryNames(ctx)
 		if err != nil {
@@ -452,6 +477,52 @@ func (h *Handler) UpdateWorkflow(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	previousFile, err := h.getFileByIDInternal(ctx, workflowID)
+	if err != nil || previousFile.FilePurpose != files.FilePurposeWorkflow {
+		writeJSONError(w, http.StatusNotFound, ErrorResponse{Error: "not_found", Message: "Workflow not found"})
+		return
+	}
+	previousGraph, err := workflows.FromFileContent(previousFile.Content)
+	if err != nil {
+		logger.Error(err, "Failed to read previous workflow graph", "workflowID", workflowID)
+		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{Error: "internal_error", Message: "Failed to read previous workflow"})
+		return
+	}
+	indexGraph := make(map[string]krknv1alpha1.GraphScenarioNode, len(req.Graph))
+	for nodeID, node := range req.Graph {
+		if previous, exists := previousGraph[nodeID]; exists && len(node.Env) == 0 {
+			node.Env = previous.Env
+		}
+		indexGraph[nodeID] = node
+	}
+	currentIndex, err := h.secretIndexForWorkflow(ctx, indexGraph, req.StudioLayout)
+	if err != nil {
+		logger.Error(err, "Failed to inspect workflow secret metadata", "workflowID", workflowID)
+		writeJSONError(w, http.StatusServiceUnavailable, ErrorResponse{Error: "metadata_unavailable", Message: "Scenario input metadata is unavailable; workflow was not updated"})
+		return
+	}
+	savedIndex, err := decodeSecretIndex(previousFile.SecretInputFieldsJSON)
+	if err != nil {
+		logger.Error(err, "Failed to parse saved workflow secret metadata", "workflowID", workflowID)
+		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{Error: "invalid_metadata", Message: "Saved workflow secret metadata is invalid"})
+		return
+	}
+	secretIndex := unionSecretIndexes(savedIndex, currentIndex)
+	for nodeID, submitted := range req.Graph {
+		if previous, exists := previousGraph[nodeID]; exists {
+			if savedIndex != nil && !reflect.DeepEqual(savedIndex[nodeID], currentIndex[nodeID]) {
+				previous.Env = nil
+			}
+			merged, _ := mergeGraphNodeSecrets(previous, submitted, secretIndex[nodeID])
+			req.Graph[nodeID] = merged
+		}
+	}
+	redactStudioLayout(req.StudioLayout, secretIndex)
+	secretInputFieldsJSON, err := encodeSecretIndex(secretIndex)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{Error: "internal_error", Message: "Failed to serialize secret input metadata"})
+		return
+	}
 
 	// Convert graph to JSON string
 	content, err := workflows.ToFileContent(req.Graph)
@@ -478,15 +549,17 @@ func (h *Handler) UpdateWorkflow(w http.ResponseWriter, r *http.Request) {
 	// Delegate to file update
 	workflowNamePtr := &req.WorkflowName // Convert to pointer (always set for workflows)
 	fileReq := files.UpdateFileRequest{
-		FileName:           files.WorkflowFileName,
-		Content:            content,
-		StudioLayout:       studioLayoutJSON,
-		WorkflowName:       workflowNamePtr, // Always set for workflow updates
-		Description:        req.Description,
-		Groups:             req.Groups,
-		AvailableToAll:     req.AvailableToAll,
-		FilePurpose:        files.FilePurposeWorkflow,
-		WorkflowCategories: req.Categories,
+		FileName:                files.WorkflowFileName,
+		Content:                 content,
+		StudioLayout:            studioLayoutJSON,
+		WorkflowName:            workflowNamePtr, // Always set for workflow updates
+		Description:             req.Description,
+		Groups:                  req.Groups,
+		AvailableToAll:          req.AvailableToAll,
+		FilePurpose:             files.FilePurposeWorkflow,
+		WorkflowCategories:      req.Categories,
+		SecretInputFieldsJSON:   secretInputFieldsJSON,
+		ExpectedResourceVersion: previousFile.ResourceVersion,
 	}
 
 	err = h.updateFileInternal(ctx, workflowID, fileReq)
@@ -641,18 +714,19 @@ func convertFileResponseToWorkflow(fileResp files.FileResponse) (workflows.Workf
 	}
 
 	return workflows.WorkflowResponse{
-		WorkflowID:     fileResp.FileID,
-		WorkflowName:   fileResp.WorkflowName, // User-defined workflow name from annotation
-		Description:    fileResp.Description,
-		Graph:          graph,
-		StudioLayout:   studioLayout,
-		Groups:         fileResp.Groups,
-		AvailableToAll: fileResp.AvailableToAll,
-		Categories:     categories,
-		CreatedAt:      fileResp.CreatedAt,
-		CreatedBy:      fileResp.CreatedBy,
-		UpdatedAt:      fileResp.UpdatedAt,
-		UpdatedBy:      fileResp.UpdatedBy,
+		WorkflowID:            fileResp.FileID,
+		WorkflowName:          fileResp.WorkflowName, // User-defined workflow name from annotation
+		Description:           fileResp.Description,
+		Graph:                 graph,
+		StudioLayout:          studioLayout,
+		SecretInputFieldsJSON: fileResp.SecretInputFieldsJSON,
+		Groups:                fileResp.Groups,
+		AvailableToAll:        fileResp.AvailableToAll,
+		Categories:            categories,
+		CreatedAt:             fileResp.CreatedAt,
+		CreatedBy:             fileResp.CreatedBy,
+		UpdatedAt:             fileResp.UpdatedAt,
+		UpdatedBy:             fileResp.UpdatedBy,
 	}, nil
 }
 
@@ -733,6 +807,9 @@ func (h *Handler) createFileInternal(ctx context.Context, req files.CreateFileRe
 			return nil, fmt.Errorf("failed to serialize workflow categories: %w", err)
 		}
 		annotations[files.WorkflowCategoriesAnnotation] = string(categoriesJSON)
+	}
+	if req.SecretInputFieldsJSON != "" {
+		annotations[secretInputFieldsAnnotation] = req.SecretInputFieldsJSON
 	}
 
 	// Build ConfigMap data
@@ -915,6 +992,9 @@ func (h *Handler) updateFileInternal(ctx context.Context, fileID string, req fil
 	if err != nil {
 		return fmt.Errorf("file not found: %w", err)
 	}
+	if req.ExpectedResourceVersion != "" && configMap.ResourceVersion != req.ExpectedResourceVersion {
+		return fmt.Errorf("workflow changed while editing; reload and retry")
+	}
 
 	// Verify file purpose matches expected type (only for workflow operations)
 	// This prevents workflow endpoints from mutating non-workflow files
@@ -974,6 +1054,9 @@ func (h *Handler) updateFileInternal(ctx context.Context, fileID string, req fil
 			}
 			configMap.Annotations[files.WorkflowCategoriesAnnotation] = string(categoriesJSON)
 		}
+	}
+	if req.SecretInputFieldsJSON != "" {
+		configMap.Annotations[secretInputFieldsAnnotation] = req.SecretInputFieldsJSON
 	}
 
 	// Update data

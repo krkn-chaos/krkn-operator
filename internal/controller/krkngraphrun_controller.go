@@ -21,6 +21,7 @@ package controller
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -669,6 +670,18 @@ func (r *KrknGraphRunReconciler) createScenarioRun(
 			},
 		},
 		Spec: spec,
+	}
+	// Carry the field classification captured at graph creation into the child
+	// run, so replay reads remain safe if the image metadata later changes.
+	const secretFieldsKey = "krkn.krkn-chaos.dev/secret-input-fields"
+	if encoded := graphRun.Annotations[secretFieldsKey]; encoded != "" {
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(encoded), &fields); err != nil {
+			return false, fmt.Errorf("invalid graph secret metadata: %w", err)
+		}
+		if nodeFields, ok := fields[nodeID]; ok {
+			scenarioRun.Annotations = map[string]string{secretFieldsKey: string(nodeFields)}
+		}
 	}
 
 	// Set owner reference for cascade deletion

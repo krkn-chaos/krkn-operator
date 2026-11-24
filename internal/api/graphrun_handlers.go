@@ -194,6 +194,12 @@ func (h *Handler) GetGraphRun(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{Error: "internal_error", Message: "Failed to retrieve graph run"})
 		return
 	}
+	visibleGraph, secretFields, err := h.redactGraphEnvironment(ctx, visibleGraph, graphRun.Annotations[secretInputFieldsAnnotation])
+	if err != nil {
+		logger.Error(err, "Failed to redact graph run", "graphRunName", name)
+		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{Error: "internal_error", Message: "Failed to retrieve graph run safely"})
+		return
+	}
 	// Build response
 	response := GraphRunDetailResponse{
 		Name:              graphRun.Name,
@@ -201,6 +207,7 @@ func (h *Handler) GetGraphRun(w http.ResponseWriter, r *http.Request) {
 		CreationTimestamp: graphRun.CreationTimestamp.Time,
 		Spec: GraphRunSpecResponse{
 			Graph:                   visibleGraph,
+			SecretFields:            secretFields,
 			TargetRequestID:         graphRun.Spec.TargetRequestID,
 			TargetClusters:          graphRun.Spec.TargetClusters,
 			OwnerUserID:             graphRun.Spec.OwnerUserID,
@@ -410,6 +417,11 @@ func (h *Handler) CreateGraphRun(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	if err := h.mergeGraphRunSourceSecrets(ctx, &req); err != nil {
+		logger.Info("Graph run source cannot be reused", "error", err.Error())
+		writeJSONError(w, http.StatusBadRequest, ErrorResponse{Error: "invalid_source", Message: err.Error()})
+		return
+	}
 
 	// Fetch KrknTargetRequest to validate permissions
 	targetRequest := &krknv1alpha1.KrknTargetRequest{}
@@ -616,13 +628,25 @@ func (h *Handler) CreateGraphRun(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	visibleGraph, secretFields, err := h.redactGraphEnvironment(ctx, visibleGraph, "")
+	if err != nil {
+		logger.Error(err, "Failed to inspect graph run secret metadata")
+		writeJSONError(w, http.StatusServiceUnavailable, ErrorResponse{Error: "metadata_unavailable", Message: "Scenario input metadata is unavailable; graph run was not created"})
+		return
+	}
+	secretInputFieldsJSON, err := encodeSecretIndex(indexFromSecretState(secretFields))
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{Error: "internal_error", Message: "Failed to serialize secret input metadata"})
+		return
+	}
 
 	// Create KrknGraphRun CR
 	graphRun := &krknv1alpha1.KrknGraphRun{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      graphRunName,
-			Namespace: h.namespace,
-			Labels:    labels,
+			Name:        graphRunName,
+			Namespace:   h.namespace,
+			Labels:      labels,
+			Annotations: map[string]string{secretInputFieldsAnnotation: secretInputFieldsJSON},
 		},
 		Spec: krknv1alpha1.KrknGraphRunSpec{
 			Graph:                   req.Graph,
@@ -658,6 +682,7 @@ func (h *Handler) CreateGraphRun(w http.ResponseWriter, r *http.Request) {
 		CreationTimestamp: graphRun.CreationTimestamp.Time,
 		Spec: GraphRunSpecResponse{
 			Graph:                   visibleGraph,
+			SecretFields:            secretFields,
 			TargetRequestID:         graphRun.Spec.TargetRequestID,
 			TargetClusters:          graphRun.Spec.TargetClusters,
 			MaxRetries:              graphRun.Spec.MaxRetries,

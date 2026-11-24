@@ -240,7 +240,12 @@ func (h *Handler) ListFiles(w http.ResponseWriter, r *http.Request) {
 	// Convert to response format
 	fileList := make([]files.FileResponse, len(configMapList.Items))
 	for i, cm := range configMapList.Items {
-		fileList[i] = buildFileResponse(&cm)
+		fileList[i], err = h.safeFileResponse(ctx, buildFileResponse(&cm))
+		if err != nil {
+			logger.Error(err, "Failed to redact file response", "fileID", files.ExtractFileIDFromLabels(cm.Labels))
+			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{Error: "internal_error", Message: "Failed to list files safely"})
+			return
+		}
 	}
 
 	logger.Info("Listed files", "total", len(fileList))
@@ -307,7 +312,13 @@ func (h *Handler) GetFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	logger.Info("Retrieved file", "fileID", fileID)
-	writeJSON(w, http.StatusOK, buildFileResponse(configMap))
+	response, err := h.safeFileResponse(ctx, buildFileResponse(configMap))
+	if err != nil {
+		logger.Error(err, "Failed to redact file response", "fileID", fileID)
+		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{Error: "internal_error", Message: "Failed to retrieve file safely"})
+		return
+	}
+	writeJSON(w, http.StatusOK, response)
 }
 
 // UpdateFile handles PUT /api/v1/files/{fileId}
@@ -393,6 +404,10 @@ func (h *Handler) UpdateFile(w http.ResponseWriter, r *http.Request) {
 
 	// Preserve existing filePurpose — /files cannot reclassify resources
 	existingPurpose := files.ExtractFilePurposeFromLabels(configMap.Labels)
+	if existingPurpose == files.FilePurposeWorkflow {
+		writeJSONError(w, http.StatusBadRequest, ErrorResponse{Error: "bad_request", Message: "Use PUT /api/v1/workflows/{workflowId} to update workflow templates"})
+		return
+	}
 	if existingPurpose != "" {
 		req.FilePurpose = existingPurpose
 	}
@@ -956,6 +971,8 @@ func buildFileResponse(configMap *corev1.ConfigMap) files.FileResponse {
 		Content:                content,
 		StudioLayout:           studioLayout,
 		WorkflowCategoriesJSON: configMap.Annotations[files.WorkflowCategoriesAnnotation],
+		SecretInputFieldsJSON:  configMap.Annotations[secretInputFieldsAnnotation],
+		ResourceVersion:        configMap.ResourceVersion,
 		WorkflowName:           logicalName,
 		Description:            configMap.Annotations[files.DescriptionAnnotation],
 		FilePurpose:            files.ExtractFilePurposeFromLabels(configMap.Labels),
