@@ -1,6 +1,10 @@
 # Optional Keycloak OIDC authentication (operator POC)
 
-This implementation adds Keycloak login to the **krkn-operator backend**. It does not configure the Keycloak server, LDAP federation, or the web console. Local password login and existing API Bearer JWTs remain available.
+This implementation adds Keycloak login to the **krkn-operator backend**. The companion `krkn-operator-console` implements provider discovery and OIDC login buttons. Neither component configures the Keycloak server or LDAP federation. Local password login and existing API Bearer JWTs remain available.
+
+## Rollout order
+
+Deploy a console release with OIDC login choices before enabling an external provider in the operator. The updated console keeps local password login available when an older operator returns 404 for `GET /api/v1/auth/providers`. Then deploy the operator, create the provider with `enabled: false`, and enable it only after both services are serving the same origin. Do not activate an environment-configured Keycloak provider before the console is updated. This sequence ensures external users see a working login choice when the provider becomes available.
 
 ## Identity provider management
 
@@ -29,13 +33,13 @@ Create body example:
   "redirectUrl": "https://operator.example/api/v1/auth/oidc/corp-keycloak/callback",
   "adminClientId": "krkn-operator-groups",
   "adminClientSecret": "<group-reader-secret>",
-  "enabled": true
+  "enabled": false
 }
 ```
 
 `PATCH` accepts `displayName`, client IDs/secrets, `redirectUrl`, and `enabled`; omitted secrets retain their existing values. The admin responses contain credential-presence flags but never the secret values. Group discovery credentials are optional until group import is needed. A disabled provider disappears from the public login list, rejects new login/callback requests, and causes existing HTTP and WebSocket sessions from that provider to fail the live identity check. Every enable/disable transition rotates a private session epoch, so old sessions stay invalid after re-enabling; users must log in again.
 
-The public login-choice endpoint is `GET /api/v1/auth/providers`; it returns only enabled providers with `id`, `type`, `displayName`, and `loginUrl`. The console should render its "Login with …" buttons from this response.
+The public login-choice endpoint is `GET /api/v1/auth/providers`; it returns only enabled providers with `id`, `type`, `displayName`, and `loginUrl`. The companion console renders its "Log in with …" links from this response.
 
 If a labelled provider Secret is malformed, the public list continues to return valid providers. The admin list includes its Secret name and validation reason in `invalidProviders` so the administrator can repair it without exposing credentials.
 
