@@ -24,11 +24,12 @@ import (
 	"errors"
 	"fmt"
 
-	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/types"
-
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
 	"github.com/krkn-chaos/krkn-operator/internal/kubeconfig"
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 var errAmbiguousClusterProvider = errors.New("operator_name is required to disambiguate a cluster found in multiple providers")
@@ -38,10 +39,34 @@ var errAmbiguousClusterProvider = errors.New("operator_name is required to disam
 func (h *Handler) getKubeconfigFromOperatorTarget(ctx context.Context, targetUUID string) (string, error) {
 	// Fetch KrknOperatorTarget
 	var target krknv1alpha1.KrknOperatorTarget
-	if err := h.client.Get(ctx, types.NamespacedName{
+	err := h.client.Get(ctx, types.NamespacedName{
 		Name:      targetUUID,
 		Namespace: h.namespace,
-	}, &target); err != nil {
+	}, &target)
+	if apierrors.IsNotFound(err) {
+		// VisualizeInstallCard submits the displayed clusterName, while other
+		// API callers submit the target UUID. Accept either identifier so both
+		// the selected cluster and older visualize records keep resolving.
+		var targets krknv1alpha1.KrknOperatorTargetList
+		if listErr := h.client.List(ctx, &targets, client.InNamespace(h.namespace)); listErr != nil {
+			return "", fmt.Errorf("failed to list KrknOperatorTargets: %w", listErr)
+		}
+		matches := make([]*krknv1alpha1.KrknOperatorTarget, 0, 1)
+		for i := range targets.Items {
+			candidate := &targets.Items[i]
+			if candidate.Spec.ClusterName == targetUUID || candidate.Spec.UUID == targetUUID {
+				matches = append(matches, candidate)
+			}
+		}
+		switch len(matches) {
+		case 1:
+			target = *matches[0]
+		case 0:
+			return "", fmt.Errorf("KrknOperatorTarget with UUID or cluster name %q not found", targetUUID)
+		default:
+			return "", fmt.Errorf("multiple KrknOperatorTargets match UUID or cluster name %q", targetUUID)
+		}
+	} else if err != nil {
 		return "", fmt.Errorf("failed to fetch KrknOperatorTarget: %w", err)
 	}
 

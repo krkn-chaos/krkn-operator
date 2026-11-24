@@ -20,6 +20,7 @@ staticcheck_*.tar.gz
 
 # Go workspace file
 go.work
+go.work.sum
 
 # Go vendor directory
 vendor/
