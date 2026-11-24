@@ -279,11 +279,13 @@ func (h *Handler) reconstructScenarioRunPayload(ctx context.Context, scenarioRun
 		ScenarioImage: scenarioRunImage(scenarioRun.Status.ClusterJobs),
 
 		// Optional fields
-		Environment:     scenarioRun.Spec.Environment,
-		KubeconfigPath:  scenarioRun.Spec.KubeconfigPath,
-		MaxRetries:      intPtr(scenarioRun.Spec.MaxRetries),
-		Workspace:       workspaceSelectionFromReference(scenarioRun.Spec.Workspace),
-		RollbackEnabled: scenarioRun.Spec.RollbackEnabled,
+		Environment:             scenarioRun.Spec.Environment,
+		KubeconfigPath:          scenarioRun.Spec.KubeconfigPath,
+		MaxRetries:              intPtr(scenarioRun.Spec.MaxRetries),
+		Workspace:               workspaceSelectionFromReference(scenarioRun.Spec.Workspace),
+		RollbackEnabled:         scenarioRun.Spec.RollbackEnabled,
+		ResiliencyScoreEnabled:  scenarioRun.Spec.ResiliencyScoreEnabled,
+		ResiliencyScoreBaseline: scenarioRun.Spec.ResiliencyScoreBaseline,
 	}
 	if ref := h.replayableCloudCredentialRef(ctx, scenarioRun.Spec.CloudCredentialRef); ref != "" {
 		payload.CloudCredentialRef = ref

@@ -306,6 +306,11 @@ type KrknScenarioRunSpec struct {
 	// For GraphRun-created ScenarioRuns, the GraphRun reconciler handles scoring regardless of this field.
 	// +optional
 	ResiliencyScoreEnabled bool `json:"resiliencyScoreEnabled,omitempty"`
+
+	// ResiliencyScoreBaseline is the optional threshold for standalone score comparison.
+	// +optional
+	// +kubebuilder:validation:Minimum=0
+	ResiliencyScoreBaseline *float64 `json:"resiliencyScoreBaseline,omitempty"`
 }
 
 // ReportStatus tracks the status of report generation for a scenario run

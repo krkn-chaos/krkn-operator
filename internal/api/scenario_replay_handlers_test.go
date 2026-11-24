@@ -81,8 +81,10 @@ func TestGetScenarioReplay_Success(t *testing.T) {
 			Scenario: publicScenarioReference("dummy-scenario"),
 			Workspace: &krknv1alpha1.WorkspaceReference{Name: "friendly", WorkspaceUID: "workspace-uid",
 				ClaimName: "cluster-internal-pvc", ClaimUID: "claim-uid"},
-			MaxRetries:         5,
-			CloudCredentialRef: "aws-ci",
+			MaxRetries:              5,
+			ResiliencyScoreEnabled:  true,
+			ResiliencyScoreBaseline: floatPointer(80.5),
+			CloudCredentialRef:      "aws-ci",
 			Environment: map[string]string{
 				"EXIT_STATUS": "0",
 			},
@@ -140,6 +142,9 @@ func TestGetScenarioReplay_Success(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, payload.MaxRetries)
 	assert.Equal(t, 5, *payload.MaxRetries)
+	assert.True(t, payload.ResiliencyScoreEnabled)
+	require.NotNil(t, payload.ResiliencyScoreBaseline)
+	assert.Equal(t, 80.5, *payload.ResiliencyScoreBaseline)
 
 	assert.Equal(t, "target-123", payload.TargetRequestID)
 	assert.Equal(t, []string{"resilience"}, payload.Categories)

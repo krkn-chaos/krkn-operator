@@ -122,6 +122,11 @@ spec:
                 description: RegistryName is the legacy persisted managed-registry
                   identity.
                 type: string
+              resiliencyScoreBaseline:
+                description: ResiliencyScoreBaseline is the optional threshold for
+                  standalone score comparison.
+                minimum: 0
+                type: number
               resiliencyScoreEnabled:
                 description: |-
                   ResiliencyScoreEnabled enables resiliency score calculation for this scenario run.

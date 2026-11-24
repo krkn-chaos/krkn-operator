@@ -526,6 +526,7 @@ func scenarioHistoryScores(run *krknv1alpha1.KrknScenarioRun) []categoryHistoryS
 			clusterName:  score.ClusterName,
 			providerName: providerName,
 			score:        score.Score,
+			baseline:     run.Spec.ResiliencyScoreBaseline,
 		})
 	}
 	return scores
