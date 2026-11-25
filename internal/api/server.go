@@ -220,6 +220,7 @@ func NewServerWithComponentNamespace(port int, k8sClient client.Client, clientse
 	mux.Handle(ComponentsPath, authMw.RequireAuth(http.HandlerFunc(handler.ListComponents)))
 	mux.Handle(ClustersPath, authMw.RequireAuth(http.HandlerFunc(handler.GetClusters)))
 	mux.Handle(NodesPath, authMw.RequireAuth(http.HandlerFunc(handler.GetNodes)))
+	mux.Handle(ClusterResourcesPath, authMw.RequireAuth(http.HandlerFunc(handler.GetClusterResources)))
 	mux.Handle(TerminalPath, authMw.RequireAuth(http.HandlerFunc(handler.ExecuteTerminal)))
 	mux.Handle(TerminalAvailableCommandsPath, authMw.RequireAuth(http.HandlerFunc(handler.GetAvailableCommands)))
 	mux.Handle(TargetsPath, authMw.RequireAuth(http.HandlerFunc(handler.TargetsHandler)))
