@@ -26,7 +26,7 @@ type secretFieldState map[string]bool
 
 type workflowSecretIndex map[string]map[string]struct{}
 
-const secretInputFieldsAnnotation = "krkn.krkn-chaos.dev/secret-input-fields"
+const secretInputFieldsAnnotation = "krkn.krkn-chaos.dev/secret-input-fields" // #nosec G101 -- Kubernetes annotation key containing field names, not a credential value.
 
 func encodeSecretIndex(index workflowSecretIndex) (string, error) {
 	encoded, err := json.Marshal(index)

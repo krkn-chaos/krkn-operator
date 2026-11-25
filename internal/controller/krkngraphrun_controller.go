@@ -673,7 +673,7 @@ func (r *KrknGraphRunReconciler) createScenarioRun(
 	}
 	// Carry the field classification captured at graph creation into the child
 	// run, so replay reads remain safe if the image metadata later changes.
-	const secretFieldsKey = "krkn.krkn-chaos.dev/secret-input-fields"
+	const secretFieldsKey = "krkn.krkn-chaos.dev/secret-input-fields" // #nosec G101 -- Kubernetes annotation key containing field names, not a credential value.
 	if encoded := graphRun.Annotations[secretFieldsKey]; encoded != "" {
 		var fields map[string]json.RawMessage
 		if err := json.Unmarshal([]byte(encoded), &fields); err != nil {
