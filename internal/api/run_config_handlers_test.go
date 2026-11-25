@@ -19,6 +19,8 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"github.com/krkn-chaos/krknctl/pkg/provider"
+	"github.com/krkn-chaos/krknctl/pkg/provider/models"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -96,6 +98,11 @@ func TestGetScenarioRunConfig_Success(t *testing.T) {
 	handler := &Handler{
 		client:    fakeClient,
 		namespace: "krkn-operator-system",
+	}
+	handler.scenarioProviderFactory = func(provider.Mode) (provider.ScenarioDataProvider, error) {
+		return &mockScenarioProvider{details: map[string]*models.ScenarioDetail{
+			"dummy-scenario": {ScenarioTag: models.ScenarioTag{Name: "dummy-scenario"}},
+		}}, nil
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/scenarios/run/"+scenarioRunName+"/config", nil)
@@ -334,6 +341,11 @@ func TestGetGraphRunConfig_Success(t *testing.T) {
 	handler := &Handler{
 		client:    fakeClient,
 		namespace: "krkn-operator-system",
+	}
+	handler.scenarioProviderFactory = func(provider.Mode) (provider.ScenarioDataProvider, error) {
+		return &mockScenarioProvider{details: map[string]*models.ScenarioDetail{
+			"scenario-a": {ScenarioTag: models.ScenarioTag{Name: "scenario-a"}},
+		}}, nil
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/graphruns/"+graphRunName+"/config", nil)

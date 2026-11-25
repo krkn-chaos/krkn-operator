@@ -917,13 +917,17 @@ func (h *Handler) TargetsHandler(w http.ResponseWriter, r *http.Request) {
 func convertInputFields(fields []typing.InputField) []InputFieldResponse {
 	result := make([]InputFieldResponse, 0, len(fields))
 	for _, field := range fields {
+		defaultValue := field.Default
+		if field.Secret {
+			defaultValue = nil
+		}
 		result = append(result, InputFieldResponse{
 			Name:              field.Name,
 			ShortDescription:  field.ShortDescription,
 			Description:       field.Description,
 			Variable:          field.Variable,
 			Type:              field.Type.String(),
-			Default:           field.Default,
+			Default:           defaultValue,
 			Validator:         field.Validator,
 			ValidationMessage: field.ValidationMessage,
 			Separator:         field.Separator,
@@ -1825,6 +1829,11 @@ func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
 			"clusterCount", len(seen),
 		)
 	}
+	if err := h.mergeScenarioRunSourceSecrets(ctx, &req); err != nil {
+		logger.Info("Scenario run source cannot be reused", "error", err.Error())
+		writeJSONError(w, http.StatusBadRequest, ErrorResponse{Error: "invalid_source", Message: err.Error()})
+		return
+	}
 
 	// Process file references: validate access and translate to FileMount
 	workspaceRef, ok := h.resolveWorkspaceSelection(w, r, req.Workspace.reference())
@@ -2100,12 +2109,28 @@ func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
 	if !h.addRequestedRunCategoryLabels(w, r, req.Categories, labels) {
 		return
 	}
+	secretInputFieldsJSON := ""
+	if len(req.Environment) > 0 {
+		secretVariables, metadataErr := h.secretVariablesForScenario(ctx, req.Scenario)
+		if metadataErr != nil {
+			logger.Error(metadataErr, "Failed to inspect scenario secret metadata")
+			writeJSONError(w, http.StatusServiceUnavailable, ErrorResponse{Error: "metadata_unavailable", Message: "Scenario input metadata is unavailable; run was not created"})
+			return
+		}
+		encoded, marshalErr := json.Marshal(secretVariables)
+		if marshalErr != nil {
+			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{Error: "internal_error", Message: "Failed to serialize secret input metadata"})
+			return
+		}
+		secretInputFieldsJSON = string(encoded)
+	}
 
 	scenarioRun := &krknv1alpha1.KrknScenarioRun{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      scenarioRunName,
-			Namespace: h.namespace,
-			Labels:    labels,
+			Name:        scenarioRunName,
+			Namespace:   h.namespace,
+			Labels:      labels,
+			Annotations: map[string]string{secretInputFieldsAnnotation: secretInputFieldsJSON},
 		},
 		Spec: krknv1alpha1.KrknScenarioRunSpec{
 			TargetRequestID:        req.TargetRequestID,

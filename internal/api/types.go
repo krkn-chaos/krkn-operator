@@ -207,6 +207,12 @@ type ScenarioRunRequest struct {
 	KubeconfigPath string `json:"kubeconfigPath,omitempty"`
 	// Environment is a map of environment variables to pass to the container (optional)
 	Environment map[string]string `json:"environment,omitempty"`
+	// SecretFields reports configured secret inputs in read responses. Request
+	// values are ignored; the server derives this state from scenario metadata.
+	SecretFields map[string]bool `json:"secretFields,omitempty"`
+	// SourceScenarioRunName requests reuse of a prior run's secret inputs under
+	// the server-side cleartext-change policy.
+	SourceScenarioRunName string `json:"sourceScenarioRunName,omitempty"`
 	// Files is an array of file objects to mount in the container (optional, legacy inline file mount)
 	Files []FileMount `json:"files,omitempty"`
 	// FileReferences are references to centrally-managed files by UUID (optional)
@@ -937,6 +943,12 @@ type ListGroupMembersResponse struct {
 type GraphRunCreateRequest struct {
 	// Graph is the dependency graph of scenarios to execute
 	Graph map[string]krknv1alpha1.GraphScenarioNode `json:"graph"`
+	// SecretFields is read-only configured-state metadata for each graph node.
+	SecretFields map[string]map[string]bool `json:"secretFields,omitempty"`
+	// SourceWorkflowID or SourceGraphRunName identifies a saved configuration
+	// whose secret values may be reused after server-side comparison.
+	SourceWorkflowID   string `json:"sourceWorkflowId,omitempty"`
+	SourceGraphRunName string `json:"sourceGraphRunName,omitempty"`
 	// TargetRequestID is the reference to the KrknTargetRequest CR
 	TargetRequestID string `json:"targetRequestId"`
 	// TargetClusters is a map of provider-name to list of cluster names
@@ -984,6 +996,7 @@ type GraphRunDetailResponse struct {
 // GraphRunSpecResponse represents the spec section of a graph run
 type GraphRunSpecResponse struct {
 	Graph                   map[string]krknv1alpha1.GraphScenarioNode `json:"graph"`
+	SecretFields            map[string]map[string]bool                `json:"secretFields,omitempty"`
 	TargetRequestID         string                                    `json:"targetRequestId"`
 	TargetClusters          map[string][]string                       `json:"targetClusters"`
 	MaxRetries              int                                       `json:"maxRetries"`

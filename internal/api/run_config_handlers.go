@@ -150,6 +150,12 @@ func (h *Handler) GetScenarioRunConfig(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusConflict, ErrorResponse{Error: "workspace_unavailable", Message: "Original workspace is no longer available for replay"})
 		return
 	}
+	if err := h.redactScenarioRunRequest(ctx, payload, scenarioRun.Annotations[secretInputFieldsAnnotation]); err != nil {
+		logger.Error(err, "Failed to redact scenario run configuration", "scenarioRunName", scenarioRunName)
+		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{Error: "internal_error", Message: "Failed to retrieve scenario configuration safely"})
+		return
+	}
+	payload.SourceScenarioRunName = scenarioRunName
 	logger.Info("Scenario run config retrieved successfully",
 		"scenarioRunName", scenarioRunName,
 		"userID", claims.UserID)
@@ -266,12 +272,20 @@ func (h *Handler) GetGraphRunConfig(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	visibleGraph, secretFields, err := h.redactGraphEnvironment(ctx, visibleGraph, graphRun.Annotations[secretInputFieldsAnnotation])
+	if err != nil {
+		logger.Error(err, "Failed to redact graph run configuration", "graphRunName", graphRunName)
+		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{Error: "internal_error", Message: "Failed to retrieve graph run configuration safely"})
+		return
+	}
 	payload := GraphRunCreateRequest{
-		Graph:           visibleGraph,
-		TargetRequestID: graphRun.Spec.TargetRequestID,
-		TargetClusters:  graphRun.Spec.TargetClusters,
-		MaxRetries:      intPtr(graphRun.Spec.MaxRetries),
-		Categories:      categories,
+		Graph:              visibleGraph,
+		SecretFields:       secretFields,
+		SourceGraphRunName: graphRunName,
+		TargetRequestID:    graphRun.Spec.TargetRequestID,
+		TargetClusters:     graphRun.Spec.TargetClusters,
+		MaxRetries:         intPtr(graphRun.Spec.MaxRetries),
+		Categories:         categories,
 	}
 	if ref := h.replayableCloudCredentialRef(ctx, graphRun.Spec.CloudCredentialRef); ref != "" {
 		payload.CloudCredentialRef = ref

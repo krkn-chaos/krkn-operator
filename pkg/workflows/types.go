@@ -65,6 +65,7 @@ type UpdateWorkflowRequest struct {
 
 // WorkflowResponse represents a workflow template in API responses.
 type WorkflowResponse struct {
+	SecretInputFieldsJSON string `json:"-"`
 	// WorkflowID is the UUID identifier for this workflow
 	WorkflowID string `json:"workflowId"`
 	// WorkflowName is a human-readable name for the workflow
@@ -76,6 +77,9 @@ type WorkflowResponse struct {
 	// StudioLayout is frontend-owned visual canvas data (opaque to backend - just store and return it)
 	// Contains node positions, edges, nextNodeNumber, etc.
 	StudioLayout map[string]interface{} `json:"studioLayout,omitempty"`
+	// SecretFields reports whether each secret input is configured, keyed by node
+	// ID and environment variable. Secret values are never returned.
+	SecretFields map[string]map[string]bool `json:"secretFields,omitempty"`
 	// Groups is a list of group names that can access this workflow
 	Groups []string `json:"groups,omitempty"`
 	// AvailableToAll indicates if the workflow is accessible to all users
