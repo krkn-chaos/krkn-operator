@@ -29,6 +29,18 @@ import (
 	_ "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
 )
 
+func TestRequestQueryForLogRedactsOIDCCallback(t *testing.T) {
+	callback := httptest.NewRequest(http.MethodGet,
+		"/api/v1/auth/oidc/local-keycloak/callback?code=one-time-code&state=signed-state", nil)
+	if got := requestQueryForLog(callback); got != "[redacted]" {
+		t.Fatalf("OIDC callback query leaked: %q", got)
+	}
+	other := httptest.NewRequest(http.MethodGet, "/api/v1/jobs?page=2", nil)
+	if got := requestQueryForLog(other); got != "page=2" {
+		t.Fatalf("ordinary query changed: %q", got)
+	}
+}
+
 // TestMaxBodySizeMiddleware verifies that the maxBodySizeMiddleware correctly
 // limits request body size for POST/PUT/PATCH methods and passes through
 // GET/DELETE requests without modification.

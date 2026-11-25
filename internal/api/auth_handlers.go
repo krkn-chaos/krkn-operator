@@ -443,6 +443,11 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if user.Spec.AuthProvider != "" {
+		writeJSONError(w, http.StatusUnauthorized, ErrorResponse{Error: "invalid_credentials", Message: "Use OIDC to sign in"})
+		return
+	}
+
 	// Check if user is active
 	if !user.Status.Active {
 		writeJSONError(w, http.StatusUnauthorized, ErrorResponse{
@@ -508,6 +513,22 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+
+	// Issue a separate browser session while retaining the Bearer response for
+	// existing CLI and console clients. Cookie sessions expire after eight hours.
+	sessionToken, err := tokenGen.GenerateSessionToken(auth.Claims{
+		UserID: user.Spec.UserID, Role: user.Spec.Role,
+		Name: user.Spec.Name, Surname: user.Spec.Surname,
+		Organization: user.Spec.Organization,
+	})
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{Error: "internal_error", Message: "Failed to generate session"})
+		return
+	}
+	http.SetCookie(w, &http.Cookie{Name: auth.SessionCookieName, Value: sessionToken,
+		Path: "/", HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode,
+		MaxAge: int((8 * time.Hour).Seconds()),
+	})
 
 	// Update last login timestamp
 	user.Status.LastLogin = metav1.Now()

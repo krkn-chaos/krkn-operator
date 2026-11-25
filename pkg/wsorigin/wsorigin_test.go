@@ -17,6 +17,7 @@ limitations under the License.
 package wsorigin
 
 import (
+	"net/http"
 	"net/http/httptest"
 	"testing"
 )
@@ -120,5 +121,69 @@ func TestSetAllowedOrigins_EmptyDisablesEnforcement(t *testing.T) {
 	SetAllowedOrigins(nil) // disable enforcement
 	if !IsAllowedOrigin(req) {
 		t.Error("expected all origins to be allowed after clearing the allow-list")
+	}
+}
+
+func TestIsAllowedCookieOriginRequiresTrustedOrigin(t *testing.T) {
+	SetAllowedOrigins(nil)
+	t.Cleanup(func() { SetAllowedOrigins(nil) })
+	for _, tt := range []struct {
+		target string
+		origin string
+		want   bool
+	}{
+		{"http://api.example.com/ws", "", false},
+		{"http://api.example.com/ws", "https://api.example.com", true},
+		{"http://api.example.com/ws", "http://api.example.com", true},
+		{"https://api.example.com/ws", "http://api.example.com", false},
+		{"http://api.example.com/ws", "https://evil.example.com", false},
+		{"http://api.example.com/ws", "null", false},
+		{"http://api.example.com/ws", "https://api.example.com.evil.test", false},
+	} {
+		req := httptest.NewRequest("GET", tt.target, nil)
+		req.Host = "api.example.com"
+		if tt.origin != "" {
+			req.Header.Set("Origin", tt.origin)
+		}
+		if got := IsAllowedCookieOrigin(req); got != tt.want {
+			t.Errorf("origin %q: got %v, want %v", tt.origin, got, tt.want)
+		}
+	}
+	SetAllowedOrigins([]string{"https://console.example.com"})
+	req := httptest.NewRequest("GET", "/ws", nil)
+	req.Host = "api.example.com"
+	req.Header.Set("Origin", "https://console.example.com")
+	if !IsAllowedCookieOrigin(req) {
+		t.Fatal("configured console origin rejected")
+	}
+	SetAllowedOrigins([]string{"http://localhost:3000"})
+	req.Header.Set("Origin", "http://localhost:3000")
+	if !IsAllowedCookieOrigin(req) {
+		t.Fatal("explicitly configured HTTP development origin rejected")
+	}
+}
+
+func TestCookieOriginWithSelfSignedTLS(t *testing.T) {
+	SetAllowedOrigins(nil)
+	t.Cleanup(func() { SetAllowedOrigins(nil) })
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !IsAllowedCookieOrigin(r) {
+			http.Error(w, "origin rejected", http.StatusForbidden)
+		}
+	}))
+	defer server.Close()
+
+	req, err := http.NewRequest(http.MethodGet, server.URL, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Origin", server.URL)
+	resp, err := server.Client().Do(req) // Trusts the test server's self-signed cert.
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("self-signed HTTPS origin returned %d", resp.StatusCode)
 	}
 }

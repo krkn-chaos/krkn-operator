@@ -134,6 +134,16 @@ func CreateBackup(ctx context.Context, k8sClient client.Client, config BackupCon
 			selector: map[string]string{"app.kubernetes.io/component": "user-auth"},
 		},
 		{
+			gvk:      schema.GroupVersionKind{Group: "", Version: "v1", Kind: "Secret"},
+			singular: "identity-provider-secrets",
+			selector: map[string]string{"krkn.krkn-chaos.dev/identity-provider": "true"},
+		},
+		{
+			gvk:      schema.GroupVersionKind{Group: "", Version: "v1", Kind: "Secret"},
+			singular: "oidc-block-secrets",
+			selector: map[string]string{"krkn.krkn-chaos.dev/oidc-block": "true"},
+		},
+		{
 			gvk:       schema.GroupVersionKind{Group: "", Version: "v1", Kind: "Secret"},
 			singular:  "target-secrets",
 			hasLabels: []string{"krkn-target-uuid"},

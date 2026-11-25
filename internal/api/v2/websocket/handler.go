@@ -51,16 +51,18 @@ type AuthorizationChecker interface {
 
 // Handler contains dependencies for WebSocket handlers
 type Handler struct {
-	hub            *Hub
-	k8sClient      k8sclient.Client
-	namespace      string
-	authz          AuthorizationChecker // Group-based authorization
-	getTokenGen    func(context.Context) (*auth.TokenGenerator, error)
-	upgrader       websocket.Upgrader
-	pingInterval   time.Duration
-	pongWait       time.Duration
-	writeWait      time.Duration
-	maxMessageSize int64
+	hub             *Hub
+	k8sClient       k8sclient.Client
+	namespace       string
+	authz           AuthorizationChecker // Group-based authorization
+	getTokenGen     func(context.Context) (*auth.TokenGenerator, error)
+	externalChecker auth.ExternalIdentityChecker
+	userChecker     auth.UserStatusChecker
+	upgrader        websocket.Upgrader
+	pingInterval    time.Duration
+	pongWait        time.Duration
+	writeWait       time.Duration
+	maxMessageSize  int64
 }
 
 // NewHandler creates a new WebSocket handler
@@ -81,6 +83,50 @@ func NewHandler(hub *Hub, k8sClient k8sclient.Client, namespace string, authz Au
 		writeWait:      10 * time.Second,
 		maxMessageSize: 16 * 1024,
 	}
+}
+
+// SetExternalIdentityChecker enables live revocation for OIDC WebSockets.
+func (h *Handler) SetExternalIdentityChecker(checker auth.ExternalIdentityChecker) {
+	h.externalChecker = checker
+}
+
+// SetUserStatusChecker enables local account revocation for open WebSockets.
+func (h *Handler) SetUserStatusChecker(checker auth.UserStatusChecker) {
+	h.userChecker = checker
+}
+
+func (h *Handler) clientActive(client *Client) bool {
+	if client.claims == nil {
+		return false
+	}
+	if client.claims.ExpiresAt != nil && time.Now().After(client.claims.ExpiresAt.Time) {
+		return false
+	}
+	client.statusMu.Lock()
+	defer client.statusMu.Unlock()
+	if time.Now().Before(client.statusValidUntil) {
+		return true
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	var active bool
+	var err error
+	if client.claims.Provider != "" {
+		if h.externalChecker == nil {
+			return false
+		}
+		active, err = h.externalChecker.IsExternalIdentityActive(ctx, client.claims)
+	} else {
+		if h.userChecker == nil {
+			return false
+		}
+		active, err = h.userChecker.IsUserActive(ctx, client.claims.UserID)
+	}
+	if err != nil || !active {
+		return false
+	}
+	client.statusValidUntil = time.Now().Add(5 * time.Second)
+	return true
 }
 
 // HandleWebSocket handles WebSocket connections
@@ -136,35 +182,24 @@ func NewHandler(hub *Hub, k8sClient k8sclient.Client, namespace string, authz Au
 func (h *Handler) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 	logger := log.Log.WithName("websocket-v2")
 
-	// Extract JWT token from Sec-WebSocket-Protocol header
-	// Format: "access_token.{jwt_token}"
 	protocol := r.Header.Get("Sec-WebSocket-Protocol")
-	parts := strings.SplitN(protocol, ".", 2)
-	if len(parts) != 2 || parts[0] != "access_token" {
-		logger.Error(nil, "Invalid WebSocket protocol format",
-			"protocol", "access_token.<redacted>", // Don't log raw token
-			"client_ip", r.RemoteAddr)
-		http.Error(w, "Invalid WebSocket protocol. Expected: access_token.{jwt_token}", http.StatusBadRequest)
-		return
-	}
-
-	tokenString := parts[1]
-
-	// Get TokenGenerator from SecretManager
-	tokenGen, err := h.getTokenGen(r.Context())
-	if err != nil {
-		logger.Error(err, "Failed to get TokenGenerator")
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
-		return
-	}
-
-	// Validate JWT token
-	claims, err := tokenGen.ValidateToken(tokenString)
-	if err != nil {
-		logger.Error(err, "Invalid WebSocket JWT token",
-			"client_ip", r.RemoteAddr)
-		http.Error(w, "Invalid or expired token", http.StatusUnauthorized)
-		return
+	claims := auth.GetClaimsFromContext(r.Context())
+	if claims == nil {
+		parts := strings.SplitN(protocol, ".", 2)
+		if len(parts) != 2 || parts[0] != "access_token" || parts[1] == "" {
+			http.Error(w, "Invalid WebSocket protocol. Expected: access_token.{jwt_token}", http.StatusBadRequest)
+			return
+		}
+		tokenGen, err := h.getTokenGen(r.Context())
+		if err != nil {
+			http.Error(w, "Authentication service unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		claims, err = tokenGen.ValidateToken(parts[1])
+		if err != nil || claims.TokenUse != "" {
+			http.Error(w, "Invalid or expired token", http.StatusUnauthorized)
+			return
+		}
 	}
 
 	logger.Info("WebSocket authentication successful",
@@ -179,8 +214,11 @@ func (h *Handler) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 	// Attempting to respond with a different protocol causes browser to reject the connection
 	// The JWT is already in the request headers, so echoing it in the response doesn't
 	// increase exposure risk (and connections are HTTPS in production)
-	h.upgrader.Subprotocols = []string{protocol}
-	conn, err := h.upgrader.Upgrade(w, r, nil)
+	upgrader := h.upgrader
+	if protocol != "" {
+		upgrader.Subprotocols = []string{protocol}
+	}
+	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		logger.Error(err, "Failed to upgrade WebSocket connection",
 			"userId", claims.UserID,
@@ -192,6 +230,7 @@ func (h *Handler) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 	client := &Client{
 		conn:            conn,
 		userID:          claims.UserID,
+		claims:          claims,
 		isAdmin:         claims.Role == "admin",
 		send:            make(chan []byte, 256),
 		subscriptions:   make(map[string]map[string]bool),
@@ -239,6 +278,9 @@ func (h *Handler) readPump(client *Client) {
 			break
 		}
 
+		if !h.clientActive(client) {
+			break
+		}
 		// Parse client message (subscribe/unsubscribe)
 		var msg ClientMessage
 		if err := json.Unmarshal(message, &msg); err != nil {
@@ -261,6 +303,9 @@ func (h *Handler) writePump(client *Client) {
 	for {
 		select {
 		case message, ok := <-client.send:
+			if !h.clientActive(client) {
+				return
+			}
 			_ = client.conn.SetWriteDeadline(time.Now().Add(h.writeWait))
 			if !ok {
 				// Hub closed the channel
@@ -273,6 +318,9 @@ func (h *Handler) writePump(client *Client) {
 			}
 
 		case <-ticker.C:
+			if !h.clientActive(client) {
+				return
+			}
 			_ = client.conn.SetWriteDeadline(time.Now().Add(h.writeWait))
 			if err := client.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
 				return
@@ -387,14 +435,6 @@ func (h *Handler) sendError(client *Client, errCode, errMsg string) {
 	}
 }
 
-// roleFromAdmin converts isAdmin boolean to auth.Role string
-func roleFromAdmin(isAdmin bool) string {
-	if isAdmin {
-		return string(auth.RoleAdmin)
-	}
-	return string(auth.RoleUser)
-}
-
 // getDefaultPageSize reads the default page size from configstore.
 func (h *Handler) getDefaultPageSize() int {
 	if val, ok := kvstore.Get().GetValue("jobs.defaultPageSize"); ok {
@@ -416,11 +456,7 @@ func (h *Handler) sendInitialSnapshot(client *Client, resourceType string, resou
 
 	// CRITICAL: Create context with user claims for authorization filtering
 	// Without claims, the filter functions cannot enforce group-based permissions
-	claims := &auth.Claims{
-		UserID: client.userID,
-		Role:   roleFromAdmin(client.isAdmin),
-	}
-	ctx := context.WithValue(context.Background(), auth.UserClaimsKey, claims)
+	ctx := context.WithValue(context.Background(), auth.UserClaimsKey, client.authClaims())
 
 	switch resourceType {
 	case "run":

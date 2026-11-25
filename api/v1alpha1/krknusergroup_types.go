@@ -34,9 +34,25 @@ type ClusterPermissionSet struct {
 	Actions []string `json:"actions"`
 }
 
+// ExternalGroupMapping associates a group claim from an identity provider with
+// this local KrknUserGroup. Multiple entries may grant the same local permissions.
+// Provider is the immutable configuration ID (for example, "corp-keycloak"),
+// not the product type. Group is the exact value in that provider's OIDC claim.
+type ExternalGroupMapping struct {
+	// +kubebuilder:validation:MinLength=1
+	Provider string `json:"provider"`
+	// +kubebuilder:validation:MinLength=1
+	Group string `json:"group"`
+	// GroupID is the remote provider ID for display and rename diagnostics. The
+	// Group claim value, scoped by Provider, is used for authorization.
+	// +optional
+	GroupID string `json:"groupId,omitempty"`
+}
+
 // KrknUserGroupSpec defines the desired state of KrknUserGroup.
 // KrknUserGroup defines cluster access permissions for a group of users.
-// User membership is managed via labels on KrknUser CRs: group.krkn.krkn-chaos.dev/<group-name>=true
+// Local user membership is managed via labels on KrknUser CRs.
+// External user membership is resolved from ExternalGroups mappings.
 type KrknUserGroupSpec struct {
 	// Name is the group name (duplicates metadata.name for API convenience)
 	Name string `json:"name"`
@@ -44,6 +60,11 @@ type KrknUserGroupSpec struct {
 	// Description is a human-readable description of the group's purpose
 	// +optional
 	Description string `json:"description,omitempty"`
+
+	// ExternalGroups maps exact OIDC group claim values to this local group.
+	// Unmapped claims grant no permissions.
+	// +optional
+	ExternalGroups []ExternalGroupMapping `json:"externalGroups,omitempty"`
 
 	// ClusterPermissions defines access permissions per cluster
 	// Key: cluster API URL (must match ClusterTarget.ClusterAPIURL from KrknTargetRequest)
@@ -61,9 +82,10 @@ type KrknUserGroupSpec struct {
 // KrknUserGroup is the Schema for the krknusergroups API.
 // It defines cluster-level access control for groups of users.
 //
-// Users are associated with groups via labels on their KrknUser CR:
+// Local users are associated with groups via labels on their KrknUser CR:
 //   - group.krkn.krkn-chaos.dev/<group-name>: "true"
 //
+// External users match Spec.ExternalGroups against verified OIDC claim values.
 // Permissions are aggregated across all groups a user belongs to (union).
 // Admin users bypass all group-based access controls.
 type KrknUserGroup struct {

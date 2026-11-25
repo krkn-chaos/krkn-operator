@@ -8,6 +8,33 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  auth-backend-integration:
+    name: Authentication backend integration (${{ matrix.provider }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - provider: Keycloak
+            test: TestKeycloakOIDCIntegration
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Verify Docker
+        run: docker info
+
+      - name: Test ${{ matrix.provider }} login and authorization
+        env:
+          KRKN_AUTH_TEST_RUNTIME: docker
+        run: go test -tags=integration ./internal/api -run '^${{ matrix.test }}$' -count=1 -v
+
   security-and-quality:
     name: Security & Code Quality
     runs-on: ubuntu-24.04

@@ -10,6 +10,8 @@ Kubernetes operator for chaos engineering built on the [krkn](https://github.com
 
 📖 **[Official Documentation](https://krkn-chaos.dev/docs/krkn-operator)**
 
+Optional Keycloak OIDC login, provider configuration, group mapping, and the containerized integration test are described in the [Keycloak integration guide](docs/oidc-keycloak-poc.md).
+
 ### Operator release documentation snapshots
 
 The Website repository keeps editable Operator docs in

@@ -235,6 +235,59 @@ func (h *Handler) checkScenarioRunGroupAccess(
 	return false, nil // No permission on any job
 }
 
+// checkScenarioRunReplayAccess requires run permission on every original target.
+// Saved job URLs are used because the TargetRequest may already have been removed.
+// An unresolved target fails closed; replay always operates on the complete run.
+func (h *Handler) checkScenarioRunReplayAccess(ctx context.Context, userID string, run *krknv1alpha1.KrknScenarioRun) (bool, error) {
+	groups, err := groupauth.GetUserGroups(ctx, h.client, userID, h.namespace)
+	if err != nil {
+		return false, err
+	}
+	checked := 0
+	for provider, clusters := range run.Spec.TargetClusters {
+		for _, cluster := range clusters {
+			checked++
+			found := false
+			for _, job := range run.Status.ClusterJobs {
+				if job.ProviderName == provider && job.ClusterName == cluster && job.ClusterAPIURL != "" &&
+					groupauth.CanPerformAction(groups, job.ClusterAPIURL, groupauth.ActionRun) {
+					found = true
+					break
+				}
+			}
+			if !found {
+				return false, nil
+			}
+		}
+	}
+	return checked > 0, nil
+}
+
+// visibleScenarioRunTargets returns only original targets backed by a saved job
+// that the caller may view. Missing job metadata never grants visibility.
+func (h *Handler) visibleScenarioRunTargets(ctx context.Context, userID string, run *krknv1alpha1.KrknScenarioRun) (map[string][]string, int, int, error) {
+	groups, err := groupauth.GetUserGroups(ctx, h.client, userID, h.namespace)
+	if err != nil {
+		return nil, 0, 0, err
+	}
+	visible := make(map[string][]string)
+	total, visibleCount := 0, 0
+	for provider, clusters := range run.Spec.TargetClusters {
+		for _, cluster := range clusters {
+			total++
+			for _, job := range run.Status.ClusterJobs {
+				if job.ProviderName == provider && job.ClusterName == cluster && job.ClusterAPIURL != "" &&
+					groupauth.CanPerformAction(groups, job.ClusterAPIURL, groupauth.ActionView) {
+					visible[provider] = append(visible[provider], cluster)
+					visibleCount++
+					break
+				}
+			}
+		}
+	}
+	return visible, visibleCount, total, nil
+}
+
 // checkScenarioRunCancelAccess checks if user can cancel the entire scenario run.
 // Admin users can cancel anything.
 // Regular users must have 'cancel' permission on ALL jobs in the run.
@@ -275,9 +328,10 @@ func (h *Handler) checkScenarioRunCancelAccess(
 // FilterScenarioRunsByGroupPermission filters scenario runs based on group permissions.
 //
 // Filtering rules:
-// - If no claims in context (e.g., tests), return all runs
-// - Admins see all runs
-// - Regular users see only runs where they have 'view' permission on AT LEAST ONE job
+//   - If no claims in context (e.g., tests), return all runs
+//   - Admins see all runs
+//   - Regular users see only runs where they have 'view' permission on AT LEAST ONE job;
+//     returned copies contain only visible cluster jobs and scores
 //
 // Parameters:
 //   - runs: The list of scenario runs to filter
@@ -300,34 +354,62 @@ func (h *Handler) FilterScenarioRunsByGroupPermission(
 		return runs
 	}
 
-	// Regular users: filter by group permissions on jobs
+	userGroups, err := groupauth.GetUserGroups(ctx, h.client, claims.UserID, h.namespace)
+	if err != nil {
+		log.FromContext(ctx).Error(err, "Failed to resolve groups for scenario run listing", "userID", claims.UserID)
+		return nil
+	}
+
+	// A run-level authorization check alone must not expose its other jobs.
 	filtered := make([]krknv1alpha1.KrknScenarioRun, 0)
 
 	for _, run := range runs {
-		// Check if user has 'view' permission on ANY job in this run
-		hasAccess, err := h.checkScenarioRunGroupAccess(
-			ctx,
-			claims.UserID,
-			&run,
-			groupauth.ActionView,
-		)
-
-		if err != nil {
-			// Log error but continue processing other runs
-			log.FromContext(ctx).V(1).Info("Failed to check access for run, excluding",
-				"runName", run.Name,
-				"userID", claims.UserID,
-				"error", err.Error(),
-			)
-			continue
+		visibleJobs := h.filterJobsByPermission(run.Status.ClusterJobs, ctx, userGroups, groupauth.ActionView)
+		if len(visibleJobs) == 0 {
+			// A pending rollback can be visible before its first job is recorded.
+			source := run.Spec.RollbackSource
+			if len(run.Status.ClusterJobs) != 0 || source == nil || source.ClusterAPIURL == "" ||
+				!groupauth.CanPerformAction(userGroups, source.ClusterAPIURL, groupauth.ActionView) {
+				continue
+			}
 		}
-
-		if hasAccess {
-			filtered = append(filtered, run)
-		}
+		filtered = append(filtered, *scenarioRunWithVisibleJobs(&run, visibleJobs))
 	}
 
 	return filtered
+}
+
+// scenarioRunWithVisibleJobs makes a response-safe copy with counts and scores
+// scoped to the same cluster jobs as the caller is allowed to view.
+func scenarioRunWithVisibleJobs(run *krknv1alpha1.KrknScenarioRun, jobs []krknv1alpha1.ClusterJobStatus) *krknv1alpha1.KrknScenarioRun {
+	visible := run.DeepCopy()
+	visible.Status.ClusterJobs = jobs
+	visible.Status.TotalTargets = len(jobs)
+	visible.Status.SuccessfulJobs = 0
+	visible.Status.FailedJobs = 0
+	visible.Status.CancelledJobs = 0
+	visible.Status.RunningJobs = 0
+	allowedScores := make(map[string]struct{}, len(jobs))
+	for _, job := range jobs {
+		allowedScores[job.ProviderName+"\x00"+job.ClusterName] = struct{}{}
+		switch job.Phase {
+		case "Succeeded":
+			visible.Status.SuccessfulJobs++
+		case "Failed", "MaxRetriesExceeded":
+			visible.Status.FailedJobs++
+		case "Cancelled":
+			visible.Status.CancelledJobs++
+		case "Running", "Retrying", "Cancelling":
+			visible.Status.RunningJobs++
+		}
+	}
+	visible.Status.ResiliencyScores = nil
+	for _, score := range run.Status.ResiliencyScores {
+		if _, ok := allowedScores[score.ProviderName+"\x00"+score.ClusterName]; ok {
+			visible.Status.ResiliencyScores = append(visible.Status.ResiliencyScores, score)
+		}
+	}
+	return visible
 }
 
 // filterJobsByPermission filters cluster jobs based on user's group permissions.

@@ -445,6 +445,7 @@ func findBackupDir(tempDir string) (string, error) {
 // - app.kubernetes.io/component: user-auth (user auth secrets)
 // - app.kubernetes.io/component: elasticsearch-config (elasticsearch secrets)
 // - app.kubernetes.io/component: registry (registry secrets)
+// - provider and block Secrets created by the OIDC identity API
 func isOperatorManagedSecret(obj *unstructured.Unstructured) bool {
 	labels := obj.GetLabels()
 	if labels == nil {
@@ -454,6 +455,16 @@ func isOperatorManagedSecret(obj *unstructured.Unstructured) bool {
 	// Allow target secrets (have krkn-target-uuid label)
 	if _, ok := labels["krkn-target-uuid"]; ok {
 		return true
+	}
+	if labels["app.kubernetes.io/name"] == "krkn-operator" {
+		if labels["krkn.krkn-chaos.dev/identity-provider"] == "true" &&
+			strings.HasPrefix(obj.GetName(), "krkn-identity-provider-") {
+			return true
+		}
+		if labels["krkn.krkn-chaos.dev/oidc-block"] == "true" &&
+			strings.HasPrefix(obj.GetName(), "krkn-oidc-block-") {
+			return true
+		}
 	}
 
 	// Allow secrets with component label matching any backup selector

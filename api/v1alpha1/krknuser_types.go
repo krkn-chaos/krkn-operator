@@ -25,10 +25,9 @@ import (
 
 // KrknUserSpec defines the desired state of KrknUser.
 // KrknUser serves as an authentication entity for the REST APIs.
-// Each KrknUser instance has an associated Secret containing the hashed password.
+// Local users have a password Secret; external OIDC users have an issuer and subject instead.
 type KrknUserSpec struct {
-	// UserID is the email address of the user, used as the unique identifier
-	// +kubebuilder:validation:Pattern=`^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`
+	// UserID is the local email or a stable oidc-<hash> identifier.
 	UserID string `json:"userId"`
 
 	// Name is the first name of the user
@@ -46,9 +45,24 @@ type KrknUserSpec struct {
 	// +kubebuilder:default=user
 	Role string `json:"role"`
 
-	// PasswordSecretRef references the Secret containing the hashed password
-	// The Secret must contain a 'passwordHash' key with the bcrypt hash
-	PasswordSecretRef string `json:"passwordSecretRef"`
+	// PasswordSecretRef references the local user's bcrypt hash Secret.
+	// It must be empty for OIDC users.
+	// +optional
+	PasswordSecretRef string `json:"passwordSecretRef,omitempty"`
+
+	// AuthProvider is empty for local users or the immutable OIDC provider ID.
+	// +optional
+	AuthProvider string `json:"authProvider,omitempty"`
+	// ExternalIssuer and ExternalSubject bind an OIDC user to the verified ID token.
+	// +optional
+	ExternalIssuer string `json:"externalIssuer,omitempty"`
+	// +optional
+	ExternalSubject string `json:"externalSubject,omitempty"`
+	// ExternalUsername and ExternalEmail are display-only snapshots.
+	// +optional
+	ExternalUsername string `json:"externalUsername,omitempty"`
+	// +optional
+	ExternalEmail string `json:"externalEmail,omitempty"`
 }
 
 // KrknUserStatus defines the observed state of KrknUser.

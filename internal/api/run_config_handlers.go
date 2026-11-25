@@ -31,13 +31,16 @@ import (
 )
 
 // GetScenarioRunConfig handles GET /api/v1/scenarios/run/{scenarioRunName}/config
-// Returns the configuration payload for a scenario run, ready for replay via POST /scenarios/run
+// Returns full configuration to admins and callers authorized for every target.
+// Partial viewers receive only shared scenario metadata and visible target names.
+// intent=replay additionally checks run permission on every original target.
 //
 // @Summary Get scenario run configuration
-// @Description Retrieve scenario configuration directly by KrknScenarioRun CR name
+// @Description Retrieve full configuration with view on every target, or a redacted shared view with access to one job; intent=replay requires run on every original target
 // @Tags scenarios
 // @Produce json
 // @Param scenarioRunName path string true "KrknScenarioRun CR name"
+// @Param intent query string false "Set to replay to authorize an atomic replay of all original targets"
 // @Success 200 {object} ScenarioRunRequest "Scenario configuration"
 // @Failure 400 {object} ErrorResponse "Missing scenario run name"
 // @Failure 401 {object} ErrorResponse "User authentication required"
@@ -93,38 +96,72 @@ func (h *Handler) GetScenarioRunConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !auth.IsAdmin(ctx) {
-		targetRequest := &krknv1alpha1.KrknTargetRequest{}
-		if err := h.client.Get(ctx, types.NamespacedName{
-			Name:      scenarioRun.Spec.TargetRequestID,
-			Namespace: h.namespace,
-		}, targetRequest); err != nil {
-			logger.Error(err, "Failed to fetch target request", "targetRequestId", scenarioRun.Spec.TargetRequestID)
-			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
-				Error:   "internal_error",
-				Message: "Failed to validate permissions",
-			})
+	fullView := auth.IsAdmin(ctx)
+	var visibleTargets map[string][]string
+	if !fullView {
+		// Reading saved configuration always requires view on a cluster job.
+		hasAccess, err := h.checkScenarioRunGroupAccess(ctx, claims.UserID, scenarioRun, groupauth.ActionView)
+		if err != nil {
+			logger.Error(err, "Failed to validate scenario run config access", "scenarioRunName", scenarioRunName)
+			writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "internal_error", Message: "Failed to validate permissions"})
 			return
 		}
+		if !hasAccess {
+			writeJSONError(w, http.StatusForbidden, ErrorResponse{Error: "forbidden", Message: "You do not have permission to view this scenario run"})
+			return
+		}
+		visible, visibleCount, total, err := h.visibleScenarioRunTargets(ctx, claims.UserID, scenarioRun)
+		if err != nil {
+			logger.Error(err, "Failed to resolve visible scenario targets", "scenarioRunName", scenarioRunName)
+			writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "internal_error", Message: "Failed to validate permissions"})
+			return
+		}
+		visibleTargets = visible
+		fullView = total > 0 && visibleCount == total
+		if r.URL.Query().Get("intent") == "replay" {
+			allowed, err := h.checkScenarioRunReplayAccess(ctx, claims.UserID, scenarioRun)
+			if err != nil {
+				logger.Error(err, "Failed to validate scenario replay access", "scenarioRunName", scenarioRunName)
+				writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "internal_error", Message: "Failed to validate replay permissions"})
+				return
+			}
+			if !allowed {
+				writeJSONError(w, http.StatusForbidden, ErrorResponse{Error: "forbidden", Message: "Replay requires run permission on every cluster in the original run"})
+				return
+			}
+			// Run permission on every target authorizes the complete replay payload.
+			fullView = true
+		}
+	}
 
-		if err := groupauth.ValidateScenarioRunAccess(
-			ctx,
-			h.client,
-			claims.UserID,
-			h.namespace,
-			scenarioRun.Spec.TargetClusters,
-			targetRequest,
-		); err != nil {
-			logger.Info("User lacks permission to view scenario run config",
-				"userID", claims.UserID,
-				"error", err.Error(),
-			)
-			writeJSONError(w, http.StatusForbidden, ErrorResponse{
-				Error:   "forbidden",
-				Message: err.Error(),
-			})
+	if !fullView {
+		// Build the partial view from explicitly safe fields. Do not reconstruct
+		// saved files, environment values, or credential references for a caller
+		// who cannot view every target.
+		scenario, _, err := scenarioRun.Spec.ResolveScenarioReference()
+		if err != nil {
+			writeJSONError(w, http.StatusInternalServerError, ErrorResponse{Error: "internal_error", Message: "Failed to retrieve scenario run configuration"})
 			return
 		}
+		visibleJobs := make([]krknv1alpha1.ClusterJobStatus, 0)
+		for _, job := range scenarioRun.Status.ClusterJobs {
+			for _, cluster := range visibleTargets[job.ProviderName] {
+				if job.ClusterName == cluster {
+					visibleJobs = append(visibleJobs, job)
+					break
+				}
+			}
+		}
+		writeJSON(w, http.StatusOK, struct {
+			PartialView     bool                           `json:"partialView"`
+			TargetRequestID string                         `json:"targetRequestId"`
+			TargetClusters  map[string][]string            `json:"targetClusters"`
+			Scenario        krknv1alpha1.ScenarioReference `json:"scenario"`
+			ScenarioImage   string                         `json:"scenarioImage"`
+			KubeconfigPath  string                         `json:"kubeconfigPath"`
+			Environment     map[string]string              `json:"environment"`
+		}{true, "", visibleTargets, scenario, scenarioRunImage(visibleJobs), "", map[string]string{}})
+		return
 	}
 
 	// Reconstruct payload (same as replay)

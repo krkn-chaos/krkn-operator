@@ -44,6 +44,7 @@ import (
 type capturedLogEntry struct {
 	msg           string
 	keysAndValues []interface{}
+	isError       bool
 }
 
 // captureLogSink is a minimal logr.LogSink that appends every Info/Error call to
@@ -59,7 +60,7 @@ func (s captureLogSink) Info(_ int, msg string, kv ...interface{}) {
 	*s.entries = append(*s.entries, capturedLogEntry{msg: msg, keysAndValues: kv})
 }
 func (s captureLogSink) Error(_ error, msg string, kv ...interface{}) {
-	*s.entries = append(*s.entries, capturedLogEntry{msg: msg, keysAndValues: kv})
+	*s.entries = append(*s.entries, capturedLogEntry{msg: msg, keysAndValues: kv, isError: true})
 }
 func (s captureLogSink) WithValues(...interface{}) logr.LogSink { return s }
 func (s captureLogSink) WithName(string) logr.LogSink           { return s }

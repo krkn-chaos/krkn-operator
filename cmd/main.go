@@ -533,6 +533,7 @@ func main() {
 		apiPort, mgr.GetClient(), clientset, krknNamespace, operatorNamespace,
 		grpcServerAddr, jwtSecretManager, aiAPIConfig,
 	)
+	apiServer.SetIdentityAPIReader(mgr.GetAPIReader())
 	setupLog.Info("gRPC server address", "address", grpcServerAddr)
 	if err := mgr.Add(apiServer); err != nil {
 		setupLog.Error(err, "unable to add REST API server to manager")

@@ -19,13 +19,81 @@ Assisted-by: Claude Sonnet 4.5 (claude-sonnet-4-5@20250929)
 package websocket
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 	"time"
 
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
+	"github.com/krkn-chaos/krkn-operator/pkg/auth"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
+
+type partialRunChecker struct{}
+
+func (partialRunChecker) FilterScenarioRunsByGroupPermission(runs []krknv1alpha1.KrknScenarioRun, ctx context.Context) []krknv1alpha1.KrknScenarioRun {
+	claims := auth.GetClaimsFromContext(ctx)
+	if claims == nil {
+		return nil
+	}
+	if claims.Role == "admin" {
+		return runs
+	}
+	if claims.Provider != "local-keycloak" || len(claims.Groups) != 1 || claims.Groups[0] != "/krkn-ops" {
+		return nil
+	}
+	visible := runs[0].DeepCopy()
+	visible.Status.ClusterJobs = visible.Status.ClusterJobs[:1]
+	visible.Status.TotalTargets = 1
+	return []krknv1alpha1.KrknScenarioRun{*visible}
+}
+
+func (partialRunChecker) FilterGraphRunsByGroupPermission(runs []krknv1alpha1.KrknGraphRun, _ context.Context) []krknv1alpha1.KrknGraphRun {
+	return runs
+}
+
+func TestScenarioRunBroadcastViewOmitsUnauthorizedClusterJobs(t *testing.T) {
+	run := &krknv1alpha1.KrknScenarioRun{
+		ObjectMeta: metav1.ObjectMeta{Name: "multi-run"},
+		Status: krknv1alpha1.KrknScenarioRunStatus{TotalTargets: 2, ClusterJobs: []krknv1alpha1.ClusterJobStatus{
+			{ClusterName: "visible", JobID: "job-visible"},
+			{ClusterName: "hidden", JobID: "job-hidden"},
+		}},
+	}
+	broadcaster := NewBroadcaster(nil, partialRunChecker{}, nil, "default")
+	partial := &Client{userID: "oidc-user", claims: &auth.Claims{UserID: "oidc-user", Role: "user", Provider: "local-keycloak", Groups: []string{"/krkn-ops"}}}
+	admin := &Client{userID: "admin", isAdmin: true, claims: &auth.Claims{UserID: "admin", Role: "admin"}}
+	denied := &Client{userID: "other", claims: &auth.Claims{UserID: "other", Role: "user", Provider: "local-keycloak", Groups: []string{"/other"}}}
+	for _, resource := range []string{"run", "run-detail"} {
+		view := broadcaster.scenarioRunView(run, resource)
+		for _, tc := range []struct {
+			client *Client
+			want   int
+		}{{partial, 1}, {admin, 2}, {denied, 0}} {
+			data, allowed := view(tc.client)
+			if tc.want == 0 {
+				if allowed {
+					t.Fatalf("%s: unauthorized client received a run", resource)
+				}
+				continue
+			}
+			if !allowed {
+				t.Fatalf("%s: authorized client denied", resource)
+			}
+			var message struct {
+				Data struct {
+					ClusterJobs []ClusterJobResponse `json:"clusterJobs"`
+				} `json:"data"`
+			}
+			if err := json.Unmarshal(data, &message); err != nil {
+				t.Fatal(err)
+			}
+			if len(message.Data.ClusterJobs) != tc.want {
+				t.Fatalf("%s: jobs=%v, want %d", resource, message.Data.ClusterJobs, tc.want)
+			}
+		}
+	}
+}
 
 func TestBroadcastScenarioRunUpdate(t *testing.T) {
 	hub := NewHub()
