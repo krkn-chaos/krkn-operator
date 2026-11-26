@@ -23,6 +23,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
 	"github.com/krkn-chaos/krkn-operator/internal/kubeconfig"
@@ -94,59 +95,110 @@ func (h *Handler) getKubeconfigFromOperatorTarget(ctx context.Context, targetUUI
 	return kubeconfigBase64, nil
 }
 
-// getKubeconfigFromTargetRequest retrieves kubeconfig from KrknTargetRequest (legacy)
-// This supports all providers represented in the target request.
-// Returns base64-encoded kubeconfig string
-func (h *Handler) getKubeconfigFromTargetRequest(ctx context.Context, targetID string, operatorName string, clusterName string) (string, error) {
-	// Fetch the secret with the same name as the KrknTargetRequest ID
-	var secret corev1.Secret
-	err := h.client.Get(ctx, types.NamespacedName{
+// resolveTargetRequestCluster selects matching legacy status entries used for
+// authorization and kubeconfig lookup. When operatorName is empty, repeated
+// entries are accepted only when they identify the same API URL.
+func (h *Handler) resolveTargetRequestCluster(ctx context.Context, targetID, operatorName, clusterName string) ([]string, krknv1alpha1.ClusterTarget, error) {
+	var targetRequest krknv1alpha1.KrknTargetRequest
+	if err := h.client.Get(ctx, types.NamespacedName{
 		Name:      targetID,
 		Namespace: h.namespace,
-	}, &secret)
+	}, &targetRequest); err != nil {
+		return nil, krknv1alpha1.ClusterTarget{}, fmt.Errorf("failed to fetch KrknTargetRequest: %w", err)
+	}
 
+	var matchedCluster *krknv1alpha1.ClusterTarget
+	providers := make(map[string]struct{})
+	for provider, targets := range targetRequest.Status.TargetData {
+		if operatorName != "" && provider != operatorName {
+			continue
+		}
+		for _, cluster := range targets {
+			if cluster.ClusterName != clusterName {
+				continue
+			}
+			if matchedCluster != nil {
+				if cluster.ClusterAPIURL != matchedCluster.ClusterAPIURL {
+					if operatorName == "" {
+						return nil, krknv1alpha1.ClusterTarget{}, fmt.Errorf("%w: cluster '%s' has different API URLs in target status", errAmbiguousClusterProvider, clusterName)
+					}
+					return nil, krknv1alpha1.ClusterTarget{}, fmt.Errorf("cluster '%s' appears multiple times in provider '%s' with different API URLs", clusterName, operatorName)
+				}
+			} else {
+				clusterCopy := cluster
+				matchedCluster = &clusterCopy
+			}
+			providers[provider] = struct{}{}
+		}
+	}
+	if matchedCluster == nil {
+		if operatorName != "" {
+			return nil, krknv1alpha1.ClusterTarget{}, fmt.Errorf("cluster '%s' not found in provider '%s' in target request", clusterName, operatorName)
+		}
+		return nil, krknv1alpha1.ClusterTarget{}, fmt.Errorf("cluster '%s' not found in target request", clusterName)
+	}
+
+	matchedProviders := make([]string, 0, len(providers))
+	for provider := range providers {
+		matchedProviders = append(matchedProviders, provider)
+	}
+	sort.Strings(matchedProviders)
+	return matchedProviders, *matchedCluster, nil
+}
+
+// getKubeconfigFromTargetRequest retrieves a kubeconfig only when every matching
+// provider entry and API URL in the managed-clusters Secret agree with target
+// status. Duplicate entries must carry identical kubeconfigs.
+func (h *Handler) getKubeconfigFromTargetRequest(ctx context.Context, targetID string, operatorName string, clusterName string) (string, error) {
+	providers, targetCluster, err := h.resolveTargetRequestCluster(ctx, targetID, operatorName, clusterName)
 	if err != nil {
+		return "", err
+	}
+
+	var secret corev1.Secret
+	if err := h.client.Get(ctx, types.NamespacedName{
+		Name:      targetID,
+		Namespace: h.namespace,
+	}, &secret); err != nil {
 		return "", fmt.Errorf("failed to fetch secret: %w", err)
 	}
 
-	// Retrieve the managed-clusters JSON from the secret data
 	managedClustersBytes, exists := secret.Data["managed-clusters"]
 	if !exists {
 		return "", fmt.Errorf("managed-clusters not found in secret")
 	}
 
 	var managedClusters map[string]map[string]struct {
-		Kubeconfig string `json:"kubeconfig"`
+		ClusterAPIURL *string `json:"cluster-api"`
+		Kubeconfig    string  `json:"kubeconfig"`
 	}
 	if err := json.Unmarshal(managedClustersBytes, &managedClusters); err != nil {
 		return "", fmt.Errorf("failed to parse managed-clusters JSON: %w", err)
 	}
 
-	if operatorName != "" {
-		providerClusters, exists := managedClusters[operatorName]
+	var kubeconfigBase64 string
+	// A cluster name must resolve to one credential across operator keys.
+	// Reject duplicates with different API URLs or kubeconfigs so this lookup
+	// cannot select the wrong credential; callers must resolve those conflicts.
+	for i, provider := range providers {
+		providerClusters, exists := managedClusters[provider]
 		if !exists {
-			return "", fmt.Errorf("provider '%s' not found in managed-clusters", operatorName)
+			return "", fmt.Errorf("provider '%s' not found in managed-clusters", provider)
 		}
 		clusterConfig, exists := providerClusters[clusterName]
 		if !exists {
-			return "", fmt.Errorf("cluster '%s' not found in provider '%s'", clusterName, operatorName)
+			return "", fmt.Errorf("cluster '%s' not found in provider '%s'", clusterName, provider)
 		}
-		return clusterConfig.Kubeconfig, nil
-	}
-
-	var matchedProvider string
-	var kubeconfigBase64 string
-	for provider, clusters := range managedClusters {
-		if clusterConfig, exists := clusters[clusterName]; exists {
-			if matchedProvider != "" {
-				return "", fmt.Errorf("%w: cluster '%s' exists in providers '%s' and '%s'", errAmbiguousClusterProvider, clusterName, matchedProvider, provider)
-			}
-			matchedProvider = provider
+		if clusterConfig.ClusterAPIURL == nil || *clusterConfig.ClusterAPIURL != targetCluster.ClusterAPIURL {
+			return "", fmt.Errorf("cluster '%s' API URL mismatch in provider '%s' managed-clusters", clusterName, provider)
+		}
+		if i == 0 {
 			kubeconfigBase64 = clusterConfig.Kubeconfig
+			continue
 		}
-	}
-	if matchedProvider == "" {
-		return "", fmt.Errorf("cluster '%s' not found in managed-clusters", clusterName)
+		if clusterConfig.Kubeconfig != kubeconfigBase64 {
+			return "", fmt.Errorf("cluster '%s' has conflicting kubeconfigs across providers", clusterName)
+		}
 	}
 
 	return kubeconfigBase64, nil
@@ -176,43 +228,11 @@ func (h *Handler) getClusterAPIURL(ctx context.Context, targetUUID string, targe
 
 	// Fall back to legacy system (KrknTargetRequest)
 	if targetID != "" && clusterName != "" {
-		var targetRequest krknv1alpha1.KrknTargetRequest
-		if err := h.client.Get(ctx, types.NamespacedName{
-			Name:      targetID,
-			Namespace: h.namespace,
-		}, &targetRequest); err != nil {
-			return "", fmt.Errorf("failed to fetch KrknTargetRequest: %w", err)
+		_, cluster, err := h.resolveTargetRequestCluster(ctx, targetID, operatorName, clusterName)
+		if err != nil {
+			return "", err
 		}
-
-		var matchedProvider string
-		var matchedCluster *krknv1alpha1.ClusterTarget
-		for provider, targets := range targetRequest.Status.TargetData {
-			if operatorName != "" && provider != operatorName {
-				continue
-			}
-			for _, cluster := range targets {
-				if cluster.ClusterName != clusterName {
-					continue
-				}
-				if matchedCluster != nil {
-					if operatorName == "" {
-						return "", fmt.Errorf("%w: cluster '%s' exists in providers '%s' and '%s'", errAmbiguousClusterProvider, clusterName, matchedProvider, provider)
-					}
-					return "", fmt.Errorf("cluster '%s' appears multiple times in provider '%s'", clusterName, operatorName)
-				}
-				clusterCopy := cluster
-				matchedCluster = &clusterCopy
-				matchedProvider = provider
-			}
-		}
-		if matchedCluster == nil {
-			if operatorName != "" {
-				return "", fmt.Errorf("cluster '%s' not found in provider '%s' in target request", clusterName, operatorName)
-			}
-			return "", fmt.Errorf("cluster '%s' not found in target request", clusterName)
-		}
-
-		return matchedCluster.ClusterAPIURL, nil
+		return cluster.ClusterAPIURL, nil
 	}
 
 	return "", fmt.Errorf("insufficient parameters: provide either targetUUID (new) or targetID+clusterName (legacy)")
