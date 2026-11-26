@@ -9,26 +9,27 @@ import (
 
 // ScenarioRunStatusResponse - copy of internal/api type to avoid import cycle
 type ScenarioRunStatusResponse struct {
-	ScenarioRunName        string                           `json:"scenarioRunName"`
-	RollbackEnabled        bool                             `json:"rollbackEnabled,omitempty"`
-	IsRollback             bool                             `json:"isRollback,omitempty"`
-	ScenarioName           string                           `json:"scenarioName,omitempty"`
-	Phase                  string                           `json:"phase"`
-	TotalTargets           int                              `json:"totalTargets"`
-	SuccessfulJobs         int                              `json:"successfulJobs"`
-	FailedJobs             int                              `json:"failedJobs"`
-	CancelledJobs          int                              `json:"cancelledJobs"`
-	RunningJobs            int                              `json:"runningJobs"`
-	ClusterJobs            interface{}                      `json:"clusterJobs,omitempty"`
-	OwnerUserID            string                           `json:"ownerUserId,omitempty"`
-	RegistryName           string                           `json:"registryName,omitempty"`
-	GraphRunName           string                           `json:"graphRunName,omitempty"`
-	GraphNodeID            string                           `json:"graphNodeId,omitempty"`
-	CustomRunName          string                           `json:"customRunName,omitempty"`
-	CreationTimestamp      string                           `json:"creationTimestamp,omitempty"`
-	ResiliencyScoreEnabled bool                             `json:"resiliencyScoreEnabled,omitempty"`
-	ResiliencyScore        *float64                         `json:"resiliencyScore,omitempty"`
-	ResiliencyScores       []ClusterResiliencyScoreResponse `json:"resiliencyScores,omitempty"`
+	ScenarioRunName         string                           `json:"scenarioRunName"`
+	RollbackEnabled         bool                             `json:"rollbackEnabled,omitempty"`
+	IsRollback              bool                             `json:"isRollback,omitempty"`
+	ScenarioName            string                           `json:"scenarioName,omitempty"`
+	Phase                   string                           `json:"phase"`
+	TotalTargets            int                              `json:"totalTargets"`
+	SuccessfulJobs          int                              `json:"successfulJobs"`
+	FailedJobs              int                              `json:"failedJobs"`
+	CancelledJobs           int                              `json:"cancelledJobs"`
+	RunningJobs             int                              `json:"runningJobs"`
+	ClusterJobs             interface{}                      `json:"clusterJobs,omitempty"`
+	OwnerUserID             string                           `json:"ownerUserId,omitempty"`
+	RegistryName            string                           `json:"registryName,omitempty"`
+	GraphRunName            string                           `json:"graphRunName,omitempty"`
+	GraphNodeID             string                           `json:"graphNodeId,omitempty"`
+	CustomRunName           string                           `json:"customRunName,omitempty"`
+	CreationTimestamp       string                           `json:"creationTimestamp,omitempty"`
+	ResiliencyScoreEnabled  bool                             `json:"resiliencyScoreEnabled,omitempty"`
+	ResiliencyScoreBaseline *float64                         `json:"resiliencyScoreBaseline,omitempty"`
+	ResiliencyScore         *float64                         `json:"resiliencyScore,omitempty"`
+	ResiliencyScores        []ClusterResiliencyScoreResponse `json:"resiliencyScores,omitempty"`
 }
 
 // GraphRunResponse - WebSocket response for GraphRun (same fields as REST API)

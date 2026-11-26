@@ -9,11 +9,13 @@ import (
 )
 
 func TestScenarioRunWebSocketResponsesIncludeRollbackIdentity(t *testing.T) {
+	baseline := 80.5
 	run := krknv1alpha1.KrknScenarioRun{
 		ObjectMeta: metav1.ObjectMeta{Name: "node-cpu-hog-953e3861"},
 		Spec: krknv1alpha1.KrknScenarioRunSpec{
-			RollbackEnabled: true,
-			RollbackSource:  &krknv1alpha1.RollbackSource{RunName: "source-run", JobID: "attempt"},
+			RollbackEnabled:         true,
+			RollbackSource:          &krknv1alpha1.RollbackSource{RunName: "source-run", JobID: "attempt"},
+			ResiliencyScoreBaseline: &baseline,
 		},
 	}
 	jobs := buildUnifiedJobList([]krknv1alpha1.KrknScenarioRun{run}, nil)
@@ -22,6 +24,7 @@ func TestScenarioRunWebSocketResponsesIncludeRollbackIdentity(t *testing.T) {
 	}
 	for name, response := range map[string]ScenarioRunStatusResponse{
 		"jobs":       *jobs[0].ScenarioRun,
+		"run":        buildScenarioRunResponse(&run),
 		"run-detail": buildScenarioRunDetailResponse(&run),
 	} {
 		encoded, err := json.Marshal(response)
@@ -37,6 +40,9 @@ func TestScenarioRunWebSocketResponsesIncludeRollbackIdentity(t *testing.T) {
 		}
 		if payload["isRollback"] != true {
 			t.Errorf("%s response omitted isRollback: %s", name, encoded)
+		}
+		if payload["resiliencyScoreBaseline"] != baseline {
+			t.Errorf("%s response omitted baseline: %s", name, encoded)
 		}
 	}
 }

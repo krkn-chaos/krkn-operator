@@ -142,6 +142,19 @@ func TestBuildCategoryResiliencyHistoryGroupsTypedConfigurationsAndSortsPerClust
 	}
 }
 
+func TestScenarioHistoryScoresIncludesConfiguredBaseline(t *testing.T) {
+	run := scenarioRunConfigurationFixture()
+	run.Spec.ResiliencyScoreBaseline = floatPointer(80)
+	run.Status.ResiliencyScores = []krknv1alpha1.ClusterResiliencyScore{
+		{ClusterName: "cluster-a", Score: 75, Status: "calculated"},
+		{ClusterName: "cluster-b", Score: 0, Status: "error"},
+	}
+	scores := scenarioHistoryScores(run)
+	if len(scores) != 1 || scores[0].baseline == nil || *scores[0].baseline != 80 {
+		t.Fatalf("scenario history scores = %+v, want one calculated score with baseline 80", scores)
+	}
+}
+
 func TestBuildCategoryResiliencyHistorySharesParameterProfileAcrossGroups(t *testing.T) {
 	baseTime := time.Date(2026, time.January, 2, 3, 4, 5, 0, time.UTC)
 	firstScenario := scenarioRunConfigurationFixture()

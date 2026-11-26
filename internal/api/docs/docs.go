@@ -7254,6 +7254,10 @@ const docTemplate = `{
                     "description": "ResiliencyScore is the individual resiliency score for this scenario run node",
                     "type": "number"
                 },
+                "resiliencyScoreBaseline": {
+                    "description": "ResiliencyScoreBaseline is the configured comparison threshold, when present.",
+                    "type": "number"
+                },
                 "resiliencyScoreEnabled": {
                     "description": "ResiliencyScoreEnabled indicates whether resiliency scoring is enabled for this run",
                     "type": "boolean"
@@ -7368,6 +7372,10 @@ const docTemplate = `{
                 "registryName": {
                     "description": "RegistryName is the name of a saved registry (optional)\nIf omitted, defaults to quay.io public registry",
                     "type": "string"
+                },
+                "resiliencyScoreBaseline": {
+                    "description": "ResiliencyScoreBaseline is the optional threshold for comparing calculated scores.",
+                    "type": "number"
                 },
                 "resiliencyScoreEnabled": {
                     "description": "ResiliencyScoreEnabled enables resiliency score calculation for this scenario run.\nWhen true, RESILIENCY_SCORE=true is set in scenario pods and the controller\ncalculates scores from pod logs upon completion.",

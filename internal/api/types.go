@@ -232,6 +232,8 @@ type ScenarioRunRequest struct {
 	// When true, RESILIENCY_SCORE=true is set in scenario pods and the controller
 	// calculates scores from pod logs upon completion.
 	ResiliencyScoreEnabled bool `json:"resiliencyScoreEnabled,omitempty"`
+	// ResiliencyScoreBaseline is the optional threshold for comparing calculated scores.
+	ResiliencyScoreBaseline *float64 `json:"resiliencyScoreBaseline,omitempty"`
 	// Private registry configuration (optional)
 	ScenariosRequest
 	// CloudCredentialRef, if set, names a saved cloud credential Secret whose
@@ -414,6 +416,8 @@ type ScenarioRunStatusResponse struct {
 	CustomRunName string `json:"customRunName,omitempty"`
 	// ResiliencyScoreEnabled indicates whether resiliency scoring is enabled for this run
 	ResiliencyScoreEnabled bool `json:"resiliencyScoreEnabled,omitempty"`
+	// ResiliencyScoreBaseline is the configured comparison threshold, when present.
+	ResiliencyScoreBaseline *float64 `json:"resiliencyScoreBaseline,omitempty"`
 	// ResiliencyScore is the individual resiliency score for this scenario run node
 	ResiliencyScore *float64 `json:"resiliencyScore,omitempty"`
 	// ResiliencyScores contains per-cluster resiliency scores
@@ -487,6 +491,8 @@ type ScenarioRunListItem struct {
 	CustomRunName string `json:"customRunName,omitempty"`
 	// ResiliencyScoreEnabled indicates whether resiliency scoring is enabled for this run
 	ResiliencyScoreEnabled bool `json:"resiliencyScoreEnabled,omitempty"`
+	// ResiliencyScoreBaseline is the configured comparison threshold, when present.
+	ResiliencyScoreBaseline *float64 `json:"resiliencyScoreBaseline,omitempty"`
 	// ResiliencyScore is the individual resiliency score for this scenario run node
 	ResiliencyScore *float64 `json:"resiliencyScore,omitempty"`
 	// ResiliencyScores contains per-cluster resiliency scores
