@@ -1,9 +1,7 @@
 name: Release Helm Chart
 
 on:
-  push:
-    tags:
-      - 'v*'
+  workflow_call:
 
 permissions:
   contents: read
@@ -74,8 +72,8 @@ jobs:
           IMAGE_REGISTRY="${{ env.IMAGE_REGISTRY }}"
 
           OPERATOR_IMAGE="${IMAGE_REGISTRY}/krkn-operator:${OPERATOR_VERSION}"
-          # The image release workflow starts from the same tag. Wait until its
-          # multi-architecture manifest is published before packaging the chart.
+          # The caller publishes the multi-architecture manifest first. Allow
+          # time for it to become available through the Scarf pull proxy.
           for attempt in $(seq 1 60); do
             OPERATOR_MANIFEST=$(docker buildx imagetools inspect "$OPERATOR_IMAGE" 2>/dev/null || true)
             OPERATOR_DIGEST=$(awk '$1 == "Digest:" { print $2; exit }' <<< "$OPERATOR_MANIFEST")
@@ -84,7 +82,10 @@ jobs:
             fi
             sleep 10
           done
-          [[ "$OPERATOR_DIGEST" =~ ^sha256:[a-f0-9]{64}$ ]]
+          if [[ ! "$OPERATOR_DIGEST" =~ ^sha256:[a-f0-9]{64}$ ]]; then
+            echo "::error::Operator image $OPERATOR_IMAGE is unavailable through Scarf after 10 minutes" >&2
+            exit 1
+          fi
 
           # Update chart version and appVersion
           yq eval -i ".version = \"${VERSION}\"" charts/krkn-operator/Chart.yaml

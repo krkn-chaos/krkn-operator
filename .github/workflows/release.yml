@@ -225,6 +225,13 @@ jobs:
             --title "Release $VERSION" \
             --generate-notes \
             --verify-tag
+
+  release-chart:
+    name: Release Helm Chart
+    needs: create-manifests
+    uses: ./.github/workflows/release-chart.yml
+    secrets: inherit
+
   publish-olm-bundles:
     name: Build and publish OLM bundles
     needs: create-manifests
