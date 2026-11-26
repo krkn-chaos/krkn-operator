@@ -1351,7 +1351,7 @@ func TestKrknAIConfigOwnerCanListAndReadSavedConfig(t *testing.T) {
 			Name:      "ai-robot-shop-example-c241ebb4",
 			Namespace: "default",
 			Labels: files.BuildFileLabels(
-				"config-file-id", nil, false, files.FilePurposeKrknAIConfig, "ai-robot-shop-example-c241ebb4",
+				"config-file-id", "", nil, false, files.FilePurposeKrknAIConfig, "ai-robot-shop-example-c241ebb4",
 			),
 			Annotations: files.BuildFileAnnotations("", "owner@example.com", "ai-robot-shop-example-c241ebb4"),
 		},
@@ -1362,7 +1362,7 @@ func TestKrknAIConfigOwnerCanListAndReadSavedConfig(t *testing.T) {
 			Name:      "another-private-config",
 			Namespace: "default",
 			Labels: files.BuildFileLabels(
-				"other-config-file-id", nil, false, files.FilePurposeKrknAIConfig, "another-private-config",
+				"other-config-file-id", "", nil, false, files.FilePurposeKrknAIConfig, "another-private-config",
 			),
 			Annotations: files.BuildFileAnnotations("", "other@example.com", "another-private-config"),
 		},

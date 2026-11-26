@@ -5591,6 +5591,10 @@ const docTemplate = `{
                     "description": "FilePurpose is an optional system-level classification (e.g., \"workflow-template\")",
                     "type": "string"
                 },
+                "fileType": {
+                    "description": "FileType is an optional user-defined type used to group files (e.g. \"alerts\",\n\"metrics\"). Empty means untyped. Stored as a ConfigMap label.",
+                    "type": "string"
+                },
                 "groups": {
                     "description": "Groups is a list of group names that can access this file",
                     "type": "array",
@@ -5645,6 +5649,10 @@ const docTemplate = `{
                 },
                 "filePurpose": {
                     "description": "FilePurpose is the system-level classification (e.g., \"workflow-template\")",
+                    "type": "string"
+                },
+                "fileType": {
+                    "description": "FileType is the user-defined type of this file, empty when untyped.",
                     "type": "string"
                 },
                 "groups": {
@@ -5706,6 +5714,10 @@ const docTemplate = `{
                 },
                 "filePurpose": {
                     "description": "FilePurpose is the system-level classification (e.g., \"workflow-template\")",
+                    "type": "string"
+                },
+                "fileType": {
+                    "description": "FileType is the user-defined type of this file, empty when untyped.",
                     "type": "string"
                 },
                 "groups": {

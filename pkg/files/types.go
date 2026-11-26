@@ -37,6 +37,9 @@ type CreateFileRequest struct {
 	AvailableToAll bool `json:"availableToAll,omitempty"`
 	// FilePurpose is an optional system-level classification (e.g., "workflow-template")
 	FilePurpose string `json:"filePurpose,omitempty"`
+	// FileType is an optional user-defined type used to group files (e.g. "alerts",
+	// "metrics"). Empty means untyped. Stored as a ConfigMap label.
+	FileType string `json:"fileType,omitempty"`
 	// WorkflowCategories is internal workflow metadata; generic file APIs do not expose it.
 	WorkflowCategories []string `json:"-"`
 }
@@ -67,6 +70,9 @@ type UpdateFileRequest struct {
 	AvailableToAll bool `json:"availableToAll,omitempty"`
 	// FilePurpose is an optional system-level classification (e.g., "workflow-template")
 	FilePurpose string `json:"filePurpose,omitempty"`
+	// FileType replaces the file's user-defined type. Nil preserves the existing
+	// type; an empty string clears it.
+	FileType *string `json:"fileType,omitempty"`
 	// WorkflowCategories is internal workflow metadata. Nil preserves assignments;
 	// a non-nil empty list clears them.
 	WorkflowCategories *[]string `json:"-"`
@@ -102,6 +108,8 @@ type FileResponse struct {
 	Description string `json:"description,omitempty"`
 	// FilePurpose is the system-level classification (e.g., "workflow-template")
 	FilePurpose string `json:"filePurpose,omitempty"`
+	// FileType is the user-defined type of this file, empty when untyped.
+	FileType string `json:"fileType,omitempty"`
 	// Groups is a list of group names that can access this file
 	Groups []string `json:"groups,omitempty"`
 	// AvailableToAll makes the file accessible to all users
@@ -126,6 +134,8 @@ type FileInfo struct {
 	Description string `json:"description,omitempty"`
 	// FilePurpose is the system-level classification (e.g., "workflow-template")
 	FilePurpose string `json:"filePurpose,omitempty"`
+	// FileType is the user-defined type of this file, empty when untyped.
+	FileType string `json:"fileType,omitempty"`
 	// Groups is a list of group names that can access this file.
 	Groups []string `json:"groups,omitempty"`
 	// AvailableToAll indicates whether the file is accessible to all users.
