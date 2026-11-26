@@ -1,11 +1,25 @@
 package identity
 
 import (
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
 	"net/http"
+	"sync"
 )
+
+const maxCachedProviderHTTPClients = 128
+
+var providerHTTPClientCache = struct {
+	sync.Mutex
+	clients map[providerHTTPClientKey]*http.Client
+}{clients: make(map[providerHTTPClientKey]*http.Client)}
+
+type providerHTTPClientKey struct {
+	caHash [sha256.Size]byte
+	skip   bool
+}
 
 // NewHTTPClient returns an HTTP client with the requested provider TLS trust.
 // caPEM is appended to the host's system roots. When skipVerification is true,
@@ -15,12 +29,20 @@ func NewHTTPClient(caPEM string, skipVerification bool) (*http.Client, error) {
 	if caPEM == "" && !skipVerification {
 		return http.DefaultClient, nil
 	}
-
-	tlsConfig := &tls.Config{MinVersion: tls.VersionTLS12}
 	if caPEM != "" {
 		if err := ValidateCACert(caPEM); err != nil {
 			return nil, err
 		}
+	}
+	key := providerHTTPClientKey{caHash: sha256.Sum256([]byte(caPEM)), skip: skipVerification}
+	providerHTTPClientCache.Lock()
+	defer providerHTTPClientCache.Unlock()
+	if cached := providerHTTPClientCache.clients[key]; cached != nil {
+		return cached, nil
+	}
+
+	tlsConfig := &tls.Config{MinVersion: tls.VersionTLS12}
+	if caPEM != "" {
 		roots, err := x509.SystemCertPool()
 		if err != nil {
 			return nil, fmt.Errorf("load system certificate roots: %w", err)
@@ -42,7 +64,16 @@ func NewHTTPClient(caPEM string, skipVerification bool) (*http.Client, error) {
 	}
 	transport := baseTransport.Clone()
 	transport.TLSClientConfig = tlsConfig
-	return &http.Client{Transport: transport}, nil
+	client := &http.Client{Transport: transport}
+	if len(providerHTTPClientCache.clients) >= maxCachedProviderHTTPClients {
+		for evictedKey, evictedClient := range providerHTTPClientCache.clients {
+			evictedClient.CloseIdleConnections()
+			delete(providerHTTPClientCache.clients, evictedKey)
+			break
+		}
+	}
+	providerHTTPClientCache.clients[key] = client
+	return client, nil
 }
 
 // ValidateCACert checks that caPEM contains at least one PEM certificate.

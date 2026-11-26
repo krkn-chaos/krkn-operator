@@ -432,9 +432,9 @@
     "semantic_hash": "096f40a0c168fe83a1cff16a71971dad"
   },
   "internal/api/groups_handlers.go": {
-    "mtime": 1795693561.544435,
-    "seen": 1795693781.084532,
-    "ast_hash": "42137e1cfb0f6b1f82a6d335a5154b91",
+    "mtime": 1795700119.9006298,
+    "seen": 1795700596.2336671,
+    "ast_hash": "cec90f20a093e7ddff8d806cb05694bc",
     "semantic_hash": ""
   },
   "internal/api/groups_handlers_test.go": {
@@ -450,9 +450,9 @@
     "semantic_hash": "ab824d31922a92db7c0f8cc7b491a8ac"
   },
   "internal/api/handlers.go": {
-    "mtime": 1795693561.5450041,
-    "seen": 1795693781.084533,
-    "ast_hash": "ea42951fb7ebc2973d9a8cf224ea3f97",
+    "mtime": 1795700259.9699001,
+    "seen": 1795700596.233669,
+    "ast_hash": "5b293c7ec9f5aec1296b785976f09237",
     "semantic_hash": ""
   },
   "internal/api/handlers_test.go": {
@@ -3066,15 +3066,15 @@
     "semantic_hash": ""
   },
   "docs/oidc-keycloak-poc.md": {
-    "mtime": 1795693734.1174624,
-    "seen": 1795693781.085,
-    "ast_hash": "f7230099504bda8c3d4aa2d3805e8125",
+    "mtime": 1795700252.7406883,
+    "seen": 1795700596.233931,
+    "ast_hash": "c47f3544d547fdd18905dfc8e1f459f7",
     "semantic_hash": ""
   },
   "internal/api/identity_provider_handlers.go": {
-    "mtime": 1795693729.278334,
-    "seen": 1795693781.084537,
-    "ast_hash": "228296625479ebfa53c46da9d968ae35",
+    "mtime": 1795700259.9637625,
+    "seen": 1795700596.2336729,
+    "ast_hash": "94962d7c6cb15694324c37cc1249667a",
     "semantic_hash": ""
   },
   "internal/api/identity_provider_handlers_test.go": {
@@ -3084,9 +3084,9 @@
     "semantic_hash": ""
   },
   "internal/api/identity_provider_store.go": {
-    "mtime": 1795693765.113286,
-    "seen": 1795693781.084539,
-    "ast_hash": "b19d57e6b3260d5db7fd755f8db74a43",
+    "mtime": 1795700259.9640436,
+    "seen": 1795700596.233675,
+    "ast_hash": "6dfdf19f2a980ca5bfa15511b7166016",
     "semantic_hash": ""
   },
   "compose.keycloak.yaml": {
@@ -3174,9 +3174,9 @@
     "semantic_hash": ""
   },
   "pkg/identity/http_client.go": {
-    "mtime": 1795693729.358004,
-    "seen": 1795693781.084691,
-    "ast_hash": "af41de4853b6556c07e261e9d29edd2a",
+    "mtime": 1795700195.009963,
+    "seen": 1795700596.23382,
+    "ast_hash": "5add39ebc97ff2bded0c9b576301d42d",
     "semantic_hash": ""
   },
   "pkg/visualize/deploy.go": {
@@ -3255,6 +3255,18 @@
     "mtime": 1795693561.502192,
     "seen": 1795693781.084743,
     "ast_hash": "5f211a1aaa3c3c61a1fe98bf3effe8ec",
+    "semantic_hash": ""
+  },
+  "internal/api/identity_provider_delete_test.go": {
+    "mtime": 1795700288.3354788,
+    "seen": 1795700596.233672,
+    "ast_hash": "0588ab9219eee36104e72d2d11d6c8ab",
+    "semantic_hash": ""
+  },
+  "pkg/identity/http_client_test.go": {
+    "mtime": 1795700203.2485356,
+    "seen": 1795700596.233821,
+    "ast_hash": "8a79e84ba6f4b6e2e1de5e521b10ea0c",
     "semantic_hash": ""
   }
 }

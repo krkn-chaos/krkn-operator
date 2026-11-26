@@ -318,19 +318,20 @@ func (e *scenarioCatalogError) Unwrap() error {
 
 // Handler contains the dependencies for API handlers
 type Handler struct {
-	client                  client.Client
-	identityReader          client.Reader
-	providerStore           *identityProviderStore
-	clientset               kubernetes.Interface
-	namespace               string
-	componentNamespace      string
-	grpcServerAddr          string
-	secretManager           *auth.SecretManager
-	groupDirectories        map[string]identity.GroupDirectory
-	externalIdentityChecker auth.ExternalIdentityChecker
-	userStatusChecker       auth.UserStatusChecker
-	artifactClient          *krknaiserver.Client
-	krknAIEnabled           bool
+	client                     client.Client
+	identityReader             client.Reader
+	providerStore              *identityProviderStore
+	identityProviderMutationMu sync.Mutex
+	clientset                  kubernetes.Interface
+	namespace                  string
+	componentNamespace         string
+	grpcServerAddr             string
+	secretManager              *auth.SecretManager
+	groupDirectories           map[string]identity.GroupDirectory
+	externalIdentityChecker    auth.ExternalIdentityChecker
+	userStatusChecker          auth.UserStatusChecker
+	artifactClient             *krknaiserver.Client
+	krknAIEnabled              bool
 	// scenarioProviderFactory is injectable for API tests; production handlers
 	// use the krknctl-backed factory assigned by NewHandler.
 	scenarioProviderFactory      func(provider.Mode) (provider.ScenarioDataProvider, error)

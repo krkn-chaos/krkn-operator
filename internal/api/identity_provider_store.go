@@ -19,6 +19,7 @@ import (
 )
 
 const identityProviderLabel = "krkn.krkn-chaos.dev/identity-provider"
+const identityProviderTombstoneLabel = "krkn.krkn-chaos.dev/identity-provider-deleted"
 
 var providerIDPattern = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
 
@@ -41,6 +42,7 @@ type identityProviderConfig struct {
 	CACert            string
 	SkipTLSVerify     bool
 	Enabled           bool
+	Deleting          bool
 	SessionEpoch      string
 	Source            string
 }
@@ -79,6 +81,7 @@ func secretProvider(secret *corev1.Secret) (identityProviderConfig, error) {
 		RedirectURL: string(data["redirectUrl"]), AdminClientID: string(data["adminClientId"]),
 		AdminClientSecret: string(data["adminClientSecret"]), CACert: string(data["caCert"]),
 		SkipTLSVerify: string(data["skipTLSVerify"]) == "true", Enabled: string(data["enabled"]) == "true",
+		Deleting:     string(data["deleting"]) == "true",
 		SessionEpoch: string(data["sessionEpoch"]), Source: "secret"}
 	if err := validateProviderConfig(config); err != nil {
 		return identityProviderConfig{}, fmt.Errorf("invalid identity provider %q: %w", id, err)
@@ -94,7 +97,7 @@ func (c identityProviderConfig) secret(namespace string) *corev1.Secret {
 			"clientId": []byte(c.ClientID), "clientSecret": []byte(c.ClientSecret), "redirectUrl": []byte(c.RedirectURL),
 			"adminClientId": []byte(c.AdminClientID), "adminClientSecret": []byte(c.AdminClientSecret),
 			"caCert": []byte(c.CACert), "skipTLSVerify": []byte(fmt.Sprint(c.SkipTLSVerify)),
-			"enabled":      []byte(fmt.Sprint(c.Enabled)),
+			"enabled": []byte(fmt.Sprint(c.Enabled)), "deleting": []byte(fmt.Sprint(c.Deleting)),
 			"sessionEpoch": []byte(c.SessionEpoch),
 		}}
 }
@@ -115,6 +118,9 @@ func (s *identityProviderStore) get(ctx context.Context, id string) (identityPro
 	var secret corev1.Secret
 	err := s.reader.Get(ctx, client.ObjectKey{Name: identityProviderSecretName(id), Namespace: s.namespace}, &secret)
 	if err == nil {
+		if secret.Labels[identityProviderTombstoneLabel] == "true" {
+			return identityProviderConfig{}, fmt.Errorf("%w: %s", errIdentityProviderNotFound, id)
+		}
 		return secretProvider(&secret)
 	}
 	if !apierrors.IsNotFound(err) {
@@ -139,6 +145,9 @@ func (s *identityProviderStore) list(ctx context.Context) ([]identityProviderCon
 	for i := range secrets.Items {
 		if secrets.Items[i].Name == identityProviderSecretName("keycloak") {
 			legacyFound = true
+		}
+		if secrets.Items[i].Labels[identityProviderTombstoneLabel] == "true" {
+			continue
 		}
 		c, err := secretProvider(&secrets.Items[i])
 		if err != nil {

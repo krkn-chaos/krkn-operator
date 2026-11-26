@@ -215,6 +215,9 @@ func (h *Handler) GetUserGroup(w http.ResponseWriter, r *http.Request) {
 // CreateUserGroup handles POST /api/v1/groups
 // Creates a new user group (admin only)
 func (h *Handler) CreateUserGroup(w http.ResponseWriter, r *http.Request) {
+	h.identityProviderMutationMu.Lock()
+	defer h.identityProviderMutationMu.Unlock()
+
 	ctx := r.Context()
 	logger := log.FromContext(ctx).WithName("create-user-group")
 
@@ -357,6 +360,9 @@ func (h *Handler) CreateUserGroup(w http.ResponseWriter, r *http.Request) {
 // UpdateUserGroup handles PATCH /api/v1/groups/:groupName
 // Updates a user group (admin only)
 func (h *Handler) UpdateUserGroup(w http.ResponseWriter, r *http.Request) {
+	h.identityProviderMutationMu.Lock()
+	defer h.identityProviderMutationMu.Unlock()
+
 	ctx := r.Context()
 	logger := log.FromContext(ctx).WithName("update-user-group")
 
@@ -977,8 +983,12 @@ func (h *Handler) validateExternalGroupProviders(ctx context.Context, mappings [
 		if _, ok := checked[mapping.Provider]; ok {
 			continue
 		}
-		if _, err := h.providerStore.get(ctx, mapping.Provider); err != nil {
+		provider, err := h.providerStore.get(ctx, mapping.Provider)
+		if err != nil {
 			return fmt.Errorf("identity provider %q is unavailable: %w", mapping.Provider, err)
+		}
+		if provider.Deleting {
+			return fmt.Errorf("identity provider %q is being deleted", mapping.Provider)
 		}
 		checked[mapping.Provider] = struct{}{}
 	}
