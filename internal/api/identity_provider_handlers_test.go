@@ -234,7 +234,8 @@ func TestSessionExposesMappedGroupsForOIDCEmptyState(t *testing.T) {
 			{Provider: "corp", Group: "/Ops"}}}}
 	h := setupUserTestHandler(group)
 	defer h.Shutdown()
-	claims := &auth.Claims{UserID: "oidc-user", Role: "user", Provider: "corp", Groups: []string{"/Unknown"}}
+	claims := &auth.Claims{UserID: "oidc-user", Name: "Tullio", Surname: "Sebastiani",
+		Role: "user", Provider: "corp", Groups: []string{"/Unknown"}}
 	read := func() string {
 		request := httptest.NewRequest(http.MethodGet, AuthSession, nil)
 		request = request.WithContext(context.WithValue(request.Context(), auth.UserClaimsKey, claims))
@@ -245,8 +246,9 @@ func TestSessionExposesMappedGroupsForOIDCEmptyState(t *testing.T) {
 		}
 		return w.Body.String()
 	}
-	if !strings.Contains(read(), `"mappedGroups":[]`) {
-		t.Fatal("missing unmapped-groups empty state")
+	if body := read(); !strings.Contains(body, `"mappedGroups":[]`) ||
+		!strings.Contains(body, `"name":"Tullio"`) || !strings.Contains(body, `"surname":"Sebastiani"`) {
+		t.Fatalf("session response lacks profile names or unmapped-groups state: %s", body)
 	}
 	claims.Groups = []string{"/Ops"}
 	if !strings.Contains(read(), `"mappedGroups":["ops"]`) {
