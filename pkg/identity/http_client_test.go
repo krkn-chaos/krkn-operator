@@ -47,12 +47,9 @@ func TestNewHTTPClient(t *testing.T) {
 		if !ok || transport.TLSClientConfig == nil || transport.TLSClientConfig.RootCAs == nil {
 			t.Fatal("expected custom root CAs on the transport")
 		}
-		for _, subject := range transport.TLSClientConfig.RootCAs.Subjects() {
-			if string(subject) == string(cert.RawSubject) {
-				return
-			}
+		if _, err := cert.Verify(x509.VerifyOptions{Roots: transport.TLSClientConfig.RootCAs}); err != nil {
+			t.Fatalf("custom CA was not added to the root pool: %v", err)
 		}
-		t.Fatal("custom CA was not added to the root pool")
 	})
 
 	t.Run("allows explicitly skipped verification and reuses its client", func(t *testing.T) {
