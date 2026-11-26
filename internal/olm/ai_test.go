@@ -53,6 +53,8 @@ func TestAIResourcesStableTokenAndReconcilesDeploymentDrift(t *testing.T) {
 	ctx := context.Background()
 	clientset := fake.NewSimpleClientset()
 	config := testAIConfig("ai-system")
+	config.OpenShift = true
+	config.ServiceSupplementalGroups = []int64{1001}
 	resources := &AIResources{Clientset: clientset, Config: config}
 	installed, err := resources.Ensure(ctx)
 	if err != nil {
@@ -107,6 +109,21 @@ func TestAIResourcesStableTokenAndReconcilesDeploymentDrift(t *testing.T) {
 	}
 	if got := string(secret.Data[aiTokenKey]); got != token {
 		t.Fatalf("service token changed during upgrade: got %q, want original token", got)
+	}
+	for _, groups := range [][]int64{{2001, 2002}, nil} {
+		resources.Config.ServiceSupplementalGroups = groups
+		if _, err := resources.Ensure(ctx); err != nil {
+			t.Fatalf("reconcile storage groups: %v", err)
+		}
+		deployment, err = clientset.AppsV1().Deployments(config.Namespace).Get(ctx, AIServiceName, metav1.GetOptions{})
+		if err != nil {
+			t.Fatalf("get artifact Deployment: %v", err)
+		}
+		security := deployment.Spec.Template.Spec.SecurityContext
+		if !equality.Semantic.DeepEqual(security.SupplementalGroups, groups) ||
+			security.RunAsUser != nil || security.RunAsGroup != nil || security.FSGroup != nil {
+			t.Fatalf("unexpected storage security context: %#v", security)
+		}
 	}
 
 	// Turning the opt-in off after installation retains the service and token.
@@ -342,6 +359,15 @@ func TestAIConfigFromEnvRejectsInvalidInputs(t *testing.T) {
 		{name: "invalid service resource quantity", env: map[string]string{"KRKNAI_SERVICE_RESOURCES": `{"requests":{"cpu":"lots"}}`}},
 		{name: "unknown service resource field", env: map[string]string{"KRKNAI_SERVICE_RESOURCES": `{"requests":{"cpu":"1"},"unexpected":{}}`}},
 		{name: "trailing service resources value", env: map[string]string{"KRKNAI_SERVICE_RESOURCES": `{} {}`}},
+		{name: "invalid storage groups JSON", env: map[string]string{"KRKNAI_SERVICE_SUPPLEMENTAL_GROUPS": "not-json"}},
+		{name: "null storage groups", env: map[string]string{"KRKNAI_SERVICE_SUPPLEMENTAL_GROUPS": "null"}},
+		{name: "null storage group", env: map[string]string{"KRKNAI_SERVICE_SUPPLEMENTAL_GROUPS": "[null]"}},
+		{name: "root storage group", env: map[string]string{"KRKNAI_SERVICE_SUPPLEMENTAL_GROUPS": "[0]"}},
+		{name: "negative storage group", env: map[string]string{"KRKNAI_SERVICE_SUPPLEMENTAL_GROUPS": "[-1]"}},
+		{name: "out of range storage group", env: map[string]string{"KRKNAI_SERVICE_SUPPLEMENTAL_GROUPS": "[2147483648]"}},
+		{name: "string storage group", env: map[string]string{"KRKNAI_SERVICE_SUPPLEMENTAL_GROUPS": `["1001"]`}},
+		{name: "fractional storage group", env: map[string]string{"KRKNAI_SERVICE_SUPPLEMENTAL_GROUPS": "[1001.5]"}},
+		{name: "trailing storage groups value", env: map[string]string{"KRKNAI_SERVICE_SUPPLEMENTAL_GROUPS": "[1001] []"}},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {

@@ -93,3 +93,17 @@ Namespace to use
 {{- .Release.Namespace }}
 {{- end }}
 {{- end }}
+
+{{/*
+Validate storage groups for standalone and OLM-managed AI services.
+*/}}
+{{- define "krkn-operator.validateAIServiceSupplementalGroups" -}}
+{{- if not (kindIs "slice" .) -}}
+{{- fail "aiService.podSecurityContext.supplementalGroups must be a list" -}}
+{{- end -}}
+{{- range . -}}
+{{- if or (kindIs "string" .) (not (regexMatch "^[1-9][0-9]*$" (toString .))) (gt (float64 .) 2147483647.0) -}}
+{{- fail "aiService.podSecurityContext.supplementalGroups must contain non-root Unix GIDs (integers from 1 to 2147483647)" -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
