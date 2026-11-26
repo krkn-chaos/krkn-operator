@@ -13,10 +13,12 @@ import (
 	"github.com/krkn-chaos/krkn-operator/pkg/auth"
 )
 
-// addRequestedRunCategoryLabels validates a run's complete category selection
-// before adding any labels. This keeps category assignment in the same Create
-// operation as the run itself and avoids partially categorized CRs.
-func (h *Handler) addRequestedRunCategoryLabels(w http.ResponseWriter, r *http.Request, categories []string, labels map[string]string) bool {
+// addRequestedCategoryLabels validates a complete category selection before
+// adding any labels. Validating first keeps category assignment in the same
+// Create/Update operation as the entity itself and avoids partially
+// categorized entities. Category existence and visibility are checked for every
+// selected name; duplicates are collapsed.
+func (h *Handler) addRequestedCategoryLabels(w http.ResponseWriter, r *http.Request, categories []string, labels map[string]string) bool {
 	if len(categories) == 0 {
 		return true
 	}

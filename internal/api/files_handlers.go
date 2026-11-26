@@ -39,7 +39,7 @@ import (
 
 // CreateFile handles POST /api/v1/files
 // @Summary Create file
-// @Description Create a new file ConfigMap. Users can create files for their own groups or public files. Admins can create files for any group. Cannot create workflow-template files (use POST /api/v1/workflows instead).
+// @Description Create a new file ConfigMap. Users can create files for their own groups or public files. Admins can create files for any group. Cannot create workflow-template files (use POST /api/v1/workflows instead). Optional `categories` associate the file with existing categories the caller can see.
 // @Tags files
 // @Accept json
 // @Produce json
@@ -122,6 +122,14 @@ func (h *Handler) CreateFile(w http.ResponseWriter, r *http.Request) {
 	fileID := uuid.New().String()
 	logicalName := deriveLogicalName(req.FileName, req.WorkflowName)
 
+	// Build labels up front so category visibility is validated before the
+	// logical name is reserved; a rejected category must not leave a dangling
+	// reservation behind.
+	labels := files.BuildFileLabels(fileID, req.Groups, req.AvailableToAll, req.FilePurpose, logicalName)
+	if !h.addRequestedCategoryLabels(w, r, req.Categories, labels) {
+		return
+	}
+
 	// Atomically reserve the logical name (prevents concurrent duplicates)
 	if err := h.reserveLogicalName(ctx, logicalName, fileID); err != nil {
 		if apierrors.IsAlreadyExists(err) {
@@ -142,8 +150,7 @@ func (h *Handler) CreateFile(w http.ResponseWriter, r *http.Request) {
 	// Get current user for audit trail
 	createdBy := claims.UserID
 
-	// Build labels and annotations
-	labels := files.BuildFileLabels(fileID, req.Groups, req.AvailableToAll, req.FilePurpose, logicalName)
+	// Build annotations (labels were built before the name reservation above)
 	annotations := files.BuildFileAnnotations(
 		req.Description,
 		createdBy,
@@ -237,10 +244,15 @@ func (h *Handler) ListFiles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Category names are filtered to what the caller can see so a private
+	// category assigned to an accessible file is not disclosed.
+	visibleCategories := h.visibleCategoryNamesForFileResponse(ctx)
+
 	// Convert to response format
 	fileList := make([]files.FileResponse, len(configMapList.Items))
 	for i, cm := range configMapList.Items {
 		fileList[i] = buildFileResponse(&cm)
+		fileList[i].Categories = filterVisibleCategories(fileList[i].Categories, visibleCategories)
 	}
 
 	logger.Info("Listed files", "total", len(fileList))
@@ -306,14 +318,22 @@ func (h *Handler) GetFile(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	response := buildFileResponse(configMap)
+	response.Categories = filterVisibleCategories(
+		response.Categories,
+		h.visibleCategoryNamesForFileResponse(ctx),
+	)
+
 	logger.Info("Retrieved file", "fileID", fileID)
-	writeJSON(w, http.StatusOK, buildFileResponse(configMap))
+	writeJSON(w, http.StatusOK, response)
 }
 
 // UpdateFile handles PUT /api/v1/files/{fileId}
 // Updates a file by UUID (authenticated users with access)
 // Users can update files from their own groups
 // Admins can update any file
+// Omitting `categories` preserves the file's category associations; sending an
+// empty list clears them.
 func (h *Handler) UpdateFile(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	logger := log.FromContext(ctx).WithName("update-file")
@@ -432,6 +452,34 @@ func (h *Handler) UpdateFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Validate requested categories before mutating the ConfigMap. Nil means the
+	// caller did not send the field, so existing associations are preserved; an
+	// empty list clears them.
+	//
+	// Only newly added categories are validated: an association the caller cannot
+	// see (assigned by an admin) must survive an unrelated edit instead of
+	// rejecting the whole update, and preserving it grants no new access.
+	visibleCategories, err := h.VisibleCategoryNames(ctx)
+	if err != nil {
+		logger.Error(err, "Failed to determine visible file categories", "fileID", fileID)
+		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{
+			Error:   "internal_error",
+			Message: "Failed to update file",
+		})
+		return
+	}
+
+	existingCategories := files.ExtractCategoriesFromLabels(configMap.Labels)
+	nextCategories := existingCategories
+	if req.Categories != nil {
+		addedCategories := categoriesNotIn(*req.Categories, existingCategories)
+		categoryLabels := make(map[string]string, len(addedCategories))
+		if !h.addRequestedCategoryLabels(w, r, addedCategories, categoryLabels) {
+			return
+		}
+		nextCategories = mergePreservedCategories(*req.Categories, existingCategories, visibleCategories)
+	}
+
 	// Derive the logical name and annotation pointer.
 	// For workflows: nil req.WorkflowName means preserve existing (pointer semantics).
 	// For regular files: always sync annotation to fileName.
@@ -476,6 +524,7 @@ func (h *Handler) UpdateFile(w http.ResponseWriter, r *http.Request) {
 
 	// Update labels and annotations (preserve existing file ID)
 	configMap.Labels = files.BuildFileLabels(fileID, req.Groups, req.AvailableToAll, req.FilePurpose, newLogicalName)
+	files.ApplyCategories(configMap.Labels, nextCategories)
 	configMap.Annotations = files.UpdateFileAnnotations(
 		configMap.Annotations,
 		req.Description,
@@ -670,9 +719,12 @@ func (h *Handler) ListAvailableFiles(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		visibleCategories := h.visibleCategoryNamesForFileResponse(ctx)
+
 		fileList := make([]files.FileInfo, len(configMapList.Items))
 		for i, cm := range configMapList.Items {
 			fileList[i] = buildFileInfo(&cm)
+			fileList[i].Categories = filterVisibleCategories(fileList[i].Categories, visibleCategories)
 		}
 
 		writeJSON(w, http.StatusOK, files.AvailableFilesResponse{
@@ -696,6 +748,8 @@ func (h *Handler) ListAvailableFiles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	visibleCategories := h.visibleCategoryNamesForFileResponse(ctx)
+
 	// Filter files by access
 	available := []files.FileInfo{}
 	for _, cm := range configMapList.Items {
@@ -706,7 +760,9 @@ func (h *Handler) ListAvailableFiles(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		if hasAccess {
-			available = append(available, buildFileInfo(&cm))
+			info := buildFileInfo(&cm)
+			info.Categories = filterVisibleCategories(info.Categories, visibleCategories)
+			available = append(available, info)
 		}
 	}
 
@@ -919,6 +975,74 @@ func (h *Handler) isFileOwnerOrAdmin(ctx context.Context, configMap *corev1.Conf
 	return false, nil
 }
 
+// mergePreservedCategories merges a caller's requested categories with the
+// existing associations the caller cannot see. Callers cannot manage categories
+// hidden from them, and responses no longer reveal those names, so an update
+// must not drop them.
+func mergePreservedCategories(requested, existing []string, visible map[string]struct{}) []string {
+	merged := make([]string, 0, len(requested)+len(existing))
+	seen := make(map[string]struct{}, len(requested)+len(existing))
+
+	appendUnique := func(name string) {
+		if name == "" {
+			return
+		}
+		if _, duplicate := seen[name]; duplicate {
+			return
+		}
+		seen[name] = struct{}{}
+		merged = append(merged, name)
+	}
+
+	for _, name := range requested {
+		appendUnique(name)
+	}
+	for _, name := range existing {
+		if _, ok := visible[name]; ok {
+			continue
+		}
+		appendUnique(name)
+	}
+
+	return merged
+}
+
+// categoriesNotIn returns the names of wanted that are not already present in
+// existing. Order follows wanted and duplicates are dropped.
+func categoriesNotIn(wanted, existing []string) []string {
+	exists := make(map[string]struct{}, len(existing))
+	for _, name := range existing {
+		exists[name] = struct{}{}
+	}
+
+	added := make([]string, 0, len(wanted))
+	seen := make(map[string]struct{}, len(wanted))
+	for _, name := range wanted {
+		if _, alreadyAssigned := exists[name]; alreadyAssigned {
+			continue
+		}
+		if _, duplicate := seen[name]; duplicate {
+			continue
+		}
+		seen[name] = struct{}{}
+		added = append(added, name)
+	}
+	return added
+}
+
+// visibleCategoryNamesForFileResponse resolves the categories a caller can see
+// for a file read. When visibility cannot be determined the file is still
+// returned, without category names: hiding associations is safe, while failing
+// the read would break every consumer of the file API.
+func (h *Handler) visibleCategoryNamesForFileResponse(ctx context.Context) map[string]struct{} {
+	visible, err := h.VisibleCategoryNames(ctx)
+	if err != nil {
+		log.FromContext(ctx).Error(err, "Failed to determine visible file categories; omitting category labels")
+		return map[string]struct{}{}
+	}
+	return visible
+}
+
 // buildFileResponse builds a FileResponse from a ConfigMap
 func buildFileResponse(configMap *corev1.ConfigMap) files.FileResponse {
 	logicalName := configMap.Annotations[files.WorkflowNameAnnotation]
@@ -959,6 +1083,7 @@ func buildFileResponse(configMap *corev1.ConfigMap) files.FileResponse {
 		WorkflowName:           logicalName,
 		Description:            configMap.Annotations[files.DescriptionAnnotation],
 		FilePurpose:            files.ExtractFilePurposeFromLabels(configMap.Labels),
+		Categories:             files.ExtractCategoriesFromLabels(configMap.Labels),
 		Groups:                 files.ExtractGroupsFromLabels(configMap.Labels),
 		AvailableToAll:         configMap.Labels[files.AvailableToAllLabel] == "true",
 		CreatedAt:              configMap.Annotations[files.CreatedAtAnnotation],
@@ -975,6 +1100,7 @@ func buildFileInfo(configMap *corev1.ConfigMap) files.FileInfo {
 		FileName:       configMap.Annotations[files.WorkflowNameAnnotation],
 		Description:    configMap.Annotations[files.DescriptionAnnotation],
 		FilePurpose:    files.ExtractFilePurposeFromLabels(configMap.Labels),
+		Categories:     files.ExtractCategoriesFromLabels(configMap.Labels),
 		Groups:         files.ExtractGroupsFromLabels(configMap.Labels),
 		AvailableToAll: configMap.Labels[files.AvailableToAllLabel] == "true",
 		CreatedAt:      configMap.Annotations[files.CreatedAtAnnotation],

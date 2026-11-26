@@ -2106,7 +2106,7 @@ func (h *Handler) PostScenarioRun(w http.ResponseWriter, r *http.Request) {
 	if req.RollbackEnabled {
 		maxRetries = 0
 	}
-	if !h.addRequestedRunCategoryLabels(w, r, req.Categories, labels) {
+	if !h.addRequestedCategoryLabels(w, r, req.Categories, labels) {
 		return
 	}
 

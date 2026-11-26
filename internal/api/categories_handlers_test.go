@@ -28,6 +28,7 @@ import (
 	v2 "github.com/krkn-chaos/krkn-operator/internal/api/v2"
 	"github.com/krkn-chaos/krkn-operator/pkg/auth"
 	"github.com/krkn-chaos/krkn-operator/pkg/groupauth"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	fakeclient "sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -39,6 +40,10 @@ func newCategoryTestHandler(t *testing.T, objects ...runtime.Object) (*Handler, 
 	scheme := runtime.NewScheme()
 	if err := krknv1alpha1.AddToScheme(scheme); err != nil {
 		t.Fatalf("register API scheme: %v", err)
+	}
+	// Category deletion also clears labels from file ConfigMaps.
+	if err := corev1.AddToScheme(scheme); err != nil {
+		t.Fatalf("register core scheme: %v", err)
 	}
 	defaultUserName, err := groupauth.SanitizeUserIDForResourceName("category-user@example.com")
 	if err != nil {
