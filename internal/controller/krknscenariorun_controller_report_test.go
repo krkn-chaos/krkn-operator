@@ -3,10 +3,16 @@ package controller
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"strings"
 	"testing"
 
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/kubernetes/fake"
+	k8stesting "k8s.io/client-go/testing"
 )
 
 func TestExtractDelimitedContent(t *testing.T) {
@@ -96,6 +102,47 @@ func TestExtractAndStoreReportsRejectsMultiClusterRun(t *testing.T) {
 	}
 	if !strings.Contains(scenarioRun.Status.ReportStatus.Message, "not supported for multi-cluster") {
 		t.Fatalf("unexpected report status message: %q", scenarioRun.Status.ReportStatus.Message)
+	}
+}
+
+func TestExtractAndStoreReportsMissingPodRecordsUnavailableReport(t *testing.T) {
+	clientset := fake.NewSimpleClientset()
+	clientset.PrependReactor("get", "pods", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, apierrors.NewNotFound(schema.GroupResource{Resource: "pods"}, "deleted-pod")
+	})
+	scenarioRun := &krknv1alpha1.KrknScenarioRun{}
+	scenarioRun.Name = "completed-run"
+	scenarioRun.Spec.TargetClusters = map[string][]string{"provider": {"cluster-a"}}
+	reconciler := &KrknScenarioRunReconciler{Clientset: clientset, Namespace: "krkn-operator-system"}
+
+	err := reconciler.extractAndStoreReports(context.Background(), scenarioRun, &krknv1alpha1.ClusterJobStatus{PodName: "deleted-pod"})
+	if err != nil {
+		t.Fatalf("extractAndStoreReports() returned an error for deleted pod: %v", err)
+	}
+	if scenarioRun.Status.ReportStatus == nil || scenarioRun.Status.ReportStatus.Generated {
+		t.Fatalf("expected unavailable report status, got %#v", scenarioRun.Status.ReportStatus)
+	}
+	if !strings.Contains(scenarioRun.Status.ReportStatus.Message, "deleted-pod") {
+		t.Fatalf("report status must identify deleted pod, got %q", scenarioRun.Status.ReportStatus.Message)
+	}
+}
+
+func TestExtractAndStoreReportsRetriesTransientLogFailure(t *testing.T) {
+	clientset := fake.NewSimpleClientset()
+	clientset.PrependReactor("get", "pods", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, errors.New("temporary log failure")
+	})
+	scenarioRun := &krknv1alpha1.KrknScenarioRun{}
+	scenarioRun.Name = "completed-run"
+	scenarioRun.Spec.TargetClusters = map[string][]string{"provider": {"cluster-a"}}
+	reconciler := &KrknScenarioRunReconciler{Clientset: clientset, Namespace: "krkn-operator-system"}
+
+	err := reconciler.extractAndStoreReports(context.Background(), scenarioRun, &krknv1alpha1.ClusterJobStatus{PodName: "existing-pod"})
+	if err == nil || !strings.Contains(err.Error(), "temporary log failure") {
+		t.Fatalf("expected transient log error to remain retryable, got %v", err)
+	}
+	if scenarioRun.Status.ReportStatus != nil {
+		t.Fatalf("transient log failure must not finalize report status, got %#v", scenarioRun.Status.ReportStatus)
 	}
 }
 

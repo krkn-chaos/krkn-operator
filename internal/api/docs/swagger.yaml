@@ -2297,6 +2297,37 @@ definitions:
       workspaceUid:
         type: string
     type: object
+  internal_api.clusterResourceItem:
+    properties:
+      metadata:
+        properties:
+          labels:
+            additionalProperties:
+              type: string
+            type: object
+          name:
+            type: string
+          namespace:
+            type: string
+        type: object
+      spec:
+        properties:
+          containers:
+            items:
+              properties:
+                name:
+                  type: string
+              type: object
+            type: array
+        type: object
+    type: object
+  internal_api.clusterResourcesResponse:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/internal_api.clusterResourceItem'
+        type: array
+    type: object
   internal_api.workspaceInfo:
     properties:
       available:
@@ -2888,6 +2919,77 @@ paths:
       summary: Download operator configuration backup
       tags:
       - backup
+  /cluster-resources:
+    get:
+      parameters:
+      - description: KrknTargetRequest ID
+        in: query
+        name: id
+        required: true
+        type: string
+      - description: Cluster name
+        in: query
+        name: cluster-name
+        required: true
+        type: string
+      - description: Target provider name
+        in: query
+        name: operator-name
+        required: true
+        type: string
+      - description: namespaces, nodes, pods, pvcs, vmi, or serviceaccounts
+        in: query
+        name: resource
+        required: true
+        type: string
+      - description: Namespace for namespaced resources
+        in: query
+        name: namespace
+        type: string
+      - description: List namespaced resources across all namespaces
+        in: query
+        name: all-namespaces
+        type: boolean
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_api.clusterResourcesResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "405":
+          description: Method Not Allowed
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "502":
+          description: Bad Gateway
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "504":
+          description: Gateway Timeout
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: List cluster resources for scenario parameter suggestions
+      tags:
+      - clusters
   /clusters:
     get:
       description: Get the list of target clusters from a KrknTargetRequest by ID

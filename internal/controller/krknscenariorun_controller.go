@@ -2471,6 +2471,12 @@ func (r *KrknScenarioRunReconciler) extractAndStoreReports(ctx context.Context, 
 
 	logs, err := r.fetchScenarioPodLogs(ctx, job.PodName)
 	if err != nil {
+		if apierrors.IsNotFound(err) {
+			message := fmt.Sprintf("Report unavailable for scenario run %q: completed pod %q no longer exists", scenarioRun.Name, job.PodName)
+			scenarioRun.Status.ReportStatus = &krknv1alpha1.ReportStatus{Message: message}
+			logger.Info(message)
+			return nil
+		}
 		logger.Error(err, "unable to read logs for report extraction; reconciliation will retry", "pod", job.PodName)
 		return err
 	}

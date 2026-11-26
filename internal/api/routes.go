@@ -49,6 +49,7 @@ const (
 	ComponentsPath                = APIBasePath + "/components"
 	ClustersPath                  = APIBasePath + "/clusters"
 	NodesPath                     = APIBasePath + "/nodes"
+	ClusterResourcesPath          = APIBasePath + "/cluster-resources"
 	TerminalPath                  = APIBasePath + "/terminal"
 	TerminalAvailableCommandsPath = TerminalPath + "/available-commands"
 )
