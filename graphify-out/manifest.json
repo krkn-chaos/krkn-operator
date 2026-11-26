@@ -2964,9 +2964,9 @@
     "semantic_hash": ""
   },
   "internal/api/session_handlers.go": {
-    "mtime": 1795693561.5539522,
-    "seen": 1795693781.0845802,
-    "ast_hash": "2c537849a067c6de48bbaf30d6237f66",
+    "mtime": 1795707279.2935755,
+    "seen": 1795707300.420821,
+    "ast_hash": "1810ad060b0af1142dd0782b400a7245",
     "semantic_hash": ""
   },
   "internal/api/ws_auth.go": {
@@ -3078,9 +3078,9 @@
     "semantic_hash": ""
   },
   "internal/api/identity_provider_handlers_test.go": {
-    "mtime": 1795693561.5455475,
-    "seen": 1795693781.0845382,
-    "ast_hash": "b514c684789dfa301d8dfb41a0fe03d2",
+    "mtime": 1795707171.1202803,
+    "seen": 1795707255.457824,
+    "ast_hash": "2459f9ec30015a0bd95e869d499d948d",
     "semantic_hash": ""
   },
   "internal/api/identity_provider_store.go": {
