@@ -1,17 +1,21 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"sort"
 	"strings"
 
+	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
 	"github.com/krkn-chaos/krkn-operator/pkg/auth"
 	"github.com/krkn-chaos/krkn-operator/pkg/identity"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -25,6 +29,8 @@ type IdentityProviderResponse struct {
 	ClientID             string `json:"clientId"`
 	RedirectURL          string `json:"redirectUrl"`
 	AdminClientID        string `json:"adminClientId,omitempty"`
+	HasCACert            bool   `json:"hasCACert"`
+	SkipTLSVerify        bool   `json:"skipTLSVerify"`
 	Enabled              bool   `json:"enabled"`
 	Source               string `json:"source"`
 	HasClientSecret      bool   `json:"hasClientSecret"`
@@ -34,7 +40,8 @@ type IdentityProviderResponse struct {
 func providerResponse(c identityProviderConfig) IdentityProviderResponse {
 	return IdentityProviderResponse{ID: c.ID, Type: c.Type, DisplayName: c.DisplayName,
 		Issuer: c.Issuer, ClientID: c.ClientID, RedirectURL: c.RedirectURL,
-		AdminClientID: c.AdminClientID, Enabled: c.Enabled, Source: c.Source,
+		AdminClientID: c.AdminClientID, HasCACert: c.CACert != "", SkipTLSVerify: c.SkipTLSVerify,
+		Enabled: c.Enabled, Source: c.Source,
 		HasClientSecret: c.ClientSecret != "", HasAdminClientSecret: c.AdminClientSecret != ""}
 }
 
@@ -48,6 +55,8 @@ type createIdentityProviderRequest struct {
 	RedirectURL       string `json:"redirectUrl"`
 	AdminClientID     string `json:"adminClientId"`
 	AdminClientSecret string `json:"adminClientSecret"`
+	CACert            string `json:"caCert"`
+	SkipTLSVerify     bool   `json:"skipTLSVerify"`
 	Enabled           bool   `json:"enabled"`
 }
 
@@ -59,6 +68,8 @@ type patchIdentityProviderRequest struct {
 	RedirectURL       *string `json:"redirectUrl,omitempty"`
 	AdminClientID     *string `json:"adminClientId,omitempty"`
 	AdminClientSecret *string `json:"adminClientSecret,omitempty"`
+	CACert            *string `json:"caCert,omitempty"`
+	SkipTLSVerify     *bool   `json:"skipTLSVerify,omitempty"`
 	Enabled           *bool   `json:"enabled,omitempty"`
 }
 
@@ -105,8 +116,8 @@ func (h *Handler) PublicIdentityProviders(w http.ResponseWriter, r *http.Request
 }
 
 // IdentityProviders manages Secret-backed Keycloak instances for admins. IDs
-// and issuers are immutable; disabling is used instead of deleting an identity
-// namespace that may still be referenced by users, blocks and group mappings.
+// and issuers are immutable; deleting a provider also clears its external group
+// mappings, while user records and blacklist entries remain available.
 func (h *Handler) IdentityProviders(w http.ResponseWriter, r *http.Request) {
 	if !auth.IsAdmin(r.Context()) {
 		writeJSONError(w, http.StatusForbidden, ErrorResponse{Error: "forbidden", Message: "Admin privileges required"})
@@ -138,7 +149,8 @@ func (h *Handler) IdentityProviders(w http.ResponseWriter, r *http.Request) {
 			c := identityProviderConfig{ID: req.ID, Type: req.Type, DisplayName: req.DisplayName,
 				Issuer: req.Issuer, ClientID: req.ClientID, ClientSecret: req.ClientSecret,
 				RedirectURL: req.RedirectURL, AdminClientID: req.AdminClientID,
-				AdminClientSecret: req.AdminClientSecret, Enabled: req.Enabled, Source: "secret"}
+				AdminClientSecret: req.AdminClientSecret, CACert: req.CACert,
+				SkipTLSVerify: req.SkipTLSVerify, Enabled: req.Enabled, Source: "secret"}
 			epoch, err := randomURLValue()
 			if err != nil {
 				writeJSONError(w, http.StatusInternalServerError, ErrorResponse{Error: "internal_error", Message: "Cannot create session epoch"})
@@ -193,6 +205,10 @@ func (h *Handler) IdentityProviders(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, providerResponse(c))
 		return
 	}
+	if r.Method == http.MethodDelete {
+		h.deleteIdentityProvider(w, r, id)
+		return
+	}
 	if r.Method != http.MethodPatch {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
@@ -244,6 +260,12 @@ func (h *Handler) IdentityProviders(w http.ResponseWriter, r *http.Request) {
 	if req.AdminClientSecret != nil {
 		c.AdminClientSecret = *req.AdminClientSecret
 	}
+	if req.CACert != nil {
+		c.CACert = *req.CACert
+	}
+	if req.SkipTLSVerify != nil {
+		c.SkipTLSVerify = *req.SkipTLSVerify
+	}
 	if req.Enabled != nil && *req.Enabled != c.Enabled {
 		c.Enabled = *req.Enabled
 		epoch, err := randomURLValue()
@@ -273,4 +295,79 @@ func (h *Handler) IdentityProviders(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, providerResponse(c))
+}
+
+func (h *Handler) deleteIdentityProvider(w http.ResponseWriter, r *http.Request, id string) {
+	var secret corev1.Secret
+	key := client.ObjectKey{Name: identityProviderSecretName(id), Namespace: h.namespace}
+	if err := h.providerStore.reader.Get(r.Context(), key, &secret); err != nil {
+		if apierrors.IsNotFound(err) {
+			if id == "keycloak" {
+				if _, ok := legacyKeycloakConfig(); ok {
+					writeJSONError(w, http.StatusConflict, ErrorResponse{Error: "environment_provider", Message: "Environment providers are read-only and cannot be deleted"})
+					return
+				}
+			}
+			writeJSONError(w, http.StatusNotFound, ErrorResponse{Error: "not_found", Message: "Identity provider not found"})
+			return
+		}
+		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{Error: "internal_error", Message: "Cannot read identity provider"})
+		return
+	}
+	if secret.Labels[identityProviderLabel] != "true" {
+		writeJSONError(w, http.StatusNotFound, ErrorResponse{Error: "not_found", Message: "Identity provider not found"})
+		return
+	}
+	if err := h.removeProviderGroupMappings(r.Context(), id); err != nil {
+		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{Error: "internal_error", Message: "Cannot remove provider group mappings"})
+		return
+	}
+	if err := h.providerStore.client.Delete(r.Context(), &secret); err != nil {
+		if apierrors.IsNotFound(err) {
+			writeJSONError(w, http.StatusNotFound, ErrorResponse{Error: "not_found", Message: "Identity provider not found"})
+			return
+		}
+		writeJSONError(w, http.StatusInternalServerError, ErrorResponse{Error: "internal_error", Message: "Cannot delete identity provider"})
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// removeProviderGroupMappings clears grants that reference a provider before
+// its configuration is removed. User records and blacklist entries are kept.
+func (h *Handler) removeProviderGroupMappings(ctx context.Context, providerID string) error {
+	var groups krknv1alpha1.KrknUserGroupList
+	if err := h.providerStore.reader.List(ctx, &groups, client.InNamespace(h.namespace)); err != nil {
+		return fmt.Errorf("list local groups: %w", err)
+	}
+	for i := range groups.Items {
+		groupName := groups.Items[i].Name
+		containsProvider := false
+		for _, mapping := range groups.Items[i].Spec.ExternalGroups {
+			if mapping.Provider == providerID {
+				containsProvider = true
+				break
+			}
+		}
+		if !containsProvider {
+			continue
+		}
+		if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+			var group krknv1alpha1.KrknUserGroup
+			if err := h.providerStore.reader.Get(ctx, client.ObjectKey{Name: groupName, Namespace: h.namespace}, &group); err != nil {
+				return err
+			}
+			mappings := make([]krknv1alpha1.ExternalGroupMapping, 0, len(group.Spec.ExternalGroups))
+			for _, mapping := range group.Spec.ExternalGroups {
+				if mapping.Provider != providerID {
+					mappings = append(mappings, mapping)
+				}
+			}
+			group.Spec.ExternalGroups = mappings
+			return h.providerStore.client.Update(ctx, &group)
+		}); err != nil {
+			return fmt.Errorf("remove provider mapping from group %q: %w", groupName, err)
+		}
+	}
+	return nil
 }

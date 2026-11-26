@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/krkn-chaos/krkn-operator/pkg/identity"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -37,6 +38,8 @@ type identityProviderConfig struct {
 	RedirectURL       string
 	AdminClientID     string
 	AdminClientSecret string
+	CACert            string
+	SkipTLSVerify     bool
 	Enabled           bool
 	SessionEpoch      string
 	Source            string
@@ -74,7 +77,8 @@ func secretProvider(secret *corev1.Secret) (identityProviderConfig, error) {
 	config := identityProviderConfig{ID: id, Type: string(data["type"]), DisplayName: string(data["displayName"]),
 		Issuer: string(data["issuer"]), ClientID: string(data["clientId"]), ClientSecret: string(data["clientSecret"]),
 		RedirectURL: string(data["redirectUrl"]), AdminClientID: string(data["adminClientId"]),
-		AdminClientSecret: string(data["adminClientSecret"]), Enabled: string(data["enabled"]) == "true",
+		AdminClientSecret: string(data["adminClientSecret"]), CACert: string(data["caCert"]),
+		SkipTLSVerify: string(data["skipTLSVerify"]) == "true", Enabled: string(data["enabled"]) == "true",
 		SessionEpoch: string(data["sessionEpoch"]), Source: "secret"}
 	if err := validateProviderConfig(config); err != nil {
 		return identityProviderConfig{}, fmt.Errorf("invalid identity provider %q: %w", id, err)
@@ -89,6 +93,7 @@ func (c identityProviderConfig) secret(namespace string) *corev1.Secret {
 			"type": []byte(c.Type), "displayName": []byte(c.DisplayName), "issuer": []byte(c.Issuer),
 			"clientId": []byte(c.ClientID), "clientSecret": []byte(c.ClientSecret), "redirectUrl": []byte(c.RedirectURL),
 			"adminClientId": []byte(c.AdminClientID), "adminClientSecret": []byte(c.AdminClientSecret),
+			"caCert": []byte(c.CACert), "skipTLSVerify": []byte(fmt.Sprint(c.SkipTLSVerify)),
 			"enabled":      []byte(fmt.Sprint(c.Enabled)),
 			"sessionEpoch": []byte(c.SessionEpoch),
 		}}
@@ -180,6 +185,11 @@ func validateProviderConfig(c identityProviderConfig) error {
 	}
 	if (c.AdminClientID == "") != (c.AdminClientSecret == "") {
 		return fmt.Errorf("both adminClientId and adminClientSecret are required for group discovery")
+	}
+	if c.CACert != "" {
+		if err := identity.ValidateCACert(c.CACert); err != nil {
+			return fmt.Errorf("invalid CA certificate: %w", err)
+		}
 	}
 	return nil
 }

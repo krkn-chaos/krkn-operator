@@ -63,8 +63,14 @@ func (h *Handler) ListExternalGroups(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusServiceUnavailable, ErrorResponse{Error: "provider_unavailable", Message: "Group discovery credentials are not configured"})
 			return
 		}
+		httpClient, err := identity.NewHTTPClient(config.CACert, config.SkipTLSVerify)
+		if err != nil {
+			logger.Info("Invalid TLS configuration for group discovery", "provider", parts[0], "cause", err.Error())
+			writeJSON(w, http.StatusBadGateway, ErrorResponse{Error: "provider_unavailable", Message: "Invalid provider TLS configuration"})
+			return
+		}
 		directory, err = identity.NewKeycloakDirectory(config.ID, config.Issuer,
-			config.AdminClientID, config.AdminClientSecret, nil)
+			config.AdminClientID, config.AdminClientSecret, httpClient)
 		if err != nil {
 			logger.Info("Invalid group discovery configuration", "provider", parts[0], "cause", err.Error())
 			writeJSON(w, http.StatusBadGateway, ErrorResponse{Error: "provider_unavailable", Message: "Invalid group discovery configuration"})
