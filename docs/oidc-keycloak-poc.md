@@ -8,7 +8,7 @@ Deploy a console release with OIDC login choices before enabling an external pro
 
 ## Identity provider management
 
-An operator admin can create and manage multiple Keycloak instances without a new persistence service. Each configuration is an opaque Kubernetes Secret in the operator namespace. The immutable `id` identifies the instance in login URLs, user records, blocks, and group mappings; `type` is currently `keycloak`. The issuer is immutable after creation. To move to another realm, choose a new ID and create new mappings. Provider deletion is intentionally unavailable so an ID cannot be reused while users or grants still refer to it.
+An operator admin can create and manage multiple Keycloak instances without a new persistence service. Each configuration is an opaque Kubernetes Secret in the operator namespace. The immutable `id` identifies the instance in login URLs, user records, blocks, and group mappings; `type` is currently `keycloak`. The issuer is immutable after creation. To move to another realm, choose a new ID and create new mappings.
 
 Admin API (requires an operator admin session or Bearer token):
 
@@ -17,6 +17,7 @@ GET   /api/v1/identity-providers
 POST  /api/v1/identity-providers
 GET   /api/v1/identity-providers/{id}
 PATCH /api/v1/identity-providers/{id}
+DELETE /api/v1/identity-providers/{id}
 GET   /api/v1/identity-providers/{id}/groups?search=ops&first=0&max=50
 ```
 
@@ -33,11 +34,17 @@ Create body example:
   "redirectUrl": "https://operator.example/api/v1/auth/oidc/corp-keycloak/callback",
   "adminClientId": "krkn-operator-groups",
   "adminClientSecret": "<group-reader-secret>",
+  "caCert": "-----BEGIN CERTIFICATE-----\n...\n-----END CERTIFICATE-----",
+  "skipTLSVerify": false,
   "enabled": false
 }
 ```
 
-`PATCH` accepts `displayName`, client IDs/secrets, `redirectUrl`, and `enabled`; omitted secrets retain their existing values. The admin responses contain credential-presence flags but never the secret values. Group discovery credentials are optional until group import is needed. A disabled provider disappears from the public login list, rejects new login/callback requests, and causes existing HTTP and WebSocket sessions from that provider to fail the live identity check. Every enable/disable transition rotates a private session epoch, so old sessions stay invalid after re-enabling; users must log in again.
+`PATCH` accepts `displayName`, client IDs/secrets, `redirectUrl`, `caCert`, `skipTLSVerify`, and `enabled`; omitted secrets and CA certificates retain their existing values. Send an empty `caCert` to remove a configured CA. The additional PEM CA is added to the operator's system trust roots for OIDC discovery, token exchange, and group discovery. `skipTLSVerify` disables certificate and hostname verification for that provider; prefer a trusted CA and use this option only on a network you trust. Admin responses expose `hasCACert` and `skipTLSVerify`, but never return certificate or secret contents. Group discovery credentials are optional until group import is needed. A disabled provider disappears from the public login list, rejects new login/callback requests, and causes existing HTTP and WebSocket sessions from that provider to fail the live identity check. Every enable/disable transition rotates a private session epoch, so old sessions stay invalid after re-enabling; users must log in again.
+
+`DELETE /api/v1/identity-providers/{id}` disables a Secret-backed provider, rotates its session epoch, clears its remote group mappings, then replaces its credentials with a hidden, credential-free tombstone. This ordering revokes sessions before cleanup, prevents new API group mappings while deletion is in progress, and makes retries safe after partial failures. `POST` may reuse the ID once cleanup has completed. User records and blacklist entries are retained. Deleting the `keycloak` Secret override is rejected with `409 environment_provider` when environment credentials would become active again.
+
+Deletion returns `204` when complete, including when retrying a completed deletion; `404 not_found` when no provider exists; `409 environment_provider` when the configured provider is environment-backed or deleting an override would reactivate one; and `500 internal_error` if mapping cleanup or tombstone persistence fails. On a `500`, the provider remains disabled and marked for deletion; mappings may already have been removed, so retry the same DELETE request. The API serializes group mapping writes with provider deletion and verifies that no mappings remain before leaving the tombstone.
 
 The public login-choice endpoint is `GET /api/v1/auth/providers`; it returns only enabled providers with `id`, `type`, `displayName`, and `loginUrl`. The companion console renders its "Log in with …" links from this response.
 

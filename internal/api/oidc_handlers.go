@@ -34,7 +34,11 @@ func (h *Handler) oidcLoginConfig(ctx context.Context, id string) (identity.OIDC
 	if !config.Enabled {
 		return nil, identityProviderConfig{}, fmt.Errorf("identity provider is disabled")
 	}
-	provider, err := identity.NewOIDCClient(config.ID, config.Issuer, config.ClientID, config.ClientSecret, config.RedirectURL, nil)
+	httpClient, err := identity.NewHTTPClient(config.CACert, config.SkipTLSVerify)
+	if err != nil {
+		return nil, identityProviderConfig{}, err
+	}
+	provider, err := identity.NewOIDCClient(config.ID, config.Issuer, config.ClientID, config.ClientSecret, config.RedirectURL, httpClient)
 	return provider, config, err
 }
 
