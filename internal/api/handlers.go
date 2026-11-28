@@ -50,6 +50,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
@@ -895,6 +896,10 @@ func (h *Handler) krknAITargetReferenced(ctx context.Context, requestID string) 
 
 	var runs krknv1alpha1.KrknAIRunList
 	if err := h.client.List(ctx, &runs, client.InNamespace(h.namespace)); err != nil {
+		// Without Krkn-AI its CRD is not installed, and no run references the target.
+		if apimeta.IsNoMatchError(err) {
+			return false, nil
+		}
 		return false, err
 	}
 	for i := range runs.Items {

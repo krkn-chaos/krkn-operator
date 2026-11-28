@@ -27,6 +27,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -185,7 +186,8 @@ func (r *KrknTargetRequestReconciler) Reconcile(ctx context.Context, req ctrl.Re
 
 func (r *KrknTargetRequestReconciler) cleanupOldTargetRequests(ctx context.Context) (int, error) {
 	var runs krknv1alpha1.KrknAIRunList
-	if err := r.List(ctx, &runs, client.InNamespace(r.OperatorNamespace)); err != nil {
+	// Without Krkn-AI its CRD is not installed, and no run needs a target.
+	if err := r.List(ctx, &runs, client.InNamespace(r.OperatorNamespace)); err != nil && !meta.IsNoMatchError(err) {
 		return 0, fmt.Errorf("failed to list KrknAIRuns before target cleanup: %w", err)
 	}
 	activeTargetRequests := make(map[string]struct{})
