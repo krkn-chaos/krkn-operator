@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 
 	krknv1alpha1 "github.com/krkn-chaos/krkn-operator/api/v1alpha1"
@@ -27,7 +28,15 @@ type InvalidImageSignatureError struct {
 }
 
 type imageSignatureVerifier func(context.Context, *krknctlconfig.Config, krknv1alpha1.ScenarioReference, *krknctlmodels.RegistryV2, string) (verify.SignatureStatus, error)
-type imageResolver func(context.Context, *krknctlconfig.Config, krknv1alpha1.ScenarioReference, *krknctlmodels.RegistryV2) (string, error)
+type imageResolver func(context.Context, *krknctlconfig.Config, krknv1alpha1.ScenarioReference, *krknctlmodels.RegistryV2) (resolvedImage, error)
+
+// resolvedImage is a scenario image pinned by digest, with whether the scenario
+// declares that it needs a privileged container (the krknctl.privileged image
+// label, which krknctl reads too).
+type resolvedImage struct {
+	image      string
+	privileged bool
+}
 
 func (e *InvalidImageSignatureError) Error() string {
 	return fmt.Sprintf("image %q does not have a valid signature (status: %s)", e.Image, e.Status)
@@ -54,56 +63,81 @@ func resolvePrivateRegistry(ctx context.Context, k8sClient client.Client, namesp
 
 // resolveImmutableImage resolves the scenario metadata once and returns an
 // image reference pinned to the digest observed during that resolution.
-func resolveImmutableImage(ctx context.Context, config *krknctlconfig.Config, reference krknv1alpha1.ScenarioReference, privateRegistry *krknctlmodels.RegistryV2) (string, error) {
+func resolveImmutableImage(ctx context.Context, config *krknctlconfig.Config, reference krknv1alpha1.ScenarioReference, privateRegistry *krknctlmodels.RegistryV2) (resolvedImage, error) {
 	if err := reference.Validate(); err != nil {
-		return "", fmt.Errorf("invalid scenario reference: %w", err)
+		return resolvedImage{}, fmt.Errorf("invalid scenario reference: %w", err)
 	}
 	var mode krknctlprovider.Mode = krknctlprovider.Quay
 	var base string
 	if reference.Private != nil && *reference.Private {
 		if privateRegistry == nil {
-			return "", fmt.Errorf("private registry configuration is required")
+			return resolvedImage{}, fmt.Errorf("private registry configuration is required")
 		}
 		base = privateRegistry.GetPrivateRegistryURI()
-		digest, err := resolvePrivateImageDigest(ctx, reference.Name, privateRegistry)
+		// Read the label from the image config over the same connection as the
+		// digest: krknctl's private-registry provider does not handle every
+		// registry's authentication.
+		digest, labels, err := registryutil.ResolvePrivateTagImage(ctx, reference.Name, privateRegistry)
 		if err != nil {
-			return "", err
+			return resolvedImage{}, err
 		}
-		return krknctlprovider.ImageReference(base, krknctlmodels.ScenarioTag{Name: reference.Name, Digest: &digest}), nil
+		privileged, err := privilegedLabel(config, labels)
+		if err != nil {
+			return resolvedImage{}, fmt.Errorf("scenario %q: %w", reference.Name, err)
+		}
+		return resolvedImage{
+			image:      krknctlprovider.ImageReference(base, krknctlmodels.ScenarioTag{Name: reference.Name, Digest: &digest}),
+			privileged: privileged,
+		}, nil
 	} else {
 		var err error
 		base, err = config.GetQuayImageURI()
 		if err != nil {
-			return "", fmt.Errorf("failed to build public scenario image URI: %w", err)
+			return resolvedImage{}, fmt.Errorf("failed to build public scenario image URI: %w", err)
 		}
 		if reference.Name == "workload-rollback" {
 			repositoryAPIURI, err := config.GetQuayScenarioRepositoryAPIURI()
 			if err != nil {
-				return "", fmt.Errorf("failed to build public rollback repository URI: %w", err)
+				return resolvedImage{}, fmt.Errorf("failed to build public rollback repository URI: %w", err)
 			}
 			digest, err := registryutil.ResolvePublicTagDigest(ctx, repositoryAPIURI, reference.Name)
 			if err != nil {
-				return "", fmt.Errorf("failed to resolve rollback image digest: %w", err)
+				return resolvedImage{}, fmt.Errorf("failed to resolve rollback image digest: %w", err)
 			}
-			return krknctlprovider.ImageReference(base, krknctlmodels.ScenarioTag{Name: reference.Name, Digest: &digest}), nil
+			// The rollback image is labeled krknctl.privileged=false.
+			return resolvedImage{image: krknctlprovider.ImageReference(base, krknctlmodels.ScenarioTag{Name: reference.Name, Digest: &digest})}, nil
 		}
 	}
 	provider := krknctlfactory.NewProviderFactory(config).NewInstance(mode)
 	if provider == nil {
-		return "", fmt.Errorf("failed to create image provider")
+		return resolvedImage{}, fmt.Errorf("failed to create image provider")
 	}
 	detail, err := provider.GetScenarioDetail(reference.Name, privateRegistry)
 	if err != nil {
-		return "", fmt.Errorf("failed to resolve image digest for %q: %w", reference.Name, err)
+		return resolvedImage{}, fmt.Errorf("failed to resolve image digest for %q: %w", reference.Name, err)
 	}
 	if detail == nil || detail.Digest == nil || *detail.Digest == "" {
-		return "", fmt.Errorf("scenario %q did not resolve to an image digest", reference.Name)
+		return resolvedImage{}, fmt.Errorf("scenario %q did not resolve to an image digest", reference.Name)
 	}
-	return krknctlprovider.ImageReference(base, detail.ScenarioTag), nil
+	return resolvedImage{
+		image:      krknctlprovider.ImageReference(base, detail.ScenarioTag),
+		privileged: detail.Privileged,
+	}, nil
 }
 
-func resolvePrivateImageDigest(ctx context.Context, scenario string, registry *krknctlmodels.RegistryV2) (string, error) {
-	return registryutil.ResolvePrivateTagDigest(ctx, scenario, registry)
+// privilegedLabel reads the krknctl.privileged label, named as in krknctl's
+// configuration. A missing label means the scenario does not need privileges.
+func privilegedLabel(config *krknctlconfig.Config, labels map[string]string) (bool, error) {
+	key := strings.TrimSuffix(config.LabelPrivileged, "=")
+	value, ok := labels[key]
+	if !ok {
+		return false, nil
+	}
+	privileged, err := strconv.ParseBool(strings.TrimSpace(value))
+	if err != nil {
+		return false, fmt.Errorf("invalid %s label %q", key, value)
+	}
+	return privileged, nil
 }
 
 func scenarioTagForImage(reference krknv1alpha1.ScenarioReference, image string) krknctlmodels.ScenarioTag {
