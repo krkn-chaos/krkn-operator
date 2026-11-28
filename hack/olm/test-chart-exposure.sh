@@ -84,6 +84,20 @@ if ! grep -Fq -- '--enable-krkn-ai=false' "$work_dir/base.yaml"; then
   echo "operator must disable Krkn-AI by default" >&2
   exit 1
 fi
+# The target request controller and the API list KrknAIRuns even with Krkn-AI
+# off, so the operator Role reads them by default and writes them only opt-in.
+krknairun_verbs() {
+  yq ea '[select(.kind == "Role" and .metadata.name == "krkn-operator-operator") | .rules[] | select(.apiGroups[] == "krkn.krkn-chaos.dev" and .resources[] == "krknairuns") | .verbs[]] | sort | unique | join(",")' "$1"
+}
+if [[ "$(krknairun_verbs "$work_dir/base.yaml")" != "get,list,watch" ]]; then
+  echo "operator Role must read KrknAIRuns, and only read them, by default" >&2
+  exit 1
+fi
+helm template krkn-operator "$chart_dir" --set krknAI.enabled=true > "$work_dir/krkn-ai.yaml"
+if [[ "$(krknairun_verbs "$work_dir/krkn-ai.yaml")" != "create,delete,get,list,patch,update,watch" ]]; then
+  echo "operator Role must manage KrknAIRuns when Krkn-AI is enabled" >&2
+  exit 1
+fi
 
 helm template krkn-operator "$chart_dir" --set krknAI.enabled=true > "$work_dir/krkn-ai.yaml"
 if ! grep -Eq 'krkn-operator-ai-service|krkn-operator-krkn-ai-orchestrator|krknairuns.krkn.krkn-chaos.dev' "$work_dir/krkn-ai.yaml"; then
