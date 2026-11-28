@@ -99,6 +99,16 @@ rules:
   - patch
   - update
   - watch
+# The target request controller and the API read KrknAIRuns even when
+# Krkn-AI is off, to keep the targets a run still needs.
+- apiGroups:
+  - krkn.krkn-chaos.dev
+  resources:
+  - krknairuns
+  verbs:
+  - get
+  - list
+  - watch
 {{- if or .Values.krknAI.enabled .Values.operator.olmBootstrap }}
 - apiGroups:
   - krkn.krkn-chaos.dev
@@ -107,11 +117,8 @@ rules:
   verbs:
   - create
   - delete
-  - get
-  - list
   - patch
   - update
-  - watch
 - apiGroups:
   - ""
   resources:
