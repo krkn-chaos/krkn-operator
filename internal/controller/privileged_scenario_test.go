@@ -15,6 +15,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	fakeclient "sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
@@ -105,28 +107,97 @@ func TestScenarioPodIsPrivilegedOnlyWhenTheScenarioRequestsIt(t *testing.T) {
 	}
 }
 
-func TestPrivilegedScenarioPodRejectedByClusterPolicy(t *testing.T) {
-	rejectPods := interceptor.Funcs{Create: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
+// rejectPodsWith makes every Pod create fail with a 403 Forbidden carrying
+// reason, as admission or quota checks answer.
+func rejectPodsWith(reason string) interceptor.Funcs {
+	return interceptor.Funcs{Create: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
 		if _, ok := obj.(*corev1.Pod); ok {
-			return apierrors.NewForbidden(schema.GroupResource{Resource: "pods"}, obj.GetName(),
-				errors.New(`violates PodSecurity "restricted:latest": privileged`))
+			return apierrors.NewForbidden(schema.GroupResource{Resource: "pods"}, obj.GetName(), errors.New(reason))
 		}
 		return c.Create(ctx, obj, opts...)
 	}}
-	for _, privileged := range []bool{true, false} {
-		r, run := newPrivilegedTestReconciler(t, privileged, rejectPods)
-		resources, err := r.prepareJobResources(t.Context(), run, "provider", "cluster", "https://cluster.example.com", "11111111-1111-4111-8111-111111111111")
-		require.NoError(t, err)
+}
 
-		_, err = r.submitScenarioPod(t.Context(), run, resources)
+const (
+	podSecurityRejection = `violates PodSecurity "restricted:latest": privileged (container "krkn" must not set securityContext.privileged=true)`
+	sccRejection         = `unable to validate against any security context constraint: [provider "restricted-v2": Forbidden: not usable by user or serviceaccount, spec.containers[0].securityContext.privileged: Invalid value: true: Privileged containers are not allowed]`
+	quotaRejection       = `exceeded quota: pods, requested: pods=1, used: pods=10, limited: pods=10`
+)
 
-		require.True(t, apierrors.IsForbidden(err), "error: %v", err)
-		if privileged {
-			require.ErrorContains(t, err, `scenario "node-io-hog" needs a privileged container`)
-			require.ErrorContains(t, err, `"krkn-operator-krkn-scenario-runner"`)
-		} else {
-			require.ErrorContains(t, err, "failed to create pod")
-			require.NotContains(t, err.Error(), "privileged container")
-		}
+func TestPrivilegedScenarioPodRejectedByClusterPolicy(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		privileged bool
+		reason     string
+		guidance   bool
+	}{
+		{name: "Pod Security admission", privileged: true, reason: podSecurityRejection, guidance: true},
+		{name: "OpenShift SCC", privileged: true, reason: sccRejection, guidance: true},
+		{name: "quota on a privileged scenario", privileged: true, reason: quotaRejection},
+		{name: "unprivileged scenario", privileged: false, reason: podSecurityRejection},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r, run := newPrivilegedTestReconciler(t, tc.privileged, rejectPodsWith(tc.reason))
+			resources, err := r.prepareJobResources(t.Context(), run, "provider", "cluster", "https://cluster.example.com", "11111111-1111-4111-8111-111111111111")
+			require.NoError(t, err)
+
+			_, err = r.submitScenarioPod(t.Context(), run, resources)
+
+			require.True(t, apierrors.IsForbidden(err), "error: %v", err)
+			var rejected *privilegedPodRejectedError
+			if tc.guidance {
+				require.ErrorAs(t, err, &rejected)
+				require.ErrorContains(t, err, `Scenario "node-io-hog" needs a privileged container`)
+				require.ErrorContains(t, err, `"krkn-operator-krkn-scenario-runner"`)
+			} else {
+				require.False(t, errors.As(err, &rejected), "error: %v", err)
+				require.ErrorContains(t, err, "failed to create pod")
+				require.NotContains(t, err.Error(), "privileged container and the cluster rejected it")
+			}
+		})
 	}
+}
+
+func TestReconcile_PrivilegedPodRejectionIsInTheRunStatus(t *testing.T) {
+	const namespace = "default"
+	scheme := newTestScheme(t)
+	public := false
+	run := &krknv1alpha1.KrknScenarioRun{
+		ObjectMeta: metav1.ObjectMeta{Name: "privileged-run", Namespace: namespace, UID: "run-uid"},
+		Spec: krknv1alpha1.KrknScenarioRunSpec{
+			Scenario:        krknv1alpha1.ScenarioReference{Name: "node-io-hog", Private: &public},
+			TargetRequestID: "target",
+			TargetClusters:  map[string][]string{"provider": {"cluster"}},
+		},
+		Status: krknv1alpha1.KrknScenarioRunStatus{Phase: "Pending"},
+	}
+	target := newTargetRequest("target", namespace, "provider", "cluster", "https://cluster.example.com")
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "target", Namespace: namespace},
+		Data:       map[string][]byte{"managed-clusters": []byte(`{"provider":{"cluster":{"kubeconfig":"Y29uZmln"}}}`)},
+	}
+	k8sClient := fakeclient.NewClientBuilder().WithScheme(scheme).
+		WithStatusSubresource(&krknv1alpha1.KrknScenarioRun{}, &krknv1alpha1.KrknTargetRequest{}).
+		WithObjects(run, target, secret).WithInterceptorFuncs(rejectPodsWith(podSecurityRejection)).Build()
+	r := &KrknScenarioRunReconciler{
+		Client: k8sClient, Scheme: scheme, Namespace: namespace,
+		imageResolver: func(context.Context, *krknctlconfig.Config, krknv1alpha1.ScenarioReference, *krknctlmodels.RegistryV2) (resolvedImage, error) {
+			return resolvedImage{image: "quay.io/example/node-io-hog@sha256:abc", privileged: true}, nil
+		},
+		signatureVerifier: func(context.Context, *krknctlconfig.Config, krknv1alpha1.ScenarioReference, *krknctlmodels.RegistryV2, string) (verify.SignatureStatus, error) {
+			return verify.SignatureSigned, nil
+		},
+	}
+	key := types.NamespacedName{Name: run.Name, Namespace: namespace}
+
+	_, err := r.Reconcile(t.Context(), ctrl.Request{NamespacedName: key})
+
+	require.NoError(t, err)
+	var updated krknv1alpha1.KrknScenarioRun
+	require.NoError(t, k8sClient.Get(t.Context(), key, &updated))
+	require.Len(t, updated.Status.ClusterJobs, 1)
+	job := updated.Status.ClusterJobs[0]
+	require.Equal(t, "Failed", job.Phase)
+	require.Equal(t, "PrivilegedPodRejected", job.FailureReason)
+	require.Equal(t, `Scenario "node-io-hog" needs a privileged container and the cluster rejected it; allow privileged Pods for ServiceAccount "krkn-operator-krkn-scenario-runner" (on OpenShift, the privileged SCC).`, job.Message)
 }

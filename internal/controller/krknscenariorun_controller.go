@@ -517,6 +517,11 @@ func (r *KrknScenarioRunReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 					"scenarioRun", scenarioRun.Name,
 					"image", invalidSignatureErr.Image)
 			}
+			var privilegedErr *privilegedPodRejectedError
+			if errors.As(outcome.err, &privilegedErr) {
+				failureReason = "PrivilegedPodRejected"
+				message = privilegedErr.guidance()
+			}
 			if errors.Is(outcome.err, workspace.ErrUnavailable) || errors.Is(outcome.err, workspace.ErrReplaced) {
 				failureReason = "WorkspaceUnavailable"
 				message = outcome.err.Error()
@@ -1188,9 +1193,6 @@ func (r *KrknScenarioRunReconciler) cleanupPreparedResources(ctx context.Context
 	}
 }
 
-// submitScenarioPod builds and creates the scenario Pod from prepared resources.
-// On failure it cleans up all prepared ConfigMaps and Secrets and returns an error.
-// Status updates are the caller's responsibility.
 // scenarioContainerSecurityContext makes the scenario container privileged
 // only when the scenario image declares krknctl.privileged=true; every other
 // scenario keeps an unprivileged container.
@@ -1201,6 +1203,38 @@ func scenarioContainerSecurityContext(privileged bool) *corev1.SecurityContext {
 	return &corev1.SecurityContext{Privileged: &privileged}
 }
 
+// privilegedPodRejectedError reports that the cluster refused a scenario Pod
+// because its container is privileged.
+type privilegedPodRejectedError struct {
+	scenario       string
+	serviceAccount string
+	err            error
+}
+
+// guidance says what to allow. It names only the scenario and the
+// ServiceAccount, so it is safe to store in the run's status.
+func (e *privilegedPodRejectedError) guidance() string {
+	return fmt.Sprintf("Scenario %q needs a privileged container and the cluster rejected it; allow privileged Pods for ServiceAccount %q (on OpenShift, the privileged SCC).",
+		e.scenario, e.serviceAccount)
+}
+
+func (e *privilegedPodRejectedError) Error() string {
+	return fmt.Sprintf("%s: %v", e.guidance(), e.err)
+}
+
+func (e *privilegedPodRejectedError) Unwrap() error { return e.err }
+
+// rejectsPrivilegedContainer reports whether a Pod create error is an
+// admission rejection of a privileged container: Pod Security admission and
+// OpenShift's SCC admission both name it in their message. Other 403 answers,
+// such as an exceeded ResourceQuota or a terminating namespace, do not.
+func rejectsPrivilegedContainer(err error) bool {
+	return apierrors.IsForbidden(err) && strings.Contains(strings.ToLower(err.Error()), "privileged")
+}
+
+// submitScenarioPod builds and creates the scenario Pod from prepared resources.
+// On failure it cleans up all prepared ConfigMaps and Secrets and returns an error.
+// Status updates are the caller's responsibility.
 func (r *KrknScenarioRunReconciler) submitScenarioPod(
 	ctx context.Context,
 	scenarioRun *krknv1alpha1.KrknScenarioRun,
@@ -1327,9 +1361,12 @@ func (r *KrknScenarioRunReconciler) submitScenarioPod(
 	}
 	if err := r.Create(ctx, pod); err != nil {
 		r.cleanupPreparedResources(ctx, resources)
-		if resources.privileged && apierrors.IsForbidden(err) {
-			return "", fmt.Errorf("scenario %q needs a privileged container and the cluster rejected it; allow privileged Pods for ServiceAccount %q (on OpenShift, the privileged SCC): %w",
-				scenarioRun.Spec.Scenario.Name, pod.Spec.ServiceAccountName, err)
+		if resources.privileged && rejectsPrivilegedContainer(err) {
+			return "", &privilegedPodRejectedError{
+				scenario:       scenarioRun.Spec.Scenario.Name,
+				serviceAccount: pod.Spec.ServiceAccountName,
+				err:            err,
+			}
 		}
 		return "", fmt.Errorf("failed to create pod: %w", err)
 	}

@@ -87,7 +87,7 @@ func ResolvePrivateTagImage(ctx context.Context, tag string, registry *models.Re
 		return "", nil, err
 	}
 	defer cancel()
-	labels, err := imageConfigLabels(descriptor)
+	labels, err := imageConfigLabels(descriptor, registry)
 	if err != nil {
 		return "", nil, err
 	}
@@ -145,9 +145,10 @@ func getPrivateTagDescriptor(ctx context.Context, tag string, registry *models.R
 }
 
 // imageConfigLabels returns the labels of the image a descriptor points to.
-// For an index it reads the first platform image: the images of one tag are
-// built from the same Dockerfile, so they carry the same labels.
-func imageConfigLabels(descriptor *remote.Descriptor) (map[string]string, error) {
+// For an index it reads the image for the registry's target platform, as
+// krknctl does when it lists the scenario, so the labels are those of the
+// image that platform pulls.
+func imageConfigLabels(descriptor *remote.Descriptor, registry *models.RegistryV2) (map[string]string, error) {
 	var image v1.Image
 	if descriptor.MediaType.IsIndex() {
 		index, err := descriptor.ImageIndex()
@@ -160,8 +161,9 @@ func imageConfigLabels(descriptor *remote.Descriptor) (map[string]string, error)
 		}
 		for _, child := range manifest.Manifests {
 			// Build attestations sit in the index as images for platform
-			// unknown/unknown; they have no scenario labels.
-			if !child.MediaType.IsImage() || (child.Platform != nil && child.Platform.OS == "unknown") {
+			// unknown/unknown, so they never match a Linux target.
+			if !child.MediaType.IsImage() || child.Platform == nil ||
+				!registry.MatchesPlatform(child.Platform.OS, child.Platform.Architecture, child.Platform.Variant) {
 				continue
 			}
 			if image, err = index.Image(child.Digest); err != nil {
@@ -170,7 +172,7 @@ func imageConfigLabels(descriptor *remote.Descriptor) (map[string]string, error)
 			break
 		}
 		if image == nil {
-			return nil, errors.New("private image index has no platform image")
+			return nil, fmt.Errorf("private image index has no image for platform %s", registry.GetPlatform())
 		}
 	} else {
 		var err error

@@ -80,14 +80,48 @@ func TestResolvePrivateTagImageSkipsAttestationsInAnIndex(t *testing.T) {
 		mutate.IndexAddendum{Add: platformImage, Descriptor: v1.Descriptor{Platform: &v1.Platform{OS: "linux", Architecture: "arm64"}}},
 	)
 	require.NoError(t, remote.WriteIndex(pushTag(t, host, "node-io-hog"), index, testBasicAuth))
+	registry := testPrivateRegistry(server.URL, true, "test-user", "test-password")
+	registry.Platform = "linux/arm64"
 
-	digest, labels, err := ResolvePrivateTagImage(t.Context(), "node-io-hog", testPrivateRegistry(server.URL, true, "test-user", "test-password"))
+	digest, labels, err := ResolvePrivateTagImage(t.Context(), "node-io-hog", registry)
 
 	require.NoError(t, err)
 	want, err := index.Digest()
 	require.NoError(t, err)
 	require.Equal(t, want.String(), digest)
 	require.Equal(t, "true", labels["krknctl.privileged"])
+}
+
+func TestResolvePrivateTagImageReadsTheTargetPlatformsLabels(t *testing.T) {
+	server, host := labelRegistry(t)
+	amd64 := labeledImage(t, map[string]string{"krknctl.privileged": "false"})
+	arm64 := labeledImage(t, map[string]string{"krknctl.privileged": "true"})
+	index := mutate.AppendManifests(empty.Index,
+		mutate.IndexAddendum{Add: amd64, Descriptor: v1.Descriptor{Platform: &v1.Platform{OS: "linux", Architecture: "amd64"}}},
+		mutate.IndexAddendum{Add: arm64, Descriptor: v1.Descriptor{Platform: &v1.Platform{OS: "linux", Architecture: "arm64", Variant: "v8"}}},
+	)
+	require.NoError(t, remote.WriteIndex(pushTag(t, host, "node-io-hog"), index, testBasicAuth))
+
+	for platform, want := range map[string]string{"linux/amd64": "false", "linux/arm64": "true", "linux/arm64/v8": "true"} {
+		t.Run(platform, func(t *testing.T) {
+			registry := testPrivateRegistry(server.URL, true, "test-user", "test-password")
+			registry.Platform = platform
+
+			_, labels, err := ResolvePrivateTagImage(t.Context(), "node-io-hog", registry)
+
+			require.NoError(t, err)
+			require.Equal(t, want, labels["krknctl.privileged"])
+		})
+	}
+
+	t.Run("no image for the platform", func(t *testing.T) {
+		registry := testPrivateRegistry(server.URL, true, "test-user", "test-password")
+		registry.Platform = "linux/s390x"
+
+		_, _, err := ResolvePrivateTagImage(t.Context(), "node-io-hog", registry)
+
+		require.ErrorContains(t, err, "private image index has no image for platform linux/s390x")
+	})
 }
 
 func TestResolvePrivateTagImageMissingTag(t *testing.T) {
